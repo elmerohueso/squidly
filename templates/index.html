@@ -9,8 +9,20 @@
 <body>
     <div class="container">
         <header>
-            <h1 class="logo">Squidly</h1>
-            <p class="tagline">Your web app framework</p>
+            <div class="header-content">
+                <div>
+                    <h1 class="logo">Squidly</h1>
+                    <p class="tagline">Your web app framework</p>
+                </div>
+                <button id="statusButton" class="status-button" title="View mirror status">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                    <span class="status-count">0/0</span>
+                </button>
+            </div>
         </header>
         
         <main>
@@ -37,6 +49,37 @@
             <p>&copy; 2026 Squidly</p>
         </footer>
     </div>
+    
+    <!-- Status Flyout -->
+    <div id="statusFlyout" class="status-flyout">
+        <div class="flyout-header">
+            <h2>Mirror Status</h2>
+            <button id="closeFlyout" class="close-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="flyout-summary" id="flyoutSummary">
+            <div class="summary-stat">
+                <span class="stat-value" id="totalCount">-</span>
+                <span class="stat-label">Total</span>
+            </div>
+            <div class="summary-stat online">
+                <span class="stat-value" id="onlineCount">-</span>
+                <span class="stat-label">Online</span>
+            </div>
+            <div class="summary-stat offline">
+                <span class="stat-value" id="offlineCount">-</span>
+                <span class="stat-label">Offline</span>
+            </div>
+        </div>
+        <div class="flyout-content" id="flyoutContent">
+            <p class="loading-text">Loading status...</p>
+        </div>
+    </div>
+    <div id="flyoutOverlay" class="flyout-overlay"></div>
     
     <script src="{{ url_for('static', filename='dist/bundle.js') }}"></script>
 </body>

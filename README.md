@@ -9,6 +9,7 @@ A modern web application framework built with Flask and TypeScript, featuring a 
 - 🎨 **Modern UI** - Clean, dark-themed design with smooth animations
 - 🐳 **Docker Ready** - Containerized for easy deployment
 - 🔍 **Search Functionality** - Built-in search interface
+- 🔄 **Round-Robin Proxy** - Distributes search requests across multiple backend URLs
 
 ## Prerequisites
 
@@ -75,6 +76,7 @@ The application will be available at `http://localhost:5000`
 ```
 squidly/
 ├── app.py                  # Flask application
+├── squidurls.json         # Proxy URLs configuration
 ├── requirements.txt        # Python dependencies
 ├── package.json           # Node dependencies
 ├── tsconfig.json          # TypeScript configuration
@@ -90,10 +92,16 @@ squidly/
     └── dist/             # Built assets (generated)
 ```
 
+## Round-Robin Proxy
+
+The application distributes search requests across multiple backend URLs in a round-robin fashion. The URLs are stored in [squidurls.json](squidurls.json) as base64-encoded values for security. Each search request automatically cycles to the next available URL, providing load balancing and redundancy.
+
 ## API Endpoints
 
 - `GET /` - Main page
-- `POST /api/search` - Search endpoint
+- `POST /api/search` - Search endpoint (proxies to backend URLs in round-robin)
+  - Request body: `{"query": "search term"}`
+  - Response includes `proxied_via` field showing which backend was used
 - `GET /api/health` - Health check
 
 ## Styling

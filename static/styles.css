@@ -64,6 +64,18 @@ header {
     padding-top: 2rem;
 }
 
+.header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.header-content > div {
+    flex: 1;
+}
+
 .logo {
     font-size: 4rem;
     font-weight: 700;
@@ -79,6 +91,38 @@ header {
     font-size: 1.125rem;
     color: var(--text-secondary);
     font-weight: 400;
+}
+
+/* === Status Button === */
+.status-button {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: all var(--transition-fast);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-button:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+.status-button svg {
+    color: var(--accent-primary);
+}
+
+.status-count {
+    font-family: 'Courier New', monospace;
+    color: var(--text-secondary);
 }
 
 /* === Main Content === */
@@ -164,6 +208,18 @@ main {
     font-size: 1.5rem;
     font-weight: 600;
     color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.proxy-info {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+}
+
+.proxy-name {
+    color: var(--accent-primary);
+    font-weight: 500;
 }
 
 .results-list {
@@ -286,4 +342,261 @@ footer p {
 .result-item,
 .message {
     animation: fadeIn var(--transition-normal);
+}
+
+/* === Status Flyout === */
+.flyout-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-normal);
+    z-index: 998;
+}
+
+.flyout-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.status-flyout {
+    position: fixed;
+    top: 0;
+    right: -450px;
+    width: 100%;
+    max-width: 450px;
+    height: 100vh;
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-lg);
+    transition: right var(--transition-normal);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border-color);
+}
+
+.status-flyout.active {
+    right: 0;
+}
+
+.flyout-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+.flyout-header h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.close-button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+}
+
+.close-button:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.flyout-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    padding: 1.5rem;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.summary-stat {
+    text-align: center;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 2px solid var(--border-color);
+}
+
+.summary-stat.online {
+    border-color: #00cc66;
+}
+
+.summary-stat.offline {
+    border-color: #ff4466;
+}
+
+.stat-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.summary-stat.online .stat-value {
+    color: #00cc66;
+}
+
+.summary-stat.offline .stat-value {
+    color: #ff4466;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.flyout-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+}
+
+.loading-text {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 2rem;
+}
+
+.endpoint-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: all var(--transition-fast);
+}
+
+.endpoint-item:hover {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.endpoint-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.endpoint-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.endpoint-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-indicator.online {
+    background: #00cc66;
+    box-shadow: 0 0 8px rgba(0, 204, 102, 0.6);
+}
+
+.status-indicator.offline {
+    background: #ff4466;
+    box-shadow: 0 0 8px rgba(255, 68, 102, 0.6);
+}
+
+.endpoint-status.online {
+    color: #00cc66;
+}
+
+.endpoint-status.offline {
+    color: #ff4466;
+}
+
+.endpoint-url {
+    font-family: 'Courier New', monospace;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    word-break: break-all;
+}
+
+.endpoint-details {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8125rem;
+}
+
+.endpoint-detail {
+    display: flex;
+    flex-direction: column;
+}
+
+.detail-label {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-bottom: 0.25rem;
+}
+
+.detail-value {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.detail-value.response-time {
+    font-family: 'Courier New', monospace;
+    color: var(--accent-primary);
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+    .header-content {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .status-flyout {
+        max-width: 100%;
+        right: -100%;
+    }
+
+    .flyout-summary {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        padding: 1rem;
+    }
+
+    .summary-stat {
+        padding: 0.75rem 0.5rem;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+    }
 }

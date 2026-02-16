@@ -37,6 +37,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Flask application
 COPY app.py .
+COPY squidurls.json .
 COPY templates ./templates
 COPY static ./static
 
@@ -47,8 +48,11 @@ COPY --from=frontend-builder /app/static/dist ./static/dist
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
+# Disable Python output buffering
+ENV PYTHONUNBUFFERED=1
+
 # Expose port
 EXPOSE 5000
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

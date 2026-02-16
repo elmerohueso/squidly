@@ -1,0 +1,72 @@
+[
+    {
+        "name": "triton",
+        "encodedUrl": "aHR0cHM6Ly90cml0b24uc3F1aWQud3Rm",
+        "online": true,
+        "responseTime": 1624.45,
+        "lastChecked": "2026-02-16T17:23:54.007973Z"
+    },
+    {
+        "name": "binimum",
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC1hcGkuYmluaW11bS5vcmc=",
+        "online": true,
+        "responseTime": 600.64,
+        "lastChecked": "2026-02-16T17:23:55.634937Z"
+    },
+    {
+        "name": "kinoplus",
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC5raW5vcGx1cy5vbmxpbmU=",
+        "online": true,
+        "responseTime": 818.11,
+        "lastChecked": "2026-02-16T17:23:56.238653Z"
+    },
+    {
+        "name": "spoti-2",
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLXR3by5zcG90aXNhdmVyLm5ldA==",
+        "online": true,
+        "responseTime": 523.25,
+        "lastChecked": "2026-02-16T17:23:57.060174Z"
+    },
+    {
+        "name": "spoti-1",
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLW9uZS5zcG90aXNhdmVyLm5ldA==",
+        "online": true,
+        "responseTime": 507.53,
+        "lastChecked": "2026-02-16T17:23:57.586284Z"
+    },
+    {
+        "name": "wolf",
+        "encodedUrl": "aHR0cHM6Ly93b2xmLnFxZGwuc2l0ZQ==",
+        "online": true,
+        "responseTime": 1175.74,
+        "lastChecked": "2026-02-16T17:23:58.095963Z"
+    },
+    {
+        "name": "hund",
+        "encodedUrl": "aHR0cDovL2h1bmQucXFkbC5zaXRl",
+        "online": true,
+        "responseTime": 1170.55,
+        "lastChecked": "2026-02-16T17:23:59.274745Z"
+    },
+    {
+        "name": "katze",
+        "encodedUrl": "aHR0cHM6Ly9rYXR6ZS5xcWRsLnNpdGU=",
+        "online": true,
+        "responseTime": 1026.64,
+        "lastChecked": "2026-02-16T17:24:00.446656Z"
+    },
+    {
+        "name": "vogel",
+        "encodedUrl": "aHR0cHM6Ly92b2dlbC5xcWRsLnNpdGU=",
+        "online": true,
+        "responseTime": 1218.6,
+        "lastChecked": "2026-02-16T17:24:01.476981Z"
+    },
+    {
+        "name": "maus",
+        "encodedUrl": "aHR0cHM6Ly9tYXVzLnFxZGwuc2l0ZQ==",
+        "online": true,
+        "responseTime": 1134.8,
+        "lastChecked": "2026-02-16T17:24:02.697733Z"
+    }
+]
