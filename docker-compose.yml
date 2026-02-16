@@ -11,10 +11,7 @@ services:
     volumes:
       # Mount JSON file to persist endpoint status
       - ./squidurls.json:/app/squidurls.json
-    restart: unless-stopped
-    networks:
-      - squidly-network
-
-networks:
-  squidly-network:
-    driver: bridge
+      # Mount data folder for SQLite database and other persistent data
+      - ./data:/app/data
+      # Mount downloads folder for track downloads
+      - ./downloads:/app/downloads

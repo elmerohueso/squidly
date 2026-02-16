@@ -55,7 +55,6 @@ type DownloadFormat = 'original' | 'mp3';
 
 interface DownloadSettings {
     format: DownloadFormat;
-    parentFolder: string;
     fileNaming: string;
 }
 
@@ -75,7 +74,6 @@ class App {
     private closeSettingsButton: HTMLButtonElement;
     private formatOriginalInput: HTMLInputElement;
     private formatMp3Input: HTMLInputElement;
-    private parentFolderInput: HTMLInputElement;
     private fileNamingInput: HTMLInputElement;
     private downloadSettings: DownloadSettings;
     private settingsSaveTimer: number | null = null;
@@ -98,7 +96,6 @@ class App {
         this.closeSettingsButton = document.getElementById('closeSettings') as HTMLButtonElement;
         this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
-        this.parentFolderInput = document.getElementById('parentFolder') as HTMLInputElement;
         this.fileNamingInput = document.getElementById('fileNaming') as HTMLInputElement;
         
         this.initializeEventListeners();
@@ -131,8 +128,20 @@ class App {
 
         this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
-        this.parentFolderInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.fileNamingInput.addEventListener('input', () => this.updateSettingsFromForm());
+
+        // Download button delegation
+        this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
+            const target = e.target as HTMLElement;
+            const downloadBtn = target.closest('.track-download-btn');
+            if (downloadBtn) {
+                const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
+                const trackId = trackCard?.getAttribute('data-track-id');
+                if (trackId) {
+                    void this.handleDownload(parseInt(trackId, 10), trackCard);
+                }
+            }
+        });
     }
 
     private openFlyout(): void {
@@ -163,23 +172,16 @@ class App {
     private defaultDownloadSettings(): DownloadSettings {
         return {
             format: 'original',
-            parentFolder: '',
-            fileNaming: '{artist}\\{album}\\{track} - {title}.{ext}'
+            fileNaming: '{artist}/{album}/{track} - {title}.{ext}'
         };
     }
 
     private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
-        const parentFolder = (raw as { parent_folder?: string }).parent_folder;
         const fileNaming = (raw as { file_naming?: string }).file_naming;
 
         return {
             format: raw.format === 'mp3' ? 'mp3' : 'original',
-            parentFolder: typeof raw.parentFolder === 'string'
-                ? raw.parentFolder
-                : typeof parentFolder === 'string'
-                    ? parentFolder
-                    : fallback.parentFolder,
             fileNaming: typeof raw.fileNaming === 'string'
                 ? raw.fileNaming
                 : typeof fileNaming === 'string'
@@ -206,7 +208,6 @@ class App {
     private applySettingsToForm(settings: DownloadSettings): void {
         this.formatOriginalInput.checked = settings.format === 'original';
         this.formatMp3Input.checked = settings.format === 'mp3';
-        this.parentFolderInput.value = settings.parentFolder;
         this.fileNamingInput.value = settings.fileNaming;
         this.syncFormatToggleStyles();
     }
@@ -214,7 +215,6 @@ class App {
     private readSettingsFromForm(): DownloadSettings {
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
-            parentFolder: this.parentFolderInput.value.trim(),
             fileNaming: this.fileNamingInput.value.trim()
         };
     }
@@ -481,6 +481,150 @@ class App {
                 <p>${message}</p>
             </div>
         `;
+    }
+
+    private async handleDownload(trackId: number, trackCard: HTMLElement): Promise<void> {
+        const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+        if (!downloadBtn) {
+            console.error('[DOWNLOAD] Download button not found');
+            return;
+        }
+
+        console.log(`[DOWNLOAD] Starting download for track ${trackId}`);
+
+        // Store original button content
+        const originalContent = downloadBtn.innerHTML;
+        const originalDisabled = downloadBtn.disabled;
+        
+        // Disable button and show progress circle
+        downloadBtn.disabled = true;
+        
+        // Create SVG progress circle
+        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        progressSvg.setAttribute('viewBox', '0 0 24 24');
+        progressSvg.setAttribute('class', 'track-download-progress');
+        
+        // Add gradient definition
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+        gradient.setAttribute('id', 'progressGradient');
+        gradient.setAttribute('x1', '0%');
+        gradient.setAttribute('y1', '0%');
+        gradient.setAttribute('x2', '100%');
+        gradient.setAttribute('y2', '100%');
+        
+        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+        stop1.setAttribute('offset', '0%');
+        stop1.setAttribute('stop-color', '#00d4ff');
+        
+        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+        stop2.setAttribute('offset', '100%');
+        stop2.setAttribute('stop-color', '#0099ff');
+        
+        gradient.appendChild(stop1);
+        gradient.appendChild(stop2);
+        defs.appendChild(gradient);
+        progressSvg.appendChild(defs);
+        
+        // Background track circle
+        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        trackCircle.setAttribute('cx', '12');
+        trackCircle.setAttribute('cy', '12');
+        trackCircle.setAttribute('r', '12');
+        trackCircle.setAttribute('class', 'progress-circle-track');
+        progressSvg.appendChild(trackCircle);
+        
+        // Progress fill circle
+        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        fillCircle.setAttribute('cx', '12');
+        fillCircle.setAttribute('cy', '12');
+        fillCircle.setAttribute('r', '12');
+        fillCircle.setAttribute('class', 'progress-circle-fill');
+        progressSvg.appendChild(fillCircle);
+        
+        // Replace button content with progress circle
+        downloadBtn.innerHTML = '';
+        downloadBtn.appendChild(progressSvg);
+
+        try {
+            console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
+            await this.downloadTrack(trackId, fillCircle as SVGCircleElement);
+            
+            console.log(`[DOWNLOAD] Download completed successfully`);
+            
+            // Animate to 100%
+            (fillCircle as any).style.strokeDashoffset = '0';
+            
+            // Wait a moment to show completion, then replace with checkmark
+            setTimeout(() => {
+                downloadBtn.disabled = true;
+                downloadBtn.classList.add('completed');
+                downloadBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                `;
+            }, 300);
+        } catch (error) {
+            console.error('[DOWNLOAD] Download error:', error);
+            // Restore button on error
+            downloadBtn.disabled = originalDisabled;
+            downloadBtn.innerHTML = originalContent;
+        }
+    }
+
+    private async downloadTrack(trackId: number, progressCircle?: SVGCircleElement): Promise<void> {
+        try {
+            console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
+            console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            
+            // Animate progress to 50% during request
+            if (progressCircle) {
+                setTimeout(() => {
+                    if (progressCircle) (progressCircle as any).style.strokeDashoffset = '37.7'; // 50%
+                }, 200);
+            }
+            
+            const response = await fetch('/api/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    format: this.downloadSettings.format,
+                    fileNaming: this.downloadSettings.fileNaming
+                })
+            });
+
+            console.log(`[DOWNLOAD] Response status: ${response.status}`);
+            
+            // Animate progress to 80% while processing response
+            if (progressCircle) {
+                (progressCircle as any).style.strokeDashoffset = '15.08'; // 80%
+            }
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[DOWNLOAD] Download failed: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            // Parse the JSON response
+            const data = await response.json();
+            console.log(`[DOWNLOAD] Server response:`, data);
+            
+            if (data.success) {
+                console.log(`[DOWNLOAD] File saved: ${data.message}`);
+                // Progress will be set to 100% by the caller
+            } else {
+                throw new Error(data.error || 'Download failed');
+            }
+        } catch (error) {
+            console.error('[DOWNLOAD] Error in downloadTrack:', error);
+            throw error;
+        }
     }
 }
 

@@ -8,17 +8,21 @@ import sqlite3
 from itertools import cycle
 from datetime import datetime
 import time
+import sys
 
 app = Flask(__name__, 
             static_folder='static',
             template_folder='templates')
 CORS(app)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'squidly.db')
+# Create data folder if it doesn't exist
+os.makedirs(os.path.join(os.path.dirname(__file__), 'data'), exist_ok=True)
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'squidly.db')
 DEFAULT_DOWNLOAD_SETTINGS = {
     'format': 'original',
     'parent_folder': '',
-    'file_naming': '{artist}\\{album}\\{track} - {title}.{ext}'
+    'file_naming': '{artist}/{album}/{track} - {title}.{ext}'
 }
 
 def get_db_connection():
@@ -646,6 +650,203 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+@app.route('/api/download', methods=['POST'])
+def download_track():
+    """
+    Download a track with specified settings.
+    Expects JSON body with:
+    - trackId: integer
+    - format: 'original' or 'mp3'
+    - fileNaming: string (template for filename, e.g. '{artist}/{album}/{track} - {title}.{ext}')
+    """
+    payload = request.get_json(silent=True) or {}
+    track_id = payload.get('trackId')
+    file_format = payload.get('format', 'original')
+    file_naming = payload.get('fileNaming', '{artist}/{album}/{track} - {title}.{ext}')
+    
+    # Use the mounted downloads volume
+    downloads_folder = '/app/downloads'
+
+    print(f"\n[DOWNLOAD] Request received for track {track_id}", flush=True)
+    print(f"[DOWNLOAD] Format: {file_format}", flush=True)
+    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
+    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
+
+    if not track_id:
+        print(f"[DOWNLOAD] ERROR: trackId is missing", flush=True)
+        return jsonify({'error': 'trackId is required'}), 400
+
+    if not os.path.exists(downloads_folder):
+        print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
+        try:
+            os.makedirs(downloads_folder, exist_ok=True)
+        except Exception as e:
+            print(f"[DOWNLOAD] ERROR: Failed to create downloads folder: {str(e)}", flush=True)
+            return jsonify({'error': f'Failed to create downloads folder: {str(e)}'}), 500
+
+    try:
+        # Step 1: Get track metadata from /info/ endpoint
+        print(f"[DOWNLOAD] Fetching track metadata...", flush=True)
+        target = next(url_iterator)
+        info_url = f"{target['url']}/info/?id={track_id}"
+        
+        info_response = requests.get(info_url, timeout=10)
+        if not info_response.ok:
+            print(f"[DOWNLOAD] ERROR: Failed to get track info. Status: {info_response.status_code}", flush=True)
+            return jsonify({'error': f'Failed to get track info. Status: {info_response.status_code}'}), 502
+
+        info_data = info_response.json()
+        print(f"[DOWNLOAD] Track info response structure: {info_data.keys() if isinstance(info_data, dict) else type(info_data)}", flush=True)
+        
+        # Extract metadata from different possible response structures
+        track_info = info_data.get('data', info_data) if isinstance(info_data, dict) else {}
+        track_metadata = track_info.get('track', track_info) if 'track' in track_info else track_info
+        
+        artist_name = 'Unknown Artist'
+        album_name = 'Unknown Album'
+        track_title = 'Unknown Track'
+        track_num = '01'
+        
+        # Try to extract from different possible structures
+        if isinstance(track_metadata, dict):
+            # Try artist
+            if 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
+                artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
+            elif 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
+                artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
+            elif 'artistName' in track_metadata:
+                artist_name = track_metadata['artistName']
+            
+            # Try album
+            if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+                album_name = track_metadata['album'].get('title', 'Unknown Album')
+            elif 'albumTitle' in track_metadata:
+                album_name = track_metadata['albumTitle']
+            
+            # Try title
+            if 'title' in track_metadata:
+                track_title = track_metadata['title']
+            
+            # Try track number
+            if 'trackNumber' in track_metadata:
+                track_num = str(track_metadata['trackNumber']).zfill(2)
+        
+        print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}'", flush=True)
+        
+        # Step 2: Get the track manifest for download
+        print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
+        target = next(url_iterator)
+        manifest_url = f"{target['url']}/track/?id={track_id}&quality=LOSSLESS"
+        
+        manifest_response = requests.get(manifest_url, timeout=10)
+        
+        if not manifest_response.ok:
+            print(f"[DOWNLOAD] ERROR: Failed to get track manifest. Status: {manifest_response.status_code}", flush=True)
+            return jsonify({'error': f'Failed to get track manifest. Status: {manifest_response.status_code}'}), 502
+
+        manifest_data = manifest_response.json()
+        print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
+        
+        # Step 3: Extract the base64-encoded manifest from the response
+        if 'data' not in manifest_data:
+            print(f"[DOWNLOAD] ERROR: No 'data' field in response", flush=True)
+            return jsonify({'error': 'Invalid response structure - missing data field'}), 502
+        
+        data = manifest_data['data']
+        print(f"[DOWNLOAD] Data keys: {data.keys()}", flush=True)
+        
+        if 'manifest' not in data:
+            print(f"[DOWNLOAD] ERROR: No 'manifest' field in data", flush=True)
+            return jsonify({'error': 'Invalid response structure - missing manifest field'}), 502
+        
+        manifest_base64 = data['manifest']
+        print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
+        
+        # Step 4: Decode the base64 manifest to get the actual CDN URLs
+        try:
+            manifest_json_bytes = base64.b64decode(manifest_base64)
+            manifest_json = manifest_json_bytes.decode('utf-8')
+            print(f"[DOWNLOAD] Decoded manifest: {manifest_json}", flush=True)
+            
+            manifest = json.loads(manifest_json)
+            print(f"[DOWNLOAD] Parsed manifest keys: {manifest.keys()}", flush=True)
+        except Exception as e:
+            print(f"[DOWNLOAD] ERROR: Failed to decode base64 manifest: {str(e)}", flush=True)
+            return jsonify({'error': f'Failed to decode manifest: {str(e)}'}), 502
+        
+        # Step 5: Extract the CDN download URL from the manifest
+        if 'urls' not in manifest or not manifest['urls']:
+            print(f"[DOWNLOAD] ERROR: No URLs in manifest", flush=True)
+            return jsonify({'error': 'No download URLs found in manifest'}), 502
+        
+        download_urls = manifest['urls']
+        if not isinstance(download_urls, list) or len(download_urls) == 0:
+            print(f"[DOWNLOAD] ERROR: URLs is not a non-empty list", flush=True)
+            return jsonify({'error': 'Invalid URLs format in manifest'}), 502
+        
+        download_url = download_urls[0]
+        print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
+        
+        # Step 6: Build the file path using the naming template
+        file_ext = 'flac' if file_format == 'original' else 'mp3'
+        
+        # Replace placeholders in the file naming template
+        file_path = file_naming.replace('{artist}', artist_name)
+        file_path = file_path.replace('{album}', album_name)
+        file_path = file_path.replace('{track}', track_num)
+        file_path = file_path.replace('{title}', track_title)
+        file_path = file_path.replace('{ext}', file_ext)
+        
+        print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
+        
+        # Build full path and normalize separators
+        full_path = os.path.join(downloads_folder, file_path)
+        full_path = os.path.normpath(full_path)
+        
+        print(f"[DOWNLOAD] Full output path: {full_path}", flush=True)
+        
+        # Create all directories in the path
+        output_dir = os.path.dirname(full_path)
+        print(f"[DOWNLOAD] Creating directory structure: {output_dir}", flush=True)
+        
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
+        except Exception as e:
+            print(f"[DOWNLOAD] ERROR: Failed to create directory: {str(e)}", flush=True)
+            return jsonify({'error': f'Failed to create directory structure: {str(e)}'}), 500
+        
+        # Step 7: Download the actual audio file from Tidal CDN
+        print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
+        track_response = requests.get(download_url, timeout=30)
+        
+        if not track_response.ok:
+            print(f"[DOWNLOAD] ERROR: Failed to download track. Status: {track_response.status_code}", flush=True)
+            return jsonify({'error': f'Failed to download track from CDN. Status: {track_response.status_code}'}), 502
+        
+        print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
+        
+        # Step 8: Save to disk
+        print(f"[DOWNLOAD] Saving to disk: {full_path}", flush=True)
+        
+        with open(full_path, 'wb') as f:
+            f.write(track_response.content)
+        
+        print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
+        return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
+
+    except requests.exceptions.Timeout:
+        print(f"[DOWNLOAD] ERROR: Request timeout", flush=True)
+        return jsonify({'error': 'Download timeout - endpoint took too long to respond'}), 504
+    except requests.exceptions.RequestException as e:
+        print(f"[DOWNLOAD] ERROR: Request exception: {str(e)}", flush=True)
+        return jsonify({'error': f'Download failed: {str(e)}'}), 502
+    except Exception as e:
+        print(f"[DOWNLOAD] ERROR: Unexpected exception: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 def download_settings():
     """Get or update download settings stored in SQLite."""
@@ -657,20 +858,19 @@ def download_settings():
 
     updated = {
         'format': payload.get('format', current['format']),
-        'parent_folder': payload.get('parentFolder', payload.get('parent_folder', current['parent_folder'])),
+        'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
         'file_naming': payload.get('fileNaming', payload.get('file_naming', current['file_naming']))
     }
 
     if updated['format'] not in ('original', 'mp3'):
         return jsonify({'error': 'Invalid format value'}), 400
 
-    if not isinstance(updated['parent_folder'], str) or not isinstance(updated['file_naming'], str):
+    if not isinstance(updated['file_naming'], str):
         return jsonify({'error': 'Invalid settings payload'}), 400
 
     save_download_settings(updated)
     return jsonify({
         'format': updated['format'],
-        'parent_folder': updated['parent_folder'],
         'file_naming': updated['file_naming']
     })
 
