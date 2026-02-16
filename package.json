@@ -1,0 +1,21 @@
+{
+  "name": "squidly",
+  "version": "1.0.0",
+  "description": "Docker web app using Flask and TypeScript",
+  "main": "src/app.ts",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": ["flask", "typescript", "docker"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  }
+}
