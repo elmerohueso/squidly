@@ -9,6 +9,8 @@ from itertools import cycle
 from datetime import datetime
 import time
 import sys
+import subprocess
+import shutil
 
 app = Flask(__name__, 
             static_folder='static',
@@ -364,6 +366,19 @@ print("Squidly starting up...", flush=True)
 validate_all_endpoints()
 print("Validation complete, server ready to accept requests.\n", flush=True)
 
+# Create downloads and temp folders if they don't exist
+try:
+    os.makedirs('/app/downloads', exist_ok=True)
+    print("Downloads folder ready (/app/downloads)", flush=True)
+except Exception as e:
+    print(f"WARNING: Failed to create downloads folder: {str(e)}", flush=True)
+
+try:
+    os.makedirs('/app/temp', exist_ok=True)
+    print("Temp folder ready (/app/temp)", flush=True)
+except Exception as e:
+    print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
+
 @app.route('/')
 def index():
     """Serve the main page"""
@@ -650,6 +665,54 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+def convert_flac_to_mp3(flac_path: str, mp3_path: str) -> bool:
+    """
+    Convert a FLAC file to 320kbps MP3 using ffmpeg.
+    
+    Args:
+        flac_path: Path to the FLAC file
+        mp3_path: Path where the MP3 should be saved
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        print(f"[FFMPEG] Converting FLAC to MP3: {flac_path} -> {mp3_path}", flush=True)
+        
+        # Create directory if needed
+        mp3_dir = os.path.dirname(mp3_path)
+        if mp3_dir:
+            os.makedirs(mp3_dir, exist_ok=True)
+        
+        # Run ffmpeg to convert FLAC to 320kbps MP3
+        cmd = [
+            'ffmpeg',
+            '-i', flac_path,
+            '-b:a', '320k',
+            '-q:a', '0',
+            '-y',  # Overwrite output file
+            mp3_path
+        ]
+        
+        print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print(f"[FFMPEG] SUCCESS: Converted to {mp3_path}", flush=True)
+            return True
+        else:
+            print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
+            print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
+            return False
+    
+    except subprocess.TimeoutExpired:
+        print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
+        return False
+    except Exception as e:
+        print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
+        return False
+
 @app.route('/api/download', methods=['POST'])
 def download_track():
     """
@@ -826,13 +889,54 @@ def download_track():
         
         print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
         
-        # Step 8: Save to disk
-        print(f"[DOWNLOAD] Saving to disk: {full_path}", flush=True)
+        # Step 8: Handle file based on format
+        if file_format == 'mp3':
+            # For MP3: save to temp, convert, then move to downloads
+            print(f"[DOWNLOAD] Format is MP3 - will convert from FLAC", flush=True)
+            
+            # Create temp folder
+            temp_folder = '/app/temp'
+            try:
+                os.makedirs(temp_folder, exist_ok=True)
+                print(f"[DOWNLOAD] Temp folder ready: {temp_folder}", flush=True)
+            except Exception as e:
+                print(f"[DOWNLOAD] ERROR: Failed to create temp folder: {str(e)}", flush=True)
+                return jsonify({'error': f'Failed to create temp folder: {str(e)}'}), 500
+            
+            # Save FLAC to temp
+            temp_flac_path = os.path.join(temp_folder, f'temp_{track_id}.flac')
+            print(f"[DOWNLOAD] Saving temporary FLAC: {temp_flac_path}", flush=True)
+            
+            with open(temp_flac_path, 'wb') as f:
+                f.write(track_response.content)
+            
+            print(f"[DOWNLOAD] Temporary FLAC saved, now converting to MP3...", flush=True)
+            
+            # Convert FLAC to MP3
+            success = convert_flac_to_mp3(temp_flac_path, full_path)
+            
+            # Clean up temp FLAC
+            try:
+                if os.path.exists(temp_flac_path):
+                    os.remove(temp_flac_path)
+                    print(f"[DOWNLOAD] Cleaned up temporary FLAC file", flush=True)
+            except Exception as e:
+                print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
+            
+            if not success:
+                return jsonify({'error': 'Failed to convert FLAC to MP3'}), 500
+            
+            print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
+        else:
+            # For original/FLAC: save directly
+            print(f"[DOWNLOAD] Format is FLAC - saving directly", flush=True)
+            print(f"[DOWNLOAD] Saving to disk: {full_path}", flush=True)
+            
+            with open(full_path, 'wb') as f:
+                f.write(track_response.content)
+            
+            print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         
-        with open(full_path, 'wb') as f:
-            f.write(track_response.content)
-        
-        print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
 
     except requests.exceptions.Timeout:

@@ -35,6 +35,7 @@ static/dist/
 
 # Downloads
 downloads/
+temp/
 
 # IDE
 .vscode/
