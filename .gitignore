@@ -37,6 +37,9 @@ static/dist/
 downloads/
 temp/
 
+# Persistent data
+data/
+
 # IDE
 .vscode/
 .idea/
