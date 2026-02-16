@@ -130,6 +130,9 @@ class App {
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
         this.fileNamingInput.addEventListener('input', () => this.updateSettingsFromForm());
 
+        // Update placeholder text based on search type
+        this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
+
         // Download button delegation
         this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement;
@@ -330,12 +333,27 @@ class App {
         }).join('');
     }
 
+    private updateSearchPlaceholder(): void {
+        const searchType = this.searchTypeSelect.value;
+        if (searchType === 'lastfm') {
+            this.searchInput.placeholder = 'Enter Last.fm playlist URL...';
+        } else {
+            this.searchInput.placeholder = 'Search for tracks...';
+        }
+    }
+
     private async handleSearch(): Promise<void> {
         const query = this.searchInput.value.trim();
         const searchType = this.searchTypeSelect.value;
         
         if (!query) {
             this.displayMessage('Please enter a search query');
+            return;
+        }
+
+        if (searchType === 'lastfm') {
+            // Handle Last.fm playlist with progressive search
+            await this.handleLastfmPlaylist(query);
             return;
         }
 
@@ -356,6 +374,100 @@ class App {
         }
     }
 
+    private async handleLastfmPlaylist(playlistUrl: string): Promise<void> {
+        this.displayMessage('Scraping Last.fm playlist...');
+
+        try {
+            // First, scrape the playlist to get track list
+            const scrapeResponse = await fetch('/api/lastfm/playlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ playlistUrl })
+            });
+
+            if (!scrapeResponse.ok) {
+                const errorData = await scrapeResponse.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to scrape playlist');
+            }
+
+            const scrapeData = await scrapeResponse.json();
+            const playlistName = scrapeData.playlistName || 'Last.fm Playlist';
+            const tracks = scrapeData.tracks || [];
+            const totalTracks = tracks.length;
+
+            if (totalTracks === 0) {
+                this.displayMessage('No tracks found in playlist');
+                return;
+            }
+
+            // Set up progress display
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <h2>Last.fm Playlist - "${this.escapeHtml(playlistName)}"</h2>
+                    <div class="progress-info">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
+                    </div>
+                </div>
+                <div class="results-list" id="lastfmResultsList"></div>
+            `;
+
+            const resultsList = document.getElementById('lastfmResultsList');
+            const progressBar = document.getElementById('lastfmProgress');
+            const progressCount = document.getElementById('progressCount');
+            let foundCount = 0;
+
+            // Search for each track progressively
+            for (let i = 0; i < tracks.length; i++) {
+                const track = tracks[i];
+                const searchQuery = `${track.name} ${track.artist}`;
+
+                try {
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+                    
+                    if (searchResponse.ok) {
+                        const searchData = await searchResponse.json();
+                        const items = searchData.data?.items || [];
+                        
+                        if (items.length > 0) {
+                            // Add the first match to results
+                            const trackCard = this.formatTrackCard(items[0]);
+                            if (resultsList) {
+                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                            }
+                            foundCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to search for ${searchQuery}:`, error);
+                }
+
+                // Update progress
+                const progress = ((i + 1) / totalTracks) * 100;
+                if (progressBar) {
+                    progressBar.style.width = `${progress}%`;
+                }
+                if (progressCount) {
+                    progressCount.textContent = (i + 1).toString();
+                }
+            }
+
+            // Update final message
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+            }
+
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process Last.fm playlist'}`);
+            console.error('Last.fm playlist error:', error);
+        }
+    }
+
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
@@ -371,13 +483,13 @@ class App {
 
         // Display results with proxy info
         const searchTypeName = searchType === 's' ? 'Tracks' : 
-                               searchType === 'a' ? 'Artists' :
-                               searchType === 'al' ? 'Albums' :
-                               searchType === 'p' ? 'Playlists' : 'Results';
+                              searchType === 'a' ? 'Artists' :
+                              searchType === 'al' ? 'Albums' :
+                              searchType === 'p' ? 'Playlists' : 'Results';
 
         this.resultsContainer.innerHTML = `
             <div class="results-header">
-                <h2>${searchTypeName} - "${query}"</h2>
+                <h2>${searchTypeName} - "${this.escapeHtml(query)}"</h2>
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
             <div class="results-list">
@@ -427,19 +539,11 @@ class App {
                     </div>
                 </div>
                 <div class="track-actions">
-                    ${duration ? `<span class="track-duration">${duration}</span>` : ''}
                     <button class="track-download-btn" title="Download" data-track-id="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                             <polyline points="7 10 12 15 17 10"></polyline>
                             <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                    </button>
-                    <button class="track-more-btn" title="More options">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="1"></circle>
-                            <circle cx="12" cy="5" r="1"></circle>
-                            <circle cx="12" cy="19" r="1"></circle>
                         </svg>
                     </button>
                 </div>

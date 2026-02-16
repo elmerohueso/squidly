@@ -669,6 +669,84 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+@app.route('/api/lastfm/playlist', methods=['POST'])
+def lastfm_playlist():
+    """
+    Scrape a Last.fm playlist and return the track list.
+    Accepts JSON body with 'playlistUrl' field.
+    Returns the playlist name and list of tracks to search for.
+    """
+    import re
+    
+    data = request.get_json()
+    playlist_url = data.get('playlistUrl', '')
+    
+    if not playlist_url:
+        return jsonify({'error': 'Playlist URL is required'}), 400
+    
+    try:
+        # Fetch the playlist page
+        response = requests.get(playlist_url, timeout=15)
+        
+        if not response.ok:
+            return jsonify({
+                'error': f'Failed to fetch playlist page: HTTP {response.status}'
+            }), 500
+        
+        html = response.text
+        
+        # Extract playlist name
+        title_match = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
+        playlist_name = title_match.group(1).strip() if title_match else 'Last.fm Playlist'
+        
+        # Parse tracks from chartlist-row elements
+        tracks = []
+        seen_tracks = set()
+        
+        # Pattern to find chartlist-row tr elements with chartlist-name and chartlist-artist
+        chartlist_pattern = re.compile(
+            r'<tr[^>]*class="[^"]*chartlist-row[^"]*"[^>]*>[\s\S]*?'
+            r'<td[^>]*class="[^"]*chartlist-name[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>[\s\S]*?'
+            r'<td[^>]*class="[^"]*chartlist-artist[^"]*"[^>]*>[\s\S]*?<a[^>]*>([^<]+)</a>',
+            re.IGNORECASE
+        )
+        
+        for match in chartlist_pattern.finditer(html):
+            track_name = match.group(1).strip()
+            artist_name = match.group(2).strip()
+            
+            track_key = f"{artist_name}|{track_name}"
+            if track_key not in seen_tracks:
+                seen_tracks.add(track_key)
+                tracks.append({
+                    'name': track_name,
+                    'artist': artist_name
+                })
+        
+        if len(tracks) == 0:
+            return jsonify({
+                'error': 'No tracks found. The playlist may be private, empty, or the page structure has changed.'
+            }), 400
+        
+        # Return the scraped tracks without searching
+        return jsonify({
+            'playlistName': playlist_name,
+            'trackCount': len(tracks),
+            'tracks': tracks
+        })
+        
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': 'Failed to fetch Last.fm playlist',
+            'details': str(e)
+        }), 500
+    except Exception as e:
+        print(f"Last.fm scraping error: {e}", flush=True)
+        return jsonify({
+            'error': 'Failed to process Last.fm playlist',
+            'details': str(e)
+        }), 500
+
 def format_album_cover_url(cover: str) -> str:
     """
     Format album cover URL for Tidal CDN.
