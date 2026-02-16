@@ -270,11 +270,45 @@ main {
     margin-bottom: 1.5rem;
 }
 
+.results-header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
 .results-header h2 {
     font-size: 1.5rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 0.5rem;
+    margin: 0;
+    flex: 1;
+}
+
+.download-all-btn {
+    padding: 0.5rem 1rem;
+    background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+}
+
+.download-all-btn:hover:not(.cancelling) {
+    opacity: 0.9;
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+.download-all-btn.cancelling {
+    background: linear-gradient(135deg, #ff4444, #ff6666);
+    opacity: 0.9;
 }
 
 .proxy-info {

@@ -79,6 +79,9 @@ class App {
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
+    private isDownloadingAll: boolean = false;
+    private downloadAllCancelRequested: boolean = false;
+    private currentDownloadController: AbortController | null = null;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -405,7 +408,9 @@ class App {
             // Set up progress display
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
-                    <h2>Last.fm Playlist - "${this.escapeHtml(playlistName)}"</h2>
+                    <div class="results-header-top">
+                        <h2>Last.fm Playlist - "${this.escapeHtml(playlistName)}"</h2>
+                    </div>
                     <div class="progress-info">
                         <div class="progress-bar-container">
                             <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
@@ -460,6 +465,18 @@ class App {
             const progressText = document.getElementById('progressText');
             if (progressText) {
                 progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+            }
+
+            // Create and add Download All button after searching is complete
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
+                resultsHeaderTop.appendChild(downloadAllBtn);
             }
 
         } catch (error) {
@@ -671,9 +688,15 @@ class App {
             }, 300);
         } catch (error) {
             console.error('[DOWNLOAD] Download error:', error);
-            // Restore button on error
-            downloadBtn.disabled = originalDisabled;
-            downloadBtn.innerHTML = originalContent;
+            // Check if this was an abort
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[DOWNLOAD] Download was aborted, restoring button');
+                this.restoreDownloadButton(downloadBtn);
+            } else {
+                // Restore button on error
+                downloadBtn.disabled = originalDisabled;
+                downloadBtn.innerHTML = originalContent;
+            }
         }
     }
 
@@ -698,7 +721,8 @@ class App {
                     trackId,
                     format: this.downloadSettings.format,
                     fileNaming: this.downloadSettings.fileNaming
-                })
+                }),
+                signal: this.currentDownloadController?.signal
             });
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
@@ -726,9 +750,226 @@ class App {
                 throw new Error(data.error || 'Download failed');
             }
         } catch (error) {
+            // Check if error is due to abort
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[DOWNLOAD] Download was aborted');
+                return;
+            }
             console.error('[DOWNLOAD] Error in downloadTrack:', error);
             throw error;
         }
+    }
+
+    private convertButtonToProgressCircle(downloadBtn: HTMLButtonElement): void {
+        // Store original content if not already stored
+        if (!downloadBtn.dataset.originalContent) {
+            downloadBtn.dataset.originalContent = downloadBtn.innerHTML;
+        }
+        
+        downloadBtn.disabled = true;
+        
+        // Create SVG progress circle
+        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        progressSvg.setAttribute('viewBox', '0 0 24 24');
+        progressSvg.setAttribute('class', 'track-download-progress');
+        
+        // Add gradient definition
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+        gradient.setAttribute('id', 'progressGradient');
+        gradient.setAttribute('x1', '0%');
+        gradient.setAttribute('y1', '0%');
+        gradient.setAttribute('x2', '100%');
+        gradient.setAttribute('y2', '100%');
+        
+        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+        stop1.setAttribute('offset', '0%');
+        stop1.setAttribute('stop-color', '#00d4ff');
+        
+        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+        stop2.setAttribute('offset', '100%');
+        stop2.setAttribute('stop-color', '#0099ff');
+        
+        gradient.appendChild(stop1);
+        gradient.appendChild(stop2);
+        defs.appendChild(gradient);
+        progressSvg.appendChild(defs);
+        
+        // Background track circle
+        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        trackCircle.setAttribute('cx', '12');
+        trackCircle.setAttribute('cy', '12');
+        trackCircle.setAttribute('r', '12');
+        trackCircle.setAttribute('class', 'progress-circle-track');
+        progressSvg.appendChild(trackCircle);
+        
+        // Progress fill circle
+        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        fillCircle.setAttribute('cx', '12');
+        fillCircle.setAttribute('cy', '12');
+        fillCircle.setAttribute('r', '12');
+        fillCircle.setAttribute('class', 'progress-circle-fill');
+        progressSvg.appendChild(fillCircle);
+        
+        // Replace button content with progress circle
+        downloadBtn.innerHTML = '';
+        downloadBtn.appendChild(progressSvg);
+    }
+
+    private restoreDownloadButton(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = false;
+        downloadBtn.classList.remove('completed');
+        if (downloadBtn.dataset.originalContent) {
+            downloadBtn.innerHTML = downloadBtn.dataset.originalContent;
+            delete downloadBtn.dataset.originalContent;
+        } else {
+            // Fallback: recreate the download icon
+            downloadBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+            `;
+        }
+    }
+
+    private async downloadAllTracks(): Promise<void> {
+        if (this.isDownloadingAll) {
+            // Cancel the download all process immediately
+            this.downloadAllCancelRequested = true;
+            // Abort the current download
+            if (this.currentDownloadController) {
+                this.currentDownloadController.abort();
+            }
+            return;
+        }
+
+        this.isDownloadingAll = true;
+        this.downloadAllCancelRequested = false;
+        
+        const downloadAllBtn = document.getElementById('downloadAllBtn') as HTMLButtonElement;
+        if (downloadAllBtn) {
+            downloadAllBtn.textContent = 'Cancel';
+            downloadAllBtn.classList.add('cancelling');
+            downloadAllBtn.disabled = false;
+        }
+
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const totalTracks = trackCards.length;
+        let downloadedCount = 0;
+
+        console.log(`[DOWNLOAD_ALL] Starting batch download of ${totalTracks} tracks`);
+
+        // Convert all buttons to 0% progress circles
+        for (const trackCard of trackCards) {
+            const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+            if (downloadBtn && !downloadBtn.classList.contains('completed')) {
+                this.convertButtonToProgressCircle(downloadBtn);
+            }
+        }
+
+        for (let i = 0; i < trackCards.length; i++) {
+            // Check if cancel was requested
+            if (this.downloadAllCancelRequested) {
+                console.log('[DOWNLOAD_ALL] Download all cancelled by user');
+                
+                // Restore buttons for incomplete downloads
+                for (let j = i; j < trackCards.length; j++) {
+                    const trackCard = trackCards[j];
+                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    if (downloadBtn && !downloadBtn.classList.contains('completed')) {
+                        this.restoreDownloadButton(downloadBtn);
+                    }
+                }
+                break;
+            }
+
+            const trackCard = trackCards[i];
+            const trackId = trackCard.getAttribute('data-track-id');
+            
+            if (trackId) {
+                try {
+                    console.log(`[DOWNLOAD_ALL] Downloading track ${i + 1}/${totalTracks}`);
+                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    
+                    // Directly call handleDownload instead of clicking
+                    if (downloadBtn && !downloadBtn.classList.contains('completed')) {
+                        // Create abort controller for this download
+                        this.currentDownloadController = new AbortController();
+                        const currentController = this.currentDownloadController;
+                        
+                        // Create promise that waits for the download to complete
+                        await new Promise<void>((resolve) => {
+                            // Call handleDownload directly
+                            void this.handleDownload(parseInt(trackId, 10), trackCard);
+                            
+                            // Set a temporary handler to detect when download completes
+                            const checkCompletion = setInterval(() => {
+                                if (this.downloadAllCancelRequested || currentController.signal.aborted) {
+                                    clearInterval(checkCompletion);
+                                    resolve();
+                                    return;
+                                }
+                                
+                                if (downloadBtn.classList.contains('completed')) {
+                                    clearInterval(checkCompletion);
+                                    downloadedCount++;
+                                    
+                                    // Update progress bar and text
+                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                                    const progressText = document.getElementById('progressText');
+                                    if (progressBar) {
+                                        const progress = (downloadedCount / totalTracks) * 100;
+                                        progressBar.style.width = `${progress}%`;
+                                    }
+                                    if (progressText) {
+                                        progressText.innerHTML = `Downloaded <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                                    }
+                                    
+                                    setTimeout(() => resolve(), 500); // Small delay before next
+                                }
+                            }, 100);
+                            
+                            // Set timeout to prevent hanging
+                            setTimeout(() => {
+                                clearInterval(checkCompletion);
+                                if (!downloadBtn.classList.contains('completed') && !this.downloadAllCancelRequested && !currentController.signal.aborted) {
+                                    downloadedCount++;
+                                    
+                                    // Update progress bar and text
+                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                                    const progressText = document.getElementById('progressText');
+                                    if (progressBar) {
+                                        const progress = (downloadedCount / totalTracks) * 100;
+                                        progressBar.style.width = `${progress}%`;
+                                    }
+                                    if (progressText) {
+                                        progressText.innerHTML = `Downloaded <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                                    }
+                                }
+                                resolve();
+                            }, 120000); // 2 minutes timeout per track
+                        });
+                    }
+                } catch (error) {
+                    console.error(`[DOWNLOAD_ALL] Error downloading track ${trackId}:`, error);
+                }
+            }
+        }
+
+        // Reset button state
+        this.isDownloadingAll = false;
+        this.downloadAllCancelRequested = false;
+        this.currentDownloadController = null;
+        
+        if (downloadAllBtn) {
+            downloadAllBtn.textContent = 'Download All';
+            downloadAllBtn.classList.remove('cancelling');
+            downloadAllBtn.disabled = false;
+        }
+
+        console.log(`[DOWNLOAD_ALL] Batch download complete. Downloaded ${downloadedCount}/${totalTracks} tracks`);
     }
 }
 

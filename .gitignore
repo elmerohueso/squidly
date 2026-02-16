@@ -39,6 +39,8 @@ temp/
 
 # Persistent data
 data/
+squidly.db
+*.db
 
 # IDE
 .vscode/

@@ -765,6 +765,24 @@ def format_album_cover_url(cover: str) -> str:
     cover_path = cover.replace('-', '/')
     return f"https://resources.tidal.com/images/{cover_path}/1280x1280.jpg"
 
+def clean_path_components(file_path: str) -> str:
+    """
+    Clean file path by removing trailing periods and spaces from each directory component.
+    This prevents invalid folder names on Windows and other filesystems.
+    
+    Args:
+        file_path: File path with potential trailing periods/spaces in components
+    
+    Returns:
+        Cleaned file path
+    """
+    # Split path into components
+    parts = file_path.replace('\\', '/').split('/')
+    # Strip trailing periods and spaces from each component
+    cleaned_parts = [part.rstrip('. ') for part in parts]
+    # Rejoin with forward slashes
+    return '/'.join(cleaned_parts)
+
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
     """
     Add ID3 tags to an audio file (handles both FLAC and MP3).
@@ -1131,6 +1149,9 @@ def download_track():
         file_path = file_path.replace('{track}', track_num)
         file_path = file_path.replace('{title}', track_title)
         file_path = file_path.replace('{ext}', file_ext)
+        
+        # Clean path components to remove trailing periods and spaces
+        file_path = clean_path_components(file_path)
         
         print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
         
