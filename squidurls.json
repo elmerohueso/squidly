@@ -1,72 +1,42 @@
 [
     {
         "name": "triton",
-        "encodedUrl": "aHR0cHM6Ly90cml0b24uc3F1aWQud3Rm",
-        "online": true,
-        "responseTime": 2083.87,
-        "lastChecked": "2026-02-16T18:43:42.700437Z"
+        "encodedUrl": "aHR0cHM6Ly90cml0b24uc3F1aWQud3Rm"
     },
     {
         "name": "binimum",
-        "encodedUrl": "aHR0cHM6Ly90aWRhbC1hcGkuYmluaW11bS5vcmc=",
-        "online": true,
-        "responseTime": 514.7,
-        "lastChecked": "2026-02-16T18:43:44.787430Z"
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC1hcGkuYmluaW11bS5vcmc="
     },
     {
         "name": "kinoplus",
-        "encodedUrl": "aHR0cHM6Ly90aWRhbC5raW5vcGx1cy5vbmxpbmU=",
-        "online": true,
-        "responseTime": 967.83,
-        "lastChecked": "2026-02-16T18:43:45.304275Z"
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC5raW5vcGx1cy5vbmxpbmU="
     },
     {
         "name": "spoti-2",
-        "encodedUrl": "aHR0cHM6Ly9oaWZpLXR3by5zcG90aXNhdmVyLm5ldA==",
-        "online": true,
-        "responseTime": 490.69,
-        "lastChecked": "2026-02-16T18:43:46.274915Z"
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLXR3by5zcG90aXNhdmVyLm5ldA=="
     },
     {
         "name": "spoti-1",
-        "encodedUrl": "aHR0cHM6Ly9oaWZpLW9uZS5zcG90aXNhdmVyLm5ldA==",
-        "online": true,
-        "responseTime": 496.13,
-        "lastChecked": "2026-02-16T18:43:46.768188Z"
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLW9uZS5zcG90aXNhdmVyLm5ldA=="
     },
     {
         "name": "wolf",
-        "encodedUrl": "aHR0cHM6Ly93b2xmLnFxZGwuc2l0ZQ==",
-        "online": true,
-        "responseTime": 1051.24,
-        "lastChecked": "2026-02-16T18:43:47.266793Z"
+        "encodedUrl": "aHR0cHM6Ly93b2xmLnFxZGwuc2l0ZQ=="
     },
     {
         "name": "hund",
-        "encodedUrl": "aHR0cDovL2h1bmQucXFkbC5zaXRl",
-        "online": true,
-        "responseTime": 982.97,
-        "lastChecked": "2026-02-16T18:43:48.320689Z"
+        "encodedUrl": "aHR0cDovL2h1bmQucXFkbC5zaXRl"
     },
     {
         "name": "katze",
-        "encodedUrl": "aHR0cHM6Ly9rYXR6ZS5xcWRsLnNpdGU=",
-        "online": true,
-        "responseTime": 1074.51,
-        "lastChecked": "2026-02-16T18:43:49.304888Z"
+        "encodedUrl": "aHR0cHM6Ly9rYXR6ZS5xcWRsLnNpdGU="
     },
     {
         "name": "vogel",
-        "encodedUrl": "aHR0cHM6Ly92b2dlbC5xcWRsLnNpdGU=",
-        "online": true,
-        "responseTime": 1253.82,
-        "lastChecked": "2026-02-16T18:43:50.383718Z"
+        "encodedUrl": "aHR0cHM6Ly92b2dlbC5xcWRsLnNpdGU="
     },
     {
         "name": "maus",
-        "encodedUrl": "aHR0cHM6Ly9tYXVzLnFxZGwuc2l0ZQ==",
-        "online": true,
-        "responseTime": 1016.04,
-        "lastChecked": "2026-02-16T18:43:51.639643Z"
+        "encodedUrl": "aHR0cHM6Ly9tYXVzLnFxZGwuc2l0ZQ=="
     }
 ]

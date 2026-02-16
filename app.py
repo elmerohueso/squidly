@@ -4,6 +4,7 @@ import os
 import json
 import base64
 import requests
+import sqlite3
 from itertools import cycle
 from datetime import datetime
 import time
@@ -12,6 +13,140 @@ app = Flask(__name__,
             static_folder='static',
             template_folder='templates')
 CORS(app)
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'squidly.db')
+DEFAULT_DOWNLOAD_SETTINGS = {
+    'format': 'original',
+    'parent_folder': '',
+    'file_naming': '{artist}\\{album}\\{track} - {title}.{ext}'
+}
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS download_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            format TEXT NOT NULL,
+            parent_folder TEXT NOT NULL,
+            file_naming TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mirror_endpoints (
+            name TEXT PRIMARY KEY,
+            encoded_url TEXT NOT NULL,
+            online INTEGER NOT NULL,
+            response_time REAL,
+            last_checked TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+def seed_mirrors_from_json():
+    with open('squidurls.json', 'r', encoding='utf-8') as f:
+        urls_data = json.load(f)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Clear existing entries
+    cur.execute("DELETE FROM mirror_endpoints")
+    
+    # Insert fresh data from JSON with initial values
+    for entry in urls_data:
+        cur.execute(
+            """
+            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                entry.get('name'),
+                entry.get('encodedUrl'),
+                0,
+                None,
+                None
+            )
+        )
+    
+    conn.commit()
+    conn.close()
+
+def get_download_settings():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT format, parent_folder, file_naming
+        FROM download_settings
+        WHERE id = 1
+        """
+    ).fetchone()
+
+    if row is None:
+        now = datetime.utcnow().isoformat() + 'Z'
+        cur.execute(
+            """
+            INSERT INTO download_settings (id, format, parent_folder, file_naming, updated_at)
+            VALUES (1, ?, ?, ?, ?)
+            """,
+            (
+                DEFAULT_DOWNLOAD_SETTINGS['format'],
+                DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming'],
+                now
+            )
+        )
+        conn.commit()
+        row = cur.execute(
+            """
+            SELECT format, parent_folder, file_naming
+            FROM download_settings
+            WHERE id = 1
+            """
+        ).fetchone()
+
+    conn.close()
+    return {
+        'format': row['format'],
+        'parent_folder': row['parent_folder'],
+        'file_naming': row['file_naming']
+    }
+
+def save_download_settings(settings):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO download_settings (id, format, parent_folder, file_naming, updated_at)
+        VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            format = excluded.format,
+            parent_folder = excluded.parent_folder,
+            file_naming = excluded.file_naming,
+            updated_at = excluded.updated_at
+        """,
+        (
+            settings['format'],
+            settings['parent_folder'],
+            settings['file_naming'],
+            now
+        )
+    )
+    conn.commit()
+    conn.close()
 
 # Validation Functions
 def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
@@ -130,6 +265,9 @@ def validate_all_endpoints():
     offline_count = 0
     search_working_count = 0
     
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
     # Validate each endpoint
     for entry in urls_data:
         name = entry['name']
@@ -140,10 +278,20 @@ def validate_all_endpoints():
         # Validate endpoint (ping + search test in one call)
         result = validate_endpoint(decoded_url, name, timeout=5)
         
-        # Update entry with results
-        entry['online'] = result['online']
-        entry['responseTime'] = result['responseTime']
-        entry['lastChecked'] = result['lastChecked']
+        # Update database with results
+        cur.execute(
+            """
+            UPDATE mirror_endpoints
+            SET online = ?, response_time = ?, last_checked = ?
+            WHERE name = ?
+            """,
+            (
+                1 if result['online'] else 0,
+                result['responseTime'],
+                result['lastChecked'],
+                name
+            )
+        )
         
         if result['online']:
             online_count += 1
@@ -162,10 +310,8 @@ def validate_all_endpoints():
             error_msg = result.get('error', 'Unknown error')
             print(f"  ✗ OFFLINE - {error_msg}", flush=True)
     
-    # Save updated status to file
-    with open('squidurls.json', 'w', encoding='utf-8') as f:
-        json.dump(urls_data, f, indent=4, ensure_ascii=False)
-        f.write('\n')  # Add newline at end of file
+    conn.commit()
+    conn.close()
     
     # Print summary
     print("\n" + "="*60, flush=True)
@@ -199,6 +345,10 @@ def load_squid_urls():
         })
     
     return decoded_urls
+
+# Initialize SQLite and mirror data
+init_db()
+seed_mirrors_from_json()
 
 # Initialize URL list and round-robin iterator
 SQUID_URLS = load_squid_urls()
@@ -496,18 +646,63 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+@app.route('/api/settings', methods=['GET', 'POST'])
+def download_settings():
+    """Get or update download settings stored in SQLite."""
+    if request.method == 'GET':
+        return jsonify(get_download_settings())
+
+    payload = request.get_json(silent=True) or {}
+    current = get_download_settings()
+
+    updated = {
+        'format': payload.get('format', current['format']),
+        'parent_folder': payload.get('parentFolder', payload.get('parent_folder', current['parent_folder'])),
+        'file_naming': payload.get('fileNaming', payload.get('file_naming', current['file_naming']))
+    }
+
+    if updated['format'] not in ('original', 'mp3'):
+        return jsonify({'error': 'Invalid format value'}), 400
+
+    if not isinstance(updated['parent_folder'], str) or not isinstance(updated['file_naming'], str):
+        return jsonify({'error': 'Invalid settings payload'}), 400
+
+    save_download_settings(updated)
+    return jsonify({
+        'format': updated['format'],
+        'parent_folder': updated['parent_folder'],
+        'file_naming': updated['file_naming']
+    })
+
 @app.route('/api/endpoints/status', methods=['GET'])
 def endpoints_status():
     """Return the current status of all endpoints"""
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-    
+    conn = get_db_connection()
+    rows = conn.execute(
+        """
+        SELECT name, encoded_url, online, response_time, last_checked
+        FROM mirror_endpoints
+        ORDER BY name
+        """
+    ).fetchall()
+    conn.close()
+
+    endpoints = []
+    for row in rows:
+        endpoints.append({
+            'name': row['name'],
+            'encodedUrl': row['encoded_url'],
+            'online': bool(row['online']),
+            'responseTime': row['response_time'],
+            'lastChecked': row['last_checked']
+        })
+
     return jsonify({
-        'endpoints': urls_data,
+        'endpoints': endpoints,
         'summary': {
-            'total': len(urls_data),
-            'online': sum(1 for e in urls_data if e.get('online', False)),
-            'offline': sum(1 for e in urls_data if not e.get('online', False))
+            'total': len(endpoints),
+            'online': sum(1 for e in endpoints if e.get('online')),
+            'offline': sum(1 for e in endpoints if not e.get('online'))
         }
     })
 

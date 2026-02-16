@@ -51,6 +51,14 @@ interface EndpointStatus {
     };
 }
 
+type DownloadFormat = 'original' | 'mp3';
+
+interface DownloadSettings {
+    format: DownloadFormat;
+    parentFolder: string;
+    fileNaming: string;
+}
+
 class App {
     private searchInput: HTMLInputElement;
     private searchTypeSelect: HTMLSelectElement;
@@ -61,6 +69,17 @@ class App {
     private flyoutOverlay: HTMLElement;
     private closeFlyoutButton: HTMLButtonElement;
     private flyoutContent: HTMLElement;
+    private settingsButton: HTMLButtonElement;
+    private settingsFlyout: HTMLElement;
+    private settingsOverlay: HTMLElement;
+    private closeSettingsButton: HTMLButtonElement;
+    private formatOriginalInput: HTMLInputElement;
+    private formatMp3Input: HTMLInputElement;
+    private parentFolderInput: HTMLInputElement;
+    private fileNamingInput: HTMLInputElement;
+    private downloadSettings: DownloadSettings;
+    private settingsSaveTimer: number | null = null;
+    private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
 
     constructor() {
@@ -73,8 +92,19 @@ class App {
         this.flyoutOverlay = document.getElementById('flyoutOverlay') as HTMLElement;
         this.closeFlyoutButton = document.getElementById('closeFlyout') as HTMLButtonElement;
         this.flyoutContent = document.getElementById('flyoutContent') as HTMLElement;
+        this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
+        this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
+        this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
+        this.closeSettingsButton = document.getElementById('closeSettings') as HTMLButtonElement;
+        this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
+        this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
+        this.parentFolderInput = document.getElementById('parentFolder') as HTMLInputElement;
+        this.fileNamingInput = document.getElementById('fileNaming') as HTMLInputElement;
         
         this.initializeEventListeners();
+        this.downloadSettings = this.defaultDownloadSettings();
+        this.applySettingsToForm(this.downloadSettings);
+        void this.fetchDownloadSettingsFromServer();
         this.updateEndpointStatus(); // Initial load
         
         // Update status every 30 seconds
@@ -94,6 +124,15 @@ class App {
         this.statusButton.addEventListener('click', () => this.openFlyout());
         this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
         this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+
+        this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
+        this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
+        this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+
+        this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
+        this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
+        this.parentFolderInput.addEventListener('input', () => this.updateSettingsFromForm());
+        this.fileNamingInput.addEventListener('input', () => this.updateSettingsFromForm());
     }
 
     private openFlyout(): void {
@@ -108,6 +147,121 @@ class App {
         this.flyoutOverlay.classList.remove('active');
         document.body.style.overflow = '';
     }
+
+    private openSettingsFlyout(): void {
+        this.settingsFlyout.classList.add('active');
+        this.settingsOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
+    private closeSettingsFlyout(): void {
+        this.settingsFlyout.classList.remove('active');
+        this.settingsOverlay.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    private defaultDownloadSettings(): DownloadSettings {
+        return {
+            format: 'original',
+            parentFolder: '',
+            fileNaming: '{artist}\\{album}\\{track} - {title}.{ext}'
+        };
+    }
+
+    private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
+        const fallback = this.defaultDownloadSettings();
+        const parentFolder = (raw as { parent_folder?: string }).parent_folder;
+        const fileNaming = (raw as { file_naming?: string }).file_naming;
+
+        return {
+            format: raw.format === 'mp3' ? 'mp3' : 'original',
+            parentFolder: typeof raw.parentFolder === 'string'
+                ? raw.parentFolder
+                : typeof parentFolder === 'string'
+                    ? parentFolder
+                    : fallback.parentFolder,
+            fileNaming: typeof raw.fileNaming === 'string'
+                ? raw.fileNaming
+                : typeof fileNaming === 'string'
+                    ? fileNaming
+                    : fallback.fileNaming
+        };
+    }
+
+    private async fetchDownloadSettingsFromServer(): Promise<void> {
+        try {
+            const response = await fetch('/api/settings');
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            this.downloadSettings = this.normalizeSettings(data);
+            this.applySettingsToForm(this.downloadSettings);
+        } catch (error) {
+            console.warn('Failed to load download settings.', error);
+        }
+    }
+
+    private applySettingsToForm(settings: DownloadSettings): void {
+        this.formatOriginalInput.checked = settings.format === 'original';
+        this.formatMp3Input.checked = settings.format === 'mp3';
+        this.parentFolderInput.value = settings.parentFolder;
+        this.fileNamingInput.value = settings.fileNaming;
+        this.syncFormatToggleStyles();
+    }
+
+    private readSettingsFromForm(): DownloadSettings {
+        return {
+            format: this.formatMp3Input.checked ? 'mp3' : 'original',
+            parentFolder: this.parentFolderInput.value.trim(),
+            fileNaming: this.fileNamingInput.value.trim()
+        };
+    }
+
+    private updateSettingsFromForm(): void {
+        this.downloadSettings = this.readSettingsFromForm();
+        this.queueSettingsSave();
+        this.syncFormatToggleStyles();
+    }
+
+    private queueSettingsSave(): void {
+        if (this.settingsSaveTimer) {
+            window.clearTimeout(this.settingsSaveTimer);
+        }
+
+        this.settingsSaveTimer = window.setTimeout(() => {
+            void this.saveSettingsToServer(this.downloadSettings);
+        }, this.settingsSaveDelayMs);
+    }
+
+    private async saveSettingsToServer(settings: DownloadSettings): Promise<void> {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            });
+        } catch (error) {
+            console.warn('Failed to save download settings.', error);
+        }
+    }
+
+    private syncFormatToggleStyles(): void {
+        const originalLabel = this.formatOriginalInput.closest('label');
+        const mp3Label = this.formatMp3Input.closest('label');
+
+        if (originalLabel) {
+            originalLabel.classList.toggle('active', this.formatOriginalInput.checked);
+        }
+
+        if (mp3Label) {
+            mp3Label.classList.toggle('active', this.formatMp3Input.checked);
+        }
+    }
+
 
     private async updateEndpointStatus(): Promise<void> {
         try {

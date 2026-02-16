@@ -10,18 +10,26 @@
     <div class="container">
         <header>
             <div class="header-content">
+                <div class="header-actions">
+                    <button id="settingsButton" class="settings-button" title="Download settings">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .7.4 1.32 1.02 1.6.31.14.64.22.98.22H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        <span>Settings</span>
+                    </button>
+                    <button id="statusButton" class="status-button" title="View mirror status">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        <span class="status-count">0/0</span>
+                    </button>
+                </div>
                 <div>
                     <h1 class="logo">Squidly</h1>
-                    <p class="tagline">Your web app framework</p>
                 </div>
-                <button id="statusButton" class="status-button" title="View mirror status">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                    <span class="status-count">0/0</span>
-                </button>
             </div>
         </header>
         
@@ -83,6 +91,46 @@
         </div>
     </div>
     <div id="flyoutOverlay" class="flyout-overlay"></div>
+
+    <!-- Settings Flyout -->
+    <div id="settingsFlyout" class="settings-flyout">
+        <div class="flyout-header">
+            <h2>Download Settings</h2>
+            <button id="closeSettings" class="close-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="settings-content">
+            <div class="settings-section">
+                <h3>Format</h3>
+                <div class="format-toggle" role="radiogroup" aria-label="Download format">
+                    <label class="toggle-option">
+                        <input type="radio" name="downloadFormat" value="original" id="formatOriginal">
+                        <span>Original</span>
+                    </label>
+                    <label class="toggle-option">
+                        <input type="radio" name="downloadFormat" value="mp3" id="formatMp3">
+                        <span>MP3</span>
+                    </label>
+                </div>
+            </div>
+            <div class="settings-section">
+                <label class="settings-label" for="parentFolder">Parent Folder (UNC path)</label>
+                <input type="text" id="parentFolder" class="settings-input" placeholder="\\server\\share\\Music">
+                <p class="settings-hint">Example: \\server\share\Music</p>
+            </div>
+            <div class="settings-section">
+                <label class="settings-label" for="fileNaming">File Naming</label>
+                <input type="text" id="fileNaming" class="settings-input" placeholder="{artist}\\{album}\\{track} - {title}.{ext}">
+                <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
+            </div>
+            <p class="settings-note">Settings are saved on this server and persist between sessions.</p>
+        </div>
+    </div>
+    <div id="settingsOverlay" class="flyout-overlay"></div>
     
     <script src="{{ url_for('static', filename='dist/bundle.js') }}"></script>
 </body>
