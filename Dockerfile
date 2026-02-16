@@ -55,4 +55,5 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 5000
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+# Using --preload to load app before forking workers (runs validation once)
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--preload", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

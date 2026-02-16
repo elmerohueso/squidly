@@ -139,10 +139,41 @@ main {
     width: 100%;
     max-width: 600px;
     margin-bottom: 2rem;
+    display: flex;
+    gap: 0.75rem;
+}
+
+.search-type-select {
+    padding: 1rem 1rem;
+    font-size: 0.9375rem;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    outline: none;
+    font-weight: 500;
+    min-width: 110px;
+}
+
+.search-type-select:hover {
+    border-color: var(--accent-primary);
+}
+
+.search-type-select:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
+    background: var(--bg-tertiary);
+}
+
+.search-type-select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .search-bar {
-    width: 100%;
+    flex: 1;
     padding: 1rem 4rem 1rem 1.5rem;
     font-size: 1rem;
     background: var(--bg-secondary);
@@ -196,7 +227,7 @@ main {
 /* === Results === */
 .results-container {
     width: 100%;
-    max-width: 800px;
+    max-width: 900px;
     margin-top: 2rem;
 }
 
@@ -225,9 +256,126 @@ main {
 .results-list {
     display: flex;
     flex-direction: column;
+    gap: 0.5rem;
+}
+
+.track-card {
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
     gap: 1rem;
 }
 
+.track-card:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.track-artwork {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.track-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.track-artwork-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+    color: var(--text-muted);
+}
+
+.track-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.track-title {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.track-artist {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.track-metadata {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.track-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.track-duration {
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-width: 40px;
+    text-align: right;
+}
+
+.track-download-btn,
+.track-more-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.track-download-btn:hover,
+.track-more-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.track-download-btn svg,
+.track-more-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Old result-item styles kept for backward compatibility */
 .result-item {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -285,6 +433,15 @@ footer p {
         font-size: 1rem;
     }
 
+    .search-container {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .search-type-select {
+        width: 100%;
+    }
+
     .search-bar {
         font-size: 0.9375rem;
         padding: 0.875rem 3.5rem 0.875rem 1.25rem;
@@ -296,6 +453,32 @@ footer p {
 
     .result-item {
         padding: 1.25rem;
+    }
+
+    .track-card {
+        padding: 0.625rem 0.75rem;
+    }
+
+    .track-artwork {
+        width: 48px;
+        height: 48px;
+    }
+
+    .track-title {
+        font-size: 0.9375rem;
+    }
+
+    .track-artist,
+    .track-metadata {
+        font-size: 0.8125rem;
+    }
+
+    .track-duration {
+        font-size: 0.875rem;
+    }
+
+    .track-actions {
+        gap: 0.5rem;
     }
 }
 

@@ -123,7 +123,7 @@ def validate_all_endpoints():
     print("="*60, flush=True)
     
     # Load current URLs
-    with open('squidurls.json', 'r') as f:
+    with open('squidurls.json', 'r', encoding='utf-8') as f:
         urls_data = json.load(f)
     
     online_count = 0
@@ -163,8 +163,9 @@ def validate_all_endpoints():
             print(f"  ✗ OFFLINE - {error_msg}", flush=True)
     
     # Save updated status to file
-    with open('squidurls.json', 'w') as f:
-        json.dump(urls_data, f, indent=4)
+    with open('squidurls.json', 'w', encoding='utf-8') as f:
+        json.dump(urls_data, f, indent=4, ensure_ascii=False)
+        f.write('\n')  # Add newline at end of file
     
     # Print summary
     print("\n" + "="*60, flush=True)
@@ -186,7 +187,7 @@ def validate_all_endpoints():
 # Load squid URLs and set up round-robin
 def load_squid_urls():
     """Load and decode squid URLs from JSON file"""
-    with open('squidurls.json', 'r') as f:
+    with open('squidurls.json', 'r', encoding='utf-8') as f:
         urls_data = json.load(f)
     
     decoded_urls = []
@@ -203,7 +204,8 @@ def load_squid_urls():
 SQUID_URLS = load_squid_urls()
 url_iterator = cycle(SQUID_URLS)
 
-# Run validation on module load (works with both gunicorn and direct execution)
+# Run validation on startup
+# With gunicorn --preload, this runs once before workers are forked
 print("Squidly starting up...", flush=True)
 validate_all_endpoints()
 print("Validation complete, server ready to accept requests.\n", flush=True)
@@ -497,7 +499,7 @@ def health():
 @app.route('/api/endpoints/status', methods=['GET'])
 def endpoints_status():
     """Return the current status of all endpoints"""
-    with open('squidurls.json', 'r') as f:
+    with open('squidurls.json', 'r', encoding='utf-8') as f:
         urls_data = json.load(f)
     
     return jsonify({
