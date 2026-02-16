@@ -466,7 +466,7 @@ class App {
     private formatAlbumCoverUrl(cover: string): string {
         // Convert dashes to forward slashes for Tidal CDN format
         const coverPath = cover.replace(/-/g, '/');
-        return `https://resources.tidal.com/images/${coverPath}/640x640.jpg`;
+        return `https://resources.tidal.com/images/${coverPath}/1280x1280.jpg`;
     }
 
     private escapeHtml(text: string): string {

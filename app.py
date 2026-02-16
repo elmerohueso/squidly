@@ -11,6 +11,10 @@ import time
 import sys
 import subprocess
 import shutil
+from mutagen.flac import FLAC
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
+from mutagen.mp3 import MP3
+from io import BytesIO
 
 app = Flask(__name__, 
             static_folder='static',
@@ -665,6 +669,125 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy'})
 
+def format_album_cover_url(cover: str) -> str:
+    """
+    Format album cover URL for Tidal CDN.
+    Converts dashes to forward slashes in the cover path.
+    
+    Args:
+        cover: Cover ID or path (may contain dashes)
+    
+    Returns:
+        Full URL to the cover image
+    """
+    if not cover:
+        return ''
+    
+    # Convert dashes to forward slashes for Tidal CDN format
+    cover_path = cover.replace('-', '/')
+    return f"https://resources.tidal.com/images/{cover_path}/1280x1280.jpg"
+
+def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
+    """
+    Add ID3 tags to an audio file (handles both FLAC and MP3).
+    
+    Args:
+        file_path: Path to the audio file
+        metadata: Dict with keys: artist, title, album, year, track_number
+        cover_image_data: Binary image data to embed as cover art
+    """
+    try:
+        artist = metadata.get('artist', 'Unknown Artist')
+        title = metadata.get('title', 'Unknown Track')
+        album = metadata.get('album', 'Unknown Album')
+        year = metadata.get('year', '')
+        track_num = metadata.get('track_number', '1')
+        
+        # Handle FLAC files
+        if file_path.lower().endswith('.flac'):
+            try:
+                audio = FLAC(file_path)
+                audio['TITLE'] = title
+                audio['ARTIST'] = artist
+                audio['ALBUM'] = album
+                if year:
+                    audio['DATE'] = str(year)
+                audio['TRACKNUMBER'] = str(track_num)
+                
+                # Add cover art if available
+                if cover_image_data:
+                    from mutagen.flac import Picture
+                    pic = Picture()
+                    pic.data = cover_image_data
+                    pic.type = 3  # Cover (front)
+                    pic.mime = 'image/jpeg'
+                    audio.add_picture(pic)
+                
+                audio.save()
+                print(f"[ID3] Successfully added FLAC metadata to {file_path}", flush=True)
+            except Exception as e:
+                print(f"[ID3] Warning: Could not write FLAC tags: {str(e)}", flush=True)
+        
+        # Handle MP3 files
+        elif file_path.lower().endswith('.mp3'):
+            try:
+                try:
+                    audio = MP3(file_path, ID3=ID3)
+                except:
+                    audio = MP3(file_path)
+                    audio.add_tags()
+                
+                # Remove existing tags to ensure clean slate
+                audio.delete()
+                audio = MP3(file_path)
+                audio.add_tags()
+                
+                # Add text tags
+                audio['TIT2'] = TIT2(encoding=3, text=title)
+                audio['TPE1'] = TPE1(encoding=3, text=artist)
+                audio['TALB'] = TALB(encoding=3, text=album)
+                if year:
+                    audio['TDRC'] = TDRC(encoding=3, text=str(year))
+                audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
+                
+                # Add cover art if available
+                if cover_image_data:
+                    audio['APIC'] = APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data)
+                
+                audio.save(v2_version=4)
+                print(f"[ID3] Successfully added MP3 metadata to {file_path}", flush=True)
+            except Exception as e:
+                print(f"[ID3] Warning: Could not write MP3 tags: {str(e)}", flush=True)
+                
+    except Exception as e:
+        print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
+
+def download_cover_image(cover_url):
+    """
+    Download album cover image from URL.
+    Returns binary image data or None if download fails.
+    """
+    if not cover_url:
+        print(f"[COVER] No cover URL provided", flush=True)
+        return None
+    
+    try:
+        print(f"[COVER] Downloading cover image from: {cover_url}", flush=True)
+        response = requests.get(cover_url, timeout=10)
+        
+        if response.ok:
+            print(f"[COVER] Successfully downloaded cover image ({len(response.content)} bytes)", flush=True)
+            return response.content
+        else:
+            print(f"[COVER] Failed to download cover image. Status: {response.status_code}", flush=True)
+            return None
+    except requests.exceptions.Timeout:
+        print(f"[COVER] ERROR: Timeout downloading cover image from {cover_url}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[COVER] Error downloading cover image: {str(e)}", flush=True)
+        return None
+
 def convert_flac_to_mp3(flac_path: str, mp3_path: str) -> bool:
     """
     Convert a FLAC file to 320kbps MP3 using ffmpeg.
@@ -769,6 +892,9 @@ def download_track():
         album_name = 'Unknown Album'
         track_title = 'Unknown Track'
         track_num = '01'
+        release_year = ''
+        cover_url = ''
+        album_id = ''
         
         # Try to extract from different possible structures
         if isinstance(track_metadata, dict):
@@ -783,6 +909,32 @@ def download_track():
             # Try album
             if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
                 album_name = track_metadata['album'].get('title', 'Unknown Album')
+                
+                # Get album ID for cover URL construction
+                if 'id' in track_metadata['album']:
+                    album_id = track_metadata['album']['id']
+                
+                # Try to get cover from album object
+                if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
+                    cover_val = track_metadata['album']['cover']
+                    # If cover is a string that looks like an ID (not a full URL), construct the URL
+                    if isinstance(cover_val, str) and not cover_val.startswith('http'):
+                        cover_url = format_album_cover_url(cover_val)
+                    else:
+                        cover_url = cover_val
+                
+                # Try alternative cover field names
+                if not cover_url:
+                    for cover_field in ['coverUri', 'imageUri', 'image']:
+                        if cover_field in track_metadata['album']:
+                            cover_val = track_metadata['album'][cover_field]
+                            if isinstance(cover_val, str):
+                                if not cover_val.startswith('http'):
+                                    cover_url = format_album_cover_url(cover_val)
+                                else:
+                                    cover_url = cover_val
+                                break
+                
             elif 'albumTitle' in track_metadata:
                 album_name = track_metadata['albumTitle']
             
@@ -793,8 +945,50 @@ def download_track():
             # Try track number
             if 'trackNumber' in track_metadata:
                 track_num = str(track_metadata['trackNumber']).zfill(2)
+            
+            # Try to get release date
+            if 'releaseDate' in track_metadata:
+                try:
+                    date_str = track_metadata['releaseDate']
+                    if isinstance(date_str, str) and len(date_str) >= 4:
+                        release_year = date_str[:4]
+                except:
+                    pass
+            elif 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+                if 'releaseDate' in track_metadata['album']:
+                    try:
+                        date_str = track_metadata['album']['releaseDate']
+                        if isinstance(date_str, str) and len(date_str) >= 4:
+                            release_year = date_str[:4]
+                    except:
+                        pass
+            
+            # If still no cover but we have album ID, construct URL from album ID
+            if not cover_url and album_id:
+                cover_url = format_album_cover_url(str(album_id))
+            
+            # Try to get cover from track if not already set
+            if not cover_url:
+                if 'cover' in track_metadata:
+                    cover_val = track_metadata['cover']
+                    if isinstance(cover_val, str) and not cover_val.startswith('http'):
+                        cover_url = format_album_cover_url(cover_val)
+                    else:
+                        cover_url = cover_val
+                
+                # Try alternative track cover field names
+                if not cover_url:
+                    for cover_field in ['coverUri', 'imageUri', 'image']:
+                        if cover_field in track_metadata:
+                            cover_val = track_metadata[cover_field]
+                            if isinstance(cover_val, str):
+                                if not cover_val.startswith('http'):
+                                    cover_url = format_album_cover_url(cover_val)
+                                else:
+                                    cover_url = cover_val
+                                break
         
-        print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}'", flush=True)
+        print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
         
         # Step 2: Get the track manifest for download
         print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
@@ -889,6 +1083,20 @@ def download_track():
         
         print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
         
+        # Try to download cover image if URL is available
+        cover_image_data = None
+        if cover_url:
+            cover_image_data = download_cover_image(cover_url)
+        
+        # Prepare metadata for ID3 tags
+        metadata_dict = {
+            'artist': artist_name,
+            'title': track_title,
+            'album': album_name,
+            'year': release_year,
+            'track_number': track_num
+        }
+        
         # Step 8: Handle file based on format
         if file_format == 'mp3':
             # For MP3: save to temp, convert, then move to downloads
@@ -926,6 +1134,10 @@ def download_track():
             if not success:
                 return jsonify({'error': 'Failed to convert FLAC to MP3'}), 500
             
+            # Add ID3 tags to the MP3 file
+            print(f"[DOWNLOAD] Adding ID3 metadata to MP3...", flush=True)
+            add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+            
             print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
         else:
             # For original/FLAC: save directly
@@ -934,6 +1146,10 @@ def download_track():
             
             with open(full_path, 'wb') as f:
                 f.write(track_response.content)
+            
+            # Add ID3 tags to the FLAC file
+            print(f"[DOWNLOAD] Adding metadata to FLAC...", flush=True)
+            add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
             
             print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         
