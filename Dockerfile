@@ -45,8 +45,10 @@ COPY static ./static
 # Copy built assets from frontend stage
 COPY --from=frontend-builder /app/static/dist ./static/dist
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user and data directory
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/data && \
+    chown -R appuser:appuser /app
 USER appuser
 
 # Disable Python output buffering
