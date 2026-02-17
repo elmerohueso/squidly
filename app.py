@@ -833,10 +833,54 @@ def format_album_cover_url(cover: str) -> str:
     cover_path = cover.replace('-', '/')
     return f"https://resources.tidal.com/images/{cover_path}/1280x1280.jpg"
 
+def sanitize_filename_component(value: str) -> str:
+    """
+    Sanitize a single filename or folder name component by removing/replacing invalid characters.
+    This should be called on individual metadata values (artist, album, title) before substituting
+    them into path templates.
+    
+    Args:
+        value: A single component value (artist name, track title, etc.)
+    
+    Returns:
+        Sanitized component safe for use in filenames
+    """
+    if not value:
+        return value
+    
+    # Replace slashes (both forward and back) to prevent unintended subdirectories
+    sanitized = value.replace('/', '-').replace('\\', '-')
+    
+    # Remove or replace other invalid characters on Windows: < > : " | ? *
+    sanitized = sanitized.replace('<', '').replace('>', '')
+    sanitized = sanitized.replace(':', '-').replace('"', "'")
+    sanitized = sanitized.replace('|', '-').replace('?', '')
+    sanitized = sanitized.replace('*', '')
+    
+    # Replace various Unicode apostrophes and quotes with ASCII equivalents
+    sanitized = sanitized.replace('\u2018', "'").replace('\u2019', "'")  # ' '
+    sanitized = sanitized.replace('\u201c', '"').replace('\u201d', '"')  # " "
+    sanitized = sanitized.replace('\u2013', '-').replace('\u2014', '-')  # – —
+    
+    # Remove control characters (ASCII 0-31)
+    sanitized = ''.join(char for char in sanitized if ord(char) >= 32)
+    
+    # Strip trailing periods and spaces (invalid on Windows)
+    sanitized = sanitized.rstrip('. ')
+    
+    # Strip leading spaces
+    sanitized = sanitized.lstrip(' ')
+    
+    # If the entire component was invalid, use a placeholder
+    if not sanitized:
+        sanitized = '_'
+    
+    return sanitized
+
 def clean_path_components(file_path: str) -> str:
     """
     Clean file path by removing trailing periods and spaces from each directory component.
-    This prevents invalid folder names on Windows and other filesystems.
+    This is a final cleanup after template substitution.
     
     Args:
         file_path: File path with potential trailing periods/spaces in components
@@ -847,7 +891,7 @@ def clean_path_components(file_path: str) -> str:
     # Split path into components
     parts = file_path.replace('\\', '/').split('/')
     # Strip trailing periods and spaces from each component
-    cleaned_parts = [part.rstrip('. ') for part in parts]
+    cleaned_parts = [part.rstrip('. ') if part else part for part in parts]
     # Rejoin with forward slashes
     return '/'.join(cleaned_parts)
 
@@ -1368,11 +1412,17 @@ def download_track():
         # corrected after we detect the actual format (FLAC or M4A)
         file_ext = 'flac' if file_format == 'original' else 'mp3'
         
+        # Sanitize metadata values before inserting into template
+        safe_artist = sanitize_filename_component(artist_name)
+        safe_album = sanitize_filename_component(album_name)
+        safe_title = sanitize_filename_component(track_title)
+        safe_track = sanitize_filename_component(track_num)
+        
         # Replace placeholders in the file naming template
-        file_path = file_naming.replace('{artist}', artist_name)
-        file_path = file_path.replace('{album}', album_name)
-        file_path = file_path.replace('{track}', track_num)
-        file_path = file_path.replace('{title}', track_title)
+        file_path = file_naming.replace('{artist}', safe_artist)
+        file_path = file_path.replace('{album}', safe_album)
+        file_path = file_path.replace('{track}', safe_track)
+        file_path = file_path.replace('{title}', safe_title)
         file_path = file_path.replace('{ext}', file_ext)
         
         # Clean path components to remove trailing periods and spaces
