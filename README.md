@@ -1,35 +1,35 @@
 # Squidly
 
-A modern music downloader and search interface built with Flask and TypeScript, featuring a clean, Tidal-inspired design and intelligent mirror management.
+A music downloader via SquidWTF and its mirrors, built with Flask and TypeScript.
 
 ## Features
 
-- 🎵 **Music Search & Download** - Search for tracks, albums, artists, and Last.fm playlists
-- 🔄 **Smart Mirror System** - Automatic round-robin load balancing across multiple backend mirrors
-- 💾 **Format Options** - Download in original quality or convert to FLAC/MP3
-- 🎨 **Modern UI** - Clean, dark-themed design with smooth animations
-- 📊 **Mirror Status Monitoring** - Real-time health checks and response time tracking
-- ⚙️ **Configurable Downloads** - Customizable file naming patterns and folder organization
-- 🏷️ **Metadata Tagging** - Automatic album art and ID3 tag embedding
-- 🐳 **Docker Ready** - Fully containerized for easy deployment
+- **Music Search & Download** - Search tracks, albums, artists, and Last.fm playlists
+- **Smart Mirror System** - Load balancing across multiple backend mirrors
+- **Format Conversion** - Download in original quality or convert to FLAC/MP3
+- **Metadata Tagging** - Automatic album art and ID3 tag embedding
 
-## Quick Start with Docker
+## Quick Start
 
-1. **Build and run the application:**
+1. **Download the compose file:**
    ```bash
-   docker-compose up --build
+   curl -O https://raw.githubusercontent.com/elmerohueso/squidly/main/docker-compose.yml
    ```
 
-2. **Access the application:**
+2. **Run the application:**
+   ```bash
+   docker-compose up
+   ```
+
+3. **Access the application:**
    Open your browser to `http://localhost:5000`
 
-### Volume Mounts
-The Docker container mounts:
-- `./squidurls.json` - Mirror list seed file
-- `./data` - SQLite database and other persistent data
-- `./downloads/full_albums` - Downloaded full albums (persisted)
-- `./downloads/loose_tracks` - Downloaded individual tracks (persisted)
+## Volume Mounts
+
+- **`data/`** - SQLite database and persistent application data
+- **`downloads/full_albums/`** - Downloaded full albums
+- **`downloads/loose_tracks/`** - Downloaded individual tracks
 
 ## Disclaimer
 
-This tool is for personal use only. Respect copyright laws and terms of service of the music platforms. Do not distribute copyrighted content without permission.
+For personal research use only. Respect copyright laws and service terms. Do not distribute copyrighted content without permission.
