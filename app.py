@@ -1338,56 +1338,74 @@ def download_track():
         print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
         
         # Step 2: Determine best available quality from track metadata
-        available_quality = 'HIGH'  # Default fallback
-        if isinstance(track_metadata, dict) and 'mediaMetadata' in track_metadata:
-            media_meta = track_metadata['mediaMetadata']
-            if isinstance(media_meta, dict) and 'tags' in media_meta:
+        quality_candidates = []
+        media_tags = []
+        audio_quality = None
+        if isinstance(track_metadata, dict):
+            audio_quality = track_metadata.get('audioQuality')
+            media_meta = track_metadata.get('mediaMetadata')
+            if isinstance(media_meta, dict):
                 tags = media_meta.get('tags', [])
                 if isinstance(tags, list):
-                    # Prioritize quality: HIRES_LOSSLESS > LOSSLESS > HIGH > LOW
-                    quality_priority = ['HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
-                    for quality in quality_priority:
-                        if quality in tags:
-                            available_quality = quality
-                            break
-        
-        print(f"[DOWNLOAD] Available quality tags, selected: {available_quality}", flush=True)
-        
-        # Step 3: Get the track manifest for download
-        print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
-        target = next(url_iterator)
-        manifest_url = f"{target['url']}/track/?id={track_id}&quality={available_quality}"
-        
-        manifest_response = requests.get(manifest_url, timeout=10)
-        
-        if not manifest_response.ok:
-            print(f"[DOWNLOAD] ERROR: Failed to get track manifest. Status: {manifest_response.status_code}", flush=True)
-            return jsonify({'error': f'Failed to get track manifest. Status: {manifest_response.status_code}'}), 502
+                    media_tags = tags
 
-        manifest_data = manifest_response.json()
-        print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
-        
-        # Step 3: Extract the base64-encoded manifest from the response
-        if 'data' not in manifest_data:
-            print(f"[DOWNLOAD] ERROR: No 'data' field in response", flush=True)
-            return jsonify({'error': 'Invalid response structure - missing data field'}), 502
-        
-        data = manifest_data['data']
-        print(f"[DOWNLOAD] Data keys: {data.keys()}", flush=True)
-        
-        if 'manifest' not in data:
-            print(f"[DOWNLOAD] ERROR: No 'manifest' field in data", flush=True)
-            return jsonify({'error': 'Invalid response structure - missing manifest field'}), 502
-        
-        manifest_base64 = data['manifest']
+        if isinstance(audio_quality, str) and audio_quality:
+            media_tags.append(audio_quality)
+
+        # Prioritize quality: HI_RES_LOSSLESS/HIRES_LOSSLESS > LOSSLESS > HIGH > LOW
+        quality_priority = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+        for quality in quality_priority:
+            if quality in media_tags and quality not in quality_candidates:
+                quality_candidates.append(quality)
+
+        if not quality_candidates:
+            quality_candidates = ['HIGH', 'LOW']
+
+        print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
+
+        # Step 3: Get the track manifest for download (try multiple qualities)
+        print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
+        manifest_base64 = None
+        last_manifest_status = None
+
+        for quality in quality_candidates:
+            target = next(url_iterator)
+            manifest_url = f"{target['url']}/track/?id={track_id}&quality={quality}"
+            manifest_response = requests.get(manifest_url, timeout=10)
+            last_manifest_status = manifest_response.status_code
+
+            if not manifest_response.ok:
+                continue
+
+            manifest_data = manifest_response.json()
+            print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
+
+            if isinstance(manifest_data, dict):
+                data = manifest_data.get('data')
+                if isinstance(data, dict):
+                    manifest_base64 = data.get('manifest') or data.get('manifestBase64')
+
+                if not manifest_base64:
+                    manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
+
+            if isinstance(manifest_base64, str) and manifest_base64:
+                break
+
+        if not isinstance(manifest_base64, str) or not manifest_base64:
+            status_note = f" Status: {last_manifest_status}" if last_manifest_status is not None else ""
+            print(f"[DOWNLOAD] ERROR: No manifest returned from upstream.{status_note}", flush=True)
+            return jsonify({'error': f'Failed to get track manifest.{status_note}'}), 502
+
         print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
-        
+
         # Step 4: Decode the base64 manifest to get the actual CDN URLs
         try:
-            manifest_json_bytes = base64.b64decode(manifest_base64)
+            normalized = manifest_base64.replace('-', '+').replace('_', '/')
+            padding = '=' * (-len(normalized) % 4)
+            manifest_json_bytes = base64.b64decode(normalized + padding)
             manifest_json = manifest_json_bytes.decode('utf-8')
             print(f"[DOWNLOAD] Decoded manifest: {manifest_json}", flush=True)
-            
+
             manifest = json.loads(manifest_json)
             print(f"[DOWNLOAD] Parsed manifest keys: {manifest.keys()}", flush=True)
         except Exception as e:
