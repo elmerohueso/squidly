@@ -231,6 +231,30 @@ class App {
                 return; // Stop here if it was a download button
             }
             
+            // Check for artist name clicks within track cards
+            const artistLink = target.closest('.track-artist-link');
+            if (artistLink) {
+                const trackCard = artistLink.closest('.track-card');
+                const artistId = trackCard?.getAttribute('data-artist-id');
+                if (artistId) {
+                    e.stopPropagation();
+                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    return;
+                }
+            }
+            
+            // Check for album name clicks within track cards
+            const albumLink = target.closest('.track-album-link');
+            if (albumLink) {
+                const trackCard = albumLink.closest('.track-card');
+                const albumId = trackCard?.getAttribute('data-album-id');
+                if (albumId) {
+                    e.stopPropagation();
+                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    return;
+                }
+            }
+            
             // Check for album card clicks (albums have both track-card and album-card classes)
             const clickedCard = target.closest('.track-card') as HTMLElement;
             if (clickedCard && clickedCard.classList.contains('album-card')) {
@@ -694,14 +718,16 @@ class App {
     }
 
     private formatTrackCard(track: Track, showTrackNumber: boolean = false): string {
-        // Get artist names
+        // Get artist names and IDs
         const artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(a => a.name).join(', ')
             : track.artist?.name || 'Unknown Artist';
+        const primaryArtistId = track.artists?.[0]?.id || track.artist?.id;
 
         // Get album info
         const albumTitle = track.album?.title || 'Unknown Album';
         const albumCover = track.album?.cover || track.cover;
+        const albumId = track.album?.id;
 
         // Format duration
         const duration = track.duration 
@@ -718,7 +744,7 @@ class App {
             : this.escapeHtml(track.title);
 
         return `
-            <div class="track-card" data-track-id="${track.id}">
+            <div class="track-card" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
                 <button class="track-play-btn" title="Play" aria-label="Play" aria-pressed="false" data-track-id="${track.id}">
                     ${this.getPlayIconSvg()}
                 </button>
@@ -735,9 +761,9 @@ class App {
                 </div>
                 <div class="track-info">
                     <div class="track-title">${trackTitle}</div>
-                    <div class="track-artist">${this.escapeHtml(artistNames)}</div>
+                    <div class="track-artist track-artist-link" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</div>
                     <div class="track-metadata">
-                        <span>${this.escapeHtml(albumTitle)}</span>
+                        <span class="track-album-link" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
                         ${qualityDisplay ? `<span>•</span><span>${qualityDisplay}</span>` : ''}
                     </div>
                 </div>
@@ -896,10 +922,11 @@ class App {
     }
 
     private formatAlbumCard(album: AlbumSearchItem): string {
-        // Get artist names
+        // Get artist names and IDs
         const artistNames = album.artists && album.artists.length > 0
             ? album.artists.map(a => a.name).join(', ')
             : album.artist?.name || 'Unknown Artist';
+        const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
 
         // Format release year if available
         const releaseYear = album.releaseDate 
@@ -912,7 +939,7 @@ class App {
             : '';
 
         return `
-            <div class="track-card album-card clickable" data-album-id="${album.id}" title="Click to view tracks">
+            <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
                     ${album.cover 
                         ? `<img src="${this.formatAlbumCoverUrl(album.cover)}" alt="${album.title}" loading="lazy">`
@@ -927,7 +954,7 @@ class App {
                 </div>
                 <div class="track-info">
                     <div class="track-title">${this.escapeHtml(album.title)}</div>
-                    <div class="track-artist">${this.escapeHtml(artistNames)}</div>
+                    <div class="track-artist track-artist-link" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</div>
                     <div class="track-metadata">
                         ${releaseYear ? `<span>${releaseYear}</span>` : ''}
                         ${releaseYear && trackCount ? `<span>•</span>` : ''}
