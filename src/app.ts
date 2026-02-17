@@ -7,6 +7,9 @@ interface SearchResult {
         albums?: {
             items: AlbumSearchItem[];
         };
+        artists?: {
+            items: ArtistSearchItem[];
+        };
     };
     results?: any[];
     proxied_via?: string;
@@ -47,6 +50,14 @@ interface AlbumSearchItem {
     releaseDate?: string;
     numberOfTracks?: number;
     duration?: number;
+}
+
+interface ArtistSearchItem {
+    id: number;
+    name: string;
+    picture?: string;
+    popularity?: number;
+    artistTypes?: string[];
 }
 
 interface AlbumInfo {
@@ -190,6 +201,14 @@ class App {
                 const albumId = clickedCard.getAttribute('data-album-id');
                 if (albumId) {
                     void this.fetchAlbumTracks(parseInt(albumId, 10));
+                }
+            }
+            
+            // Check for artist card clicks
+            if (clickedCard && clickedCard.classList.contains('artist-card')) {
+                const artistId = clickedCard.getAttribute('data-artist-id');
+                if (artistId) {
+                    void this.fetchArtistAlbums(parseInt(artistId, 10));
                 }
             }
         });
@@ -385,6 +404,8 @@ class App {
         const searchType = this.searchTypeSelect.value;
         if (searchType === 'lastfm') {
             this.searchInput.placeholder = 'Enter Last.fm playlist URL...';
+        } else if (searchType === 'a') {
+            this.searchInput.placeholder = 'Search for artists...';
         } else if (searchType === 'al') {
             this.searchInput.placeholder = 'Search for albums...';
         } else {
@@ -538,10 +559,15 @@ class App {
             return;
         }
 
-        // Extract items based on search type - albums are nested under data.albums.items
-        const items = searchType === 'al' 
-            ? (data.data?.albums?.items || [])
-            : (data.data?.items || []);
+        // Extract items based on search type
+        let items: any[] = [];
+        if (searchType === 'al') {
+            items = data.data?.albums?.items || [];
+        } else if (searchType === 'a') {
+            items = data.data?.artists?.items || [];
+        } else {
+            items = data.data?.items || [];
+        }
         
         if (items.length === 0) {
             this.displayMessage(`No results found for "${query}"${data.proxied_via ? ' (via ' + data.proxied_via + ')' : ''}`);
@@ -560,7 +586,11 @@ class App {
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
             <div class="results-list">
-                ${items.map(item => searchType === 'al' ? this.formatAlbumCard(item as AlbumSearchItem) : this.formatTrackCard(item as Track)).join('')}
+                ${items.map(item => {
+                    if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
+                    if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
+                    return this.formatTrackCard(item as Track);
+                }).join('')}
             </div>
         `;
     }
@@ -666,6 +696,34 @@ class App {
         `;
     }
 
+    private formatArtistCard(artist: ArtistSearchItem): string {
+        // Format popularity
+        const popularity = artist.popularity ? `Popularity: ${artist.popularity}` : '';
+
+        return `
+            <div class="track-card artist-card clickable" data-artist-id="${artist.id}" title="Click to view albums">
+                <div class="track-artwork">
+                    ${artist.picture 
+                        ? `<img src="${this.formatArtistPictureUrl(artist.picture)}" alt="${artist.name}" loading="lazy">`
+                        : `<div class="track-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="8" r="4"></circle>
+                                <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                <div class="track-info">
+                    <div class="track-title">${this.escapeHtml(artist.name)}</div>
+                    <div class="track-artist">Artist</div>
+                    <div class="track-metadata">
+                        ${popularity ? `<span>${popularity}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     private formatDuration(seconds: number): string {
         const mins = Math.floor(seconds / 60);
         const secs = seconds % 60;
@@ -688,6 +746,12 @@ class App {
         return `https://resources.tidal.com/images/${coverPath}/1280x1280.jpg`;
     }
 
+    private formatArtistPictureUrl(picture: string): string {
+        // Convert dashes to forward slashes for Tidal CDN format
+        const picturePath = picture.replace(/-/g, '/');
+        return `https://resources.tidal.com/images/${picturePath}/750x750.jpg`;
+    }
+
     private escapeHtml(text: string): string {
         const div = document.createElement('div');
         div.textContent = text;
@@ -700,6 +764,52 @@ class App {
                 <p>${message}</p>
             </div>
         `;
+    }
+
+    private async fetchArtistAlbums(artistId: number): Promise<void> {
+        this.displayMessage('Loading artist albums...');
+
+        try {
+            const response = await fetch(`/artist/?f=${artistId}`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch artist');
+            }
+
+            const data: any = await response.json();
+
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`);
+                return;
+            }
+
+            // Extract albums from data.albums.items
+            const albums = data.albums?.items || [];
+
+            if (albums.length === 0) {
+                this.displayMessage('No albums found for this artist');
+                return;
+            }
+
+            // Get artist name from the first album's artist data
+            const artistName = albums[0]?.artist?.name || albums[0]?.artists?.[0]?.name || 'Artist';
+
+            // Display albums
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(artistName)} - Albums</h2>
+                    </div>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                </div>
+                <div class="results-list">
+                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
+                </div>
+            `;
+        } catch (error) {
+            this.displayMessage('Error loading artist albums. Please try again.');
+            console.error('Artist fetch error:', error);
+        }
     }
 
     private async fetchAlbumTracks(albumId: number): Promise<void> {
