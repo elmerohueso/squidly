@@ -1,6 +1,6 @@
 services:
   web:
-    image: ghcr.io/elmerohueso/squidly:latest
+    build: .
     container_name: squidly-web
     ports:
       - "5000:5000"
