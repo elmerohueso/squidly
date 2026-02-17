@@ -11,6 +11,7 @@ import time
 import sys
 import subprocess
 import shutil
+import re
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
@@ -849,6 +850,16 @@ def clean_path_components(file_path: str) -> str:
     # Rejoin with forward slashes
     return '/'.join(cleaned_parts)
 
+def extract_year_from_text(text: str) -> str:
+    """
+    Extract a 4-digit year from a string like a copyright notice.
+    Returns empty string if none found.
+    """
+    if not text or not isinstance(text, str):
+        return ''
+    match = re.search(r"\b(19|20)\d{2}\b", text)
+    return match.group(0) if match else ''
+
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
     """
     Add ID3 tags to an audio file (handles both FLAC and MP3).
@@ -1141,6 +1152,12 @@ def download_track():
                             release_year = date_str[:4]
                     except:
                         pass
+            
+            # Fallback to copyright year if release date is unavailable
+            if not release_year:
+                release_year = extract_year_from_text(track_metadata.get('copyright', ''))
+            if not release_year and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+                release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
             
             # If still no cover but we have album ID, construct URL from album ID
             if not cover_url and album_id:
