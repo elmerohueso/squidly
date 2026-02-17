@@ -9,9 +9,10 @@ services:
       - PORT=5000
       - PYTHONUNBUFFERED=1
     volumes:
-      # Mount JSON file to persist endpoint status
+      # Mount JSON file seed the mirror list
       - ./squidurls.json:/app/squidurls.json
       # Mount data folder for SQLite database and other persistent data
       - ./data:/app/data
-      # Mount downloads folder for track downloads
-      - ./downloads:/app/downloads
+      # Mount downloads folders for track downloads
+      - "./downloads/full_albums:/app/downloads/full_albums"
+      - "./downloads/loose_tracks:/app/downloads/loose_tracks"

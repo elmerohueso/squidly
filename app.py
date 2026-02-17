@@ -25,10 +25,14 @@ CORS(app)
 os.makedirs(os.path.join(os.path.dirname(__file__), 'data'), exist_ok=True)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'squidly.db')
+DOWNLOADS_ROOT = '/app/downloads'
+DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
+DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
 DEFAULT_DOWNLOAD_SETTINGS = {
     'format': 'original',
     'parent_folder': '',
-    'file_naming': '{artist}/{album}/{track} - {title}.{ext}'
+    'file_naming_loose': '{artist} - {title}.{ext}',
+    'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}'
 }
 
 def get_db_connection():
@@ -45,11 +49,23 @@ def init_db():
             id INTEGER PRIMARY KEY CHECK (id = 1),
             format TEXT NOT NULL,
             parent_folder TEXT NOT NULL,
-            file_naming TEXT NOT NULL,
+            file_naming TEXT,
+            file_naming_loose TEXT,
+            file_naming_album TEXT,
             updated_at TEXT NOT NULL
         )
         """
     )
+    columns = {
+        row['name']
+        for row in cur.execute("PRAGMA table_info(download_settings)").fetchall()
+    }
+    if 'file_naming' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming TEXT")
+    if 'file_naming_loose' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_loose TEXT")
+    if 'file_naming_album' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_album TEXT")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS mirror_endpoints (
@@ -98,7 +114,7 @@ def get_download_settings():
     cur = conn.cursor()
     row = cur.execute(
         """
-        SELECT format, parent_folder, file_naming
+        SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album
         FROM download_settings
         WHERE id = 1
         """
@@ -108,30 +124,55 @@ def get_download_settings():
         now = datetime.utcnow().isoformat() + 'Z'
         cur.execute(
             """
-            INSERT INTO download_settings (id, format, parent_folder, file_naming, updated_at)
-            VALUES (1, ?, ?, ?, ?)
+            INSERT INTO download_settings (
+                id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, updated_at
+            )
+            VALUES (1, ?, ?, ?, ?, ?, ?)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
                 DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
-                DEFAULT_DOWNLOAD_SETTINGS['file_naming'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 now
             )
         )
         conn.commit()
         row = cur.execute(
             """
-            SELECT format, parent_folder, file_naming
+            SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album
             FROM download_settings
             WHERE id = 1
             """
         ).fetchone()
 
+    file_naming_loose = row['file_naming_loose'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose']
+    file_naming_album = row['file_naming_album'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
+
+    if row['file_naming_loose'] is None or row['file_naming_album'] is None:
+        now = datetime.utcnow().isoformat() + 'Z'
+        cur.execute(
+            """
+            UPDATE download_settings
+            SET file_naming_loose = ?, file_naming_album = ?, updated_at = ?
+            WHERE id = 1
+            """,
+            (
+                file_naming_loose,
+                file_naming_album,
+                now
+            )
+        )
+        conn.commit()
+
     conn.close()
     return {
         'format': row['format'],
         'parent_folder': row['parent_folder'],
-        'file_naming': row['file_naming']
+        'file_naming': file_naming_loose,
+        'file_naming_loose': file_naming_loose,
+        'file_naming_album': file_naming_album
     }
 
 def save_download_settings(settings):
@@ -140,18 +181,24 @@ def save_download_settings(settings):
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO download_settings (id, format, parent_folder, file_naming, updated_at)
-        VALUES (1, ?, ?, ?, ?)
+        INSERT INTO download_settings (
+            id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, updated_at
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
+            file_naming_loose = excluded.file_naming_loose,
+            file_naming_album = excluded.file_naming_album,
             updated_at = excluded.updated_at
         """,
         (
             settings['format'],
             settings['parent_folder'],
-            settings['file_naming'],
+            settings['file_naming_loose'],
+            settings['file_naming_loose'],
+            settings['file_naming_album'],
             now
         )
     )
@@ -372,8 +419,18 @@ print("Validation complete, server ready to accept requests.\n", flush=True)
 
 # Create downloads and temp folders if they don't exist
 try:
-    os.makedirs('/app/downloads', exist_ok=True)
-    print("Downloads folder ready (/app/downloads)", flush=True)
+    os.makedirs(DOWNLOADS_ROOT, exist_ok=True)
+    os.makedirs(os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER), exist_ok=True)
+    os.makedirs(os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER), exist_ok=True)
+    print(f"Downloads folder ready ({DOWNLOADS_ROOT})", flush=True)
+    print(
+        f"Full albums folder ready ({os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER)})",
+        flush=True
+    )
+    print(
+        f"Loose tracks folder ready ({os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER)})",
+        flush=True
+    )
 except Exception as e:
     print(f"WARNING: Failed to create downloads folder: {str(e)}", flush=True)
 
@@ -939,19 +996,36 @@ def download_track():
     Expects JSON body with:
     - trackId: integer
     - format: 'original' or 'mp3'
+    - downloadType: 'album' or 'loose'
     - fileNaming: string (template for filename, e.g. '{artist}/{album}/{track} - {title}.{ext}')
+    - fileNamingAlbum: string (optional override for album downloads)
+    - fileNamingLoose: string (optional override for loose track downloads)
     """
     payload = request.get_json(silent=True) or {}
     track_id = payload.get('trackId')
     file_format = payload.get('format', 'original')
-    file_naming = payload.get('fileNaming', '{artist}/{album}/{track} - {title}.{ext}')
-    
+    download_type = payload.get('downloadType', 'loose')
+
+    if download_type not in ('album', 'loose'):
+        download_type = 'loose'
+
+    settings = get_download_settings()
+    file_naming_loose = settings.get('file_naming_loose', DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'])
+    file_naming_album = settings.get('file_naming_album', DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'])
+
+    if download_type == 'album':
+        file_naming = payload.get('fileNamingAlbum') or payload.get('fileNaming') or file_naming_album
+    else:
+        file_naming = payload.get('fileNamingLoose') or payload.get('fileNaming') or file_naming_loose
+
     # Use the mounted downloads volume
-    downloads_folder = '/app/downloads'
+    target_folder_name = DOWNLOADS_FULL_ALBUMS_FOLDER if download_type == 'album' else DOWNLOADS_LOOSE_TRACKS_FOLDER
+    downloads_folder = os.path.join(DOWNLOADS_ROOT, target_folder_name)
 
     print(f"\n[DOWNLOAD] Request received for track {track_id}", flush=True)
     print(f"[DOWNLOAD] Format: {file_format}", flush=True)
     print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
+    print(f"[DOWNLOAD] Download type: {download_type}", flush=True)
     print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
 
     if not track_id:
@@ -1275,22 +1349,40 @@ def download_settings():
     payload = request.get_json(silent=True) or {}
     current = get_download_settings()
 
+    file_naming_loose = (
+        payload.get('fileNamingLoose')
+        or payload.get('file_naming_loose')
+        or payload.get('fileNaming')
+        or payload.get('file_naming')
+        or current['file_naming_loose']
+    )
+    file_naming_album = (
+        payload.get('fileNamingAlbum')
+        or payload.get('file_naming_album')
+        or payload.get('fileNaming')
+        or payload.get('file_naming')
+        or current['file_naming_album']
+    )
+
     updated = {
         'format': payload.get('format', current['format']),
         'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
-        'file_naming': payload.get('fileNaming', payload.get('file_naming', current['file_naming']))
+        'file_naming_loose': file_naming_loose,
+        'file_naming_album': file_naming_album
     }
 
     if updated['format'] not in ('original', 'mp3'):
         return jsonify({'error': 'Invalid format value'}), 400
 
-    if not isinstance(updated['file_naming'], str):
+    if not isinstance(updated['file_naming_loose'], str) or not isinstance(updated['file_naming_album'], str):
         return jsonify({'error': 'Invalid settings payload'}), 400
 
     save_download_settings(updated)
     return jsonify({
         'format': updated['format'],
-        'file_naming': updated['file_naming']
+        'file_naming': updated['file_naming_loose'],
+        'file_naming_loose': updated['file_naming_loose'],
+        'file_naming_album': updated['file_naming_album']
     })
 
 @app.route('/api/endpoints/status', methods=['GET'])

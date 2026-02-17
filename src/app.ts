@@ -99,7 +99,8 @@ type DownloadFormat = 'original' | 'mp3';
 
 interface DownloadSettings {
     format: DownloadFormat;
-    fileNaming: string;
+    fileNamingLoose: string;
+    fileNamingAlbum: string;
 }
 
 class App {
@@ -118,7 +119,8 @@ class App {
     private closeSettingsButton: HTMLButtonElement;
     private formatOriginalInput: HTMLInputElement;
     private formatMp3Input: HTMLInputElement;
-    private fileNamingInput: HTMLInputElement;
+    private fileNamingAlbumInput: HTMLInputElement;
+    private fileNamingLooseInput: HTMLInputElement;
     private downloadSettings: DownloadSettings;
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
@@ -126,6 +128,7 @@ class App {
     private isDownloadingAll: boolean = false;
     private downloadAllCancelRequested: boolean = false;
     private currentDownloadController: AbortController | null = null;
+    private downloadAllScope: 'album' | 'loose' = 'loose';
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -143,7 +146,8 @@ class App {
         this.closeSettingsButton = document.getElementById('closeSettings') as HTMLButtonElement;
         this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
-        this.fileNamingInput = document.getElementById('fileNaming') as HTMLInputElement;
+        this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
+        this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
         
         this.initializeEventListeners();
         this.downloadSettings = this.defaultDownloadSettings();
@@ -175,7 +179,8 @@ class App {
 
         this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
-        this.fileNamingInput.addEventListener('input', () => this.updateSettingsFromForm());
+        this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
+        this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
 
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
@@ -190,7 +195,7 @@ class App {
                 const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
                 const trackId = trackCard?.getAttribute('data-track-id');
                 if (trackId) {
-                    void this.handleDownload(parseInt(trackId, 10), trackCard);
+                    void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
                 }
                 return; // Stop here if it was a download button
             }
@@ -242,21 +247,38 @@ class App {
     private defaultDownloadSettings(): DownloadSettings {
         return {
             format: 'original',
-            fileNaming: '{artist}/{album}/{track} - {title}.{ext}'
+            fileNamingLoose: '{artist}/{album}/{track} - {title}.{ext}',
+            fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}'
         };
     }
 
     private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
+        const fileNamingLoose = (raw as { file_naming_loose?: string }).file_naming_loose;
+        const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
+        const legacyFileNaming = (raw as { fileNaming?: string }).fileNaming;
 
         return {
             format: raw.format === 'mp3' ? 'mp3' : 'original',
-            fileNaming: typeof raw.fileNaming === 'string'
-                ? raw.fileNaming
-                : typeof fileNaming === 'string'
-                    ? fileNaming
-                    : fallback.fileNaming
+            fileNamingLoose: typeof (raw as DownloadSettings).fileNamingLoose === 'string'
+                ? (raw as DownloadSettings).fileNamingLoose
+                : typeof fileNamingLoose === 'string'
+                    ? fileNamingLoose
+                    : typeof legacyFileNaming === 'string'
+                        ? legacyFileNaming
+                        : typeof fileNaming === 'string'
+                            ? fileNaming
+                            : fallback.fileNamingLoose,
+            fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
+                ? (raw as DownloadSettings).fileNamingAlbum
+                : typeof fileNamingAlbum === 'string'
+                    ? fileNamingAlbum
+                    : typeof legacyFileNaming === 'string'
+                        ? legacyFileNaming
+                        : typeof fileNaming === 'string'
+                            ? fileNaming
+                            : fallback.fileNamingAlbum
         };
     }
 
@@ -278,14 +300,16 @@ class App {
     private applySettingsToForm(settings: DownloadSettings): void {
         this.formatOriginalInput.checked = settings.format === 'original';
         this.formatMp3Input.checked = settings.format === 'mp3';
-        this.fileNamingInput.value = settings.fileNaming;
+        this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
+        this.fileNamingLooseInput.value = settings.fileNamingLoose;
         this.syncFormatToggleStyles();
     }
 
     private readSettingsFromForm(): DownloadSettings {
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
-            fileNaming: this.fileNamingInput.value.trim()
+            fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
+            fileNamingLoose: this.fileNamingLooseInput.value.trim()
         };
     }
 
@@ -446,6 +470,7 @@ class App {
     }
 
     private async handleLastfmPlaylist(playlistUrl: string): Promise<void> {
+        this.downloadAllScope = 'loose';
         this.displayMessage('Scraping Last.fm playlist...');
 
         try {
@@ -554,6 +579,7 @@ class App {
     }
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {
+        this.downloadAllScope = 'loose';
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
@@ -767,6 +793,7 @@ class App {
     }
 
     private async fetchArtistAlbums(artistId: number): Promise<void> {
+        this.downloadAllScope = 'loose';
         this.displayMessage('Loading artist albums...');
 
         try {
@@ -813,6 +840,7 @@ class App {
     }
 
     private async fetchAlbumTracks(albumId: number): Promise<void> {
+        this.downloadAllScope = 'album';
         this.displayMessage('Loading album tracks...');
 
         try {
@@ -896,7 +924,11 @@ class App {
         }
     }
 
-    private async handleDownload(trackId: number, trackCard: HTMLElement): Promise<void> {
+    private async handleDownload(
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose' = 'loose'
+    ): Promise<void> {
         const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
         if (!downloadBtn) {
             console.error('[DOWNLOAD] Download button not found');
@@ -961,7 +993,7 @@ class App {
 
         try {
             console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
-            await this.downloadTrack(trackId, fillCircle as SVGCircleElement);
+            await this.downloadTrack(trackId, downloadType, fillCircle as SVGCircleElement);
             
             console.log(`[DOWNLOAD] Download completed successfully`);
             
@@ -992,10 +1024,15 @@ class App {
         }
     }
 
-    private async downloadTrack(trackId: number, progressCircle?: SVGCircleElement): Promise<void> {
+    private async downloadTrack(
+        trackId: number,
+        downloadType: 'album' | 'loose',
+        progressCircle?: SVGCircleElement
+    ): Promise<void> {
         try {
             console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
             // Animate progress to 50% during request
             if (progressCircle) {
@@ -1012,7 +1049,12 @@ class App {
                 body: JSON.stringify({
                     trackId,
                     format: this.downloadSettings.format,
-                    fileNaming: this.downloadSettings.fileNaming
+                    downloadType,
+                    fileNaming: downloadType === 'album'
+                        ? this.downloadSettings.fileNamingAlbum
+                        : this.downloadSettings.fileNamingLoose,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    fileNamingLoose: this.downloadSettings.fileNamingLoose
                 }),
                 signal: this.currentDownloadController?.signal
             });
@@ -1194,7 +1236,7 @@ class App {
                         // Create promise that waits for the download to complete
                         await new Promise<void>((resolve) => {
                             // Call handleDownload directly
-                            void this.handleDownload(parseInt(trackId, 10), trackCard);
+                            void this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
                             
                             // Set a temporary handler to detect when download completes
                             const checkCompletion = setInterval(() => {
