@@ -96,6 +96,7 @@ interface EndpointStatus {
 }
 
 type DownloadFormat = 'original' | 'mp3';
+type StreamQuality = 'high' | 'low';
 
 interface DownloadSettings {
     format: DownloadFormat;
@@ -121,7 +122,10 @@ class App {
     private formatMp3Input: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private fileNamingLooseInput: HTMLInputElement;
+    private streamQualityHighInput: HTMLInputElement;
+    private streamQualityLowInput: HTMLInputElement;
     private downloadSettings: DownloadSettings;
+    private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
@@ -129,6 +133,14 @@ class App {
     private downloadAllCancelRequested: boolean = false;
     private currentDownloadController: AbortController | null = null;
     private downloadAllScope: 'album' | 'loose' = 'loose';
+    private currentAudio: HTMLAudioElement | null = null;
+    private currentPlayingTrackId: number | null = null;
+    private currentPlayButton: HTMLButtonElement | null = null;
+    private currentAudioCleanup: {
+        audio: HTMLAudioElement;
+        onEnded: () => void;
+        onError: () => void;
+    } | null = null;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -148,10 +160,14 @@ class App {
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
+        this.streamQualityHighInput = document.getElementById('streamQualityHigh') as HTMLInputElement;
+        this.streamQualityLowInput = document.getElementById('streamQualityLow') as HTMLInputElement;
         
         this.initializeEventListeners();
+        this.streamQuality = this.loadStreamQualityFromCookie();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
+        this.applyStreamQualityToForm();
         void this.fetchDownloadSettingsFromServer();
         this.updateEndpointStatus(); // Initial load
         
@@ -181,6 +197,8 @@ class App {
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
         this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
+        this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
+        this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
 
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
@@ -188,6 +206,19 @@ class App {
         // Download button and album card click delegation
         this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement;
+
+            // Check for play button clicks first
+            const playBtn = target.closest('.track-play-btn') as HTMLButtonElement | null;
+            if (playBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const trackCard = playBtn.closest('.track-card') as HTMLElement;
+                const trackId = trackCard?.getAttribute('data-track-id');
+                if (trackId) {
+                    void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
+                }
+                return;
+            }
             
             // Check for download button clicks first
             const downloadBtn = target.closest('.track-download-btn');
@@ -305,6 +336,12 @@ class App {
         this.syncFormatToggleStyles();
     }
 
+    private applyStreamQualityToForm(): void {
+        this.streamQualityHighInput.checked = this.streamQuality === 'high';
+        this.streamQualityLowInput.checked = this.streamQuality === 'low';
+        this.syncStreamQualityToggleStyles();
+    }
+
     private readSettingsFromForm(): DownloadSettings {
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
@@ -317,6 +354,27 @@ class App {
         this.downloadSettings = this.readSettingsFromForm();
         this.queueSettingsSave();
         this.syncFormatToggleStyles();
+    }
+
+    private updateStreamQualityFromForm(): void {
+        this.streamQuality = this.streamQualityHighInput.checked ? 'high' : 'low';
+        this.saveStreamQualityToCookie(this.streamQuality);
+        this.syncStreamQualityToggleStyles();
+    }
+
+    private loadStreamQualityFromCookie(): StreamQuality {
+        const value = this.getCookieValue('streamQuality');
+        return value === 'low' ? 'low' : 'high';
+    }
+
+    private saveStreamQualityToCookie(quality: StreamQuality): void {
+        const maxAgeSeconds = 60 * 60 * 24 * 365;
+        document.cookie = `streamQuality=${quality}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
+    }
+
+    private getCookieValue(name: string): string | null {
+        const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}=([^;]*)`));
+        return match ? decodeURIComponent(match[1]) : null;
     }
 
     private queueSettingsSave(): void {
@@ -353,6 +411,19 @@ class App {
 
         if (mp3Label) {
             mp3Label.classList.toggle('active', this.formatMp3Input.checked);
+        }
+    }
+
+    private syncStreamQualityToggleStyles(): void {
+        const highLabel = this.streamQualityHighInput.closest('label');
+        const lowLabel = this.streamQualityLowInput.closest('label');
+
+        if (highLabel) {
+            highLabel.classList.toggle('active', this.streamQualityHighInput.checked);
+        }
+
+        if (lowLabel) {
+            lowLabel.classList.toggle('active', this.streamQualityLowInput.checked);
         }
     }
 
@@ -580,6 +651,7 @@ class App {
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
+        this.stopPlayback();
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
@@ -647,6 +719,9 @@ class App {
 
         return `
             <div class="track-card" data-track-id="${track.id}">
+                <button class="track-play-btn" title="Play" aria-label="Play" aria-pressed="false" data-track-id="${track.id}">
+                    ${this.getPlayIconSvg()}
+                </button>
                 <div class="track-artwork">
                     ${albumCover 
                         ? `<img src="${this.formatAlbumCoverUrl(albumCover)}" alt="${track.title}" loading="lazy">`
@@ -677,6 +752,147 @@ class App {
                 </div>
             </div>
         `;
+    }
+
+    private getPlayIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <polygon points="6 4 20 12 6 20"></polygon>
+            </svg>
+        `;
+    }
+
+    private getStopIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12"></rect>
+            </svg>
+        `;
+    }
+
+    private setPlayButtonState(button: HTMLButtonElement, isPlaying: boolean): void {
+        button.classList.toggle('is-playing', isPlaying);
+        button.classList.remove('is-loading');
+        button.setAttribute('aria-pressed', isPlaying ? 'true' : 'false');
+        button.title = isPlaying ? 'Stop' : 'Play';
+        button.innerHTML = isPlaying ? this.getStopIconSvg() : this.getPlayIconSvg();
+    }
+
+    private setPlayButtonLoading(button: HTMLButtonElement, isLoading: boolean): void {
+        button.classList.toggle('is-loading', isLoading);
+        button.disabled = isLoading;
+    }
+
+    private stopPlayback(): void {
+        if (this.currentAudioCleanup) {
+            const { audio, onEnded, onError } = this.currentAudioCleanup;
+            audio.removeEventListener('ended', onEnded);
+            audio.removeEventListener('error', onError);
+            this.currentAudioCleanup = null;
+        }
+
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio.src = '';
+            this.currentAudio.load();
+        }
+
+        if (this.currentPlayButton) {
+            this.setPlayButtonState(this.currentPlayButton, false);
+        }
+
+        this.currentAudio = null;
+        this.currentPlayingTrackId = null;
+        this.currentPlayButton = null;
+    }
+
+    private async handlePlayToggle(
+        trackId: number,
+        trackCard: HTMLElement,
+        playButton: HTMLButtonElement
+    ): Promise<void> {
+        if (this.currentPlayingTrackId === trackId) {
+            this.stopPlayback();
+            return;
+        }
+
+        this.stopPlayback();
+        this.setPlayButtonState(playButton, true);
+        this.setPlayButtonLoading(playButton, true);
+        this.currentPlayingTrackId = trackId;
+        this.currentPlayButton = playButton;
+
+        const audio = new Audio();
+        audio.preload = 'none';
+        audio.crossOrigin = 'anonymous';
+        this.currentAudio = audio;
+
+        const onEnded = () => {
+            if (this.currentAudio === audio) {
+                this.stopPlayback();
+            }
+        };
+        const onError = () => {
+            if (this.currentAudio === audio) {
+                this.stopPlayback();
+            }
+        };
+        audio.addEventListener('ended', onEnded);
+        audio.addEventListener('error', onError);
+        this.currentAudioCleanup = { audio, onEnded, onError };
+
+        try {
+            const streamUrl = await this.fetchTrackStreamUrl(trackId);
+            audio.src = streamUrl;
+            this.setPlayButtonLoading(playButton, false);
+            await audio.play();
+        } catch (error) {
+            console.warn('[PLAYBACK] Failed to start playback:', error);
+            this.setPlayButtonLoading(playButton, false);
+            this.stopPlayback();
+        }
+    }
+
+    private async fetchTrackStreamUrl(trackId: number): Promise<string> {
+        const qualities = this.streamQuality === 'high'
+            ? ['HIGH']
+            : ['LOW'];
+
+        for (const quality of qualities) {
+            try {
+                const response = await fetch(`/track/?id=${trackId}&quality=${quality}`);
+                if (!response.ok) {
+                    continue;
+                }
+
+                const data = await response.json();
+                const manifestBase64 = data?.data?.manifest || data?.manifest;
+                if (typeof manifestBase64 !== 'string') {
+                    continue;
+                }
+
+                const manifest = this.decodeManifest(manifestBase64);
+                const urls = manifest?.urls;
+                if (Array.isArray(urls) && typeof urls[0] === 'string') {
+                    return urls[0];
+                }
+            } catch (error) {
+                console.warn(`[PLAYBACK] Failed to fetch ${quality} stream:`, error);
+            }
+        }
+
+        throw new Error('No playable stream found');
+    }
+
+    private decodeManifest(manifestBase64: string): { urls?: string[] } | null {
+        try {
+            const normalized = manifestBase64.replace(/-/g, '+').replace(/_/g, '/');
+            const manifestJson = atob(normalized);
+            return JSON.parse(manifestJson);
+        } catch (error) {
+            console.warn('[PLAYBACK] Failed to decode manifest:', error);
+            return null;
+        }
     }
 
     private formatAlbumCard(album: AlbumSearchItem): string {
@@ -785,6 +1001,7 @@ class App {
     }
 
     private displayMessage(message: string): void {
+        this.stopPlayback();
         this.resultsContainer.innerHTML = `
             <div class="message">
                 <p>${message}</p>
@@ -794,6 +1011,7 @@ class App {
 
     private async fetchArtistAlbums(artistId: number): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.stopPlayback();
         this.displayMessage('Loading artist albums...');
 
         try {
@@ -841,6 +1059,7 @@ class App {
 
     private async fetchAlbumTracks(albumId: number): Promise<void> {
         this.downloadAllScope = 'album';
+        this.stopPlayback();
         this.displayMessage('Loading album tracks...');
 
         try {
