@@ -637,6 +637,28 @@ main {
     font-size: 1rem;
 }
 
+.retry-button {
+    margin-top: 1.5rem;
+    padding: 0.75rem 2rem;
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.retry-button:hover {
+    background: var(--accent-secondary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+.retry-button:active {
+    transform: translateY(0);
+}
+
 /* === Footer === */
 footer {
     text-align: center;

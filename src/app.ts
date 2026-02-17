@@ -142,6 +142,7 @@ class App {
         onEnded: () => void;
         onError: () => void;
     } | null = null;
+    private lastRetryFunction: (() => Promise<void>) | null = null;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -1038,13 +1039,29 @@ class App {
         return div.innerHTML;
     }
 
-    private displayMessage(message: string): void {
+    private displayMessage(message: string, retryFn?: () => Promise<void>): void {
         this.stopPlayback();
+        this.lastRetryFunction = retryFn || null;
+        
+        const retryButton = retryFn 
+            ? `<button class="retry-button" id="retryButton">Retry</button>`
+            : '';
+        
         this.resultsContainer.innerHTML = `
             <div class="message">
                 <p>${message}</p>
+                ${retryButton}
             </div>
         `;
+        
+        if (retryFn) {
+            const retryBtn = document.getElementById('retryButton');
+            if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                    void retryFn();
+                });
+            }
+        }
     }
 
     private async fetchArtistAlbums(artistId: number): Promise<void> {
@@ -1062,7 +1079,7 @@ class App {
             const data: any = await response.json();
 
             if (data.error) {
-                this.displayMessage(`Error: ${data.error}`);
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchArtistAlbums(artistId));
                 return;
             }
 
@@ -1090,7 +1107,7 @@ class App {
                 </div>
             `;
         } catch (error) {
-            this.displayMessage('Error loading artist albums. Please try again.');
+            this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));
             console.error('Artist fetch error:', error);
         }
     }
@@ -1110,7 +1127,7 @@ class App {
             const data: AlbumInfo = await response.json();
 
             if (data.error) {
-                this.displayMessage(`Error: ${data.error}`);
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchAlbumTracks(albumId));
                 return;
             }
 
@@ -1176,7 +1193,7 @@ class App {
                 resultsHeaderTop.appendChild(downloadAllBtn);
             }
         } catch (error) {
-            this.displayMessage('Error loading album tracks. Please try again.');
+            this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
             console.error('Album fetch error:', error);
         }
     }
