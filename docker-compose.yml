@@ -1,7 +1,7 @@
 services:
-  web:
+  squidly:
     image: ghcr.io/elmerohueso/squidly:latest
-    container_name: squidly-web
+    container_name: squidly
     ports:
       - "5000:5000"
     environment:
@@ -10,10 +10,7 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       # Named volume for SQLite database and other persistent data
-      - squidly-data:/app/data
+      - ./data:/data
       # Mount downloads folders for track downloads
-      - "./downloads/full_albums:/app/downloads/full_albums"
-      - "./downloads/loose_tracks:/app/downloads/loose_tracks"
-
-volumes:
-  squidly-data:
+      - ./downloads/full_albums:/downloads/full_albums
+      - ./downloads/loose_tracks:/downloads/loose_tracks

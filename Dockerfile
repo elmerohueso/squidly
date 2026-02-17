@@ -45,12 +45,8 @@ COPY static ./static
 # Copy built assets from frontend stage
 COPY --from=frontend-builder /app/static/dist ./static/dist
 
-# Create data directory and non-root user with proper permissions
-RUN mkdir -p /app/data && \
-    chmod 777 /app/data && \
-    useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-USER appuser
+# Create data directory
+RUN mkdir -p /data
 
 # Disable Python output buffering
 ENV PYTHONUNBUFFERED=1

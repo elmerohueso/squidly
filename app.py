@@ -22,17 +22,19 @@ app = Flask(__name__,
 CORS(app)
 
 # Create data folder if it doesn't exist
-data_dir = os.path.join(os.path.dirname(__file__), 'data')
+data_dir = '/data'
 try:
     os.makedirs(data_dir, exist_ok=True)
-    # Ensure directory is writable
-    if not os.access(data_dir, os.W_OK):
-        os.chmod(data_dir, 0o755)
 except Exception as e:
-    print(f"Warning: Could not create/chmod data directory: {e}", file=sys.stderr)
+    # Directory likely already exists (mounted volume)
+    pass
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'squidly.db')
-DOWNLOADS_ROOT = '/app/downloads'
+# Verify directory is writable
+if not os.access(data_dir, os.W_OK):
+    print(f"Error: Data directory {data_dir} is not writable!", file=sys.stderr)
+
+DB_PATH = os.path.join(data_dir, 'squidly.db')
+DOWNLOADS_ROOT = '/downloads'
 DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
 DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
 DEFAULT_DOWNLOAD_SETTINGS = {
@@ -1423,8 +1425,3 @@ def endpoints_status():
             'offline': sum(1 for e in endpoints if not e.get('online'))
         }
     })
-
-if __name__ == '__main__':
-    # This runs only when executed directly with python app.py
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
