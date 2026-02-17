@@ -15,6 +15,7 @@ import re
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 
 app = Flask(__name__, 
@@ -868,9 +869,33 @@ def cleanup_file(path: str) -> None:
     except Exception as e:
         print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
 
+def detect_audio_format(data: bytes) -> str:
+    """
+    Detect the audio format from the file's magic bytes.
+    Returns: 'flac', 'm4a', 'mp3', or 'unknown'
+    """
+    if len(data) < 12:
+        return 'unknown'
+    
+    # Check for FLAC (starts with 'fLaC')
+    if data[:4] == b'fLaC':
+        return 'flac'
+    
+    # Check for M4A/MP4 (has 'ftyp' at offset 4, and typically 'M4A ' or 'mp42' after)
+    if len(data) >= 12 and data[4:8] == b'ftyp':
+        # Check common M4A/AAC signatures
+        if data[8:12] in [b'M4A ', b'mp42', b'isom', b'iso2']:
+            return 'm4a'
+    
+    # Check for MP3 (ID3v2 tag or MPEG sync word)
+    if data[:3] == b'ID3' or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return 'mp3'
+    
+    return 'unknown'
+
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
     """
-    Add ID3 tags to an audio file (handles both FLAC and MP3).
+    Add ID3 tags to an audio file (handles FLAC, MP3, and M4A/AAC).
     
     Args:
         file_path: Path to the audio file
@@ -908,6 +933,32 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 print(f"[ID3] Successfully added FLAC metadata to {file_path}", flush=True)
             except Exception as e:
                 print(f"[ID3] Warning: Could not write FLAC tags: {str(e)}", flush=True)
+        
+        # Handle M4A/AAC files
+        elif file_path.lower().endswith('.m4a'):
+            try:
+                audio = MP4(file_path)
+                audio['\xa9nam'] = title
+                audio['\xa9ART'] = artist
+                audio['\xa9alb'] = album
+                
+                if year:
+                    audio['\xa9day'] = str(year)
+                
+                if track_num:
+                    try:
+                        track_number = int(track_num)
+                        audio['trkn'] = [(track_number, 0)]
+                    except ValueError:
+                        pass
+                
+                if cover_image_data:
+                    audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                
+                audio.save()
+                print(f"[ID3] Successfully added M4A metadata to {file_path}", flush=True)
+            except Exception as e:
+                print(f"[ID3] Warning: Could not write M4A tags: {str(e)}", flush=True)
         
         # Handle MP3 files
         elif file_path.lower().endswith('.mp3'):
@@ -1004,6 +1055,54 @@ def convert_flac_to_mp3(flac_path: str, mp3_path: str) -> bool:
         
         if result.returncode == 0:
             print(f"[FFMPEG] SUCCESS: Converted to {mp3_path}", flush=True)
+            return True
+        else:
+            print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
+            print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
+            return False
+    
+    except subprocess.TimeoutExpired:
+        print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
+        return False
+    except Exception as e:
+        print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
+        return False
+
+def convert_m4a_to_mp3(m4a_path: str, mp3_path: str) -> bool:
+    """
+    Convert an M4A/AAC file to 320kbps MP3 using ffmpeg.
+    
+    Args:
+        m4a_path: Path to the M4A file
+        mp3_path: Path where the MP3 should be saved
+    
+    Returns:
+        True on success, False on failure
+    """
+    try:
+        print(f"[FFMPEG] Converting M4A to MP3: {m4a_path} -> {mp3_path}", flush=True)
+        
+        # Create directory if needed
+        mp3_dir = os.path.dirname(mp3_path)
+        if mp3_dir:
+            os.makedirs(mp3_dir, exist_ok=True)
+        
+        # Run ffmpeg to convert M4A to 320kbps MP3
+        cmd = [
+            'ffmpeg',
+            '-i', m4a_path,
+            '-b:a', '320k',
+            '-q:a', '0',
+            '-y',  # Overwrite output file
+            mp3_path
+        ]
+        
+        print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print(f"[FFMPEG] SUCCESS: Converted M4A to {mp3_path}", flush=True)
             return True
         else:
             print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
@@ -1265,6 +1364,8 @@ def download_track():
         print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
         
         # Step 6: Build the file path using the naming template
+        # Note: For 'original' format, we'll use a placeholder extension that will be
+        # corrected after we detect the actual format (FLAC or M4A)
         file_ext = 'flac' if file_format == 'original' else 'mp3'
         
         # Replace placeholders in the file naming template
@@ -1306,6 +1407,14 @@ def download_track():
         
         print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
         
+        # Step 7a: Detect the actual audio format from the downloaded blob
+        audio_format = detect_audio_format(track_response.content)
+        print(f"[DOWNLOAD] Detected audio format: {audio_format}", flush=True)
+        
+        if audio_format == 'unknown':
+            print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
+            audio_format = 'flac'
+        
         # Try to download cover image if URL is available
         cover_image_data = None
         if cover_url:
@@ -1329,48 +1438,63 @@ def download_track():
             print(f"[DOWNLOAD] ERROR: Failed to create temp folder: {str(e)}", flush=True)
             return jsonify({'error': f'Failed to create temp folder: {str(e)}'}), 500
 
-        temp_flac_path = os.path.join(temp_folder, f'temp_{track_id}.flac')
+        # Use appropriate extension based on detected format
+        temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
+        temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
         temp_mp3_path = os.path.join(temp_folder, f'temp_{track_id}.mp3')
-        print(f"[DOWNLOAD] Saving temporary FLAC: {temp_flac_path}", flush=True)
+        
+        print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
 
-        with open(temp_flac_path, 'wb') as f:
+        with open(temp_source_path, 'wb') as f:
             f.write(track_response.content)
 
-        print(f"[DOWNLOAD] Adding metadata to staged FLAC...", flush=True)
-        add_id3_tags_to_file(temp_flac_path, metadata_dict, cover_image_data)
+        print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
+        add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
 
         if file_format == 'mp3':
-            print(f"[DOWNLOAD] Format is MP3 - converting staged FLAC", flush=True)
+            print(f"[DOWNLOAD] Format is MP3 - converting staged {temp_source_ext.upper()}", flush=True)
 
-            success = convert_flac_to_mp3(temp_flac_path, temp_mp3_path)
+            # Convert based on source format
+            if audio_format == 'm4a':
+                success = convert_m4a_to_mp3(temp_source_path, temp_mp3_path)
+            else:  # flac or unknown (assumed flac)
+                success = convert_flac_to_mp3(temp_source_path, temp_mp3_path)
 
             if not success:
-                cleanup_file(temp_flac_path)
+                cleanup_file(temp_source_path)
                 cleanup_file(temp_mp3_path)
-                return jsonify({'error': 'Failed to convert FLAC to MP3'}), 500
+                return jsonify({'error': f'Failed to convert {temp_source_ext.upper()} to MP3'}), 500
 
             try:
                 shutil.move(temp_mp3_path, full_path)
             except Exception as e:
                 print(f"[DOWNLOAD] ERROR: Failed to move MP3 to destination: {str(e)}", flush=True)
-                cleanup_file(temp_flac_path)
+                cleanup_file(temp_source_path)
                 cleanup_file(temp_mp3_path)
                 return jsonify({'error': f'Failed to move MP3 to destination: {str(e)}'}), 500
 
-            cleanup_file(temp_flac_path)
+            cleanup_file(temp_source_path)
             cleanup_file(temp_mp3_path)
 
             print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
         else:
-            print(f"[DOWNLOAD] Format is FLAC - moving from temp", flush=True)
+            # Original format requested - save with correct extension
+            original_ext = 'm4a' if audio_format == 'm4a' else 'flac'
+            
+            # Update the file path to use the actual extension
+            if not full_path.endswith(f'.{original_ext}'):
+                full_path = full_path.rsplit('.', 1)[0] + f'.{original_ext}'
+                print(f"[DOWNLOAD] Updated output path with correct extension: {full_path}", flush=True)
+            
+            print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
             try:
-                shutil.move(temp_flac_path, full_path)
+                shutil.move(temp_source_path, full_path)
             except Exception as e:
-                print(f"[DOWNLOAD] ERROR: Failed to move FLAC to destination: {str(e)}", flush=True)
-                cleanup_file(temp_flac_path)
-                return jsonify({'error': f'Failed to move FLAC to destination: {str(e)}'}), 500
+                print(f"[DOWNLOAD] ERROR: Failed to move {original_ext.upper()} to destination: {str(e)}", flush=True)
+                cleanup_file(temp_source_path)
+                return jsonify({'error': f'Failed to move {original_ext.upper()} to destination: {str(e)}'}), 500
 
-            cleanup_file(temp_flac_path)
+            cleanup_file(temp_source_path)
             print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         
         return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
