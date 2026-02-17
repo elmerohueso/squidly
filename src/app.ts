@@ -3,7 +3,10 @@
 interface SearchResult {
     query: string;
     data?: {
-        items: Track[];
+        items?: (Track | AlbumSearchItem)[];
+        albums?: {
+            items: AlbumSearchItem[];
+        };
     };
     results?: any[];
     proxied_via?: string;
@@ -21,6 +24,7 @@ interface Track {
     quality?: string;
     audioQuality?: string;
     cover?: string;
+    trackNumber?: number;
 }
 
 interface Artist {
@@ -32,6 +36,35 @@ interface Album {
     id: number;
     title: string;
     cover?: string;
+}
+
+interface AlbumSearchItem {
+    id: number;
+    title: string;
+    cover?: string;
+    artists?: Artist[];
+    artist?: Artist;
+    releaseDate?: string;
+    numberOfTracks?: number;
+    duration?: number;
+}
+
+interface AlbumInfo {
+    data?: {
+        id: number;
+        title: string;
+        cover?: string;
+        artist?: Artist;
+        artists?: Artist[];
+        releaseDate?: string;
+        numberOfTracks?: number;
+        items?: Array<{
+            type: string;
+            item: Track;
+        }>;
+    };
+    proxied_via?: string;
+    error?: string;
 }
 
 interface Endpoint {
@@ -136,15 +169,27 @@ class App {
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
 
-        // Download button delegation
+        // Download button and album card click delegation
         this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement;
+            
+            // Check for download button clicks first
             const downloadBtn = target.closest('.track-download-btn');
             if (downloadBtn) {
                 const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
                 const trackId = trackCard?.getAttribute('data-track-id');
                 if (trackId) {
                     void this.handleDownload(parseInt(trackId, 10), trackCard);
+                }
+                return; // Stop here if it was a download button
+            }
+            
+            // Check for album card clicks (albums have both track-card and album-card classes)
+            const clickedCard = target.closest('.track-card') as HTMLElement;
+            if (clickedCard && clickedCard.classList.contains('album-card')) {
+                const albumId = clickedCard.getAttribute('data-album-id');
+                if (albumId) {
+                    void this.fetchAlbumTracks(parseInt(albumId, 10));
                 }
             }
         });
@@ -340,6 +385,8 @@ class App {
         const searchType = this.searchTypeSelect.value;
         if (searchType === 'lastfm') {
             this.searchInput.placeholder = 'Enter Last.fm playlist URL...';
+        } else if (searchType === 'al') {
+            this.searchInput.placeholder = 'Search for albums...';
         } else {
             this.searchInput.placeholder = 'Search for tracks...';
         }
@@ -491,7 +538,10 @@ class App {
             return;
         }
 
-        const items = data.data?.items || [];
+        // Extract items based on search type - albums are nested under data.albums.items
+        const items = searchType === 'al' 
+            ? (data.data?.albums?.items || [])
+            : (data.data?.items || []);
         
         if (items.length === 0) {
             this.displayMessage(`No results found for "${query}"${data.proxied_via ? ' (via ' + data.proxied_via + ')' : ''}`);
@@ -510,12 +560,12 @@ class App {
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
             <div class="results-list">
-                ${items.map(item => this.formatTrackCard(item)).join('')}
+                ${items.map(item => searchType === 'al' ? this.formatAlbumCard(item as AlbumSearchItem) : this.formatTrackCard(item as Track)).join('')}
             </div>
         `;
     }
 
-    private formatTrackCard(track: Track): string {
+    private formatTrackCard(track: Track, showTrackNumber: boolean = false): string {
         // Get artist names
         const artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(a => a.name).join(', ')
@@ -534,6 +584,11 @@ class App {
         const quality = track.audioQuality || track.quality || '';
         const qualityDisplay = this.formatQuality(quality);
 
+        // Format track title with optional track number
+        const trackTitle = showTrackNumber && track.trackNumber
+            ? `${track.trackNumber}. ${this.escapeHtml(track.title)}`
+            : this.escapeHtml(track.title);
+
         return `
             <div class="track-card" data-track-id="${track.id}">
                 <div class="track-artwork">
@@ -548,7 +603,7 @@ class App {
                     }
                 </div>
                 <div class="track-info">
-                    <div class="track-title">${this.escapeHtml(track.title)}</div>
+                    <div class="track-title">${trackTitle}</div>
                     <div class="track-artist">${this.escapeHtml(artistNames)}</div>
                     <div class="track-metadata">
                         <span>${this.escapeHtml(albumTitle)}</span>
@@ -563,6 +618,49 @@ class App {
                             <line x1="12" y1="15" x2="12" y2="3"></line>
                         </svg>
                     </button>
+                </div>
+            </div>
+        `;
+    }
+
+    private formatAlbumCard(album: AlbumSearchItem): string {
+        // Get artist names
+        const artistNames = album.artists && album.artists.length > 0
+            ? album.artists.map(a => a.name).join(', ')
+            : album.artist?.name || 'Unknown Artist';
+
+        // Format release year if available
+        const releaseYear = album.releaseDate 
+            ? new Date(album.releaseDate).getFullYear()
+            : '';
+
+        // Format track count
+        const trackCount = album.numberOfTracks 
+            ? `${album.numberOfTracks} track${album.numberOfTracks !== 1 ? 's' : ''}`
+            : '';
+
+        return `
+            <div class="track-card album-card clickable" data-album-id="${album.id}" title="Click to view tracks">
+                <div class="track-artwork">
+                    ${album.cover 
+                        ? `<img src="${this.formatAlbumCoverUrl(album.cover)}" alt="${album.title}" loading="lazy">`
+                        : `<div class="track-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                <div class="track-info">
+                    <div class="track-title">${this.escapeHtml(album.title)}</div>
+                    <div class="track-artist">${this.escapeHtml(artistNames)}</div>
+                    <div class="track-metadata">
+                        ${releaseYear ? `<span>${releaseYear}</span>` : ''}
+                        ${releaseYear && trackCount ? `<span>•</span>` : ''}
+                        ${trackCount ? `<span>${trackCount}</span>` : ''}
+                    </div>
                 </div>
             </div>
         `;
@@ -602,6 +700,90 @@ class App {
                 <p>${message}</p>
             </div>
         `;
+    }
+
+    private async fetchAlbumTracks(albumId: number): Promise<void> {
+        this.displayMessage('Loading album tracks...');
+
+        try {
+            const response = await fetch(`/album/?id=${albumId}`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch album');
+            }
+
+            const data: AlbumInfo = await response.json();
+
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`);
+                return;
+            }
+
+            // Extract album metadata from data root
+            const albumData = data.data;
+            if (!albumData) {
+                this.displayMessage('No album data found');
+                return;
+            }
+
+            // Extract tracks from items array
+            const trackItems = albumData.items || [];
+            const tracks = trackItems
+                .filter(item => item.type === 'track')
+                .map(item => item.item);
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Get album info for display
+            const albumTitle = albumData.title || 'Album';
+            const artistNames = albumData.artists && albumData.artists.length > 0
+                ? albumData.artists.map(a => a.name).join(', ')
+                : albumData.artist?.name || 'Unknown Artist';
+
+            // Display tracks with Download All button
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(albumTitle)} - ${this.escapeHtml(artistNames)}</h2>
+                    </div>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                    <div class="progress-info" style="display: none;">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Downloaded <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
+                    </div>
+                </div>
+                <div class="results-list">
+                    ${tracks.map(track => this.formatTrackCard(track, true)).join('')}
+                </div>
+            `;
+
+            // Add Download All button
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => {
+                    // Show progress info when download starts
+                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
+                    if (progressInfo) {
+                        progressInfo.style.display = 'block';
+                    }
+                    void this.downloadAllTracks();
+                });
+                resultsHeaderTop.appendChild(downloadAllBtn);
+            }
+        } catch (error) {
+            this.displayMessage('Error loading album tracks. Please try again.');
+            console.error('Album fetch error:', error);
+        }
     }
 
     private async handleDownload(trackId: number, trackCard: HTMLElement): Promise<void> {

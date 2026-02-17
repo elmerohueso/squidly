@@ -377,6 +377,15 @@ main {
     border-color: var(--border-color);
 }
 
+.track-card.clickable {
+    cursor: pointer;
+}
+
+.track-card.clickable:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 .track-artwork {
     width: 56px;
     height: 56px;
