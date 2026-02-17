@@ -860,6 +860,14 @@ def extract_year_from_text(text: str) -> str:
     match = re.search(r"\b(19|20)\d{2}\b", text)
     return match.group(0) if match else ''
 
+def cleanup_file(path: str) -> None:
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"[DOWNLOAD] Cleaned up temporary file", flush=True)
+    except Exception as e:
+        print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
+
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
     """
     Add ID3 tags to an audio file (handles both FLAC and MP3).
@@ -1296,60 +1304,57 @@ def download_track():
             'track_number': track_num
         }
         
-        # Step 8: Handle file based on format
+        # Step 8: Stage to temp, add tags, then convert or move based on format
+        temp_folder = '/app/temp'
+        try:
+            os.makedirs(temp_folder, exist_ok=True)
+            print(f"[DOWNLOAD] Temp folder ready: {temp_folder}", flush=True)
+        except Exception as e:
+            print(f"[DOWNLOAD] ERROR: Failed to create temp folder: {str(e)}", flush=True)
+            return jsonify({'error': f'Failed to create temp folder: {str(e)}'}), 500
+
+        temp_flac_path = os.path.join(temp_folder, f'temp_{track_id}.flac')
+        temp_mp3_path = os.path.join(temp_folder, f'temp_{track_id}.mp3')
+        print(f"[DOWNLOAD] Saving temporary FLAC: {temp_flac_path}", flush=True)
+
+        with open(temp_flac_path, 'wb') as f:
+            f.write(track_response.content)
+
+        print(f"[DOWNLOAD] Adding metadata to staged FLAC...", flush=True)
+        add_id3_tags_to_file(temp_flac_path, metadata_dict, cover_image_data)
+
         if file_format == 'mp3':
-            # For MP3: save to temp, convert, then move to downloads
-            print(f"[DOWNLOAD] Format is MP3 - will convert from FLAC", flush=True)
-            
-            # Create temp folder
-            temp_folder = '/app/temp'
-            try:
-                os.makedirs(temp_folder, exist_ok=True)
-                print(f"[DOWNLOAD] Temp folder ready: {temp_folder}", flush=True)
-            except Exception as e:
-                print(f"[DOWNLOAD] ERROR: Failed to create temp folder: {str(e)}", flush=True)
-                return jsonify({'error': f'Failed to create temp folder: {str(e)}'}), 500
-            
-            # Save FLAC to temp
-            temp_flac_path = os.path.join(temp_folder, f'temp_{track_id}.flac')
-            print(f"[DOWNLOAD] Saving temporary FLAC: {temp_flac_path}", flush=True)
-            
-            with open(temp_flac_path, 'wb') as f:
-                f.write(track_response.content)
-            
-            print(f"[DOWNLOAD] Temporary FLAC saved, now converting to MP3...", flush=True)
-            
-            # Convert FLAC to MP3
-            success = convert_flac_to_mp3(temp_flac_path, full_path)
-            
-            # Clean up temp FLAC
-            try:
-                if os.path.exists(temp_flac_path):
-                    os.remove(temp_flac_path)
-                    print(f"[DOWNLOAD] Cleaned up temporary FLAC file", flush=True)
-            except Exception as e:
-                print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
-            
+            print(f"[DOWNLOAD] Format is MP3 - converting staged FLAC", flush=True)
+
+            success = convert_flac_to_mp3(temp_flac_path, temp_mp3_path)
+
             if not success:
+                cleanup_file(temp_flac_path)
+                cleanup_file(temp_mp3_path)
                 return jsonify({'error': 'Failed to convert FLAC to MP3'}), 500
-            
-            # Add ID3 tags to the MP3 file
-            print(f"[DOWNLOAD] Adding ID3 metadata to MP3...", flush=True)
-            add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
-            
+
+            try:
+                shutil.move(temp_mp3_path, full_path)
+            except Exception as e:
+                print(f"[DOWNLOAD] ERROR: Failed to move MP3 to destination: {str(e)}", flush=True)
+                cleanup_file(temp_flac_path)
+                cleanup_file(temp_mp3_path)
+                return jsonify({'error': f'Failed to move MP3 to destination: {str(e)}'}), 500
+
+            cleanup_file(temp_flac_path)
+            cleanup_file(temp_mp3_path)
+
             print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
         else:
-            # For original/FLAC: save directly
-            print(f"[DOWNLOAD] Format is FLAC - saving directly", flush=True)
-            print(f"[DOWNLOAD] Saving to disk: {full_path}", flush=True)
-            
-            with open(full_path, 'wb') as f:
-                f.write(track_response.content)
-            
-            # Add ID3 tags to the FLAC file
-            print(f"[DOWNLOAD] Adding metadata to FLAC...", flush=True)
-            add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
-            
+            print(f"[DOWNLOAD] Format is FLAC - moving from temp", flush=True)
+            try:
+                shutil.move(temp_flac_path, full_path)
+            except Exception as e:
+                print(f"[DOWNLOAD] ERROR: Failed to move FLAC to destination: {str(e)}", flush=True)
+                cleanup_file(temp_flac_path)
+                return jsonify({'error': f'Failed to move FLAC to destination: {str(e)}'}), 500
+
+            cleanup_file(temp_flac_path)
             print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         
         return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
