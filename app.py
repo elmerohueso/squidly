@@ -1194,10 +1194,26 @@ def download_track():
         
         print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
         
-        # Step 2: Get the track manifest for download
+        # Step 2: Determine best available quality from track metadata
+        available_quality = 'HIGH'  # Default fallback
+        if isinstance(track_metadata, dict) and 'mediaMetadata' in track_metadata:
+            media_meta = track_metadata['mediaMetadata']
+            if isinstance(media_meta, dict) and 'tags' in media_meta:
+                tags = media_meta.get('tags', [])
+                if isinstance(tags, list):
+                    # Prioritize quality: HIRES_LOSSLESS > LOSSLESS > HIGH > LOW
+                    quality_priority = ['HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+                    for quality in quality_priority:
+                        if quality in tags:
+                            available_quality = quality
+                            break
+        
+        print(f"[DOWNLOAD] Available quality tags, selected: {available_quality}", flush=True)
+        
+        # Step 3: Get the track manifest for download
         print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
         target = next(url_iterator)
-        manifest_url = f"{target['url']}/track/?id={track_id}&quality=LOSSLESS"
+        manifest_url = f"{target['url']}/track/?id={track_id}&quality={available_quality}"
         
         manifest_response = requests.get(manifest_url, timeout=10)
         

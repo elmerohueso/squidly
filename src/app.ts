@@ -28,6 +28,9 @@ interface Track {
     audioQuality?: string;
     cover?: string;
     trackNumber?: number;
+    mediaMetadata?: {
+        tags?: string[];
+    };
 }
 
 interface Artist {
@@ -51,6 +54,9 @@ interface AlbumSearchItem {
     numberOfTracks?: number;
     duration?: number;
     audioQuality?: string;
+    mediaMetadata?: {
+        tags?: string[];
+    };
 }
 
 interface ArtistSearchItem {
@@ -736,8 +742,19 @@ class App {
             ? this.formatDuration(track.duration)
             : '';
 
-        // Get quality info
-        const quality = track.audioQuality || track.quality || '';
+        // Get quality info - check mediaMetadata.tags for best quality
+        let quality = track.audioQuality || track.quality || '';
+        if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
+            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            const tags = track.mediaMetadata.tags;
+            if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('LOSSLESS')) {
+                quality = 'LOSSLESS';
+            } else if (tags.includes('LOW')) {
+                quality = 'LOW';
+            }
+        }
         const qualityDisplay = this.formatQuality(quality);
 
         // Format track title with optional track number
@@ -942,8 +959,19 @@ class App {
             ? `${album.numberOfTracks} track${album.numberOfTracks !== 1 ? 's' : ''}`
             : '';
 
-        // Format audio quality if available
-        const quality = album.audioQuality || '';
+        // Format audio quality if available - check mediaMetadata.tags for best quality
+        let quality = album.audioQuality || '';
+        if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
+            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            const tags = album.mediaMetadata.tags;
+            if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('LOSSLESS')) {
+                quality = 'LOSSLESS';
+            } else if (tags.includes('LOW')) {
+                quality = 'LOW';
+            }
+        }
         const qualityDisplay = this.formatQuality(quality);
 
         return `
@@ -1013,10 +1041,9 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
-            'HI_RES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
+            'HIRES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
             'LOSSLESS': 'CD • 16-bit/44.1kHz FLAC',
-            'HIGH': '320kbps AAC',
-            'LOW': '96kbps AAC'
+            'LOW': '320kbps AAC'
         };
         return qualityMap[quality] || quality;
     }
