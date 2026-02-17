@@ -1,0 +1,23 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - '.github/**'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: authenticate
+        run: |
+          echo ${{secrets.CR_PAT}} | docker login ghcr.io -u elmerohueso --password-stdin
+      - name: build image
+        run: |
+          docker build  --tag ghcr.io/elmerohueso/squidly:latest --push .
