@@ -437,12 +437,13 @@ main {
     text-overflow: ellipsis;
 }
 
-.track-artist-link {
+.track-artist-name {
+    display: inline-block;
     cursor: pointer;
     transition: color var(--transition-fast);
 }
 
-.track-artist-link:hover {
+.track-artist-name:hover {
     color: var(--accent-primary);
 }
 
@@ -454,12 +455,13 @@ main {
     gap: 0.5rem;
 }
 
-.track-album-link {
+.track-album-name {
+    display: inline-block;
     cursor: pointer;
     transition: color var(--transition-fast);
 }
 
-.track-album-link:hover {
+.track-album-name:hover {
     color: var(--accent-primary);
 }
 

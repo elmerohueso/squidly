@@ -232,9 +232,9 @@ class App {
             }
             
             // Check for artist name clicks within track cards
-            const artistLink = target.closest('.track-artist-link');
-            if (artistLink) {
-                const trackCard = artistLink.closest('.track-card');
+            const artistName = target.closest('.track-artist-name');
+            if (artistName) {
+                const trackCard = artistName.closest('.track-card');
                 const artistId = trackCard?.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
@@ -244,9 +244,9 @@ class App {
             }
             
             // Check for album name clicks within track cards
-            const albumLink = target.closest('.track-album-link');
-            if (albumLink) {
-                const trackCard = albumLink.closest('.track-card');
+            const albumName = target.closest('.track-album-name');
+            if (albumName) {
+                const trackCard = albumName.closest('.track-card');
                 const albumId = trackCard?.getAttribute('data-album-id');
                 if (albumId) {
                     e.stopPropagation();
@@ -761,9 +761,11 @@ class App {
                 </div>
                 <div class="track-info">
                     <div class="track-title">${trackTitle}</div>
-                    <div class="track-artist track-artist-link" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</div>
+                    <div class="track-artist">
+                        <span class="track-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                    </div>
                     <div class="track-metadata">
-                        <span class="track-album-link" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
+                        <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
                         ${qualityDisplay ? `<span>•</span><span>${qualityDisplay}</span>` : ''}
                     </div>
                 </div>
@@ -954,7 +956,9 @@ class App {
                 </div>
                 <div class="track-info">
                     <div class="track-title">${this.escapeHtml(album.title)}</div>
-                    <div class="track-artist track-artist-link" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</div>
+                    <div class="track-artist">
+                        <span class="track-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                    </div>
                     <div class="track-metadata">
                         ${releaseYear ? `<span>${releaseYear}</span>` : ''}
                         ${releaseYear && trackCount ? `<span>•</span>` : ''}
