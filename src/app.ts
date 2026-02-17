@@ -50,6 +50,7 @@ interface AlbumSearchItem {
     releaseDate?: string;
     numberOfTracks?: number;
     duration?: number;
+    audioQuality?: string;
 }
 
 interface ArtistSearchItem {
@@ -940,6 +941,10 @@ class App {
             ? `${album.numberOfTracks} track${album.numberOfTracks !== 1 ? 's' : ''}`
             : '';
 
+        // Format audio quality if available
+        const quality = album.audioQuality || '';
+        const qualityDisplay = this.formatQuality(quality);
+
         return `
             <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
@@ -963,6 +968,8 @@ class App {
                         ${releaseYear ? `<span>${releaseYear}</span>` : ''}
                         ${releaseYear && trackCount ? `<span>•</span>` : ''}
                         ${trackCount ? `<span>${trackCount}</span>` : ''}
+                        ${trackCount && qualityDisplay ? `<span>•</span>` : ''}
+                        ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
                     </div>
                 </div>
             </div>
