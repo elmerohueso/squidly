@@ -22,7 +22,14 @@ app = Flask(__name__,
 CORS(app)
 
 # Create data folder if it doesn't exist
-os.makedirs(os.path.join(os.path.dirname(__file__), 'data'), exist_ok=True)
+data_dir = os.path.join(os.path.dirname(__file__), 'data')
+try:
+    os.makedirs(data_dir, exist_ok=True)
+    # Ensure directory is writable
+    if not os.access(data_dir, os.W_OK):
+        os.chmod(data_dir, 0o755)
+except Exception as e:
+    print(f"Warning: Could not create/chmod data directory: {e}", file=sys.stderr)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'squidly.db')
 DOWNLOADS_ROOT = '/app/downloads'

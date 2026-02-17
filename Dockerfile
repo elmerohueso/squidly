@@ -45,9 +45,10 @@ COPY static ./static
 # Copy built assets from frontend stage
 COPY --from=frontend-builder /app/static/dist ./static/dist
 
-# Create non-root user and data directory
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/data && \
+# Create data directory and non-root user with proper permissions
+RUN mkdir -p /app/data && \
+    chmod 777 /app/data && \
+    useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 USER appuser
 
