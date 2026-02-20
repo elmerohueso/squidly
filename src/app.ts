@@ -134,6 +134,13 @@ class App {
     private listenbrainzTokenInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
     private lbConfigStatusEl: HTMLElement;
+    private plexServerUrlInput: HTMLInputElement;
+    private plexApiTokenInput: HTMLInputElement;
+    private plexLibraryNameSelect: HTMLSelectElement;
+    private plexPlaylistNameInput: HTMLInputElement;
+    private savePlexConfigButton: HTMLButtonElement;
+    private testPlexConnectionButton: HTMLButtonElement;
+    private plexConfigStatusEl: HTMLElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
@@ -176,6 +183,13 @@ class App {
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
+        this.plexServerUrlInput = document.getElementById('plexServerUrl') as HTMLInputElement;
+        this.plexApiTokenInput = document.getElementById('plexApiToken') as HTMLInputElement;
+        this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
+        this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement;
+        this.savePlexConfigButton = document.getElementById('savePlexConfig') as HTMLButtonElement;
+        this.testPlexConnectionButton = document.getElementById('testPlexConnection') as HTMLButtonElement;
+        this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
         
         this.initializeEventListeners();
         this.streamQuality = this.loadStreamQualityFromCookie();
@@ -184,6 +198,7 @@ class App {
         this.applyStreamQualityToForm();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
+        void this.loadPlexConfig();
         this.updateEndpointStatus(); // Initial load
         
         // Update status every 30 seconds
@@ -215,6 +230,8 @@ class App {
         this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
+        this.savePlexConfigButton.addEventListener('click', () => this.savePlexConfig());
+        this.testPlexConnectionButton.addEventListener('click', () => this.testPlexConnection());
 
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
@@ -527,6 +544,132 @@ class App {
             this.lbConfigStatusEl.textContent = '✗ Error saving configuration';
             this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
         }
+    }
+
+    private async loadPlexConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/plex/config');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.server_url) {
+                    this.plexServerUrlInput.value = data.server_url;
+                }
+                if (data.library_name) {
+                    this.plexLibraryNameSelect.value = data.library_name;
+                }
+                if (data.update_playlist_name) {
+                    this.plexPlaylistNameInput.value = data.update_playlist_name;
+                }
+                this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
+            }
+        } catch (error) {
+            console.warn('Failed to load Plex config.', error);
+        }
+    }
+
+    private async testPlexConnection(): Promise<void> {
+        const serverUrl = this.plexServerUrlInput.value.trim();
+        const apiToken = this.plexApiTokenInput.value.trim();
+
+        if (!serverUrl || !apiToken) {
+            this.updatePlexConfigStatus('⚠ Server URL and X-Plex-Token are required');
+            return;
+        }
+
+        this.updatePlexConfigStatus('Testing connection...');
+        this.testPlexConnectionButton.disabled = true;
+
+        try {
+            const response = await fetch('/api/plex/test', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    server_url: serverUrl,
+                    api_token: apiToken
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.updatePlexConfigStatus('✓ Connection successful!');
+                
+                // Populate library dropdown
+                this.plexLibraryNameSelect.innerHTML = '';
+                if (data.libraries && data.libraries.length > 0) {
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = '';
+                    defaultOption.textContent = 'Select a library...';
+                    this.plexLibraryNameSelect.appendChild(defaultOption);
+                    
+                    data.libraries.forEach((lib: string) => {
+                        const option = document.createElement('option');
+                        option.value = lib;
+                        option.textContent = lib;
+                        this.plexLibraryNameSelect.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = 'Music';
+                    option.textContent = 'Music (default)';
+                    this.plexLibraryNameSelect.appendChild(option);
+                }
+            } else {
+                const data = await response.json();
+                this.updatePlexConfigStatus(`✗ ${data.message || 'Connection failed'}`);
+            }
+        } catch (error) {
+            console.error('Error testing Plex connection:', error);
+            this.updatePlexConfigStatus('✗ Error testing connection');
+        } finally {
+            this.testPlexConnectionButton.disabled = false;
+        }
+    }
+
+    private async savePlexConfig(): Promise<void> {
+        const serverUrl = this.plexServerUrlInput.value.trim();
+        const apiToken = this.plexApiTokenInput.value.trim();
+        const libraryName = this.plexLibraryNameSelect.value.trim();
+        const playlistName = this.plexPlaylistNameInput.value.trim();
+
+        if (!serverUrl || !apiToken || !libraryName) {
+            this.updatePlexConfigStatus('⚠ Server URL, X-Plex-Token, and library name are required');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    server_url: serverUrl,
+                    api_token: apiToken,
+                    library_name: libraryName,
+                    update_playlist_name: playlistName || 'Downloaded Music'
+                })
+            });
+
+            if (response.ok) {
+                this.updatePlexConfigStatus('✓ Configuration saved');
+                this.plexApiTokenInput.value = '';
+                setTimeout(() => {
+                    this.updatePlexConfigStatus('✓ Configured');
+                }, 3000);
+            } else {
+                this.updatePlexConfigStatus('✗ Failed to save configuration');
+            }
+        } catch (error) {
+            console.error('Error saving Plex config:', error);
+            this.updatePlexConfigStatus('✗ Error saving configuration');
+        }
+    }
+
+    private updatePlexConfigStatus(message: string): void {
+        this.plexConfigStatusEl.textContent = message;
+        this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
     }
 
     private async updateEndpointStatus(): Promise<void> {

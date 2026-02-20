@@ -17,6 +17,7 @@ from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
+from plexapi.server import PlexServer
 
 app = Flask(__name__, 
             static_folder='static',
@@ -98,6 +99,18 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plex_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            server_url TEXT,
+            api_token TEXT,
+            library_name TEXT,
+            update_playlist_name TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -136,6 +149,54 @@ def save_listenbrainz_config(user_token):
     )
     conn.commit()
     conn.close()
+
+def get_plex_config():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT server_url, api_token, library_name, update_playlist_name
+        FROM plex_config
+        WHERE id = 1
+        """
+    ).fetchone()
+    conn.close()
+    
+    if row is None:
+        return {
+            'server_url': None,
+            'api_token': None,
+            'library_name': None,
+            'update_playlist_name': None
+        }
+    
+    return {
+        'server_url': row['server_url'],
+        'api_token': row['api_token'],
+        'library_name': row['library_name'],
+        'update_playlist_name': row['update_playlist_name']
+    }
+
+def save_plex_config(server_url, api_token, library_name, update_playlist_name):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO plex_config (id, server_url, api_token, library_name, update_playlist_name, updated_at)
+        VALUES (1, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            server_url = excluded.server_url,
+            api_token = excluded.api_token,
+            library_name = excluded.library_name,
+            update_playlist_name = excluded.update_playlist_name,
+            updated_at = excluded.updated_at
+        """,
+        (server_url, api_token, library_name, update_playlist_name, now)
+    )
+    conn.commit()
+    conn.close()
+
 
 def seed_mirrors_from_json():
     with open('squidurls.json', 'r', encoding='utf-8') as f:
@@ -261,6 +322,175 @@ def save_download_settings(settings):
     )
     conn.commit()
     conn.close()
+
+# Plex Functions
+def test_plex_connection(server_url, api_token):
+    """
+    Test connection to Plex server by making a direct API request.
+    Returns tuple: (success: bool, message: str, libraries: list or None)
+    """
+    try:
+        # Remove trailing slash if present
+        server_url = server_url.rstrip('/')
+        
+        # Validate URL format
+        if not server_url.startswith('http://') and not server_url.startswith('https://'):
+            return False, 'Server URL must start with http:// or https://', None
+        
+        # Test connection with a direct HTTP request to validate token
+        test_url = f"{server_url}/library/sections"
+        headers = {'X-Plex-Token': api_token}
+        
+        print(f"[PLEX] Testing connection to {test_url}", flush=True)
+        response = requests.get(test_url, headers=headers, timeout=10, verify=False)
+        
+        if response.status_code == 401:
+            return False, 'Invalid API token or unauthorized access', None
+        elif response.status_code == 404:
+            return False, 'Server not found at URL', None
+        elif not response.ok:
+            return False, f'Server returned status {response.status_code}', None
+        
+        # If we got here, connection is valid. Now try with plexapi to get libraries
+        try:
+            plex = PlexServer(server_url, api_token, timeout=10)
+            
+            # Get music libraries
+            libraries = []
+            for section in plex.library.sections():
+                if section.type == 'artist':  # Music library
+                    libraries.append(section.title)
+            
+            return True, 'Successfully connected to Plex server', libraries
+        except Exception as e:
+            # Connection works but plexapi failed - still report success with libraries from HTTP response
+            print(f"[PLEX] Warning: PlexAPI failed but HTTP connection worked: {str(e)}", flush=True)
+            return True, 'Connected successfully (could not retrieve libraries)', []
+    
+    except requests.exceptions.Timeout:
+        return False, 'Connection timeout - server not responding', None
+    except requests.exceptions.ConnectionError:
+        return False, 'Cannot connect to server - check URL and network', None
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
+        return False, f'Failed to connect to Plex: {error_msg}', None
+
+def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, track_info):
+    """
+    Add downloaded tracks to a Plex playlist.
+    
+    Args:
+        server_url: Plex server URL
+        api_token: Plex API token
+        library_name: Name of the music library (e.g., "Music")
+        playlist_name: Name of the playlist to add to
+        track_info: Dict with 'artist', 'album', 'title' of the downloaded track
+    
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    try:
+        server_url = server_url.rstrip('/')
+        token_len = len(api_token) if isinstance(api_token, str) else 0
+        print(
+            f"[PLEX] Add-to-playlist start: url={server_url}, library='{library_name}', playlist='{playlist_name}', token_len={token_len}",
+            flush=True
+        )
+        plex = PlexServer(server_url, api_token, timeout=10)
+        print("[PLEX] Connected to Plex server", flush=True)
+        
+        # Get the music library
+        library = None
+        for section in plex.library.sections():
+            if section.title == library_name and section.type == 'artist':
+                library = section
+                break
+        
+        if not library:
+            available = [f"{section.title} ({section.type})" for section in plex.library.sections()]
+            print(f"[PLEX] Library not found. Available sections: {available}", flush=True)
+            return False, f'Library "{library_name}" not found or is not a music library'
+        
+        # Search for the track in the library
+        artist = track_info.get('artist', 'Unknown')
+        album = track_info.get('album', 'Unknown')
+        title = track_info.get('title', 'Unknown')
+        
+        print(f"[PLEX] Searching for track: {artist} - {album} - {title}", flush=True)
+        
+        # Try to find the track
+        tracks = []
+        try:
+            # Search in the library
+            search_results = library.search(title=title)
+            print(f"[PLEX] Search results count: {len(search_results)}", flush=True)
+            
+            # Filter by artist and album if possible
+            for result in search_results:
+                if hasattr(result, 'artist') and hasattr(result, 'album'):
+                    result_artist = result.artist.title if hasattr(result.artist, 'title') else str(result.artist)
+                    result_album = result.album.title if hasattr(result.album, 'title') else str(result.album)
+                    
+                    if result_artist.lower() == artist.lower() and result_album.lower() == album.lower():
+                        tracks.append(result)
+                        break
+            
+            # If exact match not found, add any matching track
+            if not tracks and search_results:
+                tracks.append(search_results[0])
+            print(f"[PLEX] Selected track count after filtering: {len(tracks)}", flush=True)
+        
+        except Exception as e:
+            print(f"[PLEX] Error searching for track: {str(e)}", flush=True)
+            return False, f'Error searching for track: {str(e)}'
+        
+        if not tracks:
+            print(f"[PLEX] Track not found in Plex library, waiting for Plex to scan", flush=True)
+            return False, 'Track not yet indexed in Plex library. Plex server may still be scanning.'
+        
+        track = tracks[0]
+        
+        # Get or create the playlist
+        playlist = None
+        try:
+            playlists = plex.playlists()
+            print(f"[PLEX] Existing playlists found: {len(playlists)}", flush=True)
+            for pl in playlists:
+                if pl.title == playlist_name:
+                    playlist = pl
+                    break
+        except Exception as e:
+            print(f"[PLEX] Error getting playlists: {str(e)}", flush=True)
+        
+        # Create playlist if it doesn't exist
+        if not playlist:
+            try:
+                print(f"[PLEX] Creating playlist: {playlist_name}", flush=True)
+                playlist = plex.createPlaylist(playlist_name, items=[track])
+                print(f"[PLEX] Created new playlist: {playlist_name}", flush=True)
+                return True, f'Created playlist "{playlist_name}" and added track'
+            except Exception as e:
+                print(f"[PLEX] Error creating playlist: {str(e)}", flush=True)
+                return False, f'Error creating playlist: {str(e)}'
+        else:
+            print(f"[PLEX] Using existing playlist: {playlist_name}", flush=True)
+        
+        # Add track to existing playlist
+        try:
+            playlist.addItems(track)
+            print(f"[PLEX] Added track to playlist: {playlist_name}", flush=True)
+            return True, f'Added track to playlist "{playlist_name}"'
+        except Exception as e:
+            # Check if track already in playlist
+            if 'already in' in str(e).lower():
+                return True, f'Track already in playlist "{playlist_name}"'
+            print(f"[PLEX] Error adding track to playlist: {str(e)}", flush=True)
+            return False, f'Error adding to playlist: {str(e)}'
+    
+    except Exception as e:
+        print(f"[PLEX] Unexpected error: {str(e)}", flush=True)
+        return False, f'Unexpected error: {str(e)}'
 
 # Validation Functions
 def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
@@ -1611,6 +1841,43 @@ def download_track():
             cleanup_file(temp_source_path)
             print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
         
+        # Try to add track to Plex playlist if configured
+        plex_config = get_plex_config()
+        if plex_config['server_url'] and plex_config['api_token'] and plex_config['update_playlist_name']:
+            try:
+                print(
+                    "[DOWNLOAD] Plex config OK - attempting playlist update",
+                    flush=True
+                )
+                track_info = {
+                    'artist': artist_name,
+                    'album': album_name,
+                    'title': track_title
+                }
+                success, plex_message = add_tracks_to_plex_playlist(
+                    plex_config['server_url'],
+                    plex_config['api_token'],
+                    plex_config['library_name'] or 'Music',
+                    plex_config['update_playlist_name'],
+                    track_info
+                )
+                
+                if success:
+                    print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
+                else:
+                    print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
+            except Exception as e:
+                print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
+        else:
+            missing = []
+            if not plex_config['server_url']:
+                missing.append('server_url')
+            if not plex_config['api_token']:
+                missing.append('api_token')
+            if not plex_config['update_playlist_name']:
+                missing.append('update_playlist_name')
+            print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+        
         return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
 
     except requests.exceptions.Timeout:
@@ -1810,3 +2077,61 @@ def get_listenbrainz_playlist(playlist_mbid):
     
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Failed to fetch playlist from ListenBrainz: {str(e)}'}), 500
+
+@app.route('/api/plex/config', methods=['GET'])
+def get_plex_config_endpoint():
+    """Get the current Plex configuration"""
+    config = get_plex_config()
+    return jsonify({
+        'has_config': config['server_url'] is not None and config['api_token'] is not None,
+        'server_url': config['server_url'],
+        'library_name': config['library_name'],
+        'update_playlist_name': config['update_playlist_name']
+    })
+
+@app.route('/api/plex/config', methods=['POST'])
+def save_plex_config_endpoint():
+    """Save Plex configuration"""
+    payload = request.get_json()
+    
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+    
+    server_url = payload.get('server_url', '').strip()
+    api_token = payload.get('api_token', '').strip()
+    library_name = payload.get('library_name', '')
+    update_playlist_name = payload.get('update_playlist_name', '')
+    
+    if not server_url or not api_token:
+        return jsonify({'error': 'server_url and api_token are required'}), 400
+    
+    save_plex_config(server_url, api_token, library_name, update_playlist_name)
+    return jsonify({'success': True})
+
+@app.route('/api/plex/test', methods=['POST'])
+def test_plex_connection_endpoint():
+    """Test Plex server connection"""
+    payload = request.get_json()
+    
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+    
+    server_url = payload.get('server_url', '').strip()
+    api_token = payload.get('api_token', '').strip()
+    
+    if not server_url or not api_token:
+        return jsonify({'error': 'server_url and api_token are required'}), 400
+    
+    success, message, libraries = test_plex_connection(server_url, api_token)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': message,
+            'libraries': libraries or []
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': message
+        }), 400
