@@ -47,6 +47,153 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}'
 }
 
+def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
+    """
+    Make HTTP request with exponential backoff retry logic (for non-mirror URLs like CDN).
+    Retries on 5xx errors and connection errors on the same URL.
+    
+    Args:
+        url: The URL to request
+        method: HTTP method (GET, POST, etc.)
+        timeout: Request timeout in seconds
+        max_retries: Maximum number of retry attempts (total attempts = max_retries + 1)
+        backoff_factor: Multiplier for exponential backoff (delay = backoff_factor * 2^attempt)
+        **kwargs: Additional arguments to pass to requests
+    
+    Returns:
+        Response object
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            if method.upper() == 'GET':
+                response = requests.get(url, timeout=timeout, **kwargs)
+            elif method.upper() == 'POST':
+                response = requests.post(url, timeout=timeout, **kwargs)
+            else:
+                response = requests.request(method, url, timeout=timeout, **kwargs)
+            
+            # Return on success (2xx) or client errors (4xx), only retry on 5xx
+            if response.status_code < 500:
+                return response
+            
+            # 5xx error - log and retry
+            last_exception = Exception(f"HTTP {response.status_code}")
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                print(f"[RETRY] HTTP {response.status_code} on attempt {attempt + 1}/{max_retries + 1}. Retrying in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            
+            # Last attempt failed with 5xx
+            return response
+        
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                print(f"[RETRY] Timeout on attempt {attempt + 1}/{max_retries + 1}. Retrying in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            raise
+        
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                print(f"[RETRY] Connection error on attempt {attempt + 1}/{max_retries + 1}. Retrying in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            raise
+        
+        except requests.exceptions.RequestException as e:
+            # Don't retry on other request exceptions
+            raise
+    
+    # If we got here, all retries were exhausted
+    if last_exception:
+        raise last_exception
+    return None
+
+def make_request_with_retry_rotating_mirrors(url_base, url_iterator, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
+    """
+    Make HTTP request with exponential backoff retry logic and mirror rotation.
+    Each retry attempt uses a different mirror from the round-robin iterator.
+    
+    Args:
+        url_base: The base URL path to append to mirror URLs (e.g., "/search/?s=query")
+        url_iterator: Round-robin iterator that yields mirror info dicts with 'url' and 'name'
+        method: HTTP method (GET, POST, etc.)
+        timeout: Request timeout in seconds
+        max_retries: Maximum number of retry attempts (total attempts = max_retries + 1)
+        backoff_factor: Multiplier for exponential backoff (delay = backoff_factor * 2^attempt)
+        **kwargs: Additional arguments to pass to requests
+    
+    Returns:
+        (response, target_mirror) tuple - successful response and mirror info used
+    """
+    last_exception = None
+    last_target = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            # Get a new mirror for each attempt
+            target = next(url_iterator)
+            last_target = target
+            target_url = f"{target['url']}{url_base}"
+            
+            if method.upper() == 'GET':
+                response = requests.get(target_url, timeout=timeout, **kwargs)
+            elif method.upper() == 'POST':
+                response = requests.post(target_url, timeout=timeout, **kwargs)
+            else:
+                response = requests.request(method, target_url, timeout=timeout, **kwargs)
+            
+            # Return on success (2xx) or client errors (4xx), only retry on 5xx
+            if response.status_code < 500:
+                return response, target
+            
+            # 5xx error - log and retry with different mirror
+            last_exception = Exception(f"HTTP {response.status_code}")
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                print(f"[RETRY] HTTP {response.status_code} from {target['name']} on attempt {attempt + 1}/{max_retries + 1}. Trying different mirror in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            
+            # Last attempt failed with 5xx, return the failed response
+            return response, target
+        
+        except requests.exceptions.Timeout as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                mirror_name = last_target['name'] if last_target else 'unknown'
+                print(f"[RETRY] Timeout from {mirror_name} on attempt {attempt + 1}/{max_retries + 1}. Trying different mirror in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            raise
+        
+        except requests.exceptions.ConnectionError as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = backoff_factor * (2 ** attempt)
+                mirror_name = last_target['name'] if last_target else 'unknown'
+                print(f"[RETRY] Connection error from {mirror_name} on attempt {attempt + 1}/{max_retries + 1}. Trying different mirror in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+            raise
+        
+        except requests.exceptions.RequestException as e:
+            # Don't retry on other request exceptions
+            raise
+    
+    # If we got here, all retries were exhausted
+    if last_exception:
+        raise last_exception
+    return None
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -764,12 +911,14 @@ def search():
     if not query:
         return jsonify({'error': 'Query value cannot be empty'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/search/?{search_type}={query}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/search/?{search_type}={query}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -784,7 +933,7 @@ def search():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e),
             'query': query
         }), 502
@@ -801,12 +950,14 @@ def track_info():
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/info/?id={track_id}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/info/?id={track_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -821,7 +972,7 @@ def track_info():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e)
         }), 502
 
@@ -837,12 +988,14 @@ def album_info():
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/album/?id={album_id}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/album/?id={album_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -857,7 +1010,7 @@ def album_info():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e)
         }), 502
 
@@ -873,12 +1026,14 @@ def artist_info():
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter (f) is required'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/artist/?f={artist_id}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/artist/?f={artist_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -893,7 +1048,7 @@ def artist_info():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e)
         }), 502
 
@@ -909,12 +1064,14 @@ def playlist_info():
     if not playlist_id:
         return jsonify({'error': 'Playlist ID parameter is required'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/playlist/?id={playlist_id}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/playlist/?id={playlist_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -929,7 +1086,7 @@ def playlist_info():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e)
         }), 502
 
@@ -947,12 +1104,14 @@ def track_download():
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/track/?id={track_id}&quality={quality}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/track/?id={track_id}&quality={quality}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -967,7 +1126,7 @@ def track_download():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e)
         }), 502
 
@@ -983,12 +1142,14 @@ def api_search():
     if not query:
         return jsonify({'error': 'No query provided'}), 400
     
-    # Get next URL in round-robin
-    target = next(url_iterator)
-    target_url = f"{target['url']}/search/?s={requests.utils.quote(query)}"
-    
     try:
-        response = requests.get(target_url, timeout=10)
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/search/?s={requests.utils.quote(query)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         
         if not response.ok:
             return jsonify({
@@ -1003,7 +1164,7 @@ def api_search():
     
     except requests.exceptions.RequestException as e:
         return jsonify({
-            'error': f'Proxy error via {target["name"]}',
+            'error': f'Proxy error',
             'details': str(e),
             'query': query
         }), 502
@@ -1490,10 +1651,14 @@ def download_track():
     try:
         # Step 1: Get track metadata from /info/ endpoint
         print(f"[DOWNLOAD] Fetching track metadata...", flush=True)
-        target = next(url_iterator)
-        info_url = f"{target['url']}/info/?id={track_id}"
         
-        info_response = requests.get(info_url, timeout=10)
+        info_response, target = make_request_with_retry_rotating_mirrors(
+            f"/info/?id={track_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
         if not info_response.ok:
             print(f"[DOWNLOAD] ERROR: Failed to get track info. Status: {info_response.status_code}", flush=True)
             return jsonify({'error': f'Failed to get track info. Status: {info_response.status_code}'}), 502
@@ -1645,9 +1810,13 @@ def download_track():
         last_manifest_status = None
 
         for quality in quality_candidates:
-            target = next(url_iterator)
-            manifest_url = f"{target['url']}/track/?id={track_id}&quality={quality}"
-            manifest_response = requests.get(manifest_url, timeout=10)
+            manifest_response, target = make_request_with_retry_rotating_mirrors(
+                f"/track/?id={track_id}&quality={quality}",
+                url_iterator,
+                method='GET',
+                timeout=10,
+                max_retries=3
+            )
             last_manifest_status = manifest_response.status_code
 
             if not manifest_response.ok:
@@ -1743,7 +1912,7 @@ def download_track():
         
         # Step 7: Download the actual audio file from Tidal CDN
         print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
-        track_response = requests.get(download_url, timeout=30)
+        track_response = make_request_with_retry(download_url, method='GET', timeout=60, max_retries=3, backoff_factor=2.0)
         
         if not track_response.ok:
             print(f"[DOWNLOAD] ERROR: Failed to download track. Status: {track_response.status_code}", flush=True)

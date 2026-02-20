@@ -778,7 +778,7 @@ class App {
         this.displayMessage('Searching...');
 
         try {
-            const response = await fetch(`/search/?${searchType}=${encodeURIComponent(query)}`);
+            const response = await this.fetchWithRetry(`/search/?${searchType}=${encodeURIComponent(query)}`);
 
             if (!response.ok) {
                 throw new Error('Search failed');
@@ -1501,6 +1501,49 @@ class App {
         return div.innerHTML;
     }
 
+    private async fetchWithRetry(
+        url: string,
+        options?: RequestInit,
+        maxRetries: number = 3
+    ): Promise<Response> {
+        let lastError: Error | null = null;
+        
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, options);
+                
+                // Only retry on 5xx errors or connection issues
+                if (response.status < 500) {
+                    return response;
+                }
+                
+                // 5xx error - log and retry
+                lastError = new Error(`HTTP ${response.status}`);
+                if (attempt < maxRetries) {
+                    const delay = 1000 * Math.pow(2, attempt);
+                    console.log(`[RETRY] HTTP ${response.status} on attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                
+                // Last attempt, return the response
+                return response;
+            } catch (error) {
+                lastError = error as Error;
+                if (attempt < maxRetries) {
+                    const delay = 1000 * Math.pow(2, attempt);
+                    console.log(`[RETRY] ${(error as Error).message} on attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                // Last attempt, throw the error
+                throw error;
+            }
+        }
+        
+        throw lastError || new Error('Fetch failed');
+    }
+
     private displayMessage(message: string, retryFn?: () => Promise<void>): void {
         this.stopPlayback();
         this.lastRetryFunction = retryFn || null;
@@ -1777,7 +1820,7 @@ class App {
                 }, 200);
             }
             
-            const response = await fetch('/api/download', {
+            const response = await this.fetchWithRetry('/api/download', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1793,7 +1836,7 @@ class App {
                     fileNamingLoose: this.downloadSettings.fileNamingLoose
                 }),
                 signal: this.currentDownloadController?.signal
-            });
+            }, 3);
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
             
