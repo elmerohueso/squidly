@@ -131,6 +131,9 @@ class App {
     private fileNamingLooseInput: HTMLInputElement;
     private streamQualityHighInput: HTMLInputElement;
     private streamQualityLowInput: HTMLInputElement;
+    private listenbrainzTokenInput: HTMLInputElement;
+    private saveLbConfigButton: HTMLButtonElement;
+    private lbConfigStatusEl: HTMLElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
@@ -170,6 +173,9 @@ class App {
         this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
         this.streamQualityHighInput = document.getElementById('streamQualityHigh') as HTMLInputElement;
         this.streamQualityLowInput = document.getElementById('streamQualityLow') as HTMLInputElement;
+        this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
+        this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
+        this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
         
         this.initializeEventListeners();
         this.streamQuality = this.loadStreamQualityFromCookie();
@@ -177,6 +183,7 @@ class App {
         this.applySettingsToForm(this.downloadSettings);
         this.applyStreamQualityToForm();
         void this.fetchDownloadSettingsFromServer();
+        void this.loadListenbrainzConfig();
         this.updateEndpointStatus(); // Initial load
         
         // Update status every 30 seconds
@@ -207,6 +214,7 @@ class App {
         this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
+        this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
 
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
@@ -259,6 +267,16 @@ class App {
                 if (albumId) {
                     e.stopPropagation();
                     void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    return;
+                }
+            }
+            
+            // Check for playlist card clicks
+            const playlistCard = target.closest('.playlist-card');
+            if (playlistCard) {
+                const playlistId = playlistCard.getAttribute('data-playlist-id');
+                if (playlistId) {
+                    void this.fetchListenbrainzPlaylistTracks(playlistId);
                     return;
                 }
             }
@@ -459,6 +477,57 @@ class App {
         }
     }
 
+    private async loadListenbrainzConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/listenbrainz/config');
+            if (response.ok) {
+                const data = await response.json();
+                this.lbConfigStatusEl.textContent = data.has_token ? '✓ Token configured' : '';
+                this.lbConfigStatusEl.style.color = data.has_token ? 'var(--accent-primary)' : '';
+            }
+        } catch (error) {
+            console.warn('Failed to load ListenBrainz config.', error);
+        }
+    }
+
+    private async saveListenbrainzConfig(): Promise<void> {
+        const userToken = this.listenbrainzTokenInput.value.trim();
+
+        if (!userToken) {
+            this.lbConfigStatusEl.textContent = '⚠ User token is required';
+            this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/listenbrainz/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_token: userToken
+                })
+            });
+
+            if (response.ok) {
+                this.lbConfigStatusEl.textContent = '✓ Configuration saved';
+                this.lbConfigStatusEl.style.color = 'var(--accent-primary)';
+                this.listenbrainzTokenInput.value = '';
+                // Clear status message after 3 seconds
+                setTimeout(() => {
+                    this.lbConfigStatusEl.textContent = '';
+                }, 3000);
+            } else {
+                this.lbConfigStatusEl.textContent = '✗ Failed to save configuration';
+                this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (error) {
+            console.error('Error saving ListenBrainz config:', error);
+            this.lbConfigStatusEl.textContent = '✗ Error saving configuration';
+            this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+        }
+    }
 
     private async updateEndpointStatus(): Promise<void> {
         try {
@@ -531,6 +600,8 @@ class App {
         const searchType = this.searchTypeSelect.value;
         if (searchType === 'lastfm') {
             this.searchInput.placeholder = 'Enter Last.fm playlist URL...';
+        } else if (searchType === 'listenbrainz') {
+            this.searchInput.placeholder = 'Enter ListenBrainz username...';
         } else if (searchType === 'a') {
             this.searchInput.placeholder = 'Search for artists...';
         } else if (searchType === 'al') {
@@ -541,9 +612,15 @@ class App {
     }
 
     private async handleSearch(): Promise<void> {
-        const query = this.searchInput.value.trim();
         const searchType = this.searchTypeSelect.value;
+        const query = this.searchInput.value.trim();
         
+        if (searchType === 'listenbrainz') {
+            // Handle ListenBrainz playlists without requiring query
+            await this.handleListenbrainzPlaylists();
+            return;
+        }
+
         if (!query) {
             this.displayMessage('Please enter a search query');
             return;
@@ -679,6 +756,221 @@ class App {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process Last.fm playlist'}`);
             console.error('Last.fm playlist error:', error);
         }
+    }
+
+    private async handleListenbrainzPlaylists(): Promise<void> {
+        const username = this.searchInput.value.trim();
+        
+        if (!username) {
+            this.displayMessage('Please enter ListenBrainz username');
+            return;
+        }
+
+        this.displayMessage('Loading ListenBrainz playlists...');
+
+        try {
+            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}`);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
+                throw new Error(errorData.error || 'Failed to fetch ListenBrainz playlists');
+            }
+
+            const data = await response.json();
+            const playlistsData = data.playlists || [];
+
+            if (playlistsData.length === 0) {
+                this.displayMessage('No recommended playlists found on ListenBrainz');
+                return;
+            }
+
+            // Extract playlist objects from the response structure
+            const playlists = playlistsData
+                .map((item: any) => item.playlist)
+                .filter((playlist: any) => playlist && playlist.title);
+
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <h2>ListenBrainz Playlists (${playlists.length})</h2>
+                </div>
+                <div class="results-list">
+                    ${playlists.map((playlist: any) => this.formatPlaylistCard(playlist)).join('')}
+                </div>
+            `;
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlists'}`);
+            console.error('ListenBrainz playlists error:', error);
+        }
+    }
+
+    private formatPlaylistCard(playlist: any): string {
+        const title = this.escapeHtml(playlist.title || 'Unknown');
+        const creator = this.escapeHtml(playlist.creator || 'Unknown');
+        const annotation = this.escapeHtml(playlist.annotation || '');
+
+        // Extract public status from extension
+        const isPublic = playlist.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.public || false;
+        
+        // Extract identifier (which is the full URL)
+        const playlistId = playlist.identifier ? playlist.identifier : '';
+
+        return `
+            <div class="playlist-card" data-playlist-id="${this.escapeHtml(playlistId)}">
+                <div class="playlist-info">
+                    <h3 class="playlist-title">${title}</h3>
+                    <p class="playlist-creator">by ${creator}</p>
+                    ${annotation ? `<p class="playlist-description">${annotation}</p>` : ''}
+                    ${isPublic ? '<span class="playlist-badge">Public</span>' : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    private async fetchListenbrainzPlaylistTracks(playlistId: string): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.stopPlayback();
+        this.displayMessage('Loading ListenBrainz playlist tracks...');
+
+        try {
+            // Extract MBID from identifier URL
+            // The identifier is like "https://listenbrainz.org/playlist/048c5c53-f62d-4b47-abcc-8c6992f69445"
+            const mbidMatch = playlistId.match(/playlist\/([a-f0-9-]+)$/i);
+            if (!mbidMatch || !mbidMatch[1]) {
+                throw new Error('Invalid playlist identifier format');
+            }
+
+            const playlistMbid = mbidMatch[1];
+            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}`);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlist' }));
+                throw new Error(errorData.error || 'Failed to fetch ListenBrainz playlist');
+            }
+
+            const data = await response.json();
+            const playlist = data.playlist;
+
+            if (!playlist) {
+                this.displayMessage('No playlist data found');
+                return;
+            }
+
+            // Extract tracks from the playlist
+            const tracks = playlist.track || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this playlist');
+                return;
+            }
+
+            // Get playlist info for display
+            const playlistTitle = playlist.title || 'Untitled Playlist';
+            const playlistCreator = playlist.creator || 'Unknown';
+
+            // Set up initial display with progress bar for searching
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(playlistTitle)}</h2>
+                        <p class="playlist-creator-display">by ${this.escapeHtml(playlistCreator)}</p>
+                    </div>
+                    <div class="progress-info">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${tracks.length}</p>
+                    </div>
+                </div>
+                <div class="results-list" id="listenbrainzResultsList"></div>
+            `;
+
+            const resultsList = document.getElementById('listenbrainzResultsList');
+            const progressBar = document.getElementById('lastfmProgress');
+            const progressCount = document.getElementById('progressCount');
+            let foundCount = 0;
+
+            // Search for each track progressively
+            for (let i = 0; i < tracks.length; i++) {
+                const lbTrack = tracks[i];
+                const artists = lbTrack.creator || 'Unknown';
+                const searchQuery = `${lbTrack.title} ${artists}`;
+
+                try {
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+                    
+                    if (searchResponse.ok) {
+                        const searchData = await searchResponse.json();
+                        const items = searchData.data?.items || [];
+                        
+                        if (items.length > 0) {
+                            // Add the first match to results
+                            const trackCard = this.formatTrackCard(items[0], false);
+                            if (resultsList) {
+                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                            }
+                            foundCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to search for ${searchQuery}:`, error);
+                }
+
+                // Update progress
+                const progress = ((i + 1) / tracks.length) * 100;
+                if (progressBar) {
+                    progressBar.style.width = `${progress}%`;
+                }
+                if (progressCount) {
+                    progressCount.textContent = (i + 1).toString();
+                }
+            }
+
+            // Update final message
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${tracks.length}</strong> tracks`;
+            }
+
+            // Create and add Download All button after searching is complete
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
+                resultsHeaderTop.appendChild(downloadAllBtn);
+            }
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlist'}`);
+            console.error('ListenBrainz playlist error:', error);
+        }
+    }
+
+    private convertListenbrainzTrackToTrack(lbTrack: any): Track | null {
+        // ListenBrainz track format from JSPF
+        // Example: { identifier: "https://musicbrainz.org/track/...", title: "...", creator: "...", duration: ... }
+        if (!lbTrack.title) {
+            return null;
+        }
+
+        return {
+            id: Math.random() * 1000000, // Generate a temporary ID since ListenBrainz doesn't provide numeric IDs
+            title: lbTrack.title || 'Unknown',
+            duration: lbTrack.duration ? Math.floor(lbTrack.duration / 1000) : undefined,
+            artists: lbTrack.creator 
+                ? [{ id: 0, name: lbTrack.creator }]
+                : [],
+            artist: lbTrack.creator 
+                ? { id: 0, name: lbTrack.creator }
+                : undefined,
+            album: undefined,
+            quality: undefined,
+            audioQuality: undefined,
+            cover: undefined,
+            trackNumber: undefined
+        };
     }
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {

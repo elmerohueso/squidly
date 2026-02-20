@@ -41,6 +41,7 @@
                     <option value="a">Artists</option>
                     <option value="al">Albums</option>
                     <option value="lastfm">Last.fm Playlist</option>
+                    <option value="listenbrainz">ListenBrainz Playlists</option>
                 </select>
                 <input 
                     type="text" 
@@ -144,6 +145,14 @@
                         <span>Low</span>
                     </label>
                 </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-section-title">ListenBrainz</div>
+                <label class="settings-label" for="listenbrainzToken">User Token</label>
+                <input type="password" id="listenbrainzToken" class="settings-input" placeholder="Your ListenBrainz user token">
+                <p class="settings-hint">Get your token from your <a href="https://listenbrainz.org/profile/" target="_blank" style="color: var(--accent-primary); text-decoration: none;">ListenBrainz profile</a></p>
+                <button id="saveLbConfig" class="save-button" style="margin-top: 1rem;">Save ListenBrainz Config</button>
+                <p class="settings-note" id="lbConfigStatus"></p>
             </div>
         </div>
     </div>

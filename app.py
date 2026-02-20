@@ -88,6 +88,52 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listenbrainz_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            user_token TEXT,
+            username TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+def get_listenbrainz_config():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT user_token
+        FROM listenbrainz_config
+        WHERE id = 1
+        """
+    ).fetchone()
+    conn.close()
+    
+    if row is None:
+        return {'user_token': None}
+    
+    return {
+        'user_token': row['user_token']
+    }
+
+def save_listenbrainz_config(user_token):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO listenbrainz_config (id, user_token, username, updated_at)
+        VALUES (1, ?, NULL, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            user_token = excluded.user_token,
+            updated_at = excluded.updated_at
+        """,
+        (user_token, now)
+    )
     conn.commit()
     conn.close()
 
@@ -1655,3 +1701,112 @@ def endpoints_status():
             'offline': sum(1 for e in endpoints if not e.get('online'))
         }
     })
+
+@app.route('/api/listenbrainz/config', methods=['GET'])
+def get_listenbrainz_config_endpoint():
+    """Get the current ListenBrainz configuration"""
+    config = get_listenbrainz_config()
+    return jsonify({
+        'has_token': config['user_token'] is not None
+    })
+
+@app.route('/api/listenbrainz/config', methods=['POST'])
+def save_listenbrainz_config_endpoint():
+    """Save ListenBrainz user token"""
+    payload = request.get_json()
+    
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+    
+    user_token = payload.get('user_token')
+    
+    if not user_token:
+        return jsonify({'error': 'user_token is required'}), 400
+    
+    save_listenbrainz_config(user_token)
+    return jsonify({
+        'success': True
+    })
+
+@app.route('/api/listenbrainz/playlists', methods=['GET'])
+def get_listenbrainz_playlists():
+    """Fetch recommended playlists created for user from ListenBrainz"""
+    config = get_listenbrainz_config()
+    
+    if not config['user_token']:
+        return jsonify({'error': 'ListenBrainz token not configured'}), 400
+    
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'username parameter is required'}), 400
+    
+    try:
+        headers = {'Authorization': f'Token {config["user_token"]}'}
+        endpoints = [
+            f'https://api.listenbrainz.org/1/user/{username}/playlists/createdfor',
+            f'https://api.listenbrainz.org/1/user/{username}/playlists',
+            f'https://api.listenbrainz.org/1/user/{username}/playlists/collaborator'
+        ]
+
+        combined_playlists = []
+        seen_identifiers = set()
+        total_count = 0
+        success_count = 0
+        errors = []
+
+        for url in endpoints:
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                success_count += 1
+
+                count = data.get('count')
+                if isinstance(count, int):
+                    total_count += count
+
+                for item in data.get('playlists', []) or []:
+                    playlist = item.get('playlist') if isinstance(item, dict) else None
+                    if not isinstance(playlist, dict):
+                        continue
+
+                    if isinstance(count, int) and 'count' not in playlist:
+                        playlist['count'] = count
+
+                    identifier = playlist.get('identifier')
+                    if identifier and identifier in seen_identifiers:
+                        continue
+                    if identifier:
+                        seen_identifiers.add(identifier)
+
+                    combined_playlists.append({'playlist': playlist})
+
+            except requests.exceptions.RequestException as e:
+                errors.append(str(e))
+
+        if success_count == 0:
+            return jsonify({'error': f'Failed to fetch from ListenBrainz: {"; ".join(errors)}'}), 500
+
+        return jsonify({
+            'count': total_count,
+            'offset': 0,
+            'playlist_count': len(combined_playlists),
+            'playlists': combined_playlists
+        })
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to fetch from ListenBrainz: {str(e)}'}), 500
+
+@app.route('/api/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
+def get_listenbrainz_playlist(playlist_mbid):
+    """Fetch a ListenBrainz playlist and its tracks by MBID"""
+    try:
+        url = f'https://api.listenbrainz.org/1/playlist/{playlist_mbid}'
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        return jsonify(data)
+    
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Failed to fetch playlist from ListenBrainz: {str(e)}'}), 500

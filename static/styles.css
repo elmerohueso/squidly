@@ -176,6 +176,7 @@ main {
     margin-bottom: 2rem;
     display: flex;
     gap: 0.75rem;
+    align-items: center;
 }
 
 .search-type-select {
@@ -189,7 +190,12 @@ main {
     transition: all var(--transition-normal);
     outline: none;
     font-weight: 500;
-    min-width: 110px;
+    width: 140px;
+    height: 3.625rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .search-type-select:hover {
@@ -217,6 +223,7 @@ main {
     color: var(--text-primary);
     transition: all var(--transition-normal);
     outline: none;
+    height: 3.625rem;
 }
 
 .search-bar::placeholder {
@@ -606,6 +613,61 @@ main {
     transition: stroke-dashoffset 0.3s ease;
 }
 
+/* === Playlist Card === */
+.playlist-card {
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 1.25rem 1rem;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.playlist-card:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.playlist-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.playlist-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.playlist-creator {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.playlist-description {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin: 0.5rem 0 0 0;
+    white-space: normal;
+}
+
+.playlist-badge {
+    display: inline-block;
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+    width: fit-content;
+}
+
 /* Old result-item styles kept for backward compatibility */
 .result-item {
     background: var(--bg-secondary);
@@ -917,6 +979,28 @@ footer p {
     color: var(--text-muted);
     border-top: 1px solid var(--border-color);
     padding-top: 1rem;
+}
+
+.save-button {
+    padding: 0.75rem 2rem;
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    width: 100%;
+}
+
+.save-button:hover {
+    background: var(--accent-secondary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+.save-button:active {
+    transform: translateY(0);
 }
 
 .format-toggle {
