@@ -6,13 +6,14 @@ import base64
 import requests
 import sqlite3
 from itertools import cycle
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import sys
 import subprocess
 import shutil
 import re
 import threading
+import socket
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
@@ -41,6 +42,7 @@ DB_PATH = os.path.join(data_dir, 'squidly.db')
 DOWNLOADS_ROOT = '/downloads'
 DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
 DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
+WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 
 # Create downloads directories if they don't exist
 full_albums_path = os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER)
@@ -287,35 +289,24 @@ def init_db():
         """
         CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            track_id TEXT,
-            artist TEXT NOT NULL,
-            album TEXT NOT NULL,
-            title TEXT NOT NULL,
-            format TEXT,
-            download_status TEXT,
-            conversion_status TEXT,
-            playlist_name TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            result_json TEXT,
+            error_message TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 20,
             created_at TEXT NOT NULL,
-            last_attempt_at TEXT,
-            attempt_count INTEGER DEFAULT 0,
-            max_attempts INTEGER DEFAULT 20
+            updated_at TEXT NOT NULL,
+            run_after TEXT,
+            locked_at TEXT,
+            locked_by TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            priority INTEGER NOT NULL DEFAULT 0
         )
         """
     )
-    
-    # Add new columns to existing jobs tables (backward compatibility)
-    columns = {
-        row['name']
-        for row in cur.execute("PRAGMA table_info(jobs)").fetchall()
-    }
-    if 'track_id' not in columns:
-        cur.execute("ALTER TABLE jobs ADD COLUMN track_id TEXT")
-    if 'format' not in columns:
-        cur.execute("ALTER TABLE jobs ADD COLUMN format TEXT")
-    if 'download_status' not in columns:
-        cur.execute("ALTER TABLE jobs ADD COLUMN download_status TEXT")
-    if 'conversion_status' not in columns:
-        cur.execute("ALTER TABLE jobs ADD COLUMN conversion_status TEXT")
     
     conn.commit()
     conn.close()
@@ -400,9 +391,65 @@ def save_plex_config(server_url, api_token, library_name):
     conn.commit()
     conn.close()
 
+def serialize_job_payload(payload):
+    try:
+        return json.dumps(payload, separators=(',', ':'), sort_keys=True)
+    except (TypeError, ValueError):
+        return json.dumps(payload, default=str, separators=(',', ':'), sort_keys=True)
+
+def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
+    now = datetime.utcnow().isoformat() + 'Z'
+    payload_json = serialize_job_payload(payload)
+    scheduled_at = run_after or now
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO jobs (
+            job_type,
+            status,
+            payload_json,
+            result_json,
+            error_message,
+            attempt_count,
+            max_attempts,
+            created_at,
+            updated_at,
+            run_after,
+            locked_at,
+            locked_by,
+            started_at,
+            finished_at,
+            priority
+        )
+        VALUES (?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)
+        """,
+        (
+            job_type,
+            status,
+            payload_json,
+            max_attempts,
+            now,
+            now,
+            scheduled_at,
+            priority
+        )
+    )
+    job_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return job_id
+
 def queue_pending_playlist_addition(artist, album, title, playlist_name):
     """Add a track to the pending playlist additions queue."""
-    now = datetime.utcnow().isoformat() + 'Z'
+    payload = {
+        'artist': artist,
+        'album': album,
+        'title': title,
+        'playlist_name': playlist_name
+    }
+    payload_json = serialize_job_payload(payload)
     conn = get_db_connection()
     cur = conn.cursor()
     
@@ -410,45 +457,56 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name):
     existing = cur.execute(
         """
         SELECT id FROM jobs
-        WHERE artist = ? AND album = ? AND title = ? AND playlist_name = ?
+        WHERE job_type = ?
+          AND payload_json = ?
+          AND status IN ('queued', 'in_progress', 'failed')
         """,
-        (artist, album, title, playlist_name)
+        ('plex_add', payload_json)
     ).fetchone()
     
     if existing:
         print(f"[PLEX_QUEUE] Track already in queue: {artist} - {title}", flush=True)
         conn.close()
         return
-    
-    cur.execute(
-        """
-        INSERT INTO jobs
-        (artist, album, title, playlist_name, created_at, attempt_count)
-        VALUES (?, ?, ?, ?, ?, 0)
-        """,
-        (artist, album, title, playlist_name, now)
-    )
-    conn.commit()
     conn.close()
-    print(f"[PLEX_QUEUE] Queued for retry: {artist} - {title}", flush=True)
+    job_id = enqueue_job('plex_add', payload)
+    print(f"[PLEX_QUEUE] Queued for retry (job {job_id}): {artist} - {title}", flush=True)
 
 def get_pending_playlist_additions():
     """Get all pending playlist additions that haven't exceeded max attempts."""
+    now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
     rows = cur.execute(
         """
-        SELECT id, artist, album, title, playlist_name, attempt_count, max_attempts
+        SELECT id, payload_json, attempt_count, max_attempts
         FROM jobs
-        WHERE attempt_count < max_attempts
+        WHERE job_type = ?
+          AND status IN ('queued', 'failed')
+          AND attempt_count < max_attempts
+          AND (run_after IS NULL OR run_after <= ?)
         ORDER BY created_at ASC
         """
+        ('plex_add', now)
     ).fetchall()
     conn.close()
-    
-    return [dict(row) for row in rows]
 
-def update_pending_addition_attempt(addition_id):
+    additions = []
+    for row in rows:
+        try:
+            payload = json.loads(row['payload_json'])
+        except (TypeError, ValueError):
+            payload = {}
+        additions.append({
+            'id': row['id'],
+            'attempt_count': row['attempt_count'],
+            'max_attempts': row['max_attempts'],
+            'payload': payload
+        })
+
+    return additions
+
+def update_pending_addition_attempt(addition_id, error_message=None):
     """Increment the attempt count and update last_attempt_at."""
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
@@ -456,24 +514,697 @@ def update_pending_addition_attempt(addition_id):
     cur.execute(
         """
         UPDATE jobs
-        SET attempt_count = attempt_count + 1, last_attempt_at = ?
-        WHERE id = ?
+        SET attempt_count = attempt_count + 1,
+            status = 'failed',
+            updated_at = ?,
+            run_after = ?,
+            error_message = COALESCE(?, error_message)
+        WHERE id = ? AND job_type = ?
         """,
-        (now, addition_id)
+        (now, now, error_message, addition_id, 'plex_add')
     )
     conn.commit()
     conn.close()
 
 def remove_pending_addition(addition_id):
     """Remove a successfully added track from the queue."""
+    now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "DELETE FROM job_queue WHERE id = ?",
-        (addition_id,)
+        """
+        UPDATE jobs
+        SET status = 'succeeded',
+            updated_at = ?,
+            finished_at = ?
+        WHERE id = ? AND job_type = ?
+        """,
+        (now, now, addition_id, 'plex_add')
     )
     conn.commit()
     conn.close()
+
+def compute_job_backoff_seconds(attempt_count):
+    base = 30
+    delay = base * (2 ** max(0, attempt_count - 1))
+    return min(delay, 3600)
+
+class ManifestDownloadError(Exception):
+    pass
+
+class TransientDownloadError(Exception):
+    pass
+
+class ManifestDownloadError(Exception):
+    pass
+
+class TransientDownloadError(Exception):
+    pass
+
+def claim_next_job(job_type):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("BEGIN IMMEDIATE")
+    row = cur.execute(
+        """
+        SELECT id, payload_json, attempt_count, max_attempts
+        FROM jobs
+        WHERE job_type = ?
+          AND status IN ('queued', 'failed')
+          AND attempt_count < max_attempts
+          AND (run_after IS NULL OR run_after <= ?)
+        ORDER BY priority DESC, created_at ASC
+        LIMIT 1
+        """,
+        (job_type, now)
+    ).fetchone()
+
+    if row is None:
+        conn.commit()
+        conn.close()
+        return None
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'in_progress',
+            locked_at = ?,
+            locked_by = ?,
+            started_at = COALESCE(started_at, ?),
+            updated_at = ?
+        WHERE id = ? AND status IN ('queued', 'failed')
+        """,
+        (now, WORKER_ID, now, now, row['id'])
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        'id': row['id'],
+        'payload_json': row['payload_json'],
+        'attempt_count': row['attempt_count'],
+        'max_attempts': row['max_attempts']
+    }
+
+def mark_job_succeeded(job_id, result):
+    now = datetime.utcnow().isoformat() + 'Z'
+    result_json = serialize_job_payload(result) if result is not None else None
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'succeeded',
+            result_json = ?,
+            error_message = NULL,
+            updated_at = ?,
+            finished_at = ?,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = ?
+        """,
+        (result_json, now, now, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def update_job_progress(job_id, updates):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT result_json
+        FROM jobs
+        WHERE id = ?
+        """,
+        (job_id,)
+    ).fetchone()
+
+    try:
+        current = json.loads(row['result_json']) if row and row['result_json'] else {}
+    except (TypeError, ValueError):
+        current = {}
+
+    if not isinstance(current, dict):
+        current = {}
+
+    merged = {**current, **updates}
+    result_json = serialize_job_payload(merged)
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET result_json = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (result_json, now, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
+    now = datetime.utcnow().isoformat() + 'Z'
+    next_attempt = attempt_count + 1
+    finished_at = None
+    run_after = None
+
+    if next_attempt >= max_attempts:
+        finished_at = now
+    else:
+        delay_seconds = compute_job_backoff_seconds(next_attempt)
+        run_after = (datetime.utcnow() + timedelta(seconds=delay_seconds)).isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'failed',
+            attempt_count = ?,
+            error_message = ?,
+            updated_at = ?,
+            finished_at = ?,
+            run_after = ?,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = ?
+        """,
+        (next_attempt, error_message, now, finished_at, run_after, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def mark_job_retrying(job_id, attempt_count, error_message):
+    now = datetime.utcnow().isoformat() + 'Z'
+    next_attempt = attempt_count + 1
+    delay_seconds = compute_job_backoff_seconds(next_attempt)
+    run_after = (datetime.utcnow() + timedelta(seconds=delay_seconds)).isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'queued',
+            attempt_count = ?,
+            error_message = ?,
+            updated_at = ?,
+            run_after = ?,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = ?
+        """,
+        (next_attempt, error_message, now, run_after, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def mark_job_retrying(job_id, attempt_count, error_message):
+    now = datetime.utcnow().isoformat() + 'Z'
+    next_attempt = attempt_count + 1
+    delay_seconds = compute_job_backoff_seconds(next_attempt)
+    run_after = (datetime.utcnow() + timedelta(seconds=delay_seconds)).isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'queued',
+            attempt_count = ?,
+            error_message = ?,
+            updated_at = ?,
+            run_after = ?,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = ?
+        """,
+        (next_attempt, error_message, now, run_after, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def process_download_job(job_id, payload):
+    track_id = payload.get('trackId')
+    file_format = payload.get('format', 'original')
+    download_type = payload.get('downloadType', 'loose')
+    stages = {
+        'downloaded': 'pending',
+        'id3_tagged': 'pending',
+        'converted': 'pending',
+        'written': 'pending',
+        'playlist_added': 'pending'
+    }
+
+    if not track_id:
+        raise ValueError('trackId is required')
+
+    if download_type not in ('album', 'loose'):
+        download_type = 'loose'
+
+    file_naming = payload.get('fileNaming')
+    if not file_naming:
+        if download_type == 'album':
+            file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
+        else:
+            file_naming = payload.get('fileNamingLoose') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose']
+
+    if file_format not in ('original', 'mp3'):
+        raise ValueError('Invalid format value')
+
+    target_folder_name = DOWNLOADS_FULL_ALBUMS_FOLDER if download_type == 'album' else DOWNLOADS_LOOSE_TRACKS_FOLDER
+    downloads_folder = os.path.join(DOWNLOADS_ROOT, target_folder_name)
+
+    print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
+    print(f"[DOWNLOAD] Format: {file_format}", flush=True)
+    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
+    print(f"[DOWNLOAD] Download type: {download_type}", flush=True)
+    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
+
+    if not os.path.exists(downloads_folder):
+        print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
+        os.makedirs(downloads_folder, exist_ok=True)
+
+    print(f"[DOWNLOAD] Fetching track metadata...", flush=True)
+    try:
+        info_response, target = make_request_with_retry_rotating_mirrors(
+            f"/info/?id={track_id}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+    except requests.exceptions.RequestException as e:
+        raise TransientDownloadError(f"Failed to fetch track info: {str(e)}") from e
+
+    if not info_response.ok:
+        raise TransientDownloadError(f"Failed to get track info. Status: {info_response.status_code}")
+
+    info_data = info_response.json()
+    print(f"[DOWNLOAD] Track info response structure: {info_data.keys() if isinstance(info_data, dict) else type(info_data)}", flush=True)
+
+    track_info = info_data.get('data', info_data) if isinstance(info_data, dict) else {}
+    track_metadata = track_info.get('track', track_info) if 'track' in track_info else track_info
+
+    artist_name = 'Unknown Artist'
+    album_name = 'Unknown Album'
+    track_title = 'Unknown Track'
+    track_num = '01'
+    release_year = ''
+    cover_url = ''
+    album_id = ''
+
+    if isinstance(track_metadata, dict):
+        if 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
+            artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
+        elif 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
+            artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
+        elif 'artistName' in track_metadata:
+            artist_name = track_metadata['artistName']
+
+        if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+            album_name = track_metadata['album'].get('title', 'Unknown Album')
+
+            if 'id' in track_metadata['album']:
+                album_id = track_metadata['album']['id']
+
+            if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
+                cover_val = track_metadata['album']['cover']
+                if isinstance(cover_val, str) and not cover_val.startswith('http'):
+                    cover_url = format_album_cover_url(cover_val)
+                else:
+                    cover_url = cover_val
+
+            if not cover_url:
+                for cover_field in ['coverUri', 'imageUri', 'image']:
+                    if cover_field in track_metadata['album']:
+                        cover_val = track_metadata['album'][cover_field]
+                        if isinstance(cover_val, str):
+                            if not cover_val.startswith('http'):
+                                cover_url = format_album_cover_url(cover_val)
+                            else:
+                                cover_url = cover_val
+                            break
+
+        elif 'albumTitle' in track_metadata:
+            album_name = track_metadata['albumTitle']
+
+        if 'title' in track_metadata:
+            track_title = track_metadata['title']
+
+        if 'trackNumber' in track_metadata:
+            track_num = str(track_metadata['trackNumber']).zfill(2)
+
+        if 'releaseDate' in track_metadata:
+            date_str = track_metadata['releaseDate']
+            if isinstance(date_str, str) and len(date_str) >= 4:
+                release_year = date_str[:4]
+        elif 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+            date_str = track_metadata['album'].get('releaseDate')
+            if isinstance(date_str, str) and len(date_str) >= 4:
+                release_year = date_str[:4]
+
+        if not release_year:
+            release_year = extract_year_from_text(track_metadata.get('copyright', ''))
+        if not release_year and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+            release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
+
+        if not cover_url and album_id:
+            cover_url = format_album_cover_url(str(album_id))
+
+        if not cover_url:
+            if 'cover' in track_metadata:
+                cover_val = track_metadata['cover']
+                if isinstance(cover_val, str) and not cover_val.startswith('http'):
+                    cover_url = format_album_cover_url(cover_val)
+                else:
+                    cover_url = cover_val
+
+            if not cover_url:
+                for cover_field in ['coverUri', 'imageUri', 'image']:
+                    if cover_field in track_metadata:
+                        cover_val = track_metadata[cover_field]
+                        if isinstance(cover_val, str):
+                            if not cover_val.startswith('http'):
+                                cover_url = format_album_cover_url(cover_val)
+                            else:
+                                cover_url = cover_val
+                            break
+
+    print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
+    update_job_progress(job_id, {
+        'artist': artist_name,
+        'album': album_name,
+        'title': track_title,
+        'playlist_name': payload.get('plex_playlist'),
+        'stages': stages
+    })
+
+    quality_candidates = []
+    media_tags = []
+    audio_quality = None
+    if isinstance(track_metadata, dict):
+        audio_quality = track_metadata.get('audioQuality')
+        media_meta = track_metadata.get('mediaMetadata')
+        if isinstance(media_meta, dict):
+            tags = media_meta.get('tags', [])
+            if isinstance(tags, list):
+                media_tags = tags
+
+    if isinstance(audio_quality, str) and audio_quality:
+        media_tags.append(audio_quality)
+
+    quality_priority = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+    for quality in quality_priority:
+        if quality in media_tags and quality not in quality_candidates:
+            quality_candidates.append(quality)
+
+    if not quality_candidates:
+        quality_candidates = ['HIGH', 'LOW']
+
+    print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
+
+    print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
+    manifest_base64 = None
+    last_manifest_status = None
+
+    for quality in quality_candidates:
+        try:
+            manifest_response, target = make_request_with_retry_rotating_mirrors(
+                f"/track/?id={track_id}&quality={quality}",
+                url_iterator,
+                method='GET',
+                timeout=10,
+                max_retries=3
+            )
+        except requests.exceptions.RequestException as e:
+            raise TransientDownloadError(f"Failed to fetch track manifest: {str(e)}") from e
+        last_manifest_status = manifest_response.status_code
+
+        if not manifest_response.ok:
+            continue
+
+        manifest_data = manifest_response.json()
+        print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
+
+        if isinstance(manifest_data, dict):
+            data = manifest_data.get('data')
+            if isinstance(data, dict):
+                manifest_base64 = data.get('manifest') or data.get('manifestBase64')
+
+            if not manifest_base64:
+                manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
+
+        if isinstance(manifest_base64, str) and manifest_base64:
+            break
+
+    if not isinstance(manifest_base64, str) or not manifest_base64:
+        status_note = f" Status: {last_manifest_status}" if last_manifest_status is not None else ""
+        raise ManifestDownloadError(f"Failed to get track manifest.{status_note}")
+
+    print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
+
+    normalized = manifest_base64.replace('-', '+').replace('_', '/')
+    padding = '=' * (-len(normalized) % 4)
+    manifest_json_bytes = base64.b64decode(normalized + padding)
+    manifest_json = manifest_json_bytes.decode('utf-8')
+    print(f"[DOWNLOAD] Decoded manifest: {manifest_json}", flush=True)
+
+    manifest = json.loads(manifest_json)
+    print(f"[DOWNLOAD] Parsed manifest keys: {manifest.keys()}", flush=True)
+
+    if 'urls' not in manifest or not manifest['urls']:
+        raise Exception('No download URLs found in manifest')
+
+    download_urls = manifest['urls']
+    if not isinstance(download_urls, list) or len(download_urls) == 0:
+        raise Exception('Invalid URLs format in manifest')
+
+    download_url = download_urls[0]
+    print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
+
+    file_ext = 'flac' if file_format == 'original' else 'mp3'
+
+    safe_artist = sanitize_filename_component(artist_name)
+    safe_album = sanitize_filename_component(album_name)
+    safe_title = sanitize_filename_component(track_title)
+    safe_track = sanitize_filename_component(track_num)
+
+    file_path = file_naming.replace('{artist}', safe_artist)
+    file_path = file_path.replace('{album}', safe_album)
+    file_path = file_path.replace('{track}', safe_track)
+    file_path = file_path.replace('{title}', safe_title)
+    file_path = file_path.replace('{ext}', file_ext)
+
+    file_path = clean_path_components(file_path)
+
+    print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
+
+    full_path = os.path.join(downloads_folder, file_path)
+    full_path = os.path.normpath(full_path)
+
+    print(f"[DOWNLOAD] Full output path: {full_path}", flush=True)
+
+    output_dir = os.path.dirname(full_path)
+    print(f"[DOWNLOAD] Creating directory structure: {output_dir}", flush=True)
+
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
+
+    print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
+    try:
+        track_response = make_request_with_retry(download_url, method='GET', timeout=60, max_retries=3, backoff_factor=2.0)
+    except requests.exceptions.RequestException as e:
+        raise TransientDownloadError(f"Failed to download track from CDN: {str(e)}") from e
+
+    if not track_response.ok:
+        raise TransientDownloadError(f"Failed to download track from CDN. Status: {track_response.status_code}")
+
+    print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
+
+    audio_format = detect_audio_format(track_response.content)
+    print(f"[DOWNLOAD] Detected audio format: {audio_format}", flush=True)
+
+    if audio_format == 'unknown':
+        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
+        audio_format = 'flac'
+
+    cover_image_data = None
+    if cover_url:
+        cover_image_data = download_cover_image(cover_url)
+
+    metadata_dict = {
+        'artist': artist_name,
+        'title': track_title,
+        'album': album_name,
+        'year': release_year,
+        'track_number': track_num
+    }
+
+    temp_folder = '/app/temp'
+    os.makedirs(temp_folder, exist_ok=True)
+
+    temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
+    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
+    temp_mp3_path = os.path.join(temp_folder, f'temp_{track_id}.mp3')
+
+    print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
+
+    with open(temp_source_path, 'wb') as f:
+        f.write(track_response.content)
+
+    stages['downloaded'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
+    add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
+    stages['id3_tagged'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    if file_format == 'mp3':
+        print(f"[DOWNLOAD] Format is MP3 - converting staged {temp_source_ext.upper()}", flush=True)
+
+        if audio_format == 'm4a':
+            success = convert_m4a_to_mp3(temp_source_path, temp_mp3_path)
+        else:
+            success = convert_flac_to_mp3(temp_source_path, temp_mp3_path)
+
+        if not success:
+            cleanup_file(temp_source_path)
+            cleanup_file(temp_mp3_path)
+            raise Exception(f"Failed to convert {temp_source_ext.upper()} to MP3")
+
+        shutil.move(temp_mp3_path, full_path)
+        stages['converted'] = 'done'
+        stages['written'] = 'done'
+        update_job_progress(job_id, {'stages': stages})
+        cleanup_file(temp_source_path)
+        cleanup_file(temp_mp3_path)
+
+        print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
+    else:
+        original_ext = 'm4a' if audio_format == 'm4a' else 'flac'
+
+        if not full_path.endswith(f'.{original_ext}'):
+            full_path = full_path.rsplit('.', 1)[0] + f'.{original_ext}'
+            print(f"[DOWNLOAD] Updated output path with correct extension: {full_path}", flush=True)
+
+        print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
+        shutil.move(temp_source_path, full_path)
+        stages['converted'] = 'skipped'
+        stages['written'] = 'done'
+        update_job_progress(job_id, {'stages': stages})
+        cleanup_file(temp_source_path)
+        print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
+
+    plex_config = get_plex_config()
+    playlist_name = payload.get('plex_playlist')
+    if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
+        try:
+            print("[DOWNLOAD] Plex config OK - attempting playlist update", flush=True)
+            track_info = {
+                'artist': artist_name,
+                'album': album_name,
+                'title': track_title
+            }
+            success, plex_message = add_tracks_to_plex_playlist(
+                plex_config['server_url'],
+                plex_config['api_token'],
+                plex_config['library_name'] or 'Music',
+                playlist_name,
+                track_info
+            )
+
+            if success:
+                print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
+                stages['playlist_added'] = 'done'
+                update_job_progress(job_id, {'stages': stages})
+            else:
+                print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
+                if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
+                    queue_pending_playlist_addition(
+                        artist_name,
+                        album_name,
+                        track_title,
+                        playlist_name
+                    )
+                    stages['playlist_added'] = 'queued'
+                    update_job_progress(job_id, {'stages': stages})
+                else:
+                    stages['playlist_added'] = 'failed'
+                    update_job_progress(job_id, {'stages': stages})
+        except Exception as e:
+            print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
+            stages['playlist_added'] = 'failed'
+            update_job_progress(job_id, {'stages': stages})
+    else:
+        missing = []
+        if not plex_config['server_url']:
+            missing.append('server_url')
+        if not plex_config['api_token']:
+            missing.append('api_token')
+        if not playlist_name:
+            missing.append('playlist_name')
+        if missing:
+            print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+        stages['playlist_added'] = 'skipped'
+        update_job_progress(job_id, {'stages': stages})
+
+    return {
+        'file_path': full_path,
+        'format': file_format,
+        'artist': artist_name,
+        'album': album_name,
+        'title': track_title,
+        'playlist_name': playlist_name,
+        'stages': stages
+    }
+
+def download_job_worker():
+    print("[DOWNLOAD_WORKER] Background worker started", flush=True)
+
+    while True:
+        try:
+            job = claim_next_job('download_track')
+            if not job:
+                time.sleep(2)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_download_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                print(f"[DOWNLOAD_WORKER] Job {job['id']} completed", flush=True)
+            except (ManifestDownloadError, TransientDownloadError) as e:
+                if job['attempt_count'] + 1 >= job['max_attempts']:
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                else:
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying (manifest fetch): {str(e)}", flush=True)
+                    mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                time.sleep(1)
+            except (ManifestDownloadError, TransientDownloadError) as e:
+                if job['attempt_count'] + 1 >= job['max_attempts']:
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                else:
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying: {str(e)}", flush=True)
+                    mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                time.sleep(1)
+            except Exception as e:
+                print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[DOWNLOAD_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
 
 def retry_pending_playlist_additions():
     """Background worker that periodically retries failed playlist additions."""
@@ -499,27 +1230,29 @@ def retry_pending_playlist_additions():
             
             for addition in pending:
                 try:
+                    payload = addition.get('payload') or {}
                     track_info = {
-                        'artist': addition['artist'],
-                        'album': addition['album'],
-                        'title': addition['title']
+                        'artist': payload.get('artist', 'Unknown Artist'),
+                        'album': payload.get('album', 'Unknown Album'),
+                        'title': payload.get('title', 'Unknown Track')
                     }
+                    playlist_name = payload.get('playlist_name')
                     
                     success, message = add_tracks_to_plex_playlist(
                         plex_config['server_url'],
                         plex_config['api_token'],
                         plex_config['library_name'] or 'Music',
-                        addition['playlist_name'],
+                        playlist_name,
                         track_info
                     )
                     
                     if success:
-                        print(f"[PLEX_WORKER] Successfully added: {addition['artist']} - {addition['title']}", flush=True)
+                        print(f"[PLEX_WORKER] Successfully added: {track_info['artist']} - {track_info['title']}", flush=True)
                         remove_pending_addition(addition['id'])
                     else:
-                        update_pending_addition_attempt(addition['id'])
+                        update_pending_addition_attempt(addition['id'], message)
                         if addition['attempt_count'] + 1 >= addition['max_attempts']:
-                            print(f"[PLEX_WORKER] Max attempts reached for: {addition['artist']} - {addition['title']}", flush=True)
+                            print(f"[PLEX_WORKER] Max attempts reached for: {track_info['artist']} - {track_info['title']}", flush=True)
                         else:
                             print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
                     
@@ -528,7 +1261,7 @@ def retry_pending_playlist_additions():
                     
                 except Exception as e:
                     print(f"[PLEX_WORKER] Error processing addition {addition['id']}: {str(e)}", flush=True)
-                    update_pending_addition_attempt(addition['id'])
+                    update_pending_addition_attempt(addition['id'], str(e))
         
         except Exception as e:
             print(f"[PLEX_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -1079,6 +1812,11 @@ print("Validation complete, server ready to accept requests.\n", flush=True)
 plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
 plex_retry_thread.start()
 print("Plex playlist retry worker started\n", flush=True)
+
+# Start background worker for processing download jobs
+download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
+download_worker_thread.start()
+print("Download job worker started\n", flush=True)
 
 # Download folders already created and validated at module level above
 
@@ -1814,7 +2552,7 @@ def convert_m4a_to_mp3(m4a_path: str, mp3_path: str) -> bool:
 @app.route('/api/download', methods=['POST'])
 def download_track():
     """
-    Download a track with specified settings.
+    Enqueue a download job with specified settings.
     Expects JSON body with:
     - trackId: integer
     - format: 'original' or 'mp3'
@@ -1840,450 +2578,189 @@ def download_track():
     else:
         file_naming = payload.get('fileNamingLoose') or payload.get('fileNaming') or file_naming_loose
 
-    # Use the mounted downloads volume
-    target_folder_name = DOWNLOADS_FULL_ALBUMS_FOLDER if download_type == 'album' else DOWNLOADS_LOOSE_TRACKS_FOLDER
-    downloads_folder = os.path.join(DOWNLOADS_ROOT, target_folder_name)
-
-    print(f"\n[DOWNLOAD] Request received for track {track_id}", flush=True)
-    print(f"[DOWNLOAD] Format: {file_format}", flush=True)
-    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
-    print(f"[DOWNLOAD] Download type: {download_type}", flush=True)
-    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
-
     if not track_id:
         print(f"[DOWNLOAD] ERROR: trackId is missing", flush=True)
         return jsonify({'error': 'trackId is required'}), 400
 
-    if not os.path.exists(downloads_folder):
-        print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
+    if file_format not in ('original', 'mp3'):
+        return jsonify({'error': 'Invalid format value'}), 400
+
+    job_payload = {
+        'trackId': track_id,
+        'format': file_format,
+        'downloadType': download_type,
+        'fileNaming': file_naming,
+        'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
+        'fileNamingLoose': payload.get('fileNamingLoose') or file_naming_loose,
+        'plex_playlist': payload.get('plex_playlist')
+    }
+
+    job_id = enqueue_job('download_track', job_payload)
+    print(f"[DOWNLOAD] Queued download job {job_id} for track {track_id}", flush=True)
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
+
+@app.route('/api/jobs', methods=['GET'])
+def list_jobs():
+    """
+    List jobs with optional filters.
+    Query parameters:
+    - status: filter by job status
+    - job_type: filter by job type
+    - limit: max number of rows (default 50, max 200)
+    """
+    status_filter = request.args.get('status')
+    job_type_filter = request.args.get('job_type')
+    try:
+        limit = int(request.args.get('limit', '50'))
+    except ValueError:
+        limit = 50
+    limit = max(1, min(limit, 200))
+
+    where_clauses = []
+    params = []
+    if status_filter:
+        where_clauses.append('status = ?')
+        params.append(status_filter)
+    if job_type_filter:
+        where_clauses.append('job_type = ?')
+        params.append(job_type_filter)
+
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    rows = cur.execute(
+        f"""
+        SELECT id, job_type, status, payload_json, result_json, error_message,
+               attempt_count, max_attempts, created_at, updated_at, run_after,
+               locked_at, locked_by, started_at, finished_at, priority
+        FROM jobs
+        {where_sql}
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (*params, limit)
+    ).fetchall()
+    conn.close()
+
+    jobs = []
+    for row in rows:
         try:
-            os.makedirs(downloads_folder, exist_ok=True)
-        except Exception as e:
-            print(f"[DOWNLOAD] ERROR: Failed to create downloads folder: {str(e)}", flush=True)
-            return jsonify({'error': f'Failed to create downloads folder: {str(e)}'}), 500
+            payload = json.loads(row['payload_json'])
+        except (TypeError, ValueError):
+            payload = None
+        try:
+            result = json.loads(row['result_json']) if row['result_json'] else None
+        except (TypeError, ValueError):
+            result = None
+
+        jobs.append({
+            'id': row['id'],
+            'job_type': row['job_type'],
+            'status': row['status'],
+            'payload': payload,
+            'result': result,
+            'error_message': row['error_message'],
+            'attempt_count': row['attempt_count'],
+            'max_attempts': row['max_attempts'],
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+            'run_after': row['run_after'],
+            'locked_at': row['locked_at'],
+            'locked_by': row['locked_by'],
+            'started_at': row['started_at'],
+            'finished_at': row['finished_at'],
+            'priority': row['priority']
+        })
+
+    return jsonify({'jobs': jobs})
+
+@app.route('/api/jobs/<int:job_id>', methods=['GET'])
+def get_job(job_id):
+    """Get job by id."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    row = cur.execute(
+        """
+        SELECT id, job_type, status, payload_json, result_json, error_message,
+               attempt_count, max_attempts, created_at, updated_at, run_after,
+               locked_at, locked_by, started_at, finished_at, priority
+        FROM jobs
+        WHERE id = ?
+        """,
+        (job_id,)
+    ).fetchone()
+    conn.close()
+
+    if row is None:
+        return jsonify({'error': 'Job not found'}), 404
 
     try:
-        # Step 1: Get track metadata from /info/ endpoint
-        print(f"[DOWNLOAD] Fetching track metadata...", flush=True)
-        
-        info_response, target = make_request_with_retry_rotating_mirrors(
-            f"/info/?id={track_id}",
-            url_iterator,
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-        if not info_response.ok:
-            print(f"[DOWNLOAD] ERROR: Failed to get track info. Status: {info_response.status_code}", flush=True)
-            return jsonify({'error': f'Failed to get track info. Status: {info_response.status_code}'}), 502
+        payload = json.loads(row['payload_json'])
+    except (TypeError, ValueError):
+        payload = None
+    try:
+        result = json.loads(row['result_json']) if row['result_json'] else None
+    except (TypeError, ValueError):
+        result = None
 
-        info_data = info_response.json()
-        print(f"[DOWNLOAD] Track info response structure: {info_data.keys() if isinstance(info_data, dict) else type(info_data)}", flush=True)
-        
-        # Extract metadata from different possible response structures
-        track_info = info_data.get('data', info_data) if isinstance(info_data, dict) else {}
-        track_metadata = track_info.get('track', track_info) if 'track' in track_info else track_info
-        
-        artist_name = 'Unknown Artist'
-        album_name = 'Unknown Album'
-        track_title = 'Unknown Track'
-        track_num = '01'
-        release_year = ''
-        cover_url = ''
-        album_id = ''
-        
-        # Try to extract from different possible structures
-        if isinstance(track_metadata, dict):
-            # Try artist
-            if 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
-                artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
-            elif 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
-                artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
-            elif 'artistName' in track_metadata:
-                artist_name = track_metadata['artistName']
-            
-            # Try album
-            if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-                album_name = track_metadata['album'].get('title', 'Unknown Album')
-                
-                # Get album ID for cover URL construction
-                if 'id' in track_metadata['album']:
-                    album_id = track_metadata['album']['id']
-                
-                # Try to get cover from album object
-                if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
-                    cover_val = track_metadata['album']['cover']
-                    # If cover is a string that looks like an ID (not a full URL), construct the URL
-                    if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                        cover_url = format_album_cover_url(cover_val)
-                    else:
-                        cover_url = cover_val
-                
-                # Try alternative cover field names
-                if not cover_url:
-                    for cover_field in ['coverUri', 'imageUri', 'image']:
-                        if cover_field in track_metadata['album']:
-                            cover_val = track_metadata['album'][cover_field]
-                            if isinstance(cover_val, str):
-                                if not cover_val.startswith('http'):
-                                    cover_url = format_album_cover_url(cover_val)
-                                else:
-                                    cover_url = cover_val
-                                break
-                
-            elif 'albumTitle' in track_metadata:
-                album_name = track_metadata['albumTitle']
-            
-            # Try title
-            if 'title' in track_metadata:
-                track_title = track_metadata['title']
-            
-            # Try track number
-            if 'trackNumber' in track_metadata:
-                track_num = str(track_metadata['trackNumber']).zfill(2)
-            
-            # Try to get release date
-            if 'releaseDate' in track_metadata:
-                try:
-                    date_str = track_metadata['releaseDate']
-                    if isinstance(date_str, str) and len(date_str) >= 4:
-                        release_year = date_str[:4]
-                except:
-                    pass
-            elif 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-                if 'releaseDate' in track_metadata['album']:
-                    try:
-                        date_str = track_metadata['album']['releaseDate']
-                        if isinstance(date_str, str) and len(date_str) >= 4:
-                            release_year = date_str[:4]
-                    except:
-                        pass
-            
-            # Fallback to copyright year if release date is unavailable
-            if not release_year:
-                release_year = extract_year_from_text(track_metadata.get('copyright', ''))
-            if not release_year and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-                release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
-            
-            # If still no cover but we have album ID, construct URL from album ID
-            if not cover_url and album_id:
-                cover_url = format_album_cover_url(str(album_id))
-            
-            # Try to get cover from track if not already set
-            if not cover_url:
-                if 'cover' in track_metadata:
-                    cover_val = track_metadata['cover']
-                    if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                        cover_url = format_album_cover_url(cover_val)
-                    else:
-                        cover_url = cover_val
-                
-                # Try alternative track cover field names
-                if not cover_url:
-                    for cover_field in ['coverUri', 'imageUri', 'image']:
-                        if cover_field in track_metadata:
-                            cover_val = track_metadata[cover_field]
-                            if isinstance(cover_val, str):
-                                if not cover_val.startswith('http'):
-                                    cover_url = format_album_cover_url(cover_val)
-                                else:
-                                    cover_url = cover_val
-                                break
-        
-        print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
-        
-        # Step 2: Determine best available quality from track metadata
-        quality_candidates = []
-        media_tags = []
-        audio_quality = None
-        if isinstance(track_metadata, dict):
-            audio_quality = track_metadata.get('audioQuality')
-            media_meta = track_metadata.get('mediaMetadata')
-            if isinstance(media_meta, dict):
-                tags = media_meta.get('tags', [])
-                if isinstance(tags, list):
-                    media_tags = tags
+    return jsonify({
+        'id': row['id'],
+        'job_type': row['job_type'],
+        'status': row['status'],
+        'payload': payload,
+        'result': result,
+        'error_message': row['error_message'],
+        'attempt_count': row['attempt_count'],
+        'max_attempts': row['max_attempts'],
+        'created_at': row['created_at'],
+        'updated_at': row['updated_at'],
+        'run_after': row['run_after'],
+        'locked_at': row['locked_at'],
+        'locked_by': row['locked_by'],
+        'started_at': row['started_at'],
+        'finished_at': row['finished_at'],
+        'priority': row['priority']
+    })
 
-        if isinstance(audio_quality, str) and audio_quality:
-            media_tags.append(audio_quality)
+@app.route('/api/jobs/<int:job_id>/cancel', methods=['POST'])
+def cancel_job(job_id):
+    """Cancel a queued or in-progress job."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-        # Prioritize quality: HI_RES_LOSSLESS/HIRES_LOSSLESS > LOSSLESS > HIGH > LOW
-        quality_priority = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
-        for quality in quality_priority:
-            if quality in media_tags and quality not in quality_candidates:
-                quality_candidates.append(quality)
+    row = cur.execute(
+        """
+        SELECT status
+        FROM jobs
+        WHERE id = ?
+        """,
+        (job_id,)
+    ).fetchone()
 
-        if not quality_candidates:
-            quality_candidates = ['HIGH', 'LOW']
+    if row is None:
+        conn.close()
+        return jsonify({'error': 'Job not found'}), 404
 
-        print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
+    if row['status'] not in ('queued', 'in_progress'):
+        conn.close()
+        return jsonify({'error': f"Job is not cancellable (status={row['status']})"}), 400
 
-        # Step 3: Get the track manifest for download (try multiple qualities)
-        print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
-        manifest_base64 = None
-        last_manifest_status = None
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'cancelled',
+            updated_at = ?,
+            finished_at = ?
+        WHERE id = ?
+        """,
+        (now, now, job_id)
+    )
+    conn.commit()
+    conn.close()
 
-        for quality in quality_candidates:
-            manifest_response, target = make_request_with_retry_rotating_mirrors(
-                f"/track/?id={track_id}&quality={quality}",
-                url_iterator,
-                method='GET',
-                timeout=10,
-                max_retries=3
-            )
-            last_manifest_status = manifest_response.status_code
-
-            if not manifest_response.ok:
-                continue
-
-            manifest_data = manifest_response.json()
-            print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
-
-            if isinstance(manifest_data, dict):
-                data = manifest_data.get('data')
-                if isinstance(data, dict):
-                    manifest_base64 = data.get('manifest') or data.get('manifestBase64')
-
-                if not manifest_base64:
-                    manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
-
-            if isinstance(manifest_base64, str) and manifest_base64:
-                break
-
-        if not isinstance(manifest_base64, str) or not manifest_base64:
-            status_note = f" Status: {last_manifest_status}" if last_manifest_status is not None else ""
-            print(f"[DOWNLOAD] ERROR: No manifest returned from upstream.{status_note}", flush=True)
-            return jsonify({'error': f'Failed to get track manifest.{status_note}'}), 502
-
-        print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
-
-        # Step 4: Decode the base64 manifest to get the actual CDN URLs
-        try:
-            normalized = manifest_base64.replace('-', '+').replace('_', '/')
-            padding = '=' * (-len(normalized) % 4)
-            manifest_json_bytes = base64.b64decode(normalized + padding)
-            manifest_json = manifest_json_bytes.decode('utf-8')
-            print(f"[DOWNLOAD] Decoded manifest: {manifest_json}", flush=True)
-
-            manifest = json.loads(manifest_json)
-            print(f"[DOWNLOAD] Parsed manifest keys: {manifest.keys()}", flush=True)
-        except Exception as e:
-            print(f"[DOWNLOAD] ERROR: Failed to decode base64 manifest: {str(e)}", flush=True)
-            return jsonify({'error': f'Failed to decode manifest: {str(e)}'}), 502
-        
-        # Step 5: Extract the CDN download URL from the manifest
-        if 'urls' not in manifest or not manifest['urls']:
-            print(f"[DOWNLOAD] ERROR: No URLs in manifest", flush=True)
-            return jsonify({'error': 'No download URLs found in manifest'}), 502
-        
-        download_urls = manifest['urls']
-        if not isinstance(download_urls, list) or len(download_urls) == 0:
-            print(f"[DOWNLOAD] ERROR: URLs is not a non-empty list", flush=True)
-            return jsonify({'error': 'Invalid URLs format in manifest'}), 502
-        
-        download_url = download_urls[0]
-        print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
-        
-        # Step 6: Build the file path using the naming template
-        # Note: For 'original' format, we'll use a placeholder extension that will be
-        # corrected after we detect the actual format (FLAC or M4A)
-        file_ext = 'flac' if file_format == 'original' else 'mp3'
-        
-        # Sanitize metadata values before inserting into template
-        safe_artist = sanitize_filename_component(artist_name)
-        safe_album = sanitize_filename_component(album_name)
-        safe_title = sanitize_filename_component(track_title)
-        safe_track = sanitize_filename_component(track_num)
-        
-        # Replace placeholders in the file naming template
-        file_path = file_naming.replace('{artist}', safe_artist)
-        file_path = file_path.replace('{album}', safe_album)
-        file_path = file_path.replace('{track}', safe_track)
-        file_path = file_path.replace('{title}', safe_title)
-        file_path = file_path.replace('{ext}', file_ext)
-        
-        # Clean path components to remove trailing periods and spaces
-        file_path = clean_path_components(file_path)
-        
-        print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
-        
-        # Build full path and normalize separators
-        full_path = os.path.join(downloads_folder, file_path)
-        full_path = os.path.normpath(full_path)
-        
-        print(f"[DOWNLOAD] Full output path: {full_path}", flush=True)
-        
-        # Create all directories in the path
-        output_dir = os.path.dirname(full_path)
-        print(f"[DOWNLOAD] Creating directory structure: {output_dir}", flush=True)
-        
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-            print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
-        except Exception as e:
-            print(f"[DOWNLOAD] ERROR: Failed to create directory: {str(e)}", flush=True)
-            return jsonify({'error': f'Failed to create directory structure: {str(e)}'}), 500
-        
-        # Step 7: Download the actual audio file from Tidal CDN
-        print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
-        track_response = make_request_with_retry(download_url, method='GET', timeout=60, max_retries=3, backoff_factor=2.0)
-        
-        if not track_response.ok:
-            print(f"[DOWNLOAD] ERROR: Failed to download track. Status: {track_response.status_code}", flush=True)
-            return jsonify({'error': f'Failed to download track from CDN. Status: {track_response.status_code}'}), 502
-        
-        print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
-        
-        # Step 7a: Detect the actual audio format from the downloaded blob
-        audio_format = detect_audio_format(track_response.content)
-        print(f"[DOWNLOAD] Detected audio format: {audio_format}", flush=True)
-        
-        if audio_format == 'unknown':
-            print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
-            audio_format = 'flac'
-        
-        # Try to download cover image if URL is available
-        cover_image_data = None
-        if cover_url:
-            cover_image_data = download_cover_image(cover_url)
-        
-        # Prepare metadata for ID3 tags
-        metadata_dict = {
-            'artist': artist_name,
-            'title': track_title,
-            'album': album_name,
-            'year': release_year,
-            'track_number': track_num
-        }
-        
-        # Step 8: Stage to temp, add tags, then convert or move based on format
-        temp_folder = '/app/temp'
-        try:
-            os.makedirs(temp_folder, exist_ok=True)
-            print(f"[DOWNLOAD] Temp folder ready: {temp_folder}", flush=True)
-        except Exception as e:
-            print(f"[DOWNLOAD] ERROR: Failed to create temp folder: {str(e)}", flush=True)
-            return jsonify({'error': f'Failed to create temp folder: {str(e)}'}), 500
-
-        # Use appropriate extension based on detected format
-        temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
-        temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
-        temp_mp3_path = os.path.join(temp_folder, f'temp_{track_id}.mp3')
-        
-        print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
-
-        with open(temp_source_path, 'wb') as f:
-            f.write(track_response.content)
-
-        print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
-        add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
-
-        if file_format == 'mp3':
-            print(f"[DOWNLOAD] Format is MP3 - converting staged {temp_source_ext.upper()}", flush=True)
-
-            # Convert based on source format
-            if audio_format == 'm4a':
-                success = convert_m4a_to_mp3(temp_source_path, temp_mp3_path)
-            else:  # flac or unknown (assumed flac)
-                success = convert_flac_to_mp3(temp_source_path, temp_mp3_path)
-
-            if not success:
-                cleanup_file(temp_source_path)
-                cleanup_file(temp_mp3_path)
-                return jsonify({'error': f'Failed to convert {temp_source_ext.upper()} to MP3'}), 500
-
-            try:
-                shutil.move(temp_mp3_path, full_path)
-            except Exception as e:
-                print(f"[DOWNLOAD] ERROR: Failed to move MP3 to destination: {str(e)}", flush=True)
-                cleanup_file(temp_source_path)
-                cleanup_file(temp_mp3_path)
-                return jsonify({'error': f'Failed to move MP3 to destination: {str(e)}'}), 500
-
-            cleanup_file(temp_source_path)
-            cleanup_file(temp_mp3_path)
-
-            print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
-        else:
-            # Original format requested - save with correct extension
-            original_ext = 'm4a' if audio_format == 'm4a' else 'flac'
-            
-            # Update the file path to use the actual extension
-            if not full_path.endswith(f'.{original_ext}'):
-                full_path = full_path.rsplit('.', 1)[0] + f'.{original_ext}'
-                print(f"[DOWNLOAD] Updated output path with correct extension: {full_path}", flush=True)
-            
-            print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
-            try:
-                shutil.move(temp_source_path, full_path)
-            except Exception as e:
-                print(f"[DOWNLOAD] ERROR: Failed to move {original_ext.upper()} to destination: {str(e)}", flush=True)
-                cleanup_file(temp_source_path)
-                return jsonify({'error': f'Failed to move {original_ext.upper()} to destination: {str(e)}'}), 500
-
-            cleanup_file(temp_source_path)
-            print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
-        
-        # Try to add track to Plex playlist if configured
-        plex_config = get_plex_config()
-        playlist_name = payload.get('plex_playlist')
-        if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
-            try:
-                print(
-                    "[DOWNLOAD] Plex config OK - attempting playlist update",
-                    flush=True
-                )
-                track_info = {
-                    'artist': artist_name,
-                    'album': album_name,
-                    'title': track_title
-                }
-                success, plex_message = add_tracks_to_plex_playlist(
-                    plex_config['server_url'],
-                    plex_config['api_token'],
-                    plex_config['library_name'] or 'Music',
-                    playlist_name,
-                    track_info
-                )
-                
-                if success:
-                    print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
-                else:
-                    print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
-                    # Queue for retry if track not found
-                    if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
-                        queue_pending_playlist_addition(
-                            artist_name,
-                            album_name,
-                            track_title,
-                            playlist_name
-                        )
-            except Exception as e:
-                print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
-        else:
-            missing = []
-            if not plex_config['server_url']:
-                missing.append('server_url')
-            if not plex_config['api_token']:
-                missing.append('api_token')
-            if not playlist_name:
-                missing.append('playlist_name')
-            if missing:
-                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-        
-        return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
-
-    except requests.exceptions.Timeout:
-        print(f"[DOWNLOAD] ERROR: Request timeout", flush=True)
-        return jsonify({'error': 'Download timeout - endpoint took too long to respond'}), 504
-    except requests.exceptions.RequestException as e:
-        print(f"[DOWNLOAD] ERROR: Request exception: {str(e)}", flush=True)
-        return jsonify({'error': f'Download failed: {str(e)}'}), 502
-    except Exception as e:
-        print(f"[DOWNLOAD] ERROR: Unexpected exception: {str(e)}", flush=True)
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': f'Unexpected error: {str(e)}'}), 500
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def download_settings():

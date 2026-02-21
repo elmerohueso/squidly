@@ -19,6 +19,14 @@
                         </svg>
                         <span>Settings</span>
                     </button>
+                    <button id="jobsButton" class="jobs-button" title="Jobs">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="4" y1="6" x2="20" y2="6"></line>
+                            <line x1="4" y1="12" x2="20" y2="12"></line>
+                            <line x1="4" y1="18" x2="20" y2="18"></line>
+                        </svg>
+                        <span>Jobs</span>
+                    </button>
                     <button id="statusButton" class="status-button" title="View mirror status">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
@@ -100,6 +108,30 @@
         </div>
     </div>
     <div id="flyoutOverlay" class="flyout-overlay"></div>
+
+    <!-- Jobs Flyout -->
+    <div id="jobsFlyout" class="jobs-flyout">
+        <div class="flyout-header">
+            <h2>Jobs</h2>
+            <button id="closeJobs" class="close-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="jobs-filter">
+            <label for="jobsFilter">Show</label>
+            <select id="jobsFilter" class="jobs-filter-select">
+                <option value="incomplete">Incomplete</option>
+                <option value="complete">Complete</option>
+            </select>
+        </div>
+        <div class="jobs-content" id="jobsContent">
+            <p class="loading-text">Loading jobs...</p>
+        </div>
+    </div>
+    <div id="jobsOverlay" class="flyout-overlay"></div>
 
     <!-- Settings Flyout -->
     <div id="settingsFlyout" class="settings-flyout">
