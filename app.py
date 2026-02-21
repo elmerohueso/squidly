@@ -4,7 +4,8 @@ import os
 import json
 import base64
 import requests
-import sqlite3
+import psycopg2
+import psycopg2.extras
 from itertools import cycle
 from datetime import datetime, timedelta
 import time
@@ -26,19 +27,8 @@ app = Flask(__name__,
             template_folder='templates')
 CORS(app)
 
-# Create data folder if it doesn't exist
-data_dir = '/data'
-try:
-    os.makedirs(data_dir, exist_ok=True)
-except Exception as e:
-    # Directory likely already exists (mounted volume)
-    pass
-
-# Verify directory is writable
-if not os.access(data_dir, os.W_OK):
-    print(f"Error: Data directory {data_dir} is not writable!", file=sys.stderr)
-
-DB_PATH = os.path.join(data_dir, 'squidly.db')
+# Get database URL from environment
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://squidly:squidly@localhost:5432/squidly')
 DOWNLOADS_ROOT = '/downloads'
 DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
 DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
@@ -226,19 +216,21 @@ def make_request_with_retry_rotating_mirrors(url_base, url_iterator, method='GET
     return None
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    """Get a database connection that returns dictionary-like rows"""
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 def get_online_mirror_names():
     conn = get_db_connection()
-    rows = conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """
         SELECT name
         FROM mirror_endpoints
         WHERE online = 1
         """
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     conn.close()
     return {row['name'] for row in rows}
 
@@ -259,26 +251,34 @@ def init_db():
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS download_settings (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            id INTEGER PRIMARY KEY,
             format TEXT NOT NULL,
             parent_folder TEXT NOT NULL,
             file_naming TEXT,
             file_naming_loose TEXT,
             file_naming_album TEXT,
-            updated_at TEXT NOT NULL
+            updated_at TIMESTAMP NOT NULL,
+            CONSTRAINT check_single_row CHECK (id = 1)
         )
         """
     )
-    columns = {
-        row['name']
-        for row in cur.execute("PRAGMA table_info(download_settings)").fetchall()
-    }
+    # Check if columns exist (PostgreSQL version)
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'download_settings'
+        """
+    )
+    columns = {row['column_name'] for row in cur.fetchall()}
+    
     if 'file_naming' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming TEXT")
     if 'file_naming_loose' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_loose TEXT")
     if 'file_naming_album' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_album TEXT")
+    
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS mirror_endpoints (
@@ -286,36 +286,38 @@ def init_db():
             encoded_url TEXT NOT NULL,
             online INTEGER NOT NULL,
             response_time REAL,
-            last_checked TEXT
+            last_checked TIMESTAMP
         )
         """
     )
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS listenbrainz_config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            id INTEGER PRIMARY KEY,
             user_token TEXT,
             username TEXT,
-            updated_at TEXT NOT NULL
+            updated_at TIMESTAMP NOT NULL,
+            CONSTRAINT check_single_row_lb CHECK (id = 1)
         )
         """
     )
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS plex_config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            id INTEGER PRIMARY KEY,
             server_url TEXT,
             api_token TEXT,
             library_name TEXT,
             update_playlist_name TEXT,
-            updated_at TEXT NOT NULL
+            updated_at TIMESTAMP NOT NULL,
+            CONSTRAINT check_single_row_plex CHECK (id = 1)
         )
         """
     )
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             job_type TEXT NOT NULL,
             status TEXT NOT NULL,
             payload_json TEXT NOT NULL,
@@ -323,13 +325,13 @@ def init_db():
             error_message TEXT,
             attempt_count INTEGER NOT NULL DEFAULT 0,
             max_attempts INTEGER NOT NULL DEFAULT 20,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            run_after TEXT,
-            locked_at TEXT,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            run_after TIMESTAMP,
+            locked_at TIMESTAMP,
             locked_by TEXT,
-            started_at TEXT,
-            finished_at TEXT,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP,
             priority INTEGER NOT NULL DEFAULT 0
         )
         """
@@ -341,13 +343,14 @@ def init_db():
 def get_listenbrainz_config():
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute(
+    cur.execute(
         """
         SELECT user_token
         FROM listenbrainz_config
         WHERE id = 1
         """
-    ).fetchone()
+    )
+    row = cur.fetchone()
     conn.close()
     
     if row is None:
@@ -364,7 +367,7 @@ def save_listenbrainz_config(user_token):
     cur.execute(
         """
         INSERT INTO listenbrainz_config (id, user_token, username, updated_at)
-        VALUES (1, ?, NULL, ?)
+        VALUES (1, %s, NULL, %s)
         ON CONFLICT(id) DO UPDATE SET
             user_token = excluded.user_token,
             updated_at = excluded.updated_at
@@ -377,13 +380,14 @@ def save_listenbrainz_config(user_token):
 def get_plex_config():
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute(
+    cur.execute(
         """
         SELECT server_url, api_token, library_name
         FROM plex_config
         WHERE id = 1
         """
-    ).fetchone()
+    )
+    row = cur.fetchone()
     conn.close()
     
     if row is None:
@@ -406,7 +410,7 @@ def save_plex_config(server_url, api_token, library_name):
     cur.execute(
         """
         INSERT INTO plex_config (id, server_url, api_token, library_name, updated_at)
-        VALUES (1, ?, ?, ?, ?)
+        VALUES (1, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             server_url = excluded.server_url,
             api_token = excluded.api_token,
@@ -450,7 +454,8 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
             finished_at,
             priority
         )
-        VALUES (?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)
+        VALUES (%s, %s, %s, NULL, NULL, 0, %s, %s, %s, %s, NULL, NULL, NULL, NULL, %s)
+        RETURNING id
         """,
         (
             job_type,
@@ -463,7 +468,7 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
             priority
         )
     )
-    job_id = cur.lastrowid
+    job_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
     return job_id
@@ -481,15 +486,16 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name):
     cur = conn.cursor()
     
     # Check if this track is already queued
-    existing = cur.execute(
+    cur.execute(
         """
         SELECT id FROM jobs
-        WHERE job_type = ?
-          AND payload_json = ?
+        WHERE job_type = %s
+          AND payload_json = %s
           AND status IN ('queued', 'in_progress', 'failed')
         """,
         ('plex_add', payload_json)
-    ).fetchone()
+    )
+    existing = cur.fetchone()
     
     if existing:
         print(f"[PLEX_QUEUE] Track already in queue: {artist} - {title}", flush=True)
@@ -504,18 +510,19 @@ def get_pending_playlist_additions():
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
-    rows = cur.execute(
+    cur.execute(
         """
         SELECT id, payload_json, attempt_count, max_attempts
         FROM jobs
-        WHERE job_type = ?
+        WHERE job_type = %s
           AND status IN ('queued', 'failed')
           AND attempt_count < max_attempts
-          AND (run_after IS NULL OR run_after <= ?)
+          AND (run_after IS NULL OR run_after <= %s)
         ORDER BY created_at ASC
-        """
+        """,
         ('plex_add', now)
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     conn.close()
 
     additions = []
@@ -543,10 +550,10 @@ def update_pending_addition_attempt(addition_id, error_message=None):
         UPDATE jobs
         SET attempt_count = attempt_count + 1,
             status = 'failed',
-            updated_at = ?,
-            run_after = ?,
-            error_message = COALESCE(?, error_message)
-        WHERE id = ? AND job_type = ?
+            updated_at = %s,
+            run_after = %s,
+            error_message = COALESCE(%s, error_message)
+        WHERE id = %s AND job_type = %s
         """,
         (now, now, error_message, addition_id, 'plex_add')
     )
@@ -562,9 +569,9 @@ def remove_pending_addition(addition_id):
         """
         UPDATE jobs
         SET status = 'succeeded',
-            updated_at = ?,
-            finished_at = ?
-        WHERE id = ? AND job_type = ?
+            updated_at = %s,
+            finished_at = %s
+        WHERE id = %s AND job_type = %s
         """,
         (now, now, addition_id, 'plex_add')
     )
@@ -592,20 +599,22 @@ def claim_next_job(job_type):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("BEGIN IMMEDIATE")
-    row = cur.execute(
+    # psycopg2 automatically starts transactions; FOR UPDATE SKIP LOCKED provides row-level locking
+    cur.execute(
         """
         SELECT id, payload_json, attempt_count, max_attempts
         FROM jobs
-        WHERE job_type = ?
+        WHERE job_type = %s
           AND status IN ('queued', 'failed')
           AND attempt_count < max_attempts
-          AND (run_after IS NULL OR run_after <= ?)
+          AND (run_after IS NULL OR run_after <= %s)
         ORDER BY priority DESC, created_at ASC
         LIMIT 1
+        FOR UPDATE SKIP LOCKED
         """,
         (job_type, now)
-    ).fetchone()
+    )
+    row = cur.fetchone()
 
     if row is None:
         conn.commit()
@@ -616,11 +625,11 @@ def claim_next_job(job_type):
         """
         UPDATE jobs
         SET status = 'in_progress',
-            locked_at = ?,
-            locked_by = ?,
-            started_at = COALESCE(started_at, ?),
-            updated_at = ?
-        WHERE id = ? AND status IN ('queued', 'failed')
+            locked_at = %s,
+            locked_by = %s,
+            started_at = COALESCE(started_at, %s),
+            updated_at = %s
+        WHERE id = %s AND status IN ('queued', 'failed')
         """,
         (now, WORKER_ID, now, now, row['id'])
     )
@@ -643,13 +652,13 @@ def mark_job_succeeded(job_id, result):
         """
         UPDATE jobs
         SET status = 'succeeded',
-            result_json = ?,
+            result_json = %s,
             error_message = NULL,
-            updated_at = ?,
-            finished_at = ?,
+            updated_at = %s,
+            finished_at = %s,
             locked_at = NULL,
             locked_by = NULL
-        WHERE id = ?
+        WHERE id = %s
         """,
         (result_json, now, now, job_id)
     )
@@ -660,14 +669,15 @@ def update_job_progress(job_id, updates):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute(
+    cur.execute(
         """
         SELECT result_json
         FROM jobs
-        WHERE id = ?
+        WHERE id = %s
         """,
         (job_id,)
-    ).fetchone()
+    )
+    row = cur.fetchone()
 
     try:
         current = json.loads(row['result_json']) if row and row['result_json'] else {}
@@ -683,9 +693,9 @@ def update_job_progress(job_id, updates):
     cur.execute(
         """
         UPDATE jobs
-        SET result_json = ?,
-            updated_at = ?
-        WHERE id = ?
+        SET result_json = %s,
+            updated_at = %s
+        WHERE id = %s
         """,
         (result_json, now, job_id)
     )
@@ -710,14 +720,14 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
         """
         UPDATE jobs
         SET status = 'failed',
-            attempt_count = ?,
-            error_message = ?,
-            updated_at = ?,
-            finished_at = ?,
-            run_after = ?,
+            attempt_count = %s,
+            error_message = %s,
+            updated_at = %s,
+            finished_at = %s,
+            run_after = %s,
             locked_at = NULL,
             locked_by = NULL
-        WHERE id = ?
+        WHERE id = %s
         """,
         (next_attempt, error_message, now, finished_at, run_after, job_id)
     )
@@ -736,38 +746,13 @@ def mark_job_retrying(job_id, attempt_count, error_message):
         """
         UPDATE jobs
         SET status = 'queued',
-            attempt_count = ?,
-            error_message = ?,
-            updated_at = ?,
-            run_after = ?,
+            attempt_count = %s,
+            error_message = %s,
+            updated_at = %s,
+            run_after = %s,
             locked_at = NULL,
             locked_by = NULL
-        WHERE id = ?
-        """,
-        (next_attempt, error_message, now, run_after, job_id)
-    )
-    conn.commit()
-    conn.close()
-
-def mark_job_retrying(job_id, attempt_count, error_message):
-    now = datetime.utcnow().isoformat() + 'Z'
-    next_attempt = attempt_count + 1
-    delay_seconds = compute_job_backoff_seconds(next_attempt)
-    run_after = (datetime.utcnow() + timedelta(seconds=delay_seconds)).isoformat() + 'Z'
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE jobs
-        SET status = 'queued',
-            attempt_count = ?,
-            error_message = ?,
-            updated_at = ?,
-            run_after = ?,
-            locked_at = NULL,
-            locked_by = NULL
-        WHERE id = ?
+        WHERE id = %s
         """,
         (next_attempt, error_message, now, run_after, job_id)
     )
@@ -1311,7 +1296,7 @@ def seed_mirrors_from_json():
         cur.execute(
             """
             INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s)
             """,
             (
                 entry.get('name'),
@@ -1328,13 +1313,14 @@ def seed_mirrors_from_json():
 def get_download_settings():
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute(
+    cur.execute(
         """
         SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album
         FROM download_settings
         WHERE id = 1
         """
-    ).fetchone()
+    )
+    row = cur.fetchone()
 
     if row is None:
         now = datetime.utcnow().isoformat() + 'Z'
@@ -1343,7 +1329,7 @@ def get_download_settings():
             INSERT INTO download_settings (
                 id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, updated_at
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?)
+            VALUES (1, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
@@ -1355,13 +1341,14 @@ def get_download_settings():
             )
         )
         conn.commit()
-        row = cur.execute(
+        cur.execute(
             """
             SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album
             FROM download_settings
             WHERE id = 1
             """
-        ).fetchone()
+        )
+        row = cur.fetchone()
 
     file_naming_loose = row['file_naming_loose'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose']
     file_naming_album = row['file_naming_album'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
@@ -1371,7 +1358,7 @@ def get_download_settings():
         cur.execute(
             """
             UPDATE download_settings
-            SET file_naming_loose = ?, file_naming_album = ?, updated_at = ?
+            SET file_naming_loose = %s, file_naming_album = %s, updated_at = %s
             WHERE id = 1
             """,
             (
@@ -1400,7 +1387,7 @@ def save_download_settings(settings):
         INSERT INTO download_settings (
             id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, updated_at
         )
-        VALUES (1, ?, ?, ?, ?, ?, ?)
+        VALUES (1, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             parent_folder = excluded.parent_folder,
@@ -1757,8 +1744,8 @@ def validate_all_endpoints():
         cur.execute(
             """
             UPDATE mirror_endpoints
-            SET online = ?, response_time = ?, last_checked = ?
-            WHERE name = ?
+            SET online = %s, response_time = %s, last_checked = %s
+            WHERE name = %s
             """,
             (
                 1 if result['online'] else 0,
@@ -2646,17 +2633,17 @@ def list_jobs():
     where_clauses = []
     params = []
     if status_filter:
-        where_clauses.append('status = ?')
+        where_clauses.append('status = %s')
         params.append(status_filter)
     if job_type_filter:
-        where_clauses.append('job_type = ?')
+        where_clauses.append('job_type = %s')
         params.append(job_type_filter)
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
 
     conn = get_db_connection()
     cur = conn.cursor()
-    rows = cur.execute(
+    cur.execute(
         f"""
         SELECT id, job_type, status, payload_json, result_json, error_message,
                attempt_count, max_attempts, created_at, updated_at, run_after,
@@ -2664,10 +2651,11 @@ def list_jobs():
         FROM jobs
         {where_sql}
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT %s
         """,
         (*params, limit)
-    ).fetchall()
+    )
+    rows = cur.fetchall()
     conn.close()
 
     jobs = []
@@ -2707,16 +2695,17 @@ def get_job(job_id):
     """Get job by id."""
     conn = get_db_connection()
     cur = conn.cursor()
-    row = cur.execute(
+    cur.execute(
         """
         SELECT id, job_type, status, payload_json, result_json, error_message,
                attempt_count, max_attempts, created_at, updated_at, run_after,
                locked_at, locked_by, started_at, finished_at, priority
         FROM jobs
-        WHERE id = ?
+        WHERE id = %s
         """,
         (job_id,)
-    ).fetchone()
+    )
+    row = cur.fetchone()
     conn.close()
 
     if row is None:
@@ -2757,14 +2746,15 @@ def cancel_job(job_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    row = cur.execute(
+    cur.execute(
         """
         SELECT status
         FROM jobs
-        WHERE id = ?
+        WHERE id = %s
         """,
         (job_id,)
-    ).fetchone()
+    )
+    row = cur.fetchone()
 
     if row is None:
         conn.close()
@@ -2778,9 +2768,9 @@ def cancel_job(job_id):
         """
         UPDATE jobs
         SET status = 'cancelled',
-            updated_at = ?,
-            finished_at = ?
-        WHERE id = ?
+            updated_at = %s,
+            finished_at = %s
+        WHERE id = %s
         """,
         (now, now, job_id)
     )
@@ -2838,13 +2828,15 @@ def download_settings():
 def endpoints_status():
     """Return the current status of all endpoints"""
     conn = get_db_connection()
-    rows = conn.execute(
+    cursor = conn.cursor()
+    cursor.execute(
         """
         SELECT name, encoded_url, online, response_time, last_checked
         FROM mirror_endpoints
         ORDER BY name
         """
-    ).fetchall()
+    )
+    rows = cursor.fetchall()
     conn.close()
 
     endpoints = []
