@@ -12,6 +12,7 @@ import sys
 import subprocess
 import shutil
 import re
+import threading
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
@@ -40,6 +41,30 @@ DB_PATH = os.path.join(data_dir, 'squidly.db')
 DOWNLOADS_ROOT = '/downloads'
 DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
 DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
+
+# Create downloads directories if they don't exist
+full_albums_path = os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER)
+loose_tracks_path = os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER)
+
+# Note: Don't call os.makedirs() here - volume mounts are configured in docker-compose
+# Attempting to create them can shadow the mount points
+
+# Verify downloads directories exist and are writable
+if not os.path.exists(full_albums_path):
+    print(f"Error: Full albums directory does not exist: {full_albums_path}", file=sys.stderr)
+    print(f"Check docker-compose volume mounts are configured correctly", file=sys.stderr)
+elif not os.access(full_albums_path, os.W_OK):
+    print(f"Error: Full albums directory is not writable: {full_albums_path}", file=sys.stderr)
+else:
+    print(f"Full albums directory ready: {full_albums_path}", flush=True)
+
+if not os.path.exists(loose_tracks_path):
+    print(f"Error: Loose tracks directory does not exist: {loose_tracks_path}", file=sys.stderr)
+    print(f"Check docker-compose volume mounts are configured correctly", file=sys.stderr)
+elif not os.access(loose_tracks_path, os.W_OK):
+    print(f"Error: Loose tracks directory is not writable: {loose_tracks_path}", file=sys.stderr)
+else:
+    print(f"Loose tracks directory ready: {loose_tracks_path}", flush=True)
 DEFAULT_DOWNLOAD_SETTINGS = {
     'format': 'original',
     'parent_folder': '',
@@ -258,6 +283,21 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_playlist_additions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artist TEXT NOT NULL,
+            album TEXT NOT NULL,
+            title TEXT NOT NULL,
+            playlist_name TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_attempt_at TEXT,
+            attempt_count INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 20
+        )
+        """
+    )
     conn.commit()
     conn.close()
 
@@ -343,6 +383,141 @@ def save_plex_config(server_url, api_token, library_name, update_playlist_name):
     )
     conn.commit()
     conn.close()
+
+def queue_pending_playlist_addition(artist, album, title, playlist_name):
+    """Add a track to the pending playlist additions queue."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Check if this track is already queued
+    existing = cur.execute(
+        """
+        SELECT id FROM pending_playlist_additions
+        WHERE artist = ? AND album = ? AND title = ? AND playlist_name = ?
+        """,
+        (artist, album, title, playlist_name)
+    ).fetchone()
+    
+    if existing:
+        print(f"[PLEX_QUEUE] Track already in queue: {artist} - {title}", flush=True)
+        conn.close()
+        return
+    
+    cur.execute(
+        """
+        INSERT INTO pending_playlist_additions
+        (artist, album, title, playlist_name, created_at, attempt_count)
+        VALUES (?, ?, ?, ?, ?, 0)
+        """,
+        (artist, album, title, playlist_name, now)
+    )
+    conn.commit()
+    conn.close()
+    print(f"[PLEX_QUEUE] Queued for retry: {artist} - {title}", flush=True)
+
+def get_pending_playlist_additions():
+    """Get all pending playlist additions that haven't exceeded max attempts."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    rows = cur.execute(
+        """
+        SELECT id, artist, album, title, playlist_name, attempt_count, max_attempts
+        FROM pending_playlist_additions
+        WHERE attempt_count < max_attempts
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def update_pending_addition_attempt(addition_id):
+    """Increment the attempt count and update last_attempt_at."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE pending_playlist_additions
+        SET attempt_count = attempt_count + 1, last_attempt_at = ?
+        WHERE id = ?
+        """,
+        (now, addition_id)
+    )
+    conn.commit()
+    conn.close()
+
+def remove_pending_addition(addition_id):
+    """Remove a successfully added track from the queue."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM pending_playlist_additions WHERE id = ?",
+        (addition_id,)
+    )
+    conn.commit()
+    conn.close()
+
+def retry_pending_playlist_additions():
+    """Background worker that periodically retries failed playlist additions."""
+    print("[PLEX_WORKER] Background worker started", flush=True)
+    
+    while True:
+        try:
+            # Wait 5 minutes between retry attempts
+            time.sleep(300)
+            
+            plex_config = get_plex_config()
+            
+            # Skip if Plex is not configured
+            if not (plex_config['server_url'] and plex_config['api_token'] and plex_config['update_playlist_name']):
+                continue
+            
+            pending = get_pending_playlist_additions()
+            
+            if not pending:
+                continue
+            
+            print(f"[PLEX_WORKER] Found {len(pending)} pending playlist additions to retry", flush=True)
+            
+            for addition in pending:
+                try:
+                    track_info = {
+                        'artist': addition['artist'],
+                        'album': addition['album'],
+                        'title': addition['title']
+                    }
+                    
+                    success, message = add_tracks_to_plex_playlist(
+                        plex_config['server_url'],
+                        plex_config['api_token'],
+                        plex_config['library_name'] or 'Music',
+                        addition['playlist_name'],
+                        track_info
+                    )
+                    
+                    if success:
+                        print(f"[PLEX_WORKER] Successfully added: {addition['artist']} - {addition['title']}", flush=True)
+                        remove_pending_addition(addition['id'])
+                    else:
+                        update_pending_addition_attempt(addition['id'])
+                        if addition['attempt_count'] + 1 >= addition['max_attempts']:
+                            print(f"[PLEX_WORKER] Max attempts reached for: {addition['artist']} - {addition['title']}", flush=True)
+                        else:
+                            print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
+                    
+                    # Small delay between tracks to avoid hammering Plex
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    print(f"[PLEX_WORKER] Error processing addition {addition['id']}: {str(e)}", flush=True)
+                    update_pending_addition_attempt(addition['id'])
+        
+        except Exception as e:
+            print(f"[PLEX_WORKER] Error in background worker: {str(e)}", flush=True)
+            # Continue running even if there's an error
+            time.sleep(60)
 
 
 def seed_mirrors_from_json():
@@ -566,26 +741,59 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         
         print(f"[PLEX] Searching for track: {artist} - {album} - {title}", flush=True)
         
-        # Try to find the track
+        # Try to find the track with intelligent matching
         tracks = []
         try:
-            # Search in the library
+            # First, search by title
             search_results = library.search(title=title)
             print(f"[PLEX] Search results count: {len(search_results)}", flush=True)
             
-            # Filter by artist and album if possible
-            for result in search_results:
-                if hasattr(result, 'artist') and hasattr(result, 'album'):
-                    result_artist = result.artist.title if hasattr(result.artist, 'title') else str(result.artist)
-                    result_album = result.album.title if hasattr(result.album, 'title') else str(result.album)
-                    
-                    if result_artist.lower() == artist.lower() and result_album.lower() == album.lower():
-                        tracks.append(result)
-                        break
+            # Define matching strategies in order of preference
+            exact_match = None
+            artist_album_match = None
+            artist_match = None
             
-            # If exact match not found, add any matching track
-            if not tracks and search_results:
-                tracks.append(search_results[0])
+            # Evaluate each result
+            for result in search_results:
+                if not (hasattr(result, 'artist') and hasattr(result, 'album')):
+                    continue
+                
+                result_artist = result.artist.title if hasattr(result.artist, 'title') else str(result.artist)
+                result_album = result.album.title if hasattr(result.album, 'title') else str(result.album)
+                
+                artist_match_lower = result_artist.lower() == artist.lower()
+                album_match_lower = result_album.lower() == album.lower()
+                
+                # Strategy 1: Exact match (artist AND album)
+                if artist_match_lower and album_match_lower:
+                    exact_match = result
+                    print(f"[PLEX] Found exact match: {result_artist} - {result_album} - {title}", flush=True)
+                    break
+                
+                # Strategy 2: Artist + Album match (keep first one found)
+                if artist_match_lower and album_match_lower and not artist_album_match:
+                    artist_album_match = result
+                
+                # Strategy 3: Artist match only (keep first one found)
+                if artist_match_lower and not artist_match:
+                    artist_match = result
+            
+            # Use the best match found
+            if exact_match:
+                tracks.append(exact_match)
+                print(f"[PLEX] Using exact match (artist + album + title)", flush=True)
+            elif artist_album_match:
+                tracks.append(artist_album_match)
+                print(f"[PLEX] Using artist + album match", flush=True)
+            elif artist_match:
+                tracks.append(artist_match)
+                print(f"[PLEX] Using artist match only (album not found in library)", flush=True)
+            else:
+                print(f"[PLEX] No suitable match found. Artist searched for: '{artist}'", flush=True)
+                if search_results:
+                    result_artist = search_results[0].artist.title if hasattr(search_results[0].artist, 'title') else str(search_results[0].artist)
+                    print(f"[PLEX] First search result was: '{result_artist}' (not matching requested artist)", flush=True)
+            
             print(f"[PLEX] Selected track count after filtering: {len(tracks)}", flush=True)
         
         except Exception as e:
@@ -593,8 +801,8 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
             return False, f'Error searching for track: {str(e)}'
         
         if not tracks:
-            print(f"[PLEX] Track not found in Plex library, waiting for Plex to scan", flush=True)
-            return False, 'Track not yet indexed in Plex library. Plex server may still be scanning.'
+            print(f"[PLEX] Track not found in Plex library: {artist} - {title}", flush=True)
+            return False, f'Track "{title}" by {artist} not found in {library_name} library. Please ensure the album and tracks have been added to your Plex library and scanned.'
         
         track = tracks[0]
         
@@ -851,22 +1059,12 @@ print("Squidly starting up...", flush=True)
 validate_all_endpoints()
 print("Validation complete, server ready to accept requests.\n", flush=True)
 
-# Create downloads and temp folders if they don't exist
-try:
-    os.makedirs(DOWNLOADS_ROOT, exist_ok=True)
-    os.makedirs(os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER), exist_ok=True)
-    os.makedirs(os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER), exist_ok=True)
-    print(f"Downloads folder ready ({DOWNLOADS_ROOT})", flush=True)
-    print(
-        f"Full albums folder ready ({os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER)})",
-        flush=True
-    )
-    print(
-        f"Loose tracks folder ready ({os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER)})",
-        flush=True
-    )
-except Exception as e:
-    print(f"WARNING: Failed to create downloads folder: {str(e)}", flush=True)
+# Start background worker for retrying failed Plex playlist additions
+plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
+plex_retry_thread.start()
+print("Plex playlist retry worker started\n", flush=True)
+
+# Download folders already created and validated at module level above
 
 try:
     os.makedirs('/app/temp', exist_ok=True)
@@ -2035,6 +2233,14 @@ def download_track():
                     print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
                 else:
                     print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
+                    # Queue for retry if track not found
+                    if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
+                        queue_pending_playlist_addition(
+                            artist_name,
+                            album_name,
+                            track_title,
+                            plex_config['update_playlist_name']
+                        )
             except Exception as e:
                 print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
         else:
