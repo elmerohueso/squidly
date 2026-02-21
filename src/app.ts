@@ -1942,68 +1942,24 @@ class App {
 
         console.log(`[DOWNLOAD] Starting download for track ${trackId}`);
 
-        // Store original button content
         const originalContent = downloadBtn.innerHTML;
         const originalDisabled = downloadBtn.disabled;
-        
-        // Disable button and show progress circle
+
+        if (!downloadBtn.dataset.originalContent) {
+            downloadBtn.dataset.originalContent = originalContent;
+        }
+
         downloadBtn.disabled = true;
-        
-        // Create SVG progress circle
-        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        progressSvg.setAttribute('viewBox', '0 0 24 24');
-        progressSvg.setAttribute('class', 'track-download-progress');
-        
-        // Add gradient definition
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-        gradient.setAttribute('id', 'progressGradient');
-        gradient.setAttribute('x1', '0%');
-        gradient.setAttribute('y1', '0%');
-        gradient.setAttribute('x2', '100%');
-        gradient.setAttribute('y2', '100%');
-        
-        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop1.setAttribute('offset', '0%');
-        stop1.setAttribute('stop-color', '#00d4ff');
-        
-        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop2.setAttribute('offset', '100%');
-        stop2.setAttribute('stop-color', '#0099ff');
-        
-        gradient.appendChild(stop1);
-        gradient.appendChild(stop2);
-        defs.appendChild(gradient);
-        progressSvg.appendChild(defs);
-        
-        // Background track circle
-        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        trackCircle.setAttribute('cx', '12');
-        trackCircle.setAttribute('cy', '12');
-        trackCircle.setAttribute('r', '12');
-        trackCircle.setAttribute('class', 'progress-circle-track');
-        progressSvg.appendChild(trackCircle);
-        
-        // Progress fill circle
-        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        fillCircle.setAttribute('cx', '12');
-        fillCircle.setAttribute('cy', '12');
-        fillCircle.setAttribute('r', '12');
-        fillCircle.setAttribute('class', 'progress-circle-fill');
-        progressSvg.appendChild(fillCircle);
-        
-        // Replace button content with progress circle
-        downloadBtn.innerHTML = '';
-        downloadBtn.appendChild(progressSvg);
 
         try {
             console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
             const playlistName = this.plexPlaylistNameInput.value.trim() || null;
-            const jobId = await this.downloadTrack(trackId, downloadType, playlistName, fillCircle as SVGCircleElement);
+            const jobId = await this.downloadTrack(trackId, downloadType, playlistName);
             console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
 
             const statusEl = this.ensureJobStatusElement(trackCard);
             this.setJobStatusChip(statusEl, 'queued');
+            this.setDownloadButtonCompleted(downloadBtn);
             this.registerActiveJob(jobId, trackCard, downloadBtn, statusEl);
         } catch (error) {
             console.error('[DOWNLOAD] Download error:', error);
@@ -2015,6 +1971,9 @@ class App {
                 // Restore button on error
                 downloadBtn.disabled = originalDisabled;
                 downloadBtn.innerHTML = originalContent;
+                if (downloadBtn.dataset.originalContent) {
+                    delete downloadBtn.dataset.originalContent;
+                }
             }
         }
     }
@@ -2022,20 +1981,12 @@ class App {
     private async downloadTrack(
         trackId: number,
         downloadType: 'album' | 'loose',
-        plexPlaylistName: string | null,
-        progressCircle?: SVGCircleElement
+        plexPlaylistName: string | null
     ): Promise<number> {
         try {
             console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
-            
-            // Animate progress to 50% during request
-            if (progressCircle) {
-                setTimeout(() => {
-                    if (progressCircle) (progressCircle as any).style.strokeDashoffset = '37.7'; // 50%
-                }, 200);
-            }
             
             const response = await this.fetchWithRetry('/api/download', {
                 method: 'POST',
@@ -2058,11 +2009,6 @@ class App {
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
             
-            // Animate progress to 80% while processing response
-            if (progressCircle) {
-                (progressCircle as any).style.strokeDashoffset = '15.08'; // 80%
-            }
-
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -2093,62 +2039,6 @@ class App {
             console.error('[DOWNLOAD] Error in downloadTrack:', error);
             throw error;
         }
-    }
-
-    private convertButtonToProgressCircle(downloadBtn: HTMLButtonElement): void {
-        // Store original content if not already stored
-        if (!downloadBtn.dataset.originalContent) {
-            downloadBtn.dataset.originalContent = downloadBtn.innerHTML;
-        }
-        
-        downloadBtn.disabled = true;
-        
-        // Create SVG progress circle
-        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        progressSvg.setAttribute('viewBox', '0 0 24 24');
-        progressSvg.setAttribute('class', 'track-download-progress');
-        
-        // Add gradient definition
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-        gradient.setAttribute('id', 'progressGradient');
-        gradient.setAttribute('x1', '0%');
-        gradient.setAttribute('y1', '0%');
-        gradient.setAttribute('x2', '100%');
-        gradient.setAttribute('y2', '100%');
-        
-        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop1.setAttribute('offset', '0%');
-        stop1.setAttribute('stop-color', '#00d4ff');
-        
-        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop2.setAttribute('offset', '100%');
-        stop2.setAttribute('stop-color', '#0099ff');
-        
-        gradient.appendChild(stop1);
-        gradient.appendChild(stop2);
-        defs.appendChild(gradient);
-        progressSvg.appendChild(defs);
-        
-        // Background track circle
-        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        trackCircle.setAttribute('cx', '12');
-        trackCircle.setAttribute('cy', '12');
-        trackCircle.setAttribute('r', '12');
-        trackCircle.setAttribute('class', 'progress-circle-track');
-        progressSvg.appendChild(trackCircle);
-        
-        // Progress fill circle
-        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        fillCircle.setAttribute('cx', '12');
-        fillCircle.setAttribute('cy', '12');
-        fillCircle.setAttribute('r', '12');
-        fillCircle.setAttribute('class', 'progress-circle-fill');
-        progressSvg.appendChild(fillCircle);
-        
-        // Replace button content with progress circle
-        downloadBtn.innerHTML = '';
-        downloadBtn.appendChild(progressSvg);
     }
 
     private restoreDownloadButton(downloadBtn: HTMLButtonElement): void {
@@ -2313,14 +2203,6 @@ class App {
         let downloadedCount = 0;
 
         console.log(`[DOWNLOAD_ALL] Starting batch download of ${totalTracks} tracks`);
-
-        // Convert all buttons to 0% progress circles
-        for (const trackCard of trackCards) {
-            const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
-            if (downloadBtn && !downloadBtn.classList.contains('completed')) {
-                this.convertButtonToProgressCircle(downloadBtn);
-            }
-        }
 
         for (let i = 0; i < trackCards.length; i++) {
             // Check if cancel was requested
