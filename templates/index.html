@@ -58,6 +58,11 @@
                 </button>
             </div>
             
+            <div style="padding: 1rem; display: none;" id="plexPlaylistContainer">
+                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.9rem; font-weight: 500;">Plex Playlist Name</label>
+                <input type="text" id="plexPlaylistName" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 1rem;">
+            </div>
+            
             <div id="results" class="results-container"></div>
         </main>
         
@@ -172,10 +177,6 @@
                     
                 </div>
                 
-                <label class="settings-label" for="plexPlaylistName">Playlist Name</label>
-                <input type="text" id="plexPlaylistName" class="settings-input" placeholder="Downloaded Music">
-                <p class="settings-hint">Name of the playlist to add downloads to (will be created if it doesn't exist)</p>
-
                 <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
                 <button id="savePlexConfig" class="save-button" style="margin-top: 1rem;">Save Plex Config</button>
                 <p class="settings-note" id="plexConfigStatus"></p>

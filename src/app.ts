@@ -159,6 +159,7 @@ class App {
         onError: () => void;
     } | null = null;
     private lastRetryFunction: (() => Promise<void>) | null = null;
+    private isPlexConfigured: boolean = false;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -570,13 +571,12 @@ class App {
                     this.plexLibraryNameSelect.value = data.library_name;
                 }
                 
-                if (data.update_playlist_name) {
-                    this.plexPlaylistNameInput.value = data.update_playlist_name;
-                }
                 if (data.has_config) {
                     this.plexApiTokenInput.value = 'Configured';
                 }
+                this.isPlexConfigured = data.has_config ? true : false;
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
+                this.updatePlexPlaylistContainerVisibility(false);
             }
         } catch (error) {
             console.warn('Failed to load Plex config.', error);
@@ -647,7 +647,6 @@ class App {
         const serverUrl = this.plexServerUrlInput.value.trim();
         const apiToken = this.plexApiTokenInput.value.trim();
         const libraryName = this.plexLibraryNameSelect.value.trim();
-        const playlistName = this.plexPlaylistNameInput.value.trim();
 
         if (!serverUrl || !apiToken || !libraryName) {
             this.updatePlexConfigStatus('⚠ Server URL, X-Plex-Token, and library name are required');
@@ -663,8 +662,7 @@ class App {
                 body: JSON.stringify({
                     server_url: serverUrl,
                     api_token: apiToken,
-                    library_name: libraryName,
-                    update_playlist_name: playlistName || 'Downloaded Music'
+                    library_name: libraryName
                 })
             });
 
@@ -686,6 +684,17 @@ class App {
     private updatePlexConfigStatus(message: string): void {
         this.plexConfigStatusEl.textContent = message;
         this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
+    }
+
+    private updatePlexPlaylistContainerVisibility(show: boolean): void {
+        const container = document.getElementById('plexPlaylistContainer') as HTMLElement;
+        if (container) {
+            if (this.isPlexConfigured && show) {
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
+            }
+        }
     }
 
     private async updateEndpointStatus(): Promise<void> {
@@ -1135,6 +1144,7 @@ class App {
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
         this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(true);
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
@@ -1562,6 +1572,7 @@ class App {
 
     private displayMessage(message: string, retryFn?: () => Promise<void>): void {
         this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(false);
         this.lastRetryFunction = retryFn || null;
         
         const retryButton = retryFn 
@@ -1788,7 +1799,8 @@ class App {
 
         try {
             console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
-            await this.downloadTrack(trackId, downloadType, fillCircle as SVGCircleElement);
+            const playlistName = this.plexPlaylistNameInput.value.trim() || null;
+            await this.downloadTrack(trackId, downloadType, playlistName, fillCircle as SVGCircleElement);
             
             console.log(`[DOWNLOAD] Download completed successfully`);
             
@@ -1822,6 +1834,7 @@ class App {
     private async downloadTrack(
         trackId: number,
         downloadType: 'album' | 'loose',
+        plexPlaylistName: string | null,
         progressCircle?: SVGCircleElement
     ): Promise<void> {
         try {
@@ -1849,7 +1862,8 @@ class App {
                         ? this.downloadSettings.fileNamingAlbum
                         : this.downloadSettings.fileNamingLoose,
                     fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                    fileNamingLoose: this.downloadSettings.fileNamingLoose
+                    fileNamingLoose: this.downloadSettings.fileNamingLoose,
+                    plex_playlist: plexPlaylistName
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);

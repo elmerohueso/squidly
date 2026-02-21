@@ -285,11 +285,15 @@ def init_db():
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS pending_playlist_additions (
+        CREATE TABLE IF NOT EXISTS jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id TEXT,
             artist TEXT NOT NULL,
             album TEXT NOT NULL,
             title TEXT NOT NULL,
+            format TEXT,
+            download_status TEXT,
+            conversion_status TEXT,
             playlist_name TEXT NOT NULL,
             created_at TEXT NOT NULL,
             last_attempt_at TEXT,
@@ -298,6 +302,21 @@ def init_db():
         )
         """
     )
+    
+    # Add new columns to existing jobs tables (backward compatibility)
+    columns = {
+        row['name']
+        for row in cur.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if 'track_id' not in columns:
+        cur.execute("ALTER TABLE jobs ADD COLUMN track_id TEXT")
+    if 'format' not in columns:
+        cur.execute("ALTER TABLE jobs ADD COLUMN format TEXT")
+    if 'download_status' not in columns:
+        cur.execute("ALTER TABLE jobs ADD COLUMN download_status TEXT")
+    if 'conversion_status' not in columns:
+        cur.execute("ALTER TABLE jobs ADD COLUMN conversion_status TEXT")
+    
     conn.commit()
     conn.close()
 
@@ -342,7 +361,7 @@ def get_plex_config():
     cur = conn.cursor()
     row = cur.execute(
         """
-        SELECT server_url, api_token, library_name, update_playlist_name
+        SELECT server_url, api_token, library_name
         FROM plex_config
         WHERE id = 1
         """
@@ -353,33 +372,30 @@ def get_plex_config():
         return {
             'server_url': None,
             'api_token': None,
-            'library_name': None,
-            'update_playlist_name': None
+            'library_name': None
         }
     
     return {
         'server_url': row['server_url'],
         'api_token': row['api_token'],
-        'library_name': row['library_name'],
-        'update_playlist_name': row['update_playlist_name']
+        'library_name': row['library_name']
     }
 
-def save_plex_config(server_url, api_token, library_name, update_playlist_name):
+def save_plex_config(server_url, api_token, library_name):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO plex_config (id, server_url, api_token, library_name, update_playlist_name, updated_at)
-        VALUES (1, ?, ?, ?, ?, ?)
+        INSERT INTO plex_config (id, server_url, api_token, library_name, updated_at)
+        VALUES (1, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             server_url = excluded.server_url,
             api_token = excluded.api_token,
             library_name = excluded.library_name,
-            update_playlist_name = excluded.update_playlist_name,
             updated_at = excluded.updated_at
         """,
-        (server_url, api_token, library_name, update_playlist_name, now)
+        (server_url, api_token, library_name, now)
     )
     conn.commit()
     conn.close()
@@ -393,7 +409,7 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name):
     # Check if this track is already queued
     existing = cur.execute(
         """
-        SELECT id FROM pending_playlist_additions
+        SELECT id FROM jobs
         WHERE artist = ? AND album = ? AND title = ? AND playlist_name = ?
         """,
         (artist, album, title, playlist_name)
@@ -406,7 +422,7 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name):
     
     cur.execute(
         """
-        INSERT INTO pending_playlist_additions
+        INSERT INTO jobs
         (artist, album, title, playlist_name, created_at, attempt_count)
         VALUES (?, ?, ?, ?, ?, 0)
         """,
@@ -423,7 +439,7 @@ def get_pending_playlist_additions():
     rows = cur.execute(
         """
         SELECT id, artist, album, title, playlist_name, attempt_count, max_attempts
-        FROM pending_playlist_additions
+        FROM jobs
         WHERE attempt_count < max_attempts
         ORDER BY created_at ASC
         """
@@ -439,7 +455,7 @@ def update_pending_addition_attempt(addition_id):
     cur = conn.cursor()
     cur.execute(
         """
-        UPDATE pending_playlist_additions
+        UPDATE jobs
         SET attempt_count = attempt_count + 1, last_attempt_at = ?
         WHERE id = ?
         """,
@@ -453,7 +469,7 @@ def remove_pending_addition(addition_id):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "DELETE FROM pending_playlist_additions WHERE id = ?",
+        "DELETE FROM job_queue WHERE id = ?",
         (addition_id,)
     )
     conn.commit()
@@ -471,7 +487,7 @@ def retry_pending_playlist_additions():
             plex_config = get_plex_config()
             
             # Skip if Plex is not configured
-            if not (plex_config['server_url'] and plex_config['api_token'] and plex_config['update_playlist_name']):
+            if not (plex_config['server_url'] and plex_config['api_token']):
                 continue
             
             pending = get_pending_playlist_additions()
@@ -2210,7 +2226,8 @@ def download_track():
         
         # Try to add track to Plex playlist if configured
         plex_config = get_plex_config()
-        if plex_config['server_url'] and plex_config['api_token'] and plex_config['update_playlist_name']:
+        playlist_name = payload.get('plex_playlist')
+        if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
             try:
                 print(
                     "[DOWNLOAD] Plex config OK - attempting playlist update",
@@ -2225,7 +2242,7 @@ def download_track():
                     plex_config['server_url'],
                     plex_config['api_token'],
                     plex_config['library_name'] or 'Music',
-                    plex_config['update_playlist_name'],
+                    playlist_name,
                     track_info
                 )
                 
@@ -2239,7 +2256,7 @@ def download_track():
                             artist_name,
                             album_name,
                             track_title,
-                            plex_config['update_playlist_name']
+                            playlist_name
                         )
             except Exception as e:
                 print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
@@ -2249,9 +2266,10 @@ def download_track():
                 missing.append('server_url')
             if not plex_config['api_token']:
                 missing.append('api_token')
-            if not plex_config['update_playlist_name']:
-                missing.append('update_playlist_name')
-            print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+            if not playlist_name:
+                missing.append('playlist_name')
+            if missing:
+                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
         
         return jsonify({'success': True, 'message': f'Downloaded to {full_path}'})
 
@@ -2460,8 +2478,7 @@ def get_plex_config_endpoint():
     return jsonify({
         'has_config': config['server_url'] is not None and config['api_token'] is not None,
         'server_url': config['server_url'],
-        'library_name': config['library_name'],
-        'update_playlist_name': config['update_playlist_name']
+        'library_name': config['library_name']
     })
 
 @app.route('/api/plex/config', methods=['POST'])
@@ -2475,12 +2492,11 @@ def save_plex_config_endpoint():
     server_url = payload.get('server_url', '').strip()
     api_token = payload.get('api_token', '').strip()
     library_name = payload.get('library_name', '')
-    update_playlist_name = payload.get('update_playlist_name', '')
     
     if not server_url or not api_token:
         return jsonify({'error': 'server_url and api_token are required'}), 400
     
-    save_plex_config(server_url, api_token, library_name, update_playlist_name)
+    save_plex_config(server_url, api_token, library_name)
     return jsonify({'success': True})
 
 @app.route('/api/plex/test', methods=['POST'])
