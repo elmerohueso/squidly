@@ -554,11 +554,27 @@ class App {
                 if (data.server_url) {
                     this.plexServerUrlInput.value = data.server_url;
                 }
+                
+                // Populate library dropdown with saved library
+                this.plexLibraryNameSelect.innerHTML = '';
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select a library...';
+                this.plexLibraryNameSelect.appendChild(defaultOption);
+                
                 if (data.library_name) {
+                    const option = document.createElement('option');
+                    option.value = data.library_name;
+                    option.textContent = data.library_name;
+                    this.plexLibraryNameSelect.appendChild(option);
                     this.plexLibraryNameSelect.value = data.library_name;
                 }
+                
                 if (data.update_playlist_name) {
                     this.plexPlaylistNameInput.value = data.update_playlist_name;
+                }
+                if (data.has_config) {
+                    this.plexApiTokenInput.value = 'Configured';
                 }
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
             }

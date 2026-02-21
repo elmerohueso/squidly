@@ -161,7 +161,7 @@
                 <p class="settings-hint">Your Plex server address and port</p>
                 
                 <label class="settings-label" for="plexApiToken" style="margin-top: 1rem;">X-Plex-Token</label>
-                <input type="password" id="plexApiToken" class="settings-input" placeholder="Your Plex authentication token">
+                <input type="text" id="plexApiToken" class="settings-input" placeholder="Your Plex authentication token">
                 <p class="settings-hint">See <a href="https://docs.wizarr.dev/plex/obtain-a-plex-token" target="_blank" style="color: var(--accent-primary); text-decoration: none;">how to obtain your X-Plex-Token</a></p>
                 
                 <label class="settings-label" for="plexLibraryName" style="margin-top: 1rem;">Music Library</label>
@@ -169,13 +169,14 @@
                     <select id="plexLibraryName" class="settings-input" style="flex: 1;">
                         <option value="">Select a library...</option>
                     </select>
-                    <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
+                    
                 </div>
                 
                 <label class="settings-label" for="plexPlaylistName">Playlist Name</label>
                 <input type="text" id="plexPlaylistName" class="settings-input" placeholder="Downloaded Music">
                 <p class="settings-hint">Name of the playlist to add downloads to (will be created if it doesn't exist)</p>
-                
+
+                <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
                 <button id="savePlexConfig" class="save-button" style="margin-top: 1rem;">Save Plex Config</button>
                 <p class="settings-note" id="plexConfigStatus"></p>
             </div>
