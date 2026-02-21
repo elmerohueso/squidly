@@ -162,11 +162,15 @@ def make_request_with_retry_rotating_mirrors(url_base, url_iterator, method='GET
     """
     last_exception = None
     last_target = None
+    allowed_names = get_online_mirror_names()
+    if not allowed_names:
+        allowed_names = None
+    total_count = len(SQUID_URLS) if 'SQUID_URLS' in globals() else 0
     
     for attempt in range(max_retries + 1):
         try:
-            # Get a new mirror for each attempt
-            target = next(url_iterator)
+            # Get a new mirror for each attempt, skipping known-offline entries
+            target = select_next_mirror(url_iterator, allowed_names, total_count)
             last_target = target
             target_url = f"{target['url']}{url_base}"
             
@@ -225,6 +229,29 @@ def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+def get_online_mirror_names():
+    conn = get_db_connection()
+    rows = conn.execute(
+        """
+        SELECT name
+        FROM mirror_endpoints
+        WHERE online = 1
+        """
+    ).fetchall()
+    conn.close()
+    return {row['name'] for row in rows}
+
+def select_next_mirror(url_iterator, allowed_names, total_count):
+    if not allowed_names:
+        return next(url_iterator)
+
+    for _ in range(total_count):
+        candidate = next(url_iterator)
+        if candidate['name'] in allowed_names:
+            return candidate
+
+    return next(url_iterator)
 
 def init_db():
     conn = get_db_connection()
