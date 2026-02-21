@@ -1897,7 +1897,7 @@ class App {
                         <div class="progress-bar-container">
                             <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
                         </div>
-                        <p class="progress-text" id="progressText">Downloaded <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
+                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
                     </div>
                 </div>
                 <div class="results-list">
@@ -2259,7 +2259,7 @@ class App {
                                         progressBar.style.width = `${progress}%`;
                                     }
                                     if (progressText) {
-                                        progressText.innerHTML = `Downloaded <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
                                     }
                                     
                                     setTimeout(() => resolve(), 500); // Small delay before next
@@ -2280,7 +2280,7 @@ class App {
                                         progressBar.style.width = `${progress}%`;
                                     }
                                     if (progressText) {
-                                        progressText.innerHTML = `Downloaded <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
                                     }
                                 }
                                 resolve();
@@ -2304,7 +2304,7 @@ class App {
             downloadAllBtn.disabled = false;
         }
 
-        console.log(`[DOWNLOAD_ALL] Batch download complete. Downloaded ${downloadedCount}/${totalTracks} tracks`);
+        console.log(`[DOWNLOAD_ALL] Queued ${downloadedCount}/${totalTracks} tracks`);
     }
 }
 
