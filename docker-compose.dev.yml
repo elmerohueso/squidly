@@ -1,4 +1,21 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: squidly-postgres
+    environment:
+      - POSTGRES_DB=squidly
+      - POSTGRES_USER=squidly
+      - POSTGRES_PASSWORD=squidly
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U squidly"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   squidly:
     build: .
     container_name: squidly
@@ -8,9 +25,14 @@ services:
       - FLASK_ENV=production
       - PORT=5000
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://squidly:squidly@postgres:5432/squidly
     volumes:
-      # Named volume for SQLite database and other persistent data
-      - ./data:/data
       # Mount downloads folders for track downloads
       - ./downloads/full_albums:/downloads/full_albums
       - ./downloads/loose_tracks:/downloads/loose_tracks
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

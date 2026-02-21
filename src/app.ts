@@ -102,6 +102,31 @@ interface EndpointStatus {
     };
 }
 
+interface JobStageMap {
+    downloaded?: string;
+    id3_tagged?: string;
+    converted?: string;
+    written?: string;
+    playlist_added?: string;
+}
+
+interface JobResult {
+    artist?: string;
+    title?: string;
+    album?: string;
+    playlist_name?: string | null;
+    stages?: JobStageMap;
+}
+
+interface JobItem {
+    id: number;
+    job_type: string;
+    status: string;
+    payload?: Record<string, any> | null;
+    result?: JobResult | null;
+    error_message?: string | null;
+}
+
 type DownloadFormat = 'original' | 'mp3';
 type StreamQuality = 'high' | 'low';
 
@@ -121,6 +146,12 @@ class App {
     private flyoutOverlay: HTMLElement;
     private closeFlyoutButton: HTMLButtonElement;
     private flyoutContent: HTMLElement;
+    private jobsButton: HTMLButtonElement;
+    private jobsFlyout: HTMLElement;
+    private jobsOverlay: HTMLElement;
+    private closeJobsButton: HTMLButtonElement;
+    private jobsFilterSelect: HTMLSelectElement;
+    private jobsContent: HTMLElement;
     private settingsButton: HTMLButtonElement;
     private settingsFlyout: HTMLElement;
     private settingsOverlay: HTMLElement;
@@ -146,6 +177,14 @@ class App {
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
+    private jobStatusInterval: number | null = null;
+    private jobStatusPolling = false;
+    private activeJobMap = new Map<number, {
+        trackCard: HTMLElement;
+        downloadBtn: HTMLButtonElement;
+        statusEl: HTMLElement;
+    }>();
+    private jobsUpdateInterval: number | null = null;
     private isDownloadingAll: boolean = false;
     private downloadAllCancelRequested: boolean = false;
     private currentDownloadController: AbortController | null = null;
@@ -159,6 +198,7 @@ class App {
         onError: () => void;
     } | null = null;
     private lastRetryFunction: (() => Promise<void>) | null = null;
+    private isPlexConfigured: boolean = false;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -170,6 +210,12 @@ class App {
         this.flyoutOverlay = document.getElementById('flyoutOverlay') as HTMLElement;
         this.closeFlyoutButton = document.getElementById('closeFlyout') as HTMLButtonElement;
         this.flyoutContent = document.getElementById('flyoutContent') as HTMLElement;
+        this.jobsButton = document.getElementById('jobsButton') as HTMLButtonElement;
+        this.jobsFlyout = document.getElementById('jobsFlyout') as HTMLElement;
+        this.jobsOverlay = document.getElementById('jobsOverlay') as HTMLElement;
+        this.closeJobsButton = document.getElementById('closeJobs') as HTMLButtonElement;
+        this.jobsFilterSelect = document.getElementById('jobsFilter') as HTMLSelectElement;
+        this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
@@ -218,6 +264,11 @@ class App {
         this.statusButton.addEventListener('click', () => this.openFlyout());
         this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
         this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+
+        this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
+        this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
+        this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
+        this.jobsFilterSelect.addEventListener('change', () => this.loadJobs());
 
         this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
         this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
@@ -328,6 +379,155 @@ class App {
         this.statusFlyout.classList.remove('active');
         this.flyoutOverlay.classList.remove('active');
         document.body.style.overflow = '';
+    }
+
+    private openJobsFlyout(): void {
+        this.jobsFlyout.classList.add('active');
+        this.jobsOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        void this.loadJobs();
+        if (!this.jobsUpdateInterval) {
+            this.jobsUpdateInterval = window.setInterval(() => {
+                void this.loadJobs();
+            }, 30000);
+        }
+    }
+
+    private closeJobsFlyout(): void {
+        this.jobsFlyout.classList.remove('active');
+        this.jobsOverlay.classList.remove('active');
+        document.body.style.overflow = '';
+        if (this.jobsUpdateInterval) {
+            window.clearInterval(this.jobsUpdateInterval);
+            this.jobsUpdateInterval = null;
+        }
+    }
+
+    private async loadJobs(): Promise<void> {
+        const filter = this.jobsFilterSelect.value;
+        this.jobsContent.innerHTML = '<p class="loading-text">Loading jobs...</p>';
+
+        try {
+            const response = await fetch('/api/jobs?job_type=download_track&limit=100');
+            if (!response.ok) {
+                throw new Error('Failed to fetch jobs');
+            }
+
+            const data = await response.json();
+            const jobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            const filtered = this.filterJobsByStatus(jobs, filter);
+            this.renderJobs(filtered);
+        } catch (error) {
+            this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
+            console.error('Jobs load error:', error);
+        }
+    }
+
+    private filterJobsByStatus(jobs: JobItem[], filter: string): JobItem[] {
+        if (filter === 'complete') {
+            return jobs.filter(job => ['succeeded', 'cancelled', 'failed'].includes(job.status));
+        }
+
+        return jobs.filter(job => ['queued', 'in_progress'].includes(job.status));
+    }
+
+    private renderJobs(jobs: JobItem[]): void {
+        if (jobs.length === 0) {
+            this.jobsContent.innerHTML = '<p class="loading-text">No jobs found.</p>';
+            return;
+        }
+
+        this.jobsContent.innerHTML = jobs.map(job => this.renderJobItem(job)).join('');
+    }
+
+    private renderJobItem(job: JobItem): string {
+        const title = this.getJobDisplayTitle(job);
+        const statusLabel = this.formatJobStatus(job.status);
+        const statusClass = `status-${job.status.replace('_', '-')}`;
+        const stages = job.result?.stages || {};
+        const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
+
+        const stageRows = [
+            { key: 'downloaded', label: 'Downloaded' },
+            { key: 'id3_tagged', label: 'ID3 Tag Created' },
+            { key: 'converted', label: 'Converted to MP3' },
+            { key: 'written', label: 'Written to Disk' },
+            {
+                key: 'playlist_added',
+                label: playlistName ? `Added to Playlist "${this.escapeHtml(String(playlistName))}"` : 'Added to Playlist'
+            }
+        ];
+
+        const stageHtml = stageRows.map(stage => {
+            const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
+            const stageLabel = this.formatStageStatus(status);
+            return `
+                <div class="job-stage">
+                    <span>${stage.label}</span>
+                    <span class="job-stage-status status-${status}">${stageLabel}</span>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="job-item">
+                <div class="job-main">
+                    <div class="job-title">${this.escapeHtml(title)}</div>
+                    <div class="job-status ${statusClass}">${statusLabel}</div>
+                </div>
+                <div class="job-stages">
+                    ${stageHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    private getJobDisplayTitle(job: JobItem): string {
+        const artist = job.result?.artist;
+        const title = job.result?.title;
+
+        if (artist && title) {
+            return `${artist} - ${title}`;
+        }
+
+        const trackId = job.payload?.trackId;
+        if (trackId) {
+            return `Track ${trackId}`;
+        }
+
+        return `Job ${job.id}`;
+    }
+
+    private formatJobStatus(status: string): string {
+        if (status === 'in_progress') {
+            return 'In-Progress';
+        }
+        return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+
+    private resolveStageStatus(job: JobItem, key: keyof JobStageMap, stages: JobStageMap): string {
+        const value = stages[key];
+        if (value) {
+            return value;
+        }
+
+        if (job.status === 'succeeded') {
+            return key === 'playlist_added' ? 'skipped' : 'done';
+        }
+
+        if (job.status === 'cancelled') {
+            return 'skipped';
+        }
+
+        return 'pending';
+    }
+
+    private formatStageStatus(status: string): string {
+        if (!status) {
+            return 'Pending';
+        }
+
+        return status.replace('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
     }
 
     private openSettingsFlyout(): void {
@@ -570,13 +770,12 @@ class App {
                     this.plexLibraryNameSelect.value = data.library_name;
                 }
                 
-                if (data.update_playlist_name) {
-                    this.plexPlaylistNameInput.value = data.update_playlist_name;
-                }
                 if (data.has_config) {
                     this.plexApiTokenInput.value = 'Configured';
                 }
+                this.isPlexConfigured = data.has_config ? true : false;
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
+                this.updatePlexPlaylistContainerVisibility(false);
             }
         } catch (error) {
             console.warn('Failed to load Plex config.', error);
@@ -647,7 +846,6 @@ class App {
         const serverUrl = this.plexServerUrlInput.value.trim();
         const apiToken = this.plexApiTokenInput.value.trim();
         const libraryName = this.plexLibraryNameSelect.value.trim();
-        const playlistName = this.plexPlaylistNameInput.value.trim();
 
         if (!serverUrl || !apiToken || !libraryName) {
             this.updatePlexConfigStatus('⚠ Server URL, X-Plex-Token, and library name are required');
@@ -663,8 +861,7 @@ class App {
                 body: JSON.stringify({
                     server_url: serverUrl,
                     api_token: apiToken,
-                    library_name: libraryName,
-                    update_playlist_name: playlistName || 'Downloaded Music'
+                    library_name: libraryName
                 })
             });
 
@@ -686,6 +883,17 @@ class App {
     private updatePlexConfigStatus(message: string): void {
         this.plexConfigStatusEl.textContent = message;
         this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
+    }
+
+    private updatePlexPlaylistContainerVisibility(show: boolean): void {
+        const container = document.getElementById('plexPlaylistContainer') as HTMLElement;
+        if (container) {
+            if (this.isPlexConfigured && show) {
+                container.style.display = 'block';
+            } else {
+                container.style.display = 'none';
+            }
+        }
     }
 
     private async updateEndpointStatus(): Promise<void> {
@@ -1135,6 +1343,7 @@ class App {
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
         this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(true);
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
@@ -1562,6 +1771,7 @@ class App {
 
     private displayMessage(message: string, retryFn?: () => Promise<void>): void {
         this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(false);
         this.lastRetryFunction = retryFn || null;
         
         const retryButton = retryFn 
@@ -1732,79 +1942,25 @@ class App {
 
         console.log(`[DOWNLOAD] Starting download for track ${trackId}`);
 
-        // Store original button content
         const originalContent = downloadBtn.innerHTML;
         const originalDisabled = downloadBtn.disabled;
-        
-        // Disable button and show progress circle
+
+        if (!downloadBtn.dataset.originalContent) {
+            downloadBtn.dataset.originalContent = originalContent;
+        }
+
         downloadBtn.disabled = true;
-        
-        // Create SVG progress circle
-        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        progressSvg.setAttribute('viewBox', '0 0 24 24');
-        progressSvg.setAttribute('class', 'track-download-progress');
-        
-        // Add gradient definition
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-        gradient.setAttribute('id', 'progressGradient');
-        gradient.setAttribute('x1', '0%');
-        gradient.setAttribute('y1', '0%');
-        gradient.setAttribute('x2', '100%');
-        gradient.setAttribute('y2', '100%');
-        
-        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop1.setAttribute('offset', '0%');
-        stop1.setAttribute('stop-color', '#00d4ff');
-        
-        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop2.setAttribute('offset', '100%');
-        stop2.setAttribute('stop-color', '#0099ff');
-        
-        gradient.appendChild(stop1);
-        gradient.appendChild(stop2);
-        defs.appendChild(gradient);
-        progressSvg.appendChild(defs);
-        
-        // Background track circle
-        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        trackCircle.setAttribute('cx', '12');
-        trackCircle.setAttribute('cy', '12');
-        trackCircle.setAttribute('r', '12');
-        trackCircle.setAttribute('class', 'progress-circle-track');
-        progressSvg.appendChild(trackCircle);
-        
-        // Progress fill circle
-        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        fillCircle.setAttribute('cx', '12');
-        fillCircle.setAttribute('cy', '12');
-        fillCircle.setAttribute('r', '12');
-        fillCircle.setAttribute('class', 'progress-circle-fill');
-        progressSvg.appendChild(fillCircle);
-        
-        // Replace button content with progress circle
-        downloadBtn.innerHTML = '';
-        downloadBtn.appendChild(progressSvg);
 
         try {
             console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
-            await this.downloadTrack(trackId, downloadType, fillCircle as SVGCircleElement);
-            
-            console.log(`[DOWNLOAD] Download completed successfully`);
-            
-            // Animate to 100%
-            (fillCircle as any).style.strokeDashoffset = '0';
-            
-            // Wait a moment to show completion, then replace with checkmark
-            setTimeout(() => {
-                downloadBtn.disabled = true;
-                downloadBtn.classList.add('completed');
-                downloadBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                `;
-            }, 300);
+            const playlistName = this.plexPlaylistNameInput.value.trim() || null;
+            const jobId = await this.downloadTrack(trackId, downloadType, playlistName);
+            console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
+
+            const statusEl = this.ensureJobStatusElement(trackCard);
+            this.setJobStatusChip(statusEl, 'queued');
+            this.setDownloadButtonCompleted(downloadBtn);
+            this.registerActiveJob(jobId, trackCard, downloadBtn, statusEl);
         } catch (error) {
             console.error('[DOWNLOAD] Download error:', error);
             // Check if this was an abort
@@ -1815,6 +1971,9 @@ class App {
                 // Restore button on error
                 downloadBtn.disabled = originalDisabled;
                 downloadBtn.innerHTML = originalContent;
+                if (downloadBtn.dataset.originalContent) {
+                    delete downloadBtn.dataset.originalContent;
+                }
             }
         }
     }
@@ -1822,19 +1981,12 @@ class App {
     private async downloadTrack(
         trackId: number,
         downloadType: 'album' | 'loose',
-        progressCircle?: SVGCircleElement
-    ): Promise<void> {
+        plexPlaylistName: string | null
+    ): Promise<number> {
         try {
             console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
-            
-            // Animate progress to 50% during request
-            if (progressCircle) {
-                setTimeout(() => {
-                    if (progressCircle) (progressCircle as any).style.strokeDashoffset = '37.7'; // 50%
-                }, 200);
-            }
             
             const response = await this.fetchWithRetry('/api/download', {
                 method: 'POST',
@@ -1849,18 +2001,14 @@ class App {
                         ? this.downloadSettings.fileNamingAlbum
                         : this.downloadSettings.fileNamingLoose,
                     fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                    fileNamingLoose: this.downloadSettings.fileNamingLoose
+                    fileNamingLoose: this.downloadSettings.fileNamingLoose,
+                    plex_playlist: plexPlaylistName
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
             
-            // Animate progress to 80% while processing response
-            if (progressCircle) {
-                (progressCircle as any).style.strokeDashoffset = '15.08'; // 80%
-            }
-
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -1872,77 +2020,25 @@ class App {
             const data = await response.json();
             console.log(`[DOWNLOAD] Server response:`, data);
             
-            if (data.success) {
-                console.log(`[DOWNLOAD] File saved: ${data.message}`);
-                // Progress will be set to 100% by the caller
-            } else {
+            if (!data.success) {
                 throw new Error(data.error || 'Download failed');
             }
+
+            if (!data.job_id) {
+                throw new Error('Download job id missing from response');
+            }
+
+            console.log(`[DOWNLOAD] Job queued: ${data.job_id}`);
+            return data.job_id as number;
         } catch (error) {
             // Check if error is due to abort
             if (error instanceof Error && error.name === 'AbortError') {
                 console.log('[DOWNLOAD] Download was aborted');
-                return;
+                throw error;
             }
             console.error('[DOWNLOAD] Error in downloadTrack:', error);
             throw error;
         }
-    }
-
-    private convertButtonToProgressCircle(downloadBtn: HTMLButtonElement): void {
-        // Store original content if not already stored
-        if (!downloadBtn.dataset.originalContent) {
-            downloadBtn.dataset.originalContent = downloadBtn.innerHTML;
-        }
-        
-        downloadBtn.disabled = true;
-        
-        // Create SVG progress circle
-        const progressSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        progressSvg.setAttribute('viewBox', '0 0 24 24');
-        progressSvg.setAttribute('class', 'track-download-progress');
-        
-        // Add gradient definition
-        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-        const gradient = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-        gradient.setAttribute('id', 'progressGradient');
-        gradient.setAttribute('x1', '0%');
-        gradient.setAttribute('y1', '0%');
-        gradient.setAttribute('x2', '100%');
-        gradient.setAttribute('y2', '100%');
-        
-        const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop1.setAttribute('offset', '0%');
-        stop1.setAttribute('stop-color', '#00d4ff');
-        
-        const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-        stop2.setAttribute('offset', '100%');
-        stop2.setAttribute('stop-color', '#0099ff');
-        
-        gradient.appendChild(stop1);
-        gradient.appendChild(stop2);
-        defs.appendChild(gradient);
-        progressSvg.appendChild(defs);
-        
-        // Background track circle
-        const trackCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        trackCircle.setAttribute('cx', '12');
-        trackCircle.setAttribute('cy', '12');
-        trackCircle.setAttribute('r', '12');
-        trackCircle.setAttribute('class', 'progress-circle-track');
-        progressSvg.appendChild(trackCircle);
-        
-        // Progress fill circle
-        const fillCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        fillCircle.setAttribute('cx', '12');
-        fillCircle.setAttribute('cy', '12');
-        fillCircle.setAttribute('r', '12');
-        fillCircle.setAttribute('class', 'progress-circle-fill');
-        progressSvg.appendChild(fillCircle);
-        
-        // Replace button content with progress circle
-        downloadBtn.innerHTML = '';
-        downloadBtn.appendChild(progressSvg);
     }
 
     private restoreDownloadButton(downloadBtn: HTMLButtonElement): void {
@@ -1961,6 +2057,124 @@ class App {
                 </svg>
             `;
         }
+    }
+
+    private ensureJobStatusElement(trackCard: HTMLElement): HTMLElement {
+        const metadata = trackCard.querySelector('.track-metadata');
+        if (!metadata) {
+            const fallback = document.createElement('span');
+            fallback.className = 'job-status-chip status-queued';
+            fallback.textContent = 'Queued';
+            trackCard.appendChild(fallback);
+            return fallback;
+        }
+
+        let statusEl = metadata.querySelector('.job-status-chip') as HTMLElement | null;
+        if (!statusEl) {
+            statusEl = document.createElement('span');
+            statusEl.className = 'job-status-chip status-queued';
+            statusEl.textContent = 'Queued';
+            metadata.appendChild(statusEl);
+        }
+
+        return statusEl;
+    }
+
+    private setJobStatusChip(statusEl: HTMLElement, status: string): void {
+        const normalized = status.replace('_', '-');
+        statusEl.className = `job-status-chip status-${normalized}`;
+        statusEl.textContent = this.formatJobStatus(status);
+    }
+
+    private registerActiveJob(
+        jobId: number,
+        trackCard: HTMLElement,
+        downloadBtn: HTMLButtonElement,
+        statusEl: HTMLElement
+    ): void {
+        this.activeJobMap.set(jobId, { trackCard, downloadBtn, statusEl });
+        this.startJobStatusPolling();
+    }
+
+    private startJobStatusPolling(): void {
+        if (this.jobStatusInterval) {
+            return;
+        }
+
+        this.jobStatusInterval = window.setInterval(() => {
+            void this.pollActiveJobs();
+        }, 4000);
+    }
+
+    private stopJobStatusPolling(): void {
+        if (this.jobStatusInterval && this.activeJobMap.size === 0) {
+            window.clearInterval(this.jobStatusInterval);
+            this.jobStatusInterval = null;
+        }
+    }
+
+    private async pollActiveJobs(): Promise<void> {
+        if (this.jobStatusPolling) {
+            return;
+        }
+
+        if (this.activeJobMap.size === 0) {
+            this.stopJobStatusPolling();
+            return;
+        }
+
+        this.jobStatusPolling = true;
+        const entries = Array.from(this.activeJobMap.entries());
+
+        try {
+            await Promise.all(entries.map(async ([jobId, context]) => {
+                try {
+                    const response = await fetch(`/api/jobs/${jobId}`);
+                    if (!response.ok) {
+                        return;
+                    }
+                    const job = await response.json() as JobItem;
+                    this.updateJobStatusForCard(job, context);
+                } catch (error) {
+                    console.warn('Job status fetch failed:', error);
+                }
+            }));
+        } finally {
+            this.jobStatusPolling = false;
+            this.stopJobStatusPolling();
+        }
+    }
+
+    private updateJobStatusForCard(
+        job: JobItem,
+        context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLElement }
+    ): void {
+        this.setJobStatusChip(context.statusEl, job.status);
+
+        if (job.status === 'succeeded') {
+            this.setDownloadButtonCompleted(context.downloadBtn);
+            context.downloadBtn.disabled = true;
+            this.activeJobMap.delete(job.id);
+            return;
+        }
+
+        if (job.status === 'failed' || job.status === 'cancelled') {
+            this.restoreDownloadButton(context.downloadBtn);
+            this.activeJobMap.delete(job.id);
+            return;
+        }
+
+        context.downloadBtn.disabled = true;
+    }
+
+    private setDownloadButtonCompleted(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add('completed');
+        downloadBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        `;
     }
 
     private async downloadAllTracks(): Promise<void> {
@@ -1989,14 +2203,6 @@ class App {
         let downloadedCount = 0;
 
         console.log(`[DOWNLOAD_ALL] Starting batch download of ${totalTracks} tracks`);
-
-        // Convert all buttons to 0% progress circles
-        for (const trackCard of trackCards) {
-            const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
-            if (downloadBtn && !downloadBtn.classList.contains('completed')) {
-                this.convertButtonToProgressCircle(downloadBtn);
-            }
-        }
 
         for (let i = 0; i < trackCards.length; i++) {
             // Check if cancel was requested
