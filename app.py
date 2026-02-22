@@ -1504,60 +1504,53 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         
         print(f"[PLEX] Searching for track: {artist} - {album} - {title}", flush=True)
         
-        # Try to find the track with intelligent matching
+        # Try to find the track with multiple search strategies
         tracks = []
         try:
-            # First, search by title
-            search_results = library.search(title=title)
-            print(f"[PLEX] Search results count: {len(search_results)}", flush=True)
+            # Strategy 1: Search with title + artist + album filters (most precise)
+            print(f"[PLEX] Trying search with title + artist + album filters", flush=True)
+            search_results = library.search(
+                title=title,
+                filters={'artist.title': artist, 'album.title': album},
+                libtype='track'
+            )
+            print(f"[PLEX] Search with all filters found {len(search_results)} results", flush=True)
             
-            # Define matching strategies in order of preference
-            exact_match = None
-            artist_album_match = None
-            artist_match = None
-            
-            # Evaluate each result
-            for result in search_results:
-                if not (hasattr(result, 'artist') and hasattr(result, 'album')):
-                    continue
-                
-                result_artist = result.artist.title if hasattr(result.artist, 'title') else str(result.artist)
-                result_album = result.album.title if hasattr(result.album, 'title') else str(result.album)
-                
-                artist_match_lower = result_artist.lower() == artist.lower()
-                album_match_lower = result_album.lower() == album.lower()
-                
-                # Strategy 1: Exact match (artist AND album)
-                if artist_match_lower and album_match_lower:
-                    exact_match = result
-                    print(f"[PLEX] Found exact match: {result_artist} - {result_album} - {title}", flush=True)
-                    break
-                
-                # Strategy 2: Artist + Album match (keep first one found)
-                if artist_match_lower and album_match_lower and not artist_album_match:
-                    artist_album_match = result
-                
-                # Strategy 3: Artist match only (keep first one found)
-                if artist_match_lower and not artist_match:
-                    artist_match = result
-            
-            # Use the best match found
-            if exact_match:
-                tracks.append(exact_match)
-                print(f"[PLEX] Using exact match (artist + album + title)", flush=True)
-            elif artist_album_match:
-                tracks.append(artist_album_match)
-                print(f"[PLEX] Using artist + album match", flush=True)
-            elif artist_match:
-                tracks.append(artist_match)
-                print(f"[PLEX] Using artist match only (album not found in library)", flush=True)
+            if search_results:
+                tracks = search_results
+                print(f"[PLEX] Using result from artist + album + title search", flush=True)
             else:
-                print(f"[PLEX] No suitable match found. Artist searched for: '{artist}'", flush=True)
+                # Strategy 2: Search with title + artist only (if album didn't match)
+                print(f"[PLEX] Trying search with title + artist filter only", flush=True)
+                search_results = library.search(
+                    title=title,
+                    filters={'artist.title': artist},
+                    libtype='track'
+                )
+                print(f"[PLEX] Search with artist filter found {len(search_results)} results", flush=True)
+                
                 if search_results:
-                    result_artist = search_results[0].artist.title if hasattr(search_results[0].artist, 'title') else str(search_results[0].artist)
-                    print(f"[PLEX] First search result was: '{result_artist}' (not matching requested artist)", flush=True)
-            
-            print(f"[PLEX] Selected track count after filtering: {len(tracks)}", flush=True)
+                    tracks = search_results
+                    print(f"[PLEX] Using result from artist + title search (album may not match)", flush=True)
+                else:
+                    # Strategy 3: Basic title search as last resort
+                    print(f"[PLEX] Trying basic title search", flush=True)
+                    search_results = library.search(title=title, libtype='track')
+                    print(f"[PLEX] Basic title search found {len(search_results)} results", flush=True)
+                    
+                    # Filter manually for artist match
+                    for result in search_results:
+                        if hasattr(result, 'artist'):
+                            result_artist = result.artist().title if callable(result.artist) else result.artist.title
+                            if result_artist.lower() == artist.lower():
+                                tracks.append(result)
+                                print(f"[PLEX] Found matching artist in basic search: {result_artist}", flush=True)
+                                break
+                    
+                    if tracks:
+                        print(f"[PLEX] Using artist-matched result from basic title search", flush=True)
+                    else:
+                        print(f"[PLEX] No matching tracks found with any search strategy", flush=True)
         
         except Exception as e:
             print(f"[PLEX] Error searching for track: {str(e)}", flush=True)
