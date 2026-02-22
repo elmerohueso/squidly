@@ -1045,6 +1045,8 @@ class App {
                 return;
             }
 
+            this.updatePlexPlaylistContainerVisibility(true);
+
             // Set up progress display
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
@@ -1230,6 +1232,8 @@ class App {
                 return;
             }
 
+            this.updatePlexPlaylistContainerVisibility(true);
+
             // Get playlist info for display
             const playlistTitle = playlist.title || 'Untitled Playlist';
             const playlistCreator = playlist.creator || 'Unknown';
@@ -1343,7 +1347,7 @@ class App {
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
         this.stopPlayback();
-        this.updatePlexPlaylistContainerVisibility(true);
+        this.updatePlexPlaylistContainerVisibility(searchType === 's');
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
@@ -1879,6 +1883,8 @@ class App {
                 this.displayMessage('No tracks found in this album');
                 return;
             }
+
+            this.updatePlexPlaylistContainerVisibility(true);
 
             // Get album info for display
             const albumTitle = albumData.title || 'Album';
