@@ -510,6 +510,16 @@ main {
     color: var(--accent-primary);
 }
 
+.playlist-description-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+}
+
 .track-metadata {
     font-size: 0.8125rem;
     color: var(--text-muted);

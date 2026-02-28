@@ -3,12 +3,15 @@
 interface SearchResult {
     query: string;
     data?: {
-        items?: (Track | AlbumSearchItem)[];
+        items?: (Track | AlbumSearchItem | PlaylistSearchItem)[];
         albums?: {
             items: AlbumSearchItem[];
         };
         artists?: {
             items: ArtistSearchItem[];
+        };
+        playlists?: {
+            items: PlaylistSearchItem[];
         };
     };
     results?: any[];
@@ -65,6 +68,33 @@ interface ArtistSearchItem {
     picture?: string;
     popularity?: number;
     artistTypes?: string[];
+}
+
+interface PlaylistSearchItem {
+    id?: number | string;
+    uuid?: string;
+    url?: string;
+    title: string;
+    description?: string;
+    customImageUrl?: string | null;
+    squareImage?: string;
+    image?: string;
+    cover?: string;
+    numberOfTracks?: number;
+    numberOfItems?: number;
+    type?: string;
+    audioQuality?: string;
+    mediaMetadata?: {
+        tags?: string[];
+    };
+    promotedArtists?: Array<{
+        id?: number | string;
+        name?: string;
+    }>;
+    creator?: {
+        id?: number | string;
+        name?: string;
+    } | string;
 }
 
 interface AlbumInfo {
@@ -386,6 +416,16 @@ class App {
                 const playlistId = playlistCard.getAttribute('data-playlist-id');
                 if (playlistId) {
                     void this.fetchListenbrainzPlaylistTracks(playlistId);
+                    return;
+                }
+            }
+
+            // Check for search playlist card clicks
+            const searchPlaylistCard = target.closest('.playlist-search-card') as HTMLElement | null;
+            if (searchPlaylistCard) {
+                const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
+                if (playlistId) {
+                    void this.fetchPlaylistTracks(playlistId);
                     return;
                 }
             }
@@ -1299,6 +1339,8 @@ class App {
             this.searchInput.placeholder = 'Search for artists...';
         } else if (searchType === 'al') {
             this.searchInput.placeholder = 'Search for albums...';
+        } else if (searchType === 'p') {
+            this.searchInput.placeholder = 'Search for playlists...';
         } else {
             this.searchInput.placeholder = 'Search for tracks...';
         }
@@ -1687,6 +1729,8 @@ class App {
             items = data.data?.albums?.items || [];
         } else if (searchType === 'a') {
             items = data.data?.artists?.items || [];
+        } else if (searchType === 'p') {
+            items = data.data?.playlists?.items || data.data?.items || [];
         } else {
             items = data.data?.items || [];
         }
@@ -1711,10 +1755,249 @@ class App {
                 ${items.map(item => {
                     if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
                     if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
+                    if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
                     return this.formatTrackCard(item as Track);
                 }).join('')}
             </div>
         `;
+    }
+
+    private formatSearchPlaylistCard(playlist: PlaylistSearchItem): string {
+        const playlistId = this.escapeHtml(this.getPlaylistId(playlist));
+        const playlistName = this.escapeHtml(playlist.title || 'Unknown Playlist');
+        const playlistDescription = this.escapeHtml((playlist.description || '').trim());
+        const trackTotal = playlist.numberOfTracks ?? playlist.numberOfItems;
+        const trackCount = typeof trackTotal === 'number'
+            ? `${trackTotal} track${trackTotal !== 1 ? 's' : ''}`
+            : '';
+
+        let quality = playlist.audioQuality || '';
+        if (playlist.mediaMetadata?.tags && playlist.mediaMetadata.tags.length > 0) {
+            const tags = playlist.mediaMetadata.tags;
+            if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('LOSSLESS')) {
+                quality = 'LOSSLESS';
+            } else if (tags.includes('LOW')) {
+                quality = 'LOW';
+            }
+        }
+        const qualityDisplay = this.formatQuality(quality);
+        const coverImage = this.getPlaylistCoverUrl(playlist);
+
+        return `
+            <div class="track-card album-card playlist-search-card clickable" data-playlist-id="${playlistId}" title="Click to view tracks">
+                <div class="track-artwork">
+                    ${coverImage
+                        ? `<img src="${coverImage}" alt="${playlistName}" loading="lazy">`
+                        : `<div class="track-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <path d="M9 9h6"></path>
+                                <path d="M9 13h6"></path>
+                                <path d="M9 17h4"></path>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                <div class="track-info">
+                    <div class="track-title">${playlistName}</div>
+                    ${playlistDescription ? `<div class="track-artist"><span class="playlist-description-text">${playlistDescription}</span></div>` : ''}
+                    <div class="track-metadata">
+                        ${trackCount ? `<span>${trackCount}</span>` : ''}
+                        ${trackCount && qualityDisplay ? `<span>•</span>` : ''}
+                        ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    private getPlaylistId(playlist: PlaylistSearchItem): string {
+        if (typeof playlist.uuid === 'string' && playlist.uuid.trim()) {
+            return playlist.uuid.trim();
+        }
+
+        if (typeof playlist.id === 'string' && playlist.id.trim()) {
+            const normalized = this.normalizePlaylistId(playlist.id.trim());
+            return normalized || playlist.id.trim();
+        }
+
+        if (typeof playlist.id === 'number' && Number.isFinite(playlist.id)) {
+            return String(playlist.id);
+        }
+
+        if (typeof playlist.url === 'string' && playlist.url.trim()) {
+            const normalized = this.normalizePlaylistId(playlist.url.trim());
+            return normalized || playlist.url.trim();
+        }
+
+        return '';
+    }
+
+    private getPlaylistAuthorName(playlist: PlaylistSearchItem): string {
+        if (typeof playlist.creator === 'string' && playlist.creator.trim()) {
+            return playlist.creator;
+        }
+
+        if (playlist.creator && typeof playlist.creator === 'object' && playlist.creator.name?.trim()) {
+            return playlist.creator.name;
+        }
+
+        const promotedArtistName = playlist.promotedArtists?.find(artist => artist?.name?.trim())?.name;
+        if (promotedArtistName) {
+            return promotedArtistName;
+        }
+
+        if (playlist.type === 'EDITORIAL') {
+            return 'TIDAL';
+        }
+
+        return 'Unknown';
+    }
+
+    private getPlaylistCoverUrl(playlist: PlaylistSearchItem): string {
+        const rawCover = playlist.customImageUrl || playlist.squareImage || playlist.image || playlist.cover || '';
+        if (!rawCover) {
+            return '';
+        }
+
+        if (rawCover.startsWith('http://') || rawCover.startsWith('https://')) {
+            return rawCover;
+        }
+
+        return this.formatPlaylistCoverUrl(rawCover);
+    }
+
+    private formatPlaylistCoverUrl(cover: string): string {
+        const coverPath = cover.replace(/-/g, '/');
+        return `https://resources.tidal.com/images/${coverPath}/640x640.jpg`;
+    }
+
+    private normalizePlaylistId(value: string): string {
+        const trimmed = value.trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(trimmed)) {
+            return trimmed;
+        }
+
+        const match = trimmed.match(/playlist\/([0-9a-f-]{36})/i);
+        if (match && match[1]) {
+            return match[1];
+        }
+
+        return '';
+    }
+
+    private async fetchPlaylistTracks(playlistId: string): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.stopPlayback();
+        this.displayMessage('Loading playlist tracks...');
+
+        try {
+            const normalizedPlaylistId = this.normalizePlaylistId(playlistId) || playlistId;
+            const response = await fetch(`/playlist/?id=${encodeURIComponent(normalizedPlaylistId)}`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch playlist');
+            }
+
+            const data: any = await response.json();
+
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchPlaylistTracks(normalizedPlaylistId));
+                return;
+            }
+
+            const payload = data?.data && typeof data.data === 'object' ? data.data : data;
+            if (!payload || typeof payload !== 'object') {
+                this.displayMessage('No playlist data found');
+                return;
+            }
+
+            const playlistMeta = payload.playlist && typeof payload.playlist === 'object'
+                ? payload.playlist
+                : payload;
+
+            const rawItems = Array.isArray(payload.items)
+                ? payload.items
+                : Array.isArray(payload.tracks)
+                    ? payload.tracks
+                    : Array.isArray(playlistMeta.items)
+                        ? playlistMeta.items
+                        : Array.isArray(playlistMeta.tracks)
+                            ? playlistMeta.tracks
+                            : [];
+
+            const tracks = rawItems
+                .map((item: any) => {
+                    if (
+                        item &&
+                        typeof item === 'object' &&
+                        item.item &&
+                        typeof item.item === 'object' &&
+                        'id' in item.item &&
+                        'title' in item.item
+                    ) {
+                        return item.item as Track;
+                    }
+
+                    if (item && typeof item === 'object' && 'id' in item && 'title' in item) {
+                        return item as Track;
+                    }
+
+                    return null;
+                })
+                .filter((track: Track | null): track is Track => track !== null);
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this playlist');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+
+            const playlistTitle = playlistMeta.title || playlistMeta.name || 'Playlist';
+
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(playlistTitle)}</h2>
+                    </div>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                    <div class="progress-info" style="display: none;">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
+                    </div>
+                </div>
+                <div class="results-list">
+                    ${tracks.map((track: Track) => this.formatTrackCard(track)).join('')}
+                </div>
+            `;
+
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => {
+                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
+                    if (progressInfo) {
+                        progressInfo.style.display = 'block';
+                    }
+                    void this.downloadAllTracks();
+                });
+                resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+        } catch (error) {
+            this.displayMessage('Error loading playlist tracks. Please try again.', () => this.fetchPlaylistTracks(playlistId));
+            console.error('Playlist fetch error:', error);
+        }
     }
 
     private formatTrackCard(track: Track, showTrackNumber: boolean = false): string {
