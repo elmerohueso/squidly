@@ -632,7 +632,10 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name, parent_
         SELECT id FROM jobs
         WHERE job_type = %s
           AND payload_json = %s
-          AND status IN ('queued', 'in_progress', 'failed')
+                    AND (
+                                status IN ('queued', 'in_progress')
+                                OR (status = 'failed' AND attempt_count < max_attempts)
+                            )
         """,
         ('plex_add', payload_json)
     )
@@ -3116,6 +3119,68 @@ def cancel_job(job_id):
     conn.close()
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
+
+@app.route('/api/jobs/<int:job_id>/retry', methods=['POST'])
+def retry_job(job_id):
+    """Retry an existing failed/completed-with-errors download job by re-queueing it."""
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT job_type, status, result_json
+        FROM jobs
+        WHERE id = %s
+        """,
+        (job_id,)
+    )
+    row = cur.fetchone()
+
+    if row is None:
+        conn.close()
+        return jsonify({'error': 'Job not found'}), 404
+
+    if row['job_type'] != 'download_track':
+        conn.close()
+        return jsonify({'error': 'Only download_track jobs can be retried'}), 400
+
+    retryable = row['status'] == 'failed'
+
+    if not retryable and row['status'] == 'succeeded':
+        try:
+            result = json.loads(row['result_json']) if row['result_json'] else {}
+        except (TypeError, ValueError):
+            result = {}
+
+        stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
+        retryable = stages.get('playlist_added') == 'failed'
+
+    if not retryable:
+        conn.close()
+        return jsonify({'error': f"Job is not retryable (status={row['status']})"}), 400
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'queued',
+            attempt_count = 0,
+            result_json = NULL,
+            error_message = NULL,
+            updated_at = %s,
+            run_after = %s,
+            locked_at = NULL,
+            locked_by = NULL,
+            started_at = NULL,
+            finished_at = NULL
+        WHERE id = %s
+        """,
+        (now, now, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'})
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def download_settings():

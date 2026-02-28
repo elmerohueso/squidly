@@ -1101,6 +1101,12 @@ footer p {
     gap: 0.75rem;
 }
 
+.job-main-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
 .job-title {
     font-size: 0.95rem;
     font-weight: 600;
@@ -1147,6 +1153,30 @@ footer p {
 .job-status.status-cancelled {
     color: var(--text-muted);
     border-color: var(--border-color);
+}
+
+.job-retry-button {
+    padding: 0.28rem 0.55rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--accent-primary);
+    background: transparent;
+    color: var(--accent-primary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.job-retry-button:hover:enabled {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.job-retry-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .job-stages {

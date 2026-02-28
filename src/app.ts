@@ -287,6 +287,9 @@ class App {
             this.currentJobsPage = 1;
             void this.loadJobs();
         });
+        this.jobsContent.addEventListener('click', (e: MouseEvent) => {
+            void this.handleJobsContentClick(e);
+        });
 
         this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
         this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
@@ -590,11 +593,56 @@ class App {
         this.jobsPagination.innerHTML = '';
     }
 
+    private async handleJobsContentClick(e: MouseEvent): Promise<void> {
+        const target = e.target as HTMLElement;
+        const retryButton = target.closest('.job-retry-button') as HTMLButtonElement | null;
+        if (!retryButton) {
+            return;
+        }
+
+        const jobId = Number(retryButton.getAttribute('data-job-id') || '0');
+        if (!Number.isFinite(jobId) || jobId <= 0) {
+            return;
+        }
+
+        await this.retryJob(jobId, retryButton);
+    }
+
+    private async retryJob(jobId: number, button: HTMLButtonElement): Promise<void> {
+        const originalText = button.textContent || 'Retry';
+        button.disabled = true;
+        button.textContent = 'Retrying...';
+
+        try {
+            const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to retry job';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Retry job failed:', error);
+            window.alert((error as Error).message || 'Failed to retry job');
+            button.disabled = false;
+            button.textContent = originalText;
+        }
+    }
+
     private renderJobItem(job: JobItem): string {
         const title = this.getJobDisplayTitle(job);
         const effectiveStatus = this.getEffectiveJobStatus(job);
         const statusLabel = this.formatJobStatus(effectiveStatus);
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
+        const showRetryButton = effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors';
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
 
@@ -624,7 +672,10 @@ class App {
             <div class="job-item">
                 <div class="job-main">
                     <div class="job-title">${this.escapeHtml(title)}</div>
-                    <div class="job-status ${statusClass}">${statusLabel}</div>
+                    <div class="job-main-actions">
+                        <div class="job-status ${statusClass}">${statusLabel}</div>
+                        ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
+                    </div>
                 </div>
                 <div class="job-stages">
                     ${stageHtml}
