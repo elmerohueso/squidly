@@ -613,13 +613,14 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     conn.close()
     return job_id
 
-def queue_pending_playlist_addition(artist, album, title, playlist_name):
+def queue_pending_playlist_addition(artist, album, title, playlist_name, parent_job_id=None):
     """Add a track to the pending playlist additions queue."""
     payload = {
         'artist': artist,
         'album': album,
         'title': title,
-        'playlist_name': playlist_name
+        'playlist_name': playlist_name,
+        'parent_job_id': parent_job_id
     }
     payload_json = serialize_job_payload(payload)
     conn = get_db_connection()
@@ -643,7 +644,158 @@ def queue_pending_playlist_addition(artist, album, title, playlist_name):
         return
     conn.close()
     job_id = enqueue_job('plex_add', payload)
-    print(f"[PLEX_QUEUE] Queued for retry (job {job_id}): {artist} - {title}", flush=True)
+    print(f"[PLEX_QUEUE] Queued for retry (job {job_id}, parent {parent_job_id}): {artist} - {title}", flush=True)
+
+def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
+    """Update playlist_added stage on a parent download_track job."""
+    if parent_job_id is None:
+        return
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT job_type, result_json
+        FROM jobs
+        WHERE id = %s
+        """,
+        (parent_job_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+
+    if not row or row['job_type'] != 'download_track':
+        return
+
+    try:
+        current = json.loads(row['result_json']) if row['result_json'] else {}
+    except (TypeError, ValueError):
+        current = {}
+
+    if not isinstance(current, dict):
+        current = {}
+
+    stages = current.get('stages') if isinstance(current.get('stages'), dict) else {}
+    stages['playlist_added'] = playlist_stage_status
+    update_job_progress(parent_job_id, {'stages': stages})
+
+def backfill_plex_add_parent_links():
+    """One-time repair for legacy plex_add jobs missing parent_job_id in payload."""
+    print("[PLEX_REPAIR] Starting parent link backfill", flush=True)
+    now = datetime.utcnow().isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, payload_json, status, attempt_count, max_attempts, created_at
+        FROM jobs
+        WHERE job_type = %s
+        ORDER BY created_at ASC
+        """,
+        ('plex_add',)
+    )
+    additions = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT id, result_json, created_at
+        FROM jobs
+        WHERE job_type = %s
+          AND result_json IS NOT NULL
+        ORDER BY created_at ASC
+        """,
+        ('download_track',)
+    )
+    parents = cur.fetchall()
+
+    parent_index = {}
+    for row in parents:
+        try:
+            result = json.loads(row['result_json']) if row['result_json'] else {}
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(result, dict):
+            continue
+
+        artist = str(result.get('artist') or '').strip().casefold()
+        album = str(result.get('album') or '').strip().casefold()
+        title = str(result.get('title') or '').strip().casefold()
+        playlist = str(result.get('playlist_name') or '').strip().casefold()
+        stages = result.get('stages') if isinstance(result.get('stages'), dict) else {}
+        playlist_stage = str(stages.get('playlist_added') or '').strip().casefold()
+
+        if not artist or not title or not playlist:
+            continue
+        if playlist_stage not in ('queued', 'done', 'failed'):
+            continue
+
+        key = (artist, album, title, playlist)
+        parent_index.setdefault(key, []).append({
+            'id': row['id'],
+            'created_at': row['created_at'] or '',
+            'playlist_stage': playlist_stage
+        })
+
+    linked_count = 0
+    reconciled_count = 0
+
+    for addition in additions:
+        try:
+            payload = json.loads(addition['payload_json']) if addition['payload_json'] else {}
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get('parent_job_id'):
+            continue
+
+        artist = str(payload.get('artist') or '').strip().casefold()
+        album = str(payload.get('album') or '').strip().casefold()
+        title = str(payload.get('title') or '').strip().casefold()
+        playlist = str(payload.get('playlist_name') or '').strip().casefold()
+        if not artist or not title or not playlist:
+            continue
+
+        key = (artist, album, title, playlist)
+        candidates = parent_index.get(key, [])
+        if not candidates:
+            continue
+
+        addition_created = addition['created_at'] or ''
+        best = None
+        for candidate in candidates:
+            candidate_created = candidate['created_at']
+            if not candidate_created or candidate_created <= addition_created:
+                best = candidate
+        if best is None:
+            best = candidates[0]
+
+        payload['parent_job_id'] = best['id']
+        cur.execute(
+            """
+            UPDATE jobs
+            SET payload_json = %s,
+                updated_at = %s
+            WHERE id = %s AND job_type = %s
+            """,
+            (serialize_job_payload(payload), now, addition['id'], 'plex_add')
+        )
+        linked_count += 1
+
+        if addition['status'] == 'succeeded':
+            update_parent_playlist_stage(best['id'], 'done')
+            reconciled_count += 1
+        elif addition['status'] == 'failed' and addition['attempt_count'] >= addition['max_attempts']:
+            update_parent_playlist_stage(best['id'], 'failed')
+            reconciled_count += 1
+
+    conn.commit()
+    conn.close()
+    print(
+        f"[PLEX_REPAIR] Backfill complete: linked={linked_count}, reconciled={reconciled_count}",
+        flush=True
+    )
 
 def get_pending_playlist_additions():
     """Get all pending playlist additions that haven't exceeded max attempts."""
@@ -1284,7 +1436,8 @@ def process_download_job(job_id, payload):
                         artist_name,
                         album_name,
                         track_title,
-                        playlist_name
+                        playlist_name,
+                        parent_job_id=job_id
                     )
                     stages['playlist_added'] = 'queued'
                     update_job_progress(job_id, {'stages': stages})
@@ -1384,8 +1537,10 @@ def retry_pending_playlist_additions():
             print(f"[PLEX_WORKER] Found {len(pending)} pending playlist additions to retry", flush=True)
             
             for addition in pending:
+                parent_job_id = None
                 try:
                     payload = addition.get('payload') or {}
+                    parent_job_id = payload.get('parent_job_id')
                     track_info = {
                         'artist': payload.get('artist', 'Unknown Artist'),
                         'album': payload.get('album', 'Unknown Album'),
@@ -1404,9 +1559,11 @@ def retry_pending_playlist_additions():
                     if success:
                         print(f"[PLEX_WORKER] Successfully added: {track_info['artist']} - {track_info['title']}", flush=True)
                         remove_pending_addition(addition['id'])
+                        update_parent_playlist_stage(parent_job_id, 'done')
                     else:
                         update_pending_addition_attempt(addition['id'], message)
                         if addition['attempt_count'] + 1 >= addition['max_attempts']:
+                            update_parent_playlist_stage(parent_job_id, 'failed')
                             print(f"[PLEX_WORKER] Max attempts reached for: {track_info['artist']} - {track_info['title']}", flush=True)
                         else:
                             print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
@@ -1417,6 +1574,8 @@ def retry_pending_playlist_additions():
                 except Exception as e:
                     print(f"[PLEX_WORKER] Error processing addition {addition['id']}: {str(e)}", flush=True)
                     update_pending_addition_attempt(addition['id'], str(e))
+                    if addition['attempt_count'] + 1 >= addition['max_attempts']:
+                        update_parent_playlist_stage(parent_job_id, 'failed')
         
         except Exception as e:
             print(f"[PLEX_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -1991,6 +2150,7 @@ url_iterator = cycle(SQUID_URLS)
 # With gunicorn --preload, this runs once before workers are forked
 print("Squidly starting up...", flush=True)
 validate_all_endpoints()
+backfill_plex_add_parent_links()
 print("Validation complete, server ready to accept requests.\n", flush=True)
 
 # Start background worker for retrying failed Plex playlist additions

@@ -468,6 +468,8 @@ class App {
     private updateJobsFilterCounts(jobs: JobItem[]): void {
         const incompleteCount = this.filterJobsByStatus(jobs, 'incomplete').length;
         const completeCount = this.filterJobsByStatus(jobs, 'complete').length;
+        const completedWithErrorsCount = this.filterJobsByStatus(jobs, 'completed_with_errors').length;
+        const failedCount = this.filterJobsByStatus(jobs, 'failed').length;
 
         const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
         if (incompleteOption) {
@@ -478,14 +480,53 @@ class App {
         if (completeOption) {
             completeOption.textContent = `Complete (${completeCount})`;
         }
+
+        const completedWithErrorsOption = this.jobsFilterSelect.querySelector('option[value="completed_with_errors"]');
+        if (completedWithErrorsOption) {
+            completedWithErrorsOption.textContent = `Completed with errors (${completedWithErrorsCount})`;
+        }
+
+        const failedOption = this.jobsFilterSelect.querySelector('option[value="failed"]');
+        if (failedOption) {
+            failedOption.textContent = `Failed (${failedCount})`;
+        }
+    }
+
+    private getEffectiveJobStatus(job: JobItem): string {
+        if (job.job_type !== 'download_track') {
+            return job.status;
+        }
+
+        const stages = job.result?.stages;
+        if (stages?.written === 'failed') {
+            return 'failed';
+        }
+
+        if (stages?.playlist_added === 'failed') {
+            return 'completed_with_errors';
+        }
+
+        if (job.status === 'succeeded' && stages?.playlist_added === 'queued') {
+            return 'in_progress';
+        }
+
+        return job.status;
     }
 
     private filterJobsByStatus(jobs: JobItem[], filter: string): JobItem[] {
-        if (filter === 'complete') {
-            return jobs.filter(job => ['succeeded', 'cancelled', 'failed'].includes(job.status));
+        if (filter === 'failed') {
+            return jobs.filter(job => this.getEffectiveJobStatus(job) === 'failed');
         }
 
-        return jobs.filter(job => ['queued', 'in_progress'].includes(job.status));
+        if (filter === 'completed_with_errors') {
+            return jobs.filter(job => this.getEffectiveJobStatus(job) === 'completed_with_errors');
+        }
+
+        if (filter === 'complete') {
+            return jobs.filter(job => ['succeeded', 'cancelled', 'completed_with_errors'].includes(this.getEffectiveJobStatus(job)));
+        }
+
+        return jobs.filter(job => ['queued', 'in_progress'].includes(this.getEffectiveJobStatus(job)));
     }
 
     private renderJobs(jobs: JobItem[]): void {
@@ -551,8 +592,9 @@ class App {
 
     private renderJobItem(job: JobItem): string {
         const title = this.getJobDisplayTitle(job);
-        const statusLabel = this.formatJobStatus(job.status);
-        const statusClass = `status-${job.status.replace('_', '-')}`;
+        const effectiveStatus = this.getEffectiveJobStatus(job);
+        const statusLabel = this.formatJobStatus(effectiveStatus);
+        const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
 
@@ -610,6 +652,9 @@ class App {
     private formatJobStatus(status: string): string {
         if (status === 'in_progress') {
             return 'In-Progress';
+        }
+        if (status === 'completed_with_errors') {
+            return 'Completed with errors';
         }
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
@@ -2388,17 +2433,25 @@ class App {
         job: JobItem,
         context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLElement }
     ): void {
-        this.setJobStatusChip(context.statusEl, job.status);
+        const effectiveStatus = this.getEffectiveJobStatus(job);
+        this.setJobStatusChip(context.statusEl, effectiveStatus);
 
-        if (job.status === 'succeeded') {
+        if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed_with_errors') {
             this.setDownloadButtonCompleted(context.downloadBtn);
             context.downloadBtn.disabled = true;
             this.activeJobMap.delete(job.id);
             return;
         }
 
-        if (job.status === 'failed' || job.status === 'cancelled') {
+        if (effectiveStatus === 'failed' || effectiveStatus === 'cancelled') {
             this.restoreDownloadButton(context.downloadBtn);
+            this.activeJobMap.delete(job.id);
+            return;
+        }
+
+        if (job.status === 'succeeded') {
+            this.setDownloadButtonCompleted(context.downloadBtn);
+            context.downloadBtn.disabled = true;
             this.activeJobMap.delete(job.id);
             return;
         }
