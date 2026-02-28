@@ -50,8 +50,9 @@ def set_last_job_finished_at(ts):
 def any_download_jobs_running():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM jobs WHERE job_type = 'download_track' AND status IN ('queued', 'in_progress')")
-    count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE job_type = 'download_track' AND status IN ('queued', 'in_progress')")
+    row = cur.fetchone() or {}
+    count = row.get('count', 0)
     conn.close()
     return count > 0
 
@@ -92,10 +93,20 @@ def library_update_worker():
                 continue
             last_update_time, library_update_needed, last_job_finished_at = status
             now = datetime.utcnow()
-            # Convert timestamps if not None
-            if last_update_time:
+            # Convert timestamps if not None and not already datetime
+            if last_update_time and not isinstance(last_update_time, datetime):
+                try:
+                    last_update_time = datetime.fromisoformat(str(last_update_time))
+                except Exception:
+                    last_update_time = None
+            if last_update_time and hasattr(last_update_time, 'replace'):
                 last_update_time = last_update_time.replace(tzinfo=None)
-            if last_job_finished_at:
+            if last_job_finished_at and not isinstance(last_job_finished_at, datetime):
+                try:
+                    last_job_finished_at = datetime.fromisoformat(str(last_job_finished_at))
+                except Exception:
+                    last_job_finished_at = None
+            if last_job_finished_at and hasattr(last_job_finished_at, 'replace'):
                 last_job_finished_at = last_job_finished_at.replace(tzinfo=None)
             # Scenario 1
             if library_update_needed and not any_download_jobs_running():
@@ -1592,6 +1603,40 @@ def test_plex_connection(server_url, api_token):
         error_msg = str(e)
         print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
         return False, f'Failed to connect to Plex: {error_msg}', None
+
+def get_plex_music_playlists(server_url, api_token):
+    """
+    Get existing Plex music playlists, excluding smart playlists.
+
+    Returns:
+        tuple: (success: bool, playlists: list[str], error: str | None)
+    """
+    try:
+        plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+        playlist_titles = []
+
+        for playlist in plex.playlists():
+            playlist_type = (getattr(playlist, 'playlistType', None) or '').lower()
+            if playlist_type and playlist_type != 'audio':
+                continue
+
+            smart_attr = getattr(playlist, 'smart', False)
+            try:
+                is_smart = smart_attr() if callable(smart_attr) else bool(smart_attr)
+            except Exception:
+                is_smart = bool(smart_attr)
+
+            if is_smart:
+                continue
+
+            title = getattr(playlist, 'title', None)
+            if isinstance(title, str) and title.strip():
+                playlist_titles.append(title.strip())
+
+        return True, sorted(set(playlist_titles), key=str.casefold), None
+    except Exception as e:
+        print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
+        return False, [], str(e)
 
 def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, track_info):
     """
@@ -3155,3 +3200,19 @@ def test_plex_connection_endpoint():
             'success': False,
             'message': message
         }), 400
+
+@app.route('/api/plex/playlists', methods=['GET'])
+def get_plex_playlists_endpoint():
+    """Get existing non-smart Plex music playlists for current configuration."""
+    config = get_plex_config()
+    server_url = config.get('server_url')
+    api_token = config.get('api_token')
+
+    if not server_url or not api_token:
+        return jsonify({'error': 'Plex is not configured'}), 400
+
+    success, playlists, message = get_plex_music_playlists(server_url, api_token)
+    if not success:
+        return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
+
+    return jsonify({'playlists': playlists})

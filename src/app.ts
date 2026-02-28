@@ -137,6 +137,7 @@ interface DownloadSettings {
 }
 
 class App {
+    private static readonly NEW_PLEX_PLAYLIST_OPTION = '__new_playlist__';
     private searchInput: HTMLInputElement;
     private searchTypeSelect: HTMLSelectElement;
     private searchButton: HTMLButtonElement;
@@ -168,7 +169,12 @@ class App {
     private plexServerUrlInput: HTMLInputElement;
     private plexApiTokenInput: HTMLInputElement;
     private plexLibraryNameSelect: HTMLSelectElement;
+    private plexPlaylistContainer: HTMLElement;
+    private plexPlaylistContainerHomeParent: HTMLElement;
+    private plexPlaylistContainerHomeNextSibling: ChildNode | null;
     private plexPlaylistNameInput: HTMLInputElement;
+    private plexPlaylistOptions: HTMLSelectElement;
+    private plexPlaylistBackButton: HTMLButtonElement;
     private savePlexConfigButton: HTMLButtonElement;
     private testPlexConnectionButton: HTMLButtonElement;
     private plexConfigStatusEl: HTMLElement;
@@ -232,7 +238,12 @@ class App {
         this.plexServerUrlInput = document.getElementById('plexServerUrl') as HTMLInputElement;
         this.plexApiTokenInput = document.getElementById('plexApiToken') as HTMLInputElement;
         this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
+        this.plexPlaylistContainer = document.getElementById('plexPlaylistContainer') as HTMLElement;
+        this.plexPlaylistContainerHomeParent = this.plexPlaylistContainer.parentElement as HTMLElement;
+        this.plexPlaylistContainerHomeNextSibling = this.plexPlaylistContainer.nextSibling;
         this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement;
+        this.plexPlaylistOptions = document.getElementById('plexPlaylistOptions') as HTMLSelectElement;
+        this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement;
         this.savePlexConfigButton = document.getElementById('savePlexConfig') as HTMLButtonElement;
         this.testPlexConnectionButton = document.getElementById('testPlexConnection') as HTMLButtonElement;
         this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
@@ -283,6 +294,26 @@ class App {
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         this.savePlexConfigButton.addEventListener('click', () => this.savePlexConfig());
         this.testPlexConnectionButton.addEventListener('click', () => this.testPlexConnection());
+        this.plexPlaylistOptions.addEventListener('change', () => {
+            const selectedName = this.plexPlaylistOptions.value.trim();
+            if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
+                this.setPlexPlaylistMode('new');
+                this.plexPlaylistNameInput.value = '';
+                this.plexPlaylistNameInput.focus();
+                return;
+            }
+
+            if (selectedName) {
+                this.plexPlaylistNameInput.value = selectedName;
+            }
+
+            this.setPlexPlaylistMode('existing');
+        });
+        this.plexPlaylistBackButton.addEventListener('click', () => {
+            this.setPlexPlaylistMode('existing');
+            this.plexPlaylistOptions.value = '';
+            this.plexPlaylistNameInput.value = '';
+        });
 
         // Update placeholder text based on search type
         this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
@@ -776,6 +807,11 @@ class App {
                 this.isPlexConfigured = data.has_config ? true : false;
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
                 this.updatePlexPlaylistContainerVisibility(false);
+                if (this.isPlexConfigured) {
+                    void this.loadPlexPlaylists();
+                } else {
+                    this.populatePlexPlaylistOptions([]);
+                }
             }
         } catch (error) {
             console.warn('Failed to load Plex config.', error);
@@ -867,6 +903,8 @@ class App {
 
             if (response.ok) {
                 this.updatePlexConfigStatus('✓ Configuration saved');
+                this.isPlexConfigured = true;
+                void this.loadPlexPlaylists();
                 this.plexApiTokenInput.value = '';
                 setTimeout(() => {
                     this.updatePlexConfigStatus('✓ Configured');
@@ -886,13 +924,127 @@ class App {
     }
 
     private updatePlexPlaylistContainerVisibility(show: boolean): void {
-        const container = document.getElementById('plexPlaylistContainer') as HTMLElement;
-        if (container) {
-            if (this.isPlexConfigured && show) {
-                container.style.display = 'block';
+        if (this.isPlexConfigured && show) {
+            this.restorePlexPlaylistContainerToHome();
+            this.plexPlaylistContainer.style.display = 'flex';
+            void this.loadPlexPlaylists();
+        } else {
+            this.restorePlexPlaylistContainerToHome();
+            this.plexPlaylistContainer.style.display = 'none';
+        }
+    }
+
+    private movePlexPlaylistContainerBeneathDownloadAll(): void {
+        const downloadAllBtn = this.resultsContainer.querySelector('#downloadAllBtn') as HTMLElement | null;
+        if (!downloadAllBtn || !downloadAllBtn.parentElement) {
+            return;
+        }
+
+        const headerTop = downloadAllBtn.parentElement;
+        const header = headerTop.parentElement;
+        if (header) {
+            header.insertBefore(this.plexPlaylistContainer, headerTop.nextSibling);
+        } else {
+            headerTop.insertBefore(this.plexPlaylistContainer, downloadAllBtn.nextSibling);
+        }
+        this.plexPlaylistContainer.style.padding = '0';
+        this.plexPlaylistContainer.style.marginTop = '0.75rem';
+    }
+
+    private restorePlexPlaylistContainerToHome(): void {
+        if (this.plexPlaylistContainer.parentElement !== this.plexPlaylistContainerHomeParent) {
+            if (
+                this.plexPlaylistContainerHomeNextSibling &&
+                this.plexPlaylistContainerHomeNextSibling.parentNode === this.plexPlaylistContainerHomeParent
+            ) {
+                this.plexPlaylistContainerHomeParent.insertBefore(
+                    this.plexPlaylistContainer,
+                    this.plexPlaylistContainerHomeNextSibling
+                );
             } else {
-                container.style.display = 'none';
+                this.plexPlaylistContainerHomeParent.appendChild(this.plexPlaylistContainer);
             }
+        }
+
+        this.plexPlaylistContainer.style.padding = '1rem';
+        this.plexPlaylistContainer.style.marginTop = '0';
+    }
+
+    private populatePlexPlaylistOptions(playlists: string[], showEmptyPlaceholder: boolean = true): void {
+        const currentInputValue = this.plexPlaylistNameInput.value;
+        const currentMode = this.plexPlaylistNameInput.style.display === 'none' ? 'existing' : 'new';
+        this.plexPlaylistOptions.innerHTML = '';
+
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Select existing...';
+        this.plexPlaylistOptions.appendChild(defaultOption);
+
+        if (playlists.length === 0 && showEmptyPlaceholder) {
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = '(no existing playlists found)';
+            emptyOption.disabled = true;
+            this.plexPlaylistOptions.appendChild(emptyOption);
+        }
+
+        playlists.forEach((playlistName) => {
+            const option = document.createElement('option');
+            option.value = playlistName;
+            option.textContent = playlistName;
+            this.plexPlaylistOptions.appendChild(option);
+        });
+
+        const newOption = document.createElement('option');
+        newOption.value = App.NEW_PLEX_PLAYLIST_OPTION;
+        newOption.textContent = 'New playlist...';
+        this.plexPlaylistOptions.appendChild(newOption);
+
+        this.plexPlaylistNameInput.value = currentInputValue;
+
+        if (currentMode === 'new') {
+            this.setPlexPlaylistMode('new');
+            this.plexPlaylistOptions.value = App.NEW_PLEX_PLAYLIST_OPTION;
+            return;
+        }
+
+        const hasMatchingExisting = playlists.includes(currentInputValue);
+        this.plexPlaylistOptions.value = hasMatchingExisting ? currentInputValue : '';
+        this.setPlexPlaylistMode('existing');
+    }
+
+    private setPlexPlaylistMode(mode: 'existing' | 'new'): void {
+        if (mode === 'new') {
+            this.plexPlaylistOptions.style.display = 'none';
+            this.plexPlaylistNameInput.style.display = 'block';
+            this.plexPlaylistBackButton.style.display = 'inline-flex';
+            return;
+        }
+
+        this.plexPlaylistOptions.style.display = 'block';
+        this.plexPlaylistNameInput.style.display = 'none';
+        this.plexPlaylistBackButton.style.display = 'none';
+    }
+
+    private async loadPlexPlaylists(): Promise<void> {
+        if (!this.isPlexConfigured) {
+            this.populatePlexPlaylistOptions([]);
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/playlists');
+            if (!response.ok) {
+                this.populatePlexPlaylistOptions([], false);
+                return;
+            }
+
+            const data = await response.json();
+            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
+            this.populatePlexPlaylistOptions(playlists);
+        } catch (error) {
+            console.warn('Failed to load Plex playlists.', error);
+            this.populatePlexPlaylistOptions([], false);
         }
     }
 
@@ -1119,6 +1271,7 @@ class App {
                 downloadAllBtn.textContent = 'Download All';
                 downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
                 resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
         } catch (error) {
@@ -1312,6 +1465,7 @@ class App {
                 downloadAllBtn.textContent = 'Download All';
                 downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
                 resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
             }
         } catch (error) {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlist'}`);
@@ -1928,6 +2082,7 @@ class App {
                     void this.downloadAllTracks();
                 });
                 resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
             }
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
