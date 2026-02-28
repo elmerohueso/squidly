@@ -1,3 +1,132 @@
+def init_library_update_status():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS library_update_status (
+            id INTEGER PRIMARY KEY,
+            last_update_time TIMESTAMP,
+            library_update_needed BOOLEAN NOT NULL DEFAULT FALSE,
+            last_job_finished_at TIMESTAMP
+        )
+        '''
+    )
+    # Ensure a single row exists
+    cur.execute('SELECT id FROM library_update_status WHERE id = 1')
+    if not cur.fetchone():
+        cur.execute('INSERT INTO library_update_status (id, library_update_needed) VALUES (1, FALSE)')
+    conn.commit()
+    conn.close()
+
+def get_library_update_status():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT last_update_time, library_update_needed, last_job_finished_at FROM library_update_status WHERE id = 1')
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def set_library_update_needed(value: bool):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE library_update_status SET library_update_needed = %s WHERE id = 1', (value,))
+    conn.commit()
+    conn.close()
+
+def set_last_library_update_time(ts):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE library_update_status SET last_update_time = %s WHERE id = 1', (ts,))
+    conn.commit()
+    conn.close()
+
+def set_last_job_finished_at(ts):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE library_update_status SET last_job_finished_at = %s WHERE id = 1', (ts,))
+    conn.commit()
+    conn.close()
+
+def any_download_jobs_running():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM jobs WHERE job_type = 'download_track' AND status IN ('queued', 'in_progress')")
+    count = cur.fetchone()[0]
+    conn.close()
+    return count > 0
+
+def trigger_plex_library_update():
+    print('[LIBRARY UPDATE] Triggering Plex library update...', flush=True)
+    plex_config = get_plex_config()
+    server_url = plex_config.get('server_url')
+    api_token = plex_config.get('api_token')
+    library_name = plex_config.get('library_name')
+    if not (server_url and api_token and library_name):
+        print('[LIBRARY UPDATE] Plex config missing, cannot update library.', flush=True)
+        return
+    try:
+        plex = PlexServer(server_url, api_token, timeout=20)
+        print(f'[LIBRARY UPDATE] Connected to Plex server at {server_url}', flush=True)
+        # Find the music library by name
+        library = None
+        for section in plex.library.sections():
+            if section.title == library_name and section.type == 'artist':
+                library = section
+                break
+        if not library:
+            print(f'[LIBRARY UPDATE] Library "{library_name}" not found or not a music library.', flush=True)
+            return
+        print(f'[LIBRARY UPDATE] Triggering scan on library: {library_name}', flush=True)
+        library.update()
+        print(f'[LIBRARY UPDATE] Library scan triggered successfully.', flush=True)
+    except Exception as e:
+        print(f'[LIBRARY UPDATE] Error triggering Plex library update: {e}', flush=True)
+
+def library_update_worker():
+    print('[LIBRARY UPDATE WORKER] Started', flush=True)
+    while True:
+        try:
+            status = get_library_update_status()
+            if not status:
+                time.sleep(30)
+                continue
+            last_update_time, library_update_needed, last_job_finished_at = status
+            now = datetime.utcnow()
+            # Convert timestamps if not None
+            if last_update_time:
+                last_update_time = last_update_time.replace(tzinfo=None)
+            if last_job_finished_at:
+                last_job_finished_at = last_job_finished_at.replace(tzinfo=None)
+            # Scenario 1
+            if library_update_needed and not any_download_jobs_running():
+                # 15 min since last job finished and last update
+                if last_job_finished_at and last_update_time:
+                    if (now - last_job_finished_at >= timedelta(minutes=15)) and (now - last_update_time >= timedelta(minutes=15)):
+                        trigger_plex_library_update()
+                        set_library_update_needed(False)
+                        set_last_library_update_time(now)
+                        print('[LIBRARY UPDATE WORKER] Library updated (scenario 1)', flush=True)
+                elif last_job_finished_at and not last_update_time:
+                    if (now - last_job_finished_at >= timedelta(minutes=15)):
+                        trigger_plex_library_update()
+                        set_library_update_needed(False)
+                        set_last_library_update_time(now)
+                        print('[LIBRARY UPDATE WORKER] Library updated (scenario 1, no prev update)', flush=True)
+            # Scenario 2
+            elif library_update_needed and any_download_jobs_running():
+                if last_update_time and (now - last_update_time >= timedelta(minutes=60)):
+                    trigger_plex_library_update()
+                    set_library_update_needed(False)
+                    set_last_library_update_time(now)
+                    print('[LIBRARY UPDATE WORKER] Library updated (scenario 2)', flush=True)
+                elif not last_update_time:
+                    trigger_plex_library_update()
+                    set_library_update_needed(False)
+                    set_last_library_update_time(now)
+                    print('[LIBRARY UPDATE WORKER] Library updated (scenario 2, no prev update)', flush=True)
+        except Exception as e:
+            print(f'[LIBRARY UPDATE WORKER] Error: {e}', flush=True)
+        time.sleep(60)
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import os
@@ -664,6 +793,9 @@ def mark_job_succeeded(job_id, result):
     )
     conn.commit()
     conn.close()
+    # Set library_update_needed True and update last_job_finished_at
+    set_library_update_needed(True)
+    set_last_job_finished_at(datetime.utcnow())
 
 def update_job_progress(job_id, updates):
     now = datetime.utcnow().isoformat() + 'Z'
@@ -1803,6 +1935,7 @@ def load_squid_urls():
 
 # Initialize SQLite and mirror data
 init_db()
+init_library_update_status()
 seed_mirrors_from_json()
 
 # Initialize URL list and round-robin iterator
@@ -1821,9 +1954,16 @@ plex_retry_thread.start()
 print("Plex playlist retry worker started\n", flush=True)
 
 # Start background worker for processing download jobs
+
+# Start background worker for processing download jobs
 download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
 download_worker_thread.start()
 print("Download job worker started\n", flush=True)
+
+# Start background worker for library update
+library_update_thread = threading.Thread(target=library_update_worker, daemon=True)
+library_update_thread.start()
+print("Library update worker started\n", flush=True)
 
 # Download folders already created and validated at module level above
 
