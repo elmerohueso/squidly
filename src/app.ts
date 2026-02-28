@@ -153,6 +153,7 @@ class App {
     private closeJobsButton: HTMLButtonElement;
     private jobsFilterSelect: HTMLSelectElement;
     private jobsContent: HTMLElement;
+    private jobsPagination: HTMLElement;
     private settingsButton: HTMLButtonElement;
     private settingsFlyout: HTMLElement;
     private settingsOverlay: HTMLElement;
@@ -191,6 +192,8 @@ class App {
         statusEl: HTMLElement;
     }>();
     private jobsUpdateInterval: number | null = null;
+    private currentJobsPage: number = 1;
+    private readonly jobsPageSize = 20;
     private isDownloadingAll: boolean = false;
     private downloadAllCancelRequested: boolean = false;
     private currentDownloadController: AbortController | null = null;
@@ -222,6 +225,7 @@ class App {
         this.closeJobsButton = document.getElementById('closeJobs') as HTMLButtonElement;
         this.jobsFilterSelect = document.getElementById('jobsFilter') as HTMLSelectElement;
         this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
+        this.jobsPagination = document.getElementById('jobsPagination') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
@@ -279,7 +283,10 @@ class App {
         this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
         this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
         this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
-        this.jobsFilterSelect.addEventListener('change', () => this.loadJobs());
+        this.jobsFilterSelect.addEventListener('change', () => {
+            this.currentJobsPage = 1;
+            void this.loadJobs();
+        });
 
         this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
         this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
@@ -416,11 +423,12 @@ class App {
         this.jobsFlyout.classList.add('active');
         this.jobsOverlay.classList.add('active');
         document.body.style.overflow = 'hidden';
+        this.currentJobsPage = 1;
         void this.loadJobs();
         if (!this.jobsUpdateInterval) {
             this.jobsUpdateInterval = window.setInterval(() => {
                 void this.loadJobs();
-            }, 30000);
+            }, 5000);
         }
     }
 
@@ -437,6 +445,7 @@ class App {
     private async loadJobs(): Promise<void> {
         const filter = this.jobsFilterSelect.value;
         this.jobsContent.innerHTML = '<p class="loading-text">Loading jobs...</p>';
+        this.clearJobsPagination();
 
         try {
             const response = await fetch('/api/jobs?job_type=download_track&limit=100');
@@ -446,11 +455,28 @@ class App {
 
             const data = await response.json();
             const jobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            this.updateJobsFilterCounts(jobs);
             const filtered = this.filterJobsByStatus(jobs, filter);
             this.renderJobs(filtered);
         } catch (error) {
             this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
+            this.clearJobsPagination();
             console.error('Jobs load error:', error);
+        }
+    }
+
+    private updateJobsFilterCounts(jobs: JobItem[]): void {
+        const incompleteCount = this.filterJobsByStatus(jobs, 'incomplete').length;
+        const completeCount = this.filterJobsByStatus(jobs, 'complete').length;
+
+        const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
+        if (incompleteOption) {
+            incompleteOption.textContent = `Incomplete (${incompleteCount})`;
+        }
+
+        const completeOption = this.jobsFilterSelect.querySelector('option[value="complete"]');
+        if (completeOption) {
+            completeOption.textContent = `Complete (${completeCount})`;
         }
     }
 
@@ -465,10 +491,62 @@ class App {
     private renderJobs(jobs: JobItem[]): void {
         if (jobs.length === 0) {
             this.jobsContent.innerHTML = '<p class="loading-text">No jobs found.</p>';
+            this.clearJobsPagination();
             return;
         }
 
-        this.jobsContent.innerHTML = jobs.map(job => this.renderJobItem(job)).join('');
+        const totalPages = Math.max(1, Math.ceil(jobs.length / this.jobsPageSize));
+        this.currentJobsPage = Math.min(this.currentJobsPage, totalPages);
+
+        const startIndex = (this.currentJobsPage - 1) * this.jobsPageSize;
+        const endIndex = startIndex + this.jobsPageSize;
+        const pageItems = jobs.slice(startIndex, endIndex);
+
+        this.jobsContent.innerHTML = pageItems.map(job => this.renderJobItem(job)).join('');
+        this.renderJobsPagination(jobs.length, totalPages);
+    }
+
+    private renderJobsPagination(totalJobs: number, totalPages: number): void {
+        if (totalPages <= 1) {
+            this.clearJobsPagination();
+            return;
+        }
+
+        const start = (this.currentJobsPage - 1) * this.jobsPageSize + 1;
+        const end = Math.min(this.currentJobsPage * this.jobsPageSize, totalJobs);
+
+        this.jobsPagination.innerHTML = `
+            <button type="button" class="jobs-pagination-button" data-page-action="prev" ${this.currentJobsPage === 1 ? 'disabled' : ''}>Previous</button>
+            <span class="jobs-pagination-info">${start}-${end} of ${totalJobs}</span>
+            <button type="button" class="jobs-pagination-button" data-page-action="next" ${this.currentJobsPage === totalPages ? 'disabled' : ''}>Next</button>
+        `;
+
+        this.jobsPagination.classList.add('active');
+
+        const prevButton = this.jobsPagination.querySelector('[data-page-action="prev"]') as HTMLButtonElement | null;
+        if (prevButton) {
+            prevButton.addEventListener('click', () => {
+                if (this.currentJobsPage > 1) {
+                    this.currentJobsPage -= 1;
+                    void this.loadJobs();
+                }
+            });
+        }
+
+        const nextButton = this.jobsPagination.querySelector('[data-page-action="next"]') as HTMLButtonElement | null;
+        if (nextButton) {
+            nextButton.addEventListener('click', () => {
+                if (this.currentJobsPage < totalPages) {
+                    this.currentJobsPage += 1;
+                    void this.loadJobs();
+                }
+            });
+        }
+    }
+
+    private clearJobsPagination(): void {
+        this.jobsPagination.classList.remove('active');
+        this.jobsPagination.innerHTML = '';
     }
 
     private renderJobItem(job: JobItem): string {
