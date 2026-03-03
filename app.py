@@ -1501,6 +1501,167 @@ def process_download_job(job_id, payload):
                             break
 
     print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
+
+    file_ext = 'flac' if file_format == 'original' else 'mp3'
+
+    safe_artist = sanitize_filename_component(artist_name)
+    safe_album = sanitize_filename_component(album_name)
+    safe_title = sanitize_filename_component(track_title)
+    safe_track = sanitize_filename_component(track_num)
+
+    file_path = file_naming.replace('{artist}', safe_artist)
+    file_path = file_path.replace('{album}', safe_album)
+    file_path = file_path.replace('{track}', safe_track)
+    file_path = file_path.replace('{title}', safe_title)
+    file_path = file_path.replace('{ext}', file_ext)
+
+    file_path = clean_path_components(file_path)
+
+    full_path = os.path.join(downloads_folder, file_path)
+    full_path = os.path.normpath(full_path)
+
+    print(
+        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{file_format}', title='{track_title}', artist='{artist_name}', album='{album_name}'",
+        flush=True
+    )
+
+    metadata_rows = []
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT title, artist, album, format, bitrate, file_path
+        FROM plex_songs
+        WHERE lower(COALESCE(title, '')) = lower(%s)
+          AND lower(COALESCE(artist, '')) = lower(%s)
+          AND lower(COALESCE(album, '')) = lower(%s)
+        ORDER BY updated_at DESC
+        """,
+        (track_title, artist_name, album_name)
+    )
+    metadata_rows = cur.fetchall() or []
+
+    if not metadata_rows:
+        cur.execute(
+            """
+            SELECT title, artist, album, format, bitrate, file_path
+            FROM plex_songs
+            WHERE lower(COALESCE(title, '')) = lower(%s)
+              AND lower(COALESCE(artist, '')) = lower(%s)
+            ORDER BY updated_at DESC
+            """,
+            (track_title, artist_name)
+        )
+        metadata_rows = cur.fetchall() or []
+    conn.close()
+
+    def format_matches_selected(row_format):
+        fmt = str(row_format or '').strip().lower()
+        if file_format == 'mp3':
+            return fmt in ('mp3', 'mpeg')
+        return fmt not in ('', 'mp3', 'mpeg')
+
+    matching_rows = [row for row in metadata_rows if format_matches_selected(row.get('format'))]
+
+    summary_rows = [
+        {
+            'format': str(row.get('format') or '').strip().lower() or 'unknown',
+            'bitrate': row.get('bitrate'),
+            'album': row.get('album')
+        }
+        for row in metadata_rows[:8]
+    ]
+    print(
+        f"[DOWNLOAD_DECISION] Job {job_id}: metadata_candidates={len(metadata_rows)}, matching_selected_format={len(matching_rows)}, candidate_summary={summary_rows}",
+        flush=True
+    )
+
+    if matching_rows:
+        matched_row = matching_rows[0]
+        matched_path = str(matched_row.get('file_path') or '').strip()
+        if matched_path:
+            full_path = matched_path
+        print(
+            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
+            flush=True
+        )
+        print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
+        stages['downloaded'] = 'done'
+        stages['id3_tagged'] = 'done'
+        stages['converted'] = 'done'
+        stages['written'] = 'done'
+        update_job_progress(job_id, {'stages': stages})
+
+        plex_config = get_plex_config()
+        playlist_name = payload.get('plex_playlist')
+        if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
+            try:
+                print("[DOWNLOAD] Plex config OK - attempting playlist update for existing file", flush=True)
+                track_info = {
+                    'artist': artist_name,
+                    'album': album_name,
+                    'title': track_title
+                }
+                success, plex_message = add_tracks_to_plex_playlist(
+                    plex_config['server_url'],
+                    plex_config['api_token'],
+                    plex_config['library_name'] or 'Music',
+                    playlist_name,
+                    track_info
+                )
+
+                if success:
+                    print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
+                    stages['playlist_added'] = 'done'
+                    update_job_progress(job_id, {'stages': stages})
+                else:
+                    print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
+                    if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
+                        queue_pending_playlist_addition(
+                            artist_name,
+                            album_name,
+                            track_title,
+                            playlist_name,
+                            parent_job_id=job_id
+                        )
+                        stages['playlist_added'] = 'queued'
+                        update_job_progress(job_id, {'stages': stages})
+                    else:
+                        stages['playlist_added'] = 'failed'
+                        update_job_progress(job_id, {'stages': stages})
+            except Exception as e:
+                print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
+                stages['playlist_added'] = 'failed'
+                update_job_progress(job_id, {'stages': stages})
+        else:
+            missing = []
+            if not plex_config['server_url']:
+                missing.append('server_url')
+            if not plex_config['api_token']:
+                missing.append('api_token')
+            if not playlist_name:
+                missing.append('playlist_name')
+            if missing:
+                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+            stages['playlist_added'] = 'skipped'
+            update_job_progress(job_id, {'stages': stages})
+
+        return {
+            'file_path': full_path,
+            'format': file_format,
+            'artist': artist_name,
+            'album': album_name,
+            'title': track_title,
+            'playlist_name': playlist_name,
+            'download_skipped_existing': True,
+            'stages': stages
+        }
+
+    print(
+        f"[DOWNLOAD_DECISION] Job {job_id}: downloading because no existing Plex inventory metadata matched selected format '{file_format}'",
+        flush=True
+    )
+
     update_job_progress(job_id, {
         'artist': artist_name,
         'album': album_name,
@@ -1592,25 +1753,7 @@ def process_download_job(job_id, payload):
     download_url = download_urls[0]
     print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
 
-    file_ext = 'flac' if file_format == 'original' else 'mp3'
-
-    safe_artist = sanitize_filename_component(artist_name)
-    safe_album = sanitize_filename_component(album_name)
-    safe_title = sanitize_filename_component(track_title)
-    safe_track = sanitize_filename_component(track_num)
-
-    file_path = file_naming.replace('{artist}', safe_artist)
-    file_path = file_path.replace('{album}', safe_album)
-    file_path = file_path.replace('{track}', safe_track)
-    file_path = file_path.replace('{title}', safe_title)
-    file_path = file_path.replace('{ext}', file_ext)
-
-    file_path = clean_path_components(file_path)
-
     print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
-
-    full_path = os.path.join(downloads_folder, file_path)
-    full_path = os.path.normpath(full_path)
 
     print(f"[DOWNLOAD] Full output path: {full_path}", flush=True)
 
@@ -3719,3 +3862,82 @@ def get_plex_playlists_endpoint():
         return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
 
     return jsonify({'playlists': playlists})
+
+@app.route('/api/plex/songs/match', methods=['POST'])
+def match_plex_songs_endpoint():
+    """Match candidate tracks against locally synced Plex inventory."""
+    payload = request.get_json(silent=True) or {}
+    tracks = payload.get('tracks')
+
+    if not isinstance(tracks, list):
+        return jsonify({'error': 'tracks array is required'}), 400
+
+    if len(tracks) > 200:
+        return jsonify({'error': 'tracks array too large (max 200)'}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    matches = []
+
+    for item in tracks:
+        if not isinstance(item, dict):
+            matches.append({'exists': False, 'variants': []})
+            continue
+
+        title = str(item.get('title') or '').strip()
+        artist = str(item.get('artist') or '').strip()
+        album = str(item.get('album') or '').strip()
+
+        if not title or not artist:
+            matches.append({'exists': False, 'variants': []})
+            continue
+
+        rows = []
+
+        if album:
+            cur.execute(
+                """
+                SELECT format, bitrate
+                FROM plex_songs
+                WHERE lower(title) = lower(%s)
+                  AND lower(COALESCE(artist, '')) = lower(%s)
+                  AND lower(COALESCE(album, '')) = lower(%s)
+                """,
+                (title, artist, album)
+            )
+            rows = cur.fetchall() or []
+
+        if not rows:
+            cur.execute(
+                """
+                SELECT format, bitrate
+                FROM plex_songs
+                WHERE lower(title) = lower(%s)
+                  AND lower(COALESCE(artist, '')) = lower(%s)
+                """,
+                (title, artist)
+            )
+            rows = cur.fetchall() or []
+
+        variants = []
+        seen = set()
+        for row in rows:
+            fmt = str(row.get('format') or '').strip().lower() or 'unknown'
+            bitrate = row.get('bitrate')
+            bitrate_int = int(bitrate) if isinstance(bitrate, int) else None
+            key = (fmt, bitrate_int)
+            if key in seen:
+                continue
+            seen.add(key)
+            variants.append({
+                'format': fmt,
+                'bitrate': bitrate_int
+            })
+
+        matches.append({
+            'exists': len(rows) > 0,
+            'variants': variants
+        })
+
+    conn.close()
+    return jsonify({'matches': matches})

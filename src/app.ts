@@ -155,6 +155,16 @@ interface JobResult {
     stages?: JobStageMap;
 }
 
+interface PlexSongVariant {
+    format?: string;
+    bitrate?: number | null;
+}
+
+interface PlexTrackMatch {
+    exists: boolean;
+    variants?: PlexSongVariant[];
+}
+
 interface JobItem {
     id: number;
     job_type: string;
@@ -699,6 +709,7 @@ class App {
         const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
+        const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
 
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
@@ -776,6 +787,7 @@ class App {
                         ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
                     </div>
                 </div>
+                ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
                 <div class="job-stages">
                     ${stageHtml}
                 </div>
@@ -1560,6 +1572,7 @@ class App {
             const progressBar = document.getElementById('lastfmProgress');
             const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
+            const matchedTracks: Track[] = [];
 
             // Search for each track progressively
             for (let i = 0; i < tracks.length; i++) {
@@ -1579,6 +1592,7 @@ class App {
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackCard);
                             }
+                            matchedTracks.push(items[0] as Track);
                             foundCount++;
                         }
                     }
@@ -1613,6 +1627,10 @@ class App {
                 downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
                 resultsHeaderTop.appendChild(downloadAllBtn);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+
+            if (matchedTracks.length > 0) {
+                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
             }
 
         } catch (error) {
@@ -1753,6 +1771,7 @@ class App {
             const progressBar = document.getElementById('lastfmProgress');
             const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
+            const matchedTracks: Track[] = [];
 
             // Search for each track progressively
             for (let i = 0; i < tracks.length; i++) {
@@ -1773,6 +1792,7 @@ class App {
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackCard);
                             }
+                            matchedTracks.push(items[0] as Track);
                             foundCount++;
                         }
                     }
@@ -1807,6 +1827,10 @@ class App {
                 downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
                 resultsHeaderTop.appendChild(downloadAllBtn);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+
+            if (matchedTracks.length > 0) {
+                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
             }
         } catch (error) {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlist'}`);
@@ -1885,6 +1909,94 @@ class App {
                 }).join('')}
             </div>
         `;
+
+        if (searchType === 's') {
+            void this.annotateTrackCardsWithPlexStatus(items as Track[]);
+        }
+    }
+
+    private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {
+        if (!Array.isArray(tracks) || tracks.length === 0) {
+            return;
+        }
+
+        const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
+        if (cards.length === 0) {
+            return;
+        }
+
+        const payloadTracks = tracks.map((track) => {
+            const artist = track.artists && track.artists.length > 0
+                ? track.artists.map(a => a.name).join(', ')
+                : track.artist?.name || '';
+            const album = track.album?.title || '';
+            return {
+                title: track.title || '',
+                artist,
+                album
+            };
+        });
+
+        try {
+            const response = await fetch('/api/plex/songs/match', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ tracks: payloadTracks })
+            });
+
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json() as { matches?: PlexTrackMatch[] };
+            const matches = Array.isArray(data.matches) ? data.matches : [];
+            const max = Math.min(cards.length, matches.length);
+
+            for (let i = 0; i < max; i += 1) {
+                const match = matches[i];
+                if (!match || !match.exists) {
+                    continue;
+                }
+
+                const metadataEl = cards[i].querySelector('.track-metadata') as HTMLElement | null;
+                if (!metadataEl || metadataEl.querySelector('.plex-existing-chip')) {
+                    continue;
+                }
+
+                if (metadataEl.children.length > 0) {
+                    const sep = document.createElement('span');
+                    sep.className = 'plex-chip-separator';
+                    sep.textContent = '•';
+                    metadataEl.appendChild(sep);
+                }
+
+                const chip = document.createElement('span');
+                chip.className = 'plex-existing-chip';
+                chip.textContent = 'In Plex';
+                chip.title = this.buildPlexExistingTooltip(match.variants || []);
+                metadataEl.appendChild(chip);
+            }
+        } catch (error) {
+            console.warn('Failed to annotate Plex inventory matches.', error);
+        }
+    }
+
+    private buildPlexExistingTooltip(variants: PlexSongVariant[]): string {
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return 'Exists in Plex';
+        }
+
+        const details = variants.map((variant) => {
+            const fmt = (variant.format || 'unknown').toUpperCase();
+            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
+                ? `${variant.bitrate} kbps`
+                : 'bitrate unknown';
+            return `${fmt} • ${bitrate}`;
+        });
+
+        return `Exists in Plex\n${details.join('\n')}`;
     }
 
     private formatSearchPlaylistCard(playlist: PlaylistSearchItem): string {
@@ -2119,6 +2231,8 @@ class App {
                 resultsHeaderTop.appendChild(downloadAllBtn);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
+
+            void this.annotateTrackCardsWithPlexStatus(tracks);
         } catch (error) {
             this.displayMessage('Error loading playlist tracks. Please try again.', () => this.fetchPlaylistTracks(playlistId));
             console.error('Playlist fetch error:', error);
@@ -2666,6 +2780,8 @@ class App {
                 resultsHeaderTop.appendChild(downloadAllBtn);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
+
+            void this.annotateTrackCardsWithPlexStatus(tracks);
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
             console.error('Album fetch error:', error);
