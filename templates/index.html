@@ -220,6 +220,13 @@
                 <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
                 <button id="savePlexConfig" class="save-button" style="margin-top: 1rem;">Save Plex Config</button>
                 <p class="settings-note" id="plexConfigStatus"></p>
+
+                <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library Sync Interval (hours)</label>
+                <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1" value="24" placeholder="24">
+                <p class="settings-hint">Default: 24 hours</p>
+
+                <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library Sync Now</button>
+                <p class="settings-note" id="plexSyncStatus"></p>
             </div>
         </div>
     </div>

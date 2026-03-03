@@ -1189,6 +1189,12 @@ footer p {
     cursor: not-allowed;
 }
 
+.job-sync-progress {
+    margin-top: 0.45rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
 .job-stages {
     position: absolute;
     right: 1rem;

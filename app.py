@@ -448,9 +448,36 @@ def init_db():
             server_url TEXT,
             api_token TEXT,
             library_name TEXT,
+            sync_interval_hours INTEGER NOT NULL DEFAULT 24,
             update_playlist_name TEXT,
             updated_at TIMESTAMP NOT NULL,
             CONSTRAINT check_single_row_plex CHECK (id = 1)
+        )
+        """
+    )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'plex_config'
+        """
+    )
+    plex_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'sync_interval_hours' not in plex_columns:
+        cur.execute("ALTER TABLE plex_config ADD COLUMN sync_interval_hours INTEGER NOT NULL DEFAULT 24")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plex_songs (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            artist TEXT,
+            album TEXT,
+            file_path TEXT NOT NULL UNIQUE,
+            format TEXT,
+            bitrate INTEGER,
+            updated_at TIMESTAMP NOT NULL,
+            last_seen_at TIMESTAMP NOT NULL
         )
         """
     )
@@ -522,7 +549,7 @@ def get_plex_config():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT server_url, api_token, library_name
+        SELECT server_url, api_token, library_name, sync_interval_hours
         FROM plex_config
         WHERE id = 1
         """
@@ -534,33 +561,295 @@ def get_plex_config():
         return {
             'server_url': None,
             'api_token': None,
-            'library_name': None
+            'library_name': None,
+            'sync_interval_hours': 24
         }
     
     return {
         'server_url': row['server_url'],
         'api_token': row['api_token'],
-        'library_name': row['library_name']
+        'library_name': row['library_name'],
+        'sync_interval_hours': row.get('sync_interval_hours') if row.get('sync_interval_hours') is not None else 24
     }
 
-def save_plex_config(server_url, api_token, library_name):
+def save_plex_config(server_url, api_token, library_name, sync_interval_hours=24):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO plex_config (id, server_url, api_token, library_name, updated_at)
-        VALUES (1, %s, %s, %s, %s)
+        INSERT INTO plex_config (id, server_url, api_token, library_name, sync_interval_hours, updated_at)
+        VALUES (1, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             server_url = excluded.server_url,
             api_token = excluded.api_token,
             library_name = excluded.library_name,
+            sync_interval_hours = excluded.sync_interval_hours,
             updated_at = excluded.updated_at
         """,
-        (server_url, api_token, library_name, now)
+        (server_url, api_token, library_name, sync_interval_hours, now)
     )
     conn.commit()
     conn.close()
+
+def any_plex_sync_jobs_running_or_queued():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM jobs
+        WHERE job_type = 'plex_library_sync'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return (row.get('count') or 0) > 0
+
+def get_last_successful_plex_sync_finished_at():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT finished_at
+        FROM jobs
+        WHERE job_type = 'plex_library_sync'
+          AND status = 'succeeded'
+        ORDER BY finished_at DESC
+        LIMIT 1
+        """
+    )
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    finished_at = row.get('finished_at')
+    if finished_at and not isinstance(finished_at, datetime):
+        try:
+            finished_at = datetime.fromisoformat(str(finished_at))
+        except Exception:
+            finished_at = None
+    if finished_at and hasattr(finished_at, 'replace'):
+        finished_at = finished_at.replace(tzinfo=None)
+    return finished_at
+
+def queue_plex_library_sync(trigger='manual'):
+    if any_plex_sync_jobs_running_or_queued():
+        return None
+
+    payload = {
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return enqueue_job('plex_library_sync', payload, max_attempts=5)
+
+def process_plex_sync_job(job_id, payload):
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+    library_name = (config.get('library_name') or 'Music').strip()
+
+    if not server_url or not api_token:
+        raise ValueError('Plex server_url and api_token must be configured before syncing')
+
+    stages = {
+        'connect': 'pending',
+        'fetch_tracks': 'pending',
+        'sync_songs': 'pending',
+        'cleanup': 'pending'
+    }
+    progress = {
+        'processed_tracks': 0,
+        'total_tracks': 0,
+        'upserted_songs': 0,
+        'deleted_songs': 0
+    }
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    print(f"[PLEX_SYNC] Job {job_id} connecting to Plex at {server_url}", flush=True)
+    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
+    stages['connect'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    library = None
+    for section in plex.library.sections():
+        if section.title == library_name and section.type == 'artist':
+            library = section
+            break
+
+    if not library:
+        raise ValueError(f'Plex music library "{library_name}" not found')
+
+    print(f"[PLEX_SYNC] Job {job_id} fetching tracks from library '{library_name}'", flush=True)
+    tracks = []
+    try:
+        tracks = library.all(libtype='track')
+    except Exception:
+        tracks = library.search(libtype='track')
+
+    progress['total_tracks'] = len(tracks)
+    stages['fetch_tracks'] = 'done'
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    now = datetime.utcnow().isoformat() + 'Z'
+    seen_paths = set()
+    upserted = 0
+
+    for idx, track in enumerate(tracks, start=1):
+        title = getattr(track, 'title', None) or 'Unknown Title'
+        artist = getattr(track, 'grandparentTitle', None) or None
+        album = getattr(track, 'parentTitle', None) or None
+
+        media_list = getattr(track, 'media', None) or []
+        for media in media_list:
+            parts = getattr(media, 'parts', None) or []
+            bitrate = getattr(media, 'bitrate', None)
+            media_format = (getattr(media, 'container', None) or '').strip().lower() or None
+
+            for part in parts:
+                file_path = (getattr(part, 'file', None) or '').strip()
+                if not file_path:
+                    continue
+
+                if not media_format:
+                    _, ext = os.path.splitext(file_path)
+                    media_format = ext.replace('.', '').lower() if ext else None
+
+                cur.execute(
+                    """
+                    INSERT INTO plex_songs (title, artist, album, file_path, format, bitrate, updated_at, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(file_path) DO UPDATE SET
+                        title = excluded.title,
+                        artist = excluded.artist,
+                        album = excluded.album,
+                        format = excluded.format,
+                        bitrate = excluded.bitrate,
+                        updated_at = excluded.updated_at,
+                        last_seen_at = excluded.last_seen_at
+                    """,
+                    (title, artist, album, file_path, media_format, bitrate, now, now)
+                )
+                seen_paths.add(file_path)
+                upserted += 1
+
+        progress['processed_tracks'] = idx
+        progress['upserted_songs'] = upserted
+        if idx % 25 == 0 or idx == len(tracks):
+            update_job_progress(job_id, {'progress': progress})
+
+    conn.commit()
+    stages['sync_songs'] = 'done'
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    deleted = 0
+    if seen_paths:
+        cur.execute(
+            """
+            DELETE FROM plex_songs
+            WHERE last_seen_at < %s
+            """,
+            (now,)
+        )
+        deleted = cur.rowcount or 0
+
+    conn.commit()
+    conn.close()
+
+    progress['deleted_songs'] = deleted
+    stages['cleanup'] = 'done'
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    trigger = payload.get('trigger') if isinstance(payload, dict) else None
+    print(
+        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted}",
+        flush=True
+    )
+
+    return {
+        'trigger': trigger or 'unknown',
+        'stages': stages,
+        'progress': progress,
+        'total_tracks': progress['total_tracks'],
+        'upserted_songs': upserted,
+        'deleted_songs': deleted
+    }
+
+def plex_sync_job_worker():
+    print("[PLEX_SYNC_WORKER] Background worker started", flush=True)
+
+    while True:
+        try:
+            job = claim_next_job('plex_library_sync')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_plex_sync_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                print(f"[PLEX_SYNC_WORKER] Job {job['id']} completed", flush=True)
+            except Exception as e:
+                print(f"[PLEX_SYNC_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[PLEX_SYNC_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
+
+def plex_sync_scheduler_worker():
+    print("[PLEX_SYNC_SCHEDULER] Background scheduler started", flush=True)
+
+    while True:
+        try:
+            config = get_plex_config()
+            server_url = (config.get('server_url') or '').strip()
+            api_token = (config.get('api_token') or '').strip()
+            library_name = (config.get('library_name') or '').strip()
+
+            if not (server_url and api_token and library_name):
+                time.sleep(60)
+                continue
+
+            interval_hours = config.get('sync_interval_hours')
+            try:
+                interval_hours = int(interval_hours)
+            except Exception:
+                interval_hours = 24
+            if interval_hours < 1:
+                interval_hours = 1
+
+            if any_plex_sync_jobs_running_or_queued():
+                time.sleep(60)
+                continue
+
+            last_finished = get_last_successful_plex_sync_finished_at()
+            should_enqueue = False
+            now = datetime.utcnow()
+            if not last_finished:
+                should_enqueue = True
+            else:
+                should_enqueue = now - last_finished >= timedelta(hours=interval_hours)
+
+            if should_enqueue:
+                queued = queue_plex_library_sync(trigger='interval')
+                if queued:
+                    print(f"[PLEX_SYNC_SCHEDULER] Queued interval sync job {queued}", flush=True)
+
+        except Exception as e:
+            print(f"[PLEX_SYNC_SCHEDULER] Error: {str(e)}", flush=True)
+
+        time.sleep(60)
 
 def serialize_job_payload(payload):
     try:
@@ -951,11 +1240,24 @@ def mark_job_succeeded(job_id, result):
         """,
         (result_json, now, now, job_id)
     )
+
+    cur.execute(
+        """
+        SELECT job_type
+        FROM jobs
+        WHERE id = %s
+        """,
+        (job_id,)
+    )
+    type_row = cur.fetchone()
+
     conn.commit()
     conn.close()
-    # Set library_update_needed True and update last_job_finished_at
-    set_library_update_needed(True)
-    set_last_job_finished_at(datetime.utcnow())
+
+    if type_row and type_row.get('job_type') == 'download_track':
+        # Set library_update_needed True and update last_job_finished_at
+        set_library_update_needed(True)
+        set_last_job_finished_at(datetime.utcnow())
 
 def update_job_progress(job_id, updates):
     now = datetime.utcnow().isoformat() + 'Z'
@@ -2151,6 +2453,16 @@ download_worker_thread = threading.Thread(target=download_job_worker, daemon=Tru
 download_worker_thread.start()
 print("Download job worker started\n", flush=True)
 
+# Start background worker for Plex library sync jobs
+plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
+plex_sync_worker_thread.start()
+print("Plex library sync job worker started\n", flush=True)
+
+# Start scheduler for interval-based Plex sync jobs
+plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)
+plex_sync_scheduler_thread.start()
+print("Plex library sync scheduler started\n", flush=True)
+
 # Start background worker for library update
 library_update_thread = threading.Thread(target=library_update_worker, daemon=True)
 library_update_thread.start()
@@ -3314,7 +3626,8 @@ def get_plex_config_endpoint():
     return jsonify({
         'has_config': config['server_url'] is not None and config['api_token'] is not None,
         'server_url': config['server_url'],
-        'library_name': config['library_name']
+        'library_name': config['library_name'],
+        'sync_interval_hours': config.get('sync_interval_hours', 24)
     })
 
 @app.route('/api/plex/config', methods=['POST'])
@@ -3325,15 +3638,43 @@ def save_plex_config_endpoint():
     if not payload:
         return jsonify({'error': 'No JSON payload provided'}), 400
     
-    server_url = payload.get('server_url', '').strip()
+    current = get_plex_config()
+
+    server_url = payload.get('server_url', '').strip() or (current.get('server_url') or '')
     api_token = payload.get('api_token', '').strip()
-    library_name = payload.get('library_name', '')
+    library_name = (payload.get('library_name', '') or '').strip() or (current.get('library_name') or '')
+
+    if api_token.lower() == 'configured':
+        api_token = ''
+    api_token = api_token or (current.get('api_token') or '')
+    sync_interval_hours_raw = payload.get('sync_interval_hours', 24)
+
+    try:
+        sync_interval_hours = int(sync_interval_hours_raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'sync_interval_hours must be an integer'}), 400
+
+    if sync_interval_hours < 1:
+        return jsonify({'error': 'sync_interval_hours must be at least 1'}), 400
     
-    if not server_url or not api_token:
-        return jsonify({'error': 'server_url and api_token are required'}), 400
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'server_url, api_token, and library_name are required'}), 400
     
-    save_plex_config(server_url, api_token, library_name)
+    save_plex_config(server_url, api_token, library_name, sync_interval_hours)
     return jsonify({'success': True})
+
+@app.route('/api/plex/sync', methods=['POST'])
+def start_plex_sync_endpoint():
+    """Queue a manual Plex library sync job."""
+    config = get_plex_config()
+    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
+        return jsonify({'error': 'Plex is not fully configured'}), 400
+
+    job_id = queue_plex_library_sync(trigger='manual')
+    if job_id is None:
+        return jsonify({'error': 'A Plex sync job is already queued or in progress'}), 409
+
+    return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
 @app.route('/api/plex/test', methods=['POST'])
 def test_plex_connection_endpoint():

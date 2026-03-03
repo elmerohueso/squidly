@@ -145,6 +145,13 @@ interface JobResult {
     title?: string;
     album?: string;
     playlist_name?: string | null;
+    trigger?: string;
+    progress?: {
+        processed_tracks?: number;
+        total_tracks?: number;
+        upserted_songs?: number;
+        deleted_songs?: number;
+    };
     stages?: JobStageMap;
 }
 
@@ -208,6 +215,9 @@ class App {
     private plexPlaylistBackButton: HTMLButtonElement;
     private savePlexConfigButton: HTMLButtonElement;
     private testPlexConnectionButton: HTMLButtonElement;
+    private plexSyncIntervalHoursInput: HTMLInputElement;
+    private startPlexSyncButton: HTMLButtonElement;
+    private plexSyncStatusEl: HTMLElement;
     private plexConfigStatusEl: HTMLElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
@@ -280,6 +290,9 @@ class App {
         this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement;
         this.savePlexConfigButton = document.getElementById('savePlexConfig') as HTMLButtonElement;
         this.testPlexConnectionButton = document.getElementById('testPlexConnection') as HTMLButtonElement;
+        this.plexSyncIntervalHoursInput = document.getElementById('plexSyncIntervalHours') as HTMLInputElement;
+        this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
+        this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
         this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
         
         this.initializeEventListeners();
@@ -334,6 +347,7 @@ class App {
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         this.savePlexConfigButton.addEventListener('click', () => this.savePlexConfig());
         this.testPlexConnectionButton.addEventListener('click', () => this.testPlexConnection());
+        this.startPlexSyncButton.addEventListener('click', () => this.startPlexSync());
         this.plexPlaylistOptions.addEventListener('change', () => {
             const selectedName = this.plexPlaylistOptions.value.trim();
             if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
@@ -491,7 +505,7 @@ class App {
         this.clearJobsPagination();
 
         try {
-            const response = await fetch('/api/jobs?job_type=download_track&limit=100');
+            const response = await fetch('/api/jobs?limit=100');
             if (!response.ok) {
                 throw new Error('Failed to fetch jobs');
             }
@@ -682,9 +696,54 @@ class App {
         const effectiveStatus = this.getEffectiveJobStatus(job);
         const statusLabel = this.formatJobStatus(effectiveStatus);
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
-        const showRetryButton = effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors';
+        const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
+
+        if (job.job_type === 'plex_library_sync') {
+            const stageRows = [
+                { key: 'connect', label: 'Connected to Plex' },
+                { key: 'fetch_tracks', label: 'Fetched Library Tracks' },
+                { key: 'sync_songs', label: 'Synced Songs to Database' },
+                { key: 'cleanup', label: 'Removed Missing Songs' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = job.result?.progress || {};
+            const processed = Number(progress.processed_tracks || 0);
+            const total = Number(progress.total_tracks || 0);
+            const upserted = Number(progress.upserted_songs || 0);
+            const deleted = Number(progress.deleted_songs || 0);
+            const progressText = total > 0
+                ? `${processed}/${total} tracks processed • ${upserted} songs upserted • ${deleted} removed`
+                : `${upserted} songs upserted • ${deleted} removed`;
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="job-main-actions">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
 
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
@@ -725,6 +784,17 @@ class App {
     }
 
     private getJobDisplayTitle(job: JobItem): string {
+        if (job.job_type === 'plex_library_sync') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'interval') {
+                return 'Plex Library Sync (Interval)';
+            }
+            if (trigger === 'manual') {
+                return 'Plex Library Sync (Manual)';
+            }
+            return 'Plex Library Sync';
+        }
+
         const artist = job.result?.artist;
         const title = job.result?.title;
 
@@ -773,6 +843,23 @@ class App {
         }
 
         return status.replace('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
+    }
+
+    private resolvePlexSyncStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
+        const value = stages[key];
+        if (value) {
+            return value;
+        }
+
+        if (job.status === 'succeeded') {
+            return 'done';
+        }
+
+        if (job.status === 'cancelled') {
+            return 'skipped';
+        }
+
+        return 'pending';
     }
 
     private openSettingsFlyout(): void {
@@ -1014,6 +1101,11 @@ class App {
                     this.plexLibraryNameSelect.appendChild(option);
                     this.plexLibraryNameSelect.value = data.library_name;
                 }
+
+                const intervalHours = Number(data.sync_interval_hours);
+                this.plexSyncIntervalHoursInput.value = Number.isFinite(intervalHours) && intervalHours > 0
+                    ? String(intervalHours)
+                    : '24';
                 
                 if (data.has_config) {
                     this.plexApiTokenInput.value = 'Configured';
@@ -1094,11 +1186,13 @@ class App {
 
     private async savePlexConfig(): Promise<void> {
         const serverUrl = this.plexServerUrlInput.value.trim();
-        const apiToken = this.plexApiTokenInput.value.trim();
+        const apiTokenRaw = this.plexApiTokenInput.value.trim();
+        const apiToken = apiTokenRaw.toLowerCase() === 'configured' ? '' : apiTokenRaw;
         const libraryName = this.plexLibraryNameSelect.value.trim();
+        const syncIntervalHours = Math.max(1, Number.parseInt(this.plexSyncIntervalHoursInput.value.trim() || '24', 10) || 24);
 
-        if (!serverUrl || !apiToken || !libraryName) {
-            this.updatePlexConfigStatus('⚠ Server URL, X-Plex-Token, and library name are required');
+        if (!serverUrl || !libraryName) {
+            this.updatePlexConfigStatus('⚠ Server URL and library name are required');
             return;
         }
 
@@ -1111,7 +1205,8 @@ class App {
                 body: JSON.stringify({
                     server_url: serverUrl,
                     api_token: apiToken,
-                    library_name: libraryName
+                    library_name: libraryName,
+                    sync_interval_hours: syncIntervalHours
                 })
             });
 
@@ -1129,6 +1224,36 @@ class App {
         } catch (error) {
             console.error('Error saving Plex config:', error);
             this.updatePlexConfigStatus('✗ Error saving configuration');
+        }
+    }
+
+    private async startPlexSync(): Promise<void> {
+        this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+        this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+        this.startPlexSyncButton.disabled = true;
+
+        try {
+            const response = await fetch('/api/plex/sync', {
+                method: 'POST'
+            });
+
+            if (response.status === 202) {
+                this.plexSyncStatusEl.textContent = '✓ Plex sync job queued';
+                this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
+                if (this.jobsFlyout.classList.contains('active')) {
+                    await this.loadJobs();
+                }
+            } else {
+                const data = await response.json().catch(() => ({}));
+                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start sync'}`;
+                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (error) {
+            console.error('Error starting Plex sync:', error);
+            this.plexSyncStatusEl.textContent = '✗ Error starting sync';
+            this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+        } finally {
+            this.startPlexSyncButton.disabled = false;
         }
     }
 
