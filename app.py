@@ -200,7 +200,7 @@ else:
 DEFAULT_DOWNLOAD_SETTINGS = {
     'format': 'original',
     'parent_folder': '',
-    'file_naming_loose': '{artist} - {title}.{ext}',
+    'file_naming_loose': '{artist}/{album}/{track} - {title}.{ext}',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}'
 }
 
@@ -884,12 +884,6 @@ class ManifestDownloadError(Exception):
 class TransientDownloadError(Exception):
     pass
 
-class ManifestDownloadError(Exception):
-    pass
-
-class TransientDownloadError(Exception):
-    pass
-
 def claim_next_job(job_type):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
@@ -1377,10 +1371,7 @@ def process_download_job(job_id, payload):
     if file_format == 'mp3':
         print(f"[DOWNLOAD] Format is MP3 - converting staged {temp_source_ext.upper()}", flush=True)
 
-        if audio_format == 'm4a':
-            success = convert_m4a_to_mp3(temp_source_path, temp_mp3_path)
-        else:
-            success = convert_flac_to_mp3(temp_source_path, temp_mp3_path)
+        success = convert_to_mp3(temp_source_path, temp_mp3_path, source_format=temp_source_ext)
 
         if not success:
             cleanup_file(temp_source_path)
@@ -1499,14 +1490,6 @@ def download_job_worker():
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 else:
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying (manifest fetch): {str(e)}", flush=True)
-                    mark_job_retrying(job['id'], job['attempt_count'], str(e))
-                time.sleep(1)
-            except (ManifestDownloadError, TransientDownloadError) as e:
-                if job['attempt_count'] + 1 >= job['max_attempts']:
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
-                else:
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying: {str(e)}", flush=True)
                     mark_job_retrying(job['id'], job['attempt_count'], str(e))
                 time.sleep(1)
             except Exception as e:
@@ -2808,95 +2791,49 @@ def download_cover_image(cover_url):
         print(f"[COVER] Error downloading cover image: {str(e)}", flush=True)
         return None
 
-def convert_flac_to_mp3(flac_path: str, mp3_path: str) -> bool:
+def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio') -> bool:
     """
-    Convert a FLAC file to 320kbps MP3 using ffmpeg.
-    
+    Convert an audio file (e.g., FLAC or M4A/AAC) to highest VBR quality MP3 using ffmpeg.
+
     Args:
-        flac_path: Path to the FLAC file
+        source_path: Path to the source audio file
         mp3_path: Path where the MP3 should be saved
-    
+        source_format: Source format label for logging
+
     Returns:
         True on success, False on failure
     """
     try:
-        print(f"[FFMPEG] Converting FLAC to MP3: {flac_path} -> {mp3_path}", flush=True)
-        
-        # Create directory if needed
+        print(
+            f"[FFMPEG] Converting {source_format.upper()} to MP3 (highest VBR quality): {source_path} -> {mp3_path}",
+            flush=True
+        )
+
         mp3_dir = os.path.dirname(mp3_path)
         if mp3_dir:
             os.makedirs(mp3_dir, exist_ok=True)
-        
-        # Run ffmpeg to convert FLAC to 320kbps MP3
+
         cmd = [
             'ffmpeg',
-            '-i', flac_path,
-            '-b:a', '320k',
+            '-i', source_path,
+            '-c:a', 'libmp3lame',
             '-q:a', '0',
-            '-y',  # Overwrite output file
+            '-y',
             mp3_path
         ]
-        
+
         print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
+
         if result.returncode == 0:
             print(f"[FFMPEG] SUCCESS: Converted to {mp3_path}", flush=True)
             return True
-        else:
-            print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
-            print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
-            return False
-    
-    except subprocess.TimeoutExpired:
-        print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
-        return False
-    except Exception as e:
-        print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
+
+        print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
+        print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
         return False
 
-def convert_m4a_to_mp3(m4a_path: str, mp3_path: str) -> bool:
-    """
-    Convert an M4A/AAC file to 320kbps MP3 using ffmpeg.
-    
-    Args:
-        m4a_path: Path to the M4A file
-        mp3_path: Path where the MP3 should be saved
-    
-    Returns:
-        True on success, False on failure
-    """
-    try:
-        print(f"[FFMPEG] Converting M4A to MP3: {m4a_path} -> {mp3_path}", flush=True)
-        
-        # Create directory if needed
-        mp3_dir = os.path.dirname(mp3_path)
-        if mp3_dir:
-            os.makedirs(mp3_dir, exist_ok=True)
-        
-        # Run ffmpeg to convert M4A to 320kbps MP3
-        cmd = [
-            'ffmpeg',
-            '-i', m4a_path,
-            '-b:a', '320k',
-            '-q:a', '0',
-            '-y',  # Overwrite output file
-            mp3_path
-        ]
-        
-        print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
-        if result.returncode == 0:
-            print(f"[FFMPEG] SUCCESS: Converted M4A to {mp3_path}", flush=True)
-            return True
-        else:
-            print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
-            print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
-            return False
-    
     except subprocess.TimeoutExpired:
         print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
         return False
