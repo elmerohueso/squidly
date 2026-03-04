@@ -3584,17 +3584,50 @@ def cancel_job(job_id):
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
 
+@app.route('/api/jobs/cancel-incomplete', methods=['POST'])
 @app.route('/api/jobs/cancel-pending', methods=['POST'])
 def cancel_all_pending_jobs():
-    """Delete all pending (queued) jobs from the queue/table."""
+    """Delete all incomplete jobs from the queue/table."""
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute(
         """
-        DELETE FROM jobs
-        WHERE status = 'queued'
+        SELECT id, job_type, status, result_json
+        FROM jobs
         """
+    )
+    rows = cur.fetchall() or []
+
+    delete_ids = []
+    for row in rows:
+        status = row.get('status')
+        job_type = row.get('job_type')
+
+        if status in ('queued', 'in_progress'):
+            delete_ids.append(row['id'])
+            continue
+
+        if job_type != 'download_track' or status != 'succeeded':
+            continue
+
+        try:
+            result = json.loads(row['result_json']) if row.get('result_json') else {}
+        except (TypeError, ValueError):
+            result = {}
+
+        stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
+        if stages.get('playlist_added') == 'queued':
+            delete_ids.append(row['id'])
+
+    if not delete_ids:
+        conn.close()
+        return jsonify({'success': True, 'deleted_count': 0})
+
+    placeholders = ','.join(['%s'] * len(delete_ids))
+    cur.execute(
+        f"DELETE FROM jobs WHERE id IN ({placeholders})",
+        tuple(delete_ids)
     )
     deleted_count = cur.rowcount if cur.rowcount is not None else 0
     conn.commit()

@@ -547,24 +547,24 @@ class App {
 
         if (!shouldShow) {
             this.cancelPendingJobsButton.disabled = true;
-            this.cancelPendingJobsButton.textContent = 'Cancel all pending';
+            this.cancelPendingJobsButton.textContent = 'Cancel all incomplete';
             return;
         }
 
-        const pendingCount = jobs.filter(job => this.getEffectiveJobStatus(job) === 'queued').length;
-        this.cancelPendingJobsButton.disabled = pendingCount === 0;
-        this.cancelPendingJobsButton.textContent = pendingCount > 0
-            ? `Cancel all pending (${pendingCount})`
-            : 'Cancel all pending';
+        const incompleteCount = this.filterJobsByStatus(jobs, 'incomplete').length;
+        this.cancelPendingJobsButton.disabled = incompleteCount === 0;
+        this.cancelPendingJobsButton.textContent = incompleteCount > 0
+            ? `Cancel all incomplete (${incompleteCount})`
+            : 'Cancel all incomplete';
     }
 
     private async cancelAllPendingJobs(): Promise<void> {
-        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all pending';
+        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all incomplete';
         if (this.cancelPendingJobsButton.disabled) {
             return;
         }
 
-        const shouldProceed = window.confirm('Cancel and remove all pending jobs from the queue?');
+        const shouldProceed = window.confirm('Cancel and remove all incomplete jobs from the queue?');
         if (!shouldProceed) {
             return;
         }
@@ -573,9 +573,9 @@ class App {
         this.cancelPendingJobsButton.textContent = 'Cancelling...';
 
         try {
-            const response = await fetch('/api/jobs/cancel-pending', { method: 'POST' });
+            const response = await fetch('/api/jobs/cancel-incomplete', { method: 'POST' });
             if (!response.ok) {
-                let message = 'Failed to cancel pending jobs';
+                let message = 'Failed to cancel incomplete jobs';
                 try {
                     const data = await response.json() as { error?: string };
                     if (data?.error) {
@@ -589,8 +589,8 @@ class App {
 
             await this.loadJobs();
         } catch (error) {
-            console.error('Cancel pending jobs failed:', error);
-            window.alert((error as Error).message || 'Failed to cancel pending jobs');
+            console.error('Cancel incomplete jobs failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
             this.cancelPendingJobsButton.disabled = false;
             this.cancelPendingJobsButton.textContent = pendingCountLabel;
         }
