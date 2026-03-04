@@ -2053,7 +2053,7 @@ class App {
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
         this.stopPlayback();
-        this.updatePlexPlaylistContainerVisibility(searchType === 's');
+        this.updatePlexPlaylistContainerVisibility(true);
         if (data.error) {
             this.displayMessage(`Error: ${data.error}${data.details ? ' - ' + data.details : ''}`);
             return;
