@@ -3584,6 +3584,24 @@ def cancel_job(job_id):
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
 
+@app.route('/api/jobs/cancel-pending', methods=['POST'])
+def cancel_all_pending_jobs():
+    """Delete all pending (queued) jobs from the queue/table."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        DELETE FROM jobs
+        WHERE status = 'queued'
+        """
+    )
+    deleted_count = cur.rowcount if cur.rowcount is not None else 0
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'deleted_count': deleted_count})
+
 @app.route('/api/jobs/<int:job_id>/retry', methods=['POST'])
 def retry_job(job_id):
     """Retry an existing failed/completed-with-errors download job by re-queueing it."""

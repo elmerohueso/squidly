@@ -1060,6 +1060,35 @@ footer p {
     box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.15);
 }
 
+.jobs-bulk-button {
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 68, 102, 0.45);
+    background: transparent;
+    color: #ff4466;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.jobs-bulk-button:hover:enabled {
+    border-color: #ff4466;
+    background: rgba(255, 68, 102, 0.12);
+}
+
+.jobs-bulk-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.jobs-bulk-button.hidden {
+    display: none;
+}
+
 .jobs-content {
     flex: 1;
     overflow-y: auto;

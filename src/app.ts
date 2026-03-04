@@ -199,6 +199,7 @@ class App {
     private jobsOverlay: HTMLElement;
     private closeJobsButton: HTMLButtonElement;
     private jobsFilterSelect: HTMLSelectElement;
+    private cancelPendingJobsButton: HTMLButtonElement;
     private jobsContent: HTMLElement;
     private jobsPagination: HTMLElement;
     private settingsButton: HTMLButtonElement;
@@ -274,6 +275,7 @@ class App {
         this.jobsOverlay = document.getElementById('jobsOverlay') as HTMLElement;
         this.closeJobsButton = document.getElementById('closeJobs') as HTMLButtonElement;
         this.jobsFilterSelect = document.getElementById('jobsFilter') as HTMLSelectElement;
+        this.cancelPendingJobsButton = document.getElementById('cancelPendingJobs') as HTMLButtonElement;
         this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
         this.jobsPagination = document.getElementById('jobsPagination') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
@@ -338,7 +340,11 @@ class App {
         this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
         this.jobsFilterSelect.addEventListener('change', () => {
             this.currentJobsPage = 1;
+            this.updateCancelPendingButton([], this.jobsFilterSelect.value);
             void this.loadJobs();
+        });
+        this.cancelPendingJobsButton.addEventListener('click', () => {
+            void this.cancelAllPendingJobs();
         });
         this.jobsContent.addEventListener('click', (e: MouseEvent) => {
             void this.handleJobsContentClick(e);
@@ -491,6 +497,7 @@ class App {
         this.jobsOverlay.classList.add('active');
         document.body.style.overflow = 'hidden';
         this.currentJobsPage = 1;
+        this.updateCancelPendingButton([], this.jobsFilterSelect.value);
         void this.loadJobs();
         if (!this.jobsUpdateInterval) {
             this.jobsUpdateInterval = window.setInterval(() => {
@@ -523,12 +530,69 @@ class App {
             const data = await response.json();
             const jobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
             this.updateJobsFilterCounts(jobs);
+            this.updateCancelPendingButton(jobs, filter);
             const filtered = this.filterJobsByStatus(jobs, filter);
             this.renderJobs(filtered);
         } catch (error) {
             this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
             this.clearJobsPagination();
+            this.updateCancelPendingButton([], filter);
             console.error('Jobs load error:', error);
+        }
+    }
+
+    private updateCancelPendingButton(jobs: JobItem[], filter: string): void {
+        const shouldShow = filter === 'incomplete';
+        this.cancelPendingJobsButton.classList.toggle('hidden', !shouldShow);
+
+        if (!shouldShow) {
+            this.cancelPendingJobsButton.disabled = true;
+            this.cancelPendingJobsButton.textContent = 'Cancel all pending';
+            return;
+        }
+
+        const pendingCount = jobs.filter(job => this.getEffectiveJobStatus(job) === 'queued').length;
+        this.cancelPendingJobsButton.disabled = pendingCount === 0;
+        this.cancelPendingJobsButton.textContent = pendingCount > 0
+            ? `Cancel all pending (${pendingCount})`
+            : 'Cancel all pending';
+    }
+
+    private async cancelAllPendingJobs(): Promise<void> {
+        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all pending';
+        if (this.cancelPendingJobsButton.disabled) {
+            return;
+        }
+
+        const shouldProceed = window.confirm('Cancel and remove all pending jobs from the queue?');
+        if (!shouldProceed) {
+            return;
+        }
+
+        this.cancelPendingJobsButton.disabled = true;
+        this.cancelPendingJobsButton.textContent = 'Cancelling...';
+
+        try {
+            const response = await fetch('/api/jobs/cancel-pending', { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to cancel pending jobs';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Cancel pending jobs failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel pending jobs');
+            this.cancelPendingJobsButton.disabled = false;
+            this.cancelPendingJobsButton.textContent = pendingCountLabel;
         }
     }
 
