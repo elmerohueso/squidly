@@ -528,7 +528,8 @@ class App {
             }
 
             const data = await response.json();
-            const jobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            const allJobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            const jobs = allJobs.filter(job => job.job_type !== 'plex_add');
             this.updateJobsFilterCounts(jobs);
             this.updateCancelPendingButton(jobs, filter);
             const filtered = this.filterJobsByStatus(jobs, filter);

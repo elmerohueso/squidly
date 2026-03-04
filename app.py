@@ -3587,7 +3587,7 @@ def cancel_job(job_id):
 @app.route('/api/jobs/cancel-incomplete', methods=['POST'])
 @app.route('/api/jobs/cancel-pending', methods=['POST'])
 def cancel_all_pending_jobs():
-    """Delete all incomplete jobs from the queue/table."""
+    """Delete user-visible incomplete jobs from the queue/table."""
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -3603,6 +3603,9 @@ def cancel_all_pending_jobs():
     for row in rows:
         status = row.get('status')
         job_type = row.get('job_type')
+
+        if job_type == 'plex_add':
+            continue
 
         if status in ('queued', 'in_progress'):
             delete_ids.append(row['id'])
