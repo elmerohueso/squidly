@@ -1581,6 +1581,7 @@ class App {
             const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
+            const notFoundTracks: Array<{ artist: string; name: string }> = [];
 
             // Search for each track progressively
             for (let i = 0; i < tracks.length; i++) {
@@ -1602,10 +1603,24 @@ class App {
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
+                        } else {
+                            notFoundTracks.push({
+                                artist: track.artist,
+                                name: track.name
+                            });
                         }
+                    } else {
+                        notFoundTracks.push({
+                            artist: track.artist,
+                            name: track.name
+                        });
                     }
                 } catch (error) {
                     console.error(`Failed to search for ${searchQuery}:`, error);
+                    notFoundTracks.push({
+                        artist: track.artist,
+                        name: track.name
+                    });
                 }
 
                 // Update progress
@@ -1621,7 +1636,7 @@ class App {
             // Update final message
             const progressText = document.getElementById('progressText');
             if (progressText) {
-                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
             }
 
             // Create and add Download All button after searching is complete
@@ -1697,6 +1712,7 @@ class App {
             const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
+            const notFoundTracks: Array<{ artist: string; name: string }> = [];
 
             for (let i = 0; i < tracks.length; i++) {
                 const track = tracks[i];
@@ -1716,10 +1732,24 @@ class App {
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
+                        } else {
+                            notFoundTracks.push({
+                                artist: track.artist,
+                                name: track.name
+                            });
                         }
+                    } else {
+                        notFoundTracks.push({
+                            artist: track.artist,
+                            name: track.name
+                        });
                     }
                 } catch (error) {
                     console.error(`Failed to search for ${searchQuery}:`, error);
+                    notFoundTracks.push({
+                        artist: track.artist,
+                        name: track.name
+                    });
                 }
 
                 const progress = ((i + 1) / totalTracks) * 100;
@@ -1733,7 +1763,7 @@ class App {
 
             const progressText = document.getElementById('progressText');
             if (progressText) {
-                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
             }
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
@@ -1891,6 +1921,7 @@ class App {
             const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
+            const notFoundTracks: Array<{ artist: string; name: string }> = [];
 
             // Search for each track progressively
             for (let i = 0; i < tracks.length; i++) {
@@ -1913,10 +1944,24 @@ class App {
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
+                        } else {
+                            notFoundTracks.push({
+                                artist: artists,
+                                name: lbTrack.title || 'Unknown'
+                            });
                         }
+                    } else {
+                        notFoundTracks.push({
+                            artist: artists,
+                            name: lbTrack.title || 'Unknown'
+                        });
                     }
                 } catch (error) {
                     console.error(`Failed to search for ${searchQuery}:`, error);
+                    notFoundTracks.push({
+                        artist: artists,
+                        name: lbTrack.title || 'Unknown'
+                    });
                 }
 
                 // Update progress
@@ -1932,7 +1977,7 @@ class App {
             // Update final message
             const progressText = document.getElementById('progressText');
             if (progressText) {
-                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${tracks.length}</strong> tracks`;
+                this.updatePlaylistFoundSummary(progressText, foundCount, tracks.length, notFoundTracks);
             }
 
             // Create and add Download All button after searching is complete
@@ -1980,6 +2025,29 @@ class App {
             cover: undefined,
             trackNumber: undefined
         };
+    }
+
+    private updatePlaylistFoundSummary(
+        progressTextEl: HTMLElement,
+        foundCount: number,
+        totalTracks: number,
+        notFoundTracks: Array<{ artist: string; name: string }>
+    ): void {
+        progressTextEl.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+
+        if (!notFoundTracks.length) {
+            progressTextEl.removeAttribute('title');
+            return;
+        }
+
+        const lines = notFoundTracks.map((track, index) => (
+            `${index + 1}. ${track.artist} - ${track.name}`
+        ));
+
+        progressTextEl.setAttribute(
+            'title',
+            `Not found (${notFoundTracks.length}):\n${lines.join('\n')}`
+        );
     }
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {
