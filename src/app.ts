@@ -1470,6 +1470,8 @@ class App {
         const searchType = this.searchTypeSelect.value;
         if (searchType === 'lastfm') {
             this.searchInput.placeholder = 'Enter Last.fm playlist URL...';
+        } else if (searchType === 'youtube_music') {
+            this.searchInput.placeholder = 'Enter YouTube Music playlist URL...';
         } else if (searchType === 'listenbrainz') {
             this.searchInput.placeholder = 'Enter ListenBrainz username...';
         } else if (searchType === 'a') {
@@ -1501,6 +1503,12 @@ class App {
         if (searchType === 'lastfm') {
             // Handle Last.fm playlist with progressive search
             await this.handleLastfmPlaylist(query);
+            return;
+        }
+
+        if (searchType === 'youtube_music') {
+            // Handle YouTube Music playlist with progressive search
+            await this.handleYoutubeMusicPlaylist(query);
             return;
         }
 
@@ -1636,6 +1644,117 @@ class App {
         } catch (error) {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process Last.fm playlist'}`);
             console.error('Last.fm playlist error:', error);
+        }
+    }
+
+    private async handleYoutubeMusicPlaylist(playlistUrl: string): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.displayMessage('Loading YouTube Music playlist...');
+
+        try {
+            const scrapeResponse = await fetch('/api/youtube_music/playlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ playlistUrl })
+            });
+
+            if (!scrapeResponse.ok) {
+                const errorData = await scrapeResponse.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to load playlist');
+            }
+
+            const scrapeData = await scrapeResponse.json();
+            const playlistName = scrapeData.playlistName || 'YouTube Music Playlist';
+            const tracks = scrapeData.tracks || [];
+            const totalTracks = tracks.length;
+
+            if (totalTracks === 0) {
+                this.displayMessage('No tracks found in playlist');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>YouTube Music Playlist - "${this.escapeHtml(playlistName)}"</h2>
+                    </div>
+                    <div class="progress-info">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
+                    </div>
+                </div>
+                <div class="results-list" id="lastfmResultsList"></div>
+            `;
+
+            const resultsList = document.getElementById('lastfmResultsList');
+            const progressBar = document.getElementById('lastfmProgress');
+            const progressCount = document.getElementById('progressCount');
+            let foundCount = 0;
+            const matchedTracks: Track[] = [];
+
+            for (let i = 0; i < tracks.length; i++) {
+                const track = tracks[i];
+                const searchQuery = `${track.name} ${track.artist}`;
+
+                try {
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+
+                    if (searchResponse.ok) {
+                        const searchData = await searchResponse.json();
+                        const items = searchData.data?.items || [];
+
+                        if (items.length > 0) {
+                            const trackCard = this.formatTrackCard(items[0]);
+                            if (resultsList) {
+                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                            }
+                            matchedTracks.push(items[0] as Track);
+                            foundCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to search for ${searchQuery}:`, error);
+                }
+
+                const progress = ((i + 1) / totalTracks) * 100;
+                if (progressBar) {
+                    progressBar.style.width = `${progress}%`;
+                }
+                if (progressCount) {
+                    progressCount.textContent = (i + 1).toString();
+                }
+            }
+
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                progressText.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+            }
+
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
+                resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+
+            if (matchedTracks.length > 0) {
+                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
+            }
+
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process YouTube Music playlist'}`);
+            console.error('YouTube Music playlist error:', error);
         }
     }
 

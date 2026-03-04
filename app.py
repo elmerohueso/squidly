@@ -155,12 +155,14 @@ import shutil
 import re
 import threading
 import socket
+from urllib.parse import urlparse, parse_qs
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 from plexapi.server import PlexServer
+from ytmusicapi import YTMusic
 
 app = Flask(__name__, 
             static_folder='static',
@@ -2994,6 +2996,76 @@ def lastfm_playlist():
         print(f"Last.fm scraping error: {e}", flush=True)
         return jsonify({
             'error': 'Failed to process Last.fm playlist',
+            'details': str(e)
+        }), 500
+
+@app.route('/api/youtube_music/playlist', methods=['POST'])
+def youtube_music_playlist():
+    """
+    Parse a YouTube Music playlist and return track metadata.
+    Accepts JSON body with 'playlistUrl' field.
+    Returns the playlist name and list of tracks to search for.
+    """
+    data = request.get_json() or {}
+    playlist_url = str(data.get('playlistUrl', '')).strip()
+
+    if not playlist_url:
+        return jsonify({'error': 'Playlist URL is required'}), 400
+
+    try:
+        parsed = urlparse(playlist_url)
+        query_params = parse_qs(parsed.query)
+        playlist_id = (query_params.get('list') or [''])[0].strip()
+
+        if not playlist_id:
+            return jsonify({'error': 'Invalid YouTube Music playlist URL. Missing list parameter.'}), 400
+
+        ytmusic = YTMusic()
+        playlist = ytmusic.get_playlist(playlist_id, limit=None)
+
+        playlist_name = str(playlist.get('title') or 'YouTube Music Playlist').strip()
+        raw_tracks = playlist.get('tracks') or []
+        tracks = []
+        seen_tracks = set()
+
+        for track in raw_tracks:
+            track_name = str(track.get('title') or '').strip()
+            artists = track.get('artists') or []
+            artist_names = [
+                str(artist.get('name') or '').strip()
+                for artist in artists
+                if str(artist.get('name') or '').strip()
+            ]
+            artist_name = ', '.join(artist_names).strip()
+
+            if not track_name or not artist_name:
+                continue
+
+            track_key = f"{artist_name.casefold()}|{track_name.casefold()}"
+            if track_key in seen_tracks:
+                continue
+
+            seen_tracks.add(track_key)
+            tracks.append({
+                'name': track_name,
+                'artist': artist_name
+            })
+
+        if len(tracks) == 0:
+            return jsonify({
+                'error': 'No tracks found. The playlist may be private, empty, or unavailable.'
+            }), 400
+
+        return jsonify({
+            'playlistName': playlist_name,
+            'trackCount': len(tracks),
+            'tracks': tracks
+        })
+
+    except Exception as e:
+        print(f"YouTube Music playlist parsing error: {e}", flush=True)
+        return jsonify({
+            'error': 'Failed to process YouTube Music playlist',
             'details': str(e)
         }), 500
 
