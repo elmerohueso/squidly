@@ -181,6 +181,7 @@ interface DownloadSettings {
     format: DownloadFormat;
     fileNamingLoose: string;
     fileNamingAlbum: string;
+    jobsRefreshIntervalSeconds: number;
 }
 
 class App {
@@ -212,6 +213,7 @@ class App {
     private fileNamingLooseInput: HTMLInputElement;
     private streamQualityHighInput: HTMLInputElement;
     private streamQualityLowInput: HTMLInputElement;
+    private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
     private lbConfigStatusEl: HTMLElement;
@@ -288,6 +290,7 @@ class App {
         this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
         this.streamQualityHighInput = document.getElementById('streamQualityHigh') as HTMLInputElement;
         this.streamQualityLowInput = document.getElementById('streamQualityLow') as HTMLInputElement;
+        this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
@@ -360,6 +363,7 @@ class App {
         this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
+        this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         this.savePlexConfigButton.addEventListener('click', () => this.savePlexConfig());
         this.testPlexConnectionButton.addEventListener('click', () => this.testPlexConnection());
@@ -499,11 +503,7 @@ class App {
         this.currentJobsPage = 1;
         this.updateCancelPendingButton([], this.jobsFilterSelect.value);
         void this.loadJobs();
-        if (!this.jobsUpdateInterval) {
-            this.jobsUpdateInterval = window.setInterval(() => {
-                void this.loadJobs();
-            }, 5000);
-        }
+        this.startJobsPollingInterval();
     }
 
     private closeJobsFlyout(): void {
@@ -955,7 +955,8 @@ class App {
         return {
             format: 'original',
             fileNamingLoose: '{artist}/{album}/{track} - {title}.{ext}',
-            fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}'
+            fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
+            jobsRefreshIntervalSeconds: 30
         };
     }
 
@@ -965,6 +966,11 @@ class App {
         const fileNamingLoose = (raw as { file_naming_loose?: string }).file_naming_loose;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
         const legacyFileNaming = (raw as { fileNaming?: string }).fileNaming;
+        const jobsRefreshIntervalSecondsRaw = (raw as { jobs_refresh_interval_seconds?: number | string }).jobs_refresh_interval_seconds;
+        const jobsRefreshIntervalSeconds = this.normalizeJobsRefreshIntervalSeconds(
+            (raw as { jobsRefreshIntervalSeconds?: number | string }).jobsRefreshIntervalSeconds
+            ?? jobsRefreshIntervalSecondsRaw
+        );
 
         return {
             format: raw.format === 'mp3' ? 'mp3' : 'original',
@@ -985,7 +991,8 @@ class App {
                         ? legacyFileNaming
                         : typeof fileNaming === 'string'
                             ? fileNaming
-                            : fallback.fileNamingAlbum
+                            : fallback.fileNamingAlbum,
+            jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds
         };
     }
 
@@ -1009,6 +1016,7 @@ class App {
         this.formatMp3Input.checked = settings.format === 'mp3';
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.fileNamingLooseInput.value = settings.fileNamingLoose;
+        this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.syncFormatToggleStyles();
     }
 
@@ -1019,17 +1027,52 @@ class App {
     }
 
     private readSettingsFromForm(): DownloadSettings {
+        const fallbackIntervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
+        const parsedJobsRefreshIntervalSeconds = this.normalizeJobsRefreshIntervalSeconds(this.jobsRefreshIntervalSecondsInput.value);
+
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
-            fileNamingLoose: this.fileNamingLooseInput.value.trim()
+            fileNamingLoose: this.fileNamingLooseInput.value.trim(),
+            jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds
         };
     }
 
     private updateSettingsFromForm(): void {
         this.downloadSettings = this.readSettingsFromForm();
+        this.jobsRefreshIntervalSecondsInput.value = String(this.downloadSettings.jobsRefreshIntervalSeconds);
         this.queueSettingsSave();
         this.syncFormatToggleStyles();
+
+        if (this.jobsFlyout.classList.contains('active')) {
+            this.startJobsPollingInterval();
+        }
+    }
+
+    private normalizeJobsRefreshIntervalSeconds(value: unknown): number | null {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            const parsed = Math.floor(value);
+            return parsed >= 1 ? parsed : null;
+        }
+
+        if (typeof value === 'string') {
+            const parsed = parseInt(value, 10);
+            return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+        }
+
+        return null;
+    }
+
+    private startJobsPollingInterval(): void {
+        if (this.jobsUpdateInterval) {
+            window.clearInterval(this.jobsUpdateInterval);
+            this.jobsUpdateInterval = null;
+        }
+
+        const intervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
+        this.jobsUpdateInterval = window.setInterval(() => {
+            void this.loadJobs();
+        }, intervalSeconds * 1000);
     }
 
     private updateStreamQualityFromForm(): void {

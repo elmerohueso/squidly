@@ -178,6 +178,10 @@
                 <input type="text" id="fileNamingLoose" class="settings-input" placeholder="{artist}/{album}/{track} - {title}.{ext}">
                 <p class="settings-hint">Folder: /downloads/loose_tracks</p>
                 <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
+
+                <label class="settings-label" for="jobsRefreshIntervalSeconds" style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
+                <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1" value="30" placeholder="30">
+                <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
             </div>
             <div class="settings-section">
                 <div class="settings-section-title">Streaming Settings</div>
