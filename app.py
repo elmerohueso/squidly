@@ -3989,6 +3989,14 @@ def get_plex_playlists_endpoint():
 
     return jsonify({'playlists': playlists})
 
+def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
+    text = str(value or '').strip().lower()
+    if strip_trailing_parenthetical:
+        text = re.sub(r'\s*\([^)]*\)\s*$', '', text)
+    text = re.sub(r'[^a-z0-9]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 @app.route('/api/plex/songs/match', methods=['POST'])
 def match_plex_songs_endpoint():
     """Match candidate tracks against locally synced Plex inventory."""
@@ -4044,6 +4052,39 @@ def match_plex_songs_endpoint():
                 (title, artist)
             )
             rows = cur.fetchall() or []
+
+        if not rows:
+            normalized_title = normalize_match_text(title, strip_trailing_parenthetical=True)
+            normalized_artist = normalize_match_text(artist)
+            normalized_album = normalize_match_text(album) if album else ''
+
+            cur.execute(
+                """
+                SELECT title, artist, album, format, bitrate
+                FROM plex_songs
+                WHERE trim(regexp_replace(regexp_replace(lower(COALESCE(artist, '')), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g')) = %s
+                """,
+                (normalized_artist,)
+            )
+            candidate_rows = cur.fetchall() or []
+            normalized_rows = []
+
+            for candidate in candidate_rows:
+                candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
+                candidate_album = normalize_match_text(candidate.get('album'))
+
+                if candidate_title != normalized_title:
+                    continue
+
+                if normalized_album and candidate_album != normalized_album:
+                    continue
+
+                normalized_rows.append({
+                    'format': candidate.get('format'),
+                    'bitrate': candidate.get('bitrate')
+                })
+
+            rows = normalized_rows
 
         variants = []
         seen = set()
