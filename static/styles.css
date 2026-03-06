@@ -1037,10 +1037,17 @@ footer p {
     align-items: center;
     gap: 0.75rem;
     padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-color);
     background: var(--bg-primary);
     color: var(--text-secondary);
     font-size: 0.875rem;
+}
+
+.jobs-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.75rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-primary);
 }
 
 .jobs-filter-select {
@@ -1070,6 +1077,7 @@ footer p {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+    max-width: 100%;
     white-space: nowrap;
     cursor: pointer;
     transition: all var(--transition-fast);
