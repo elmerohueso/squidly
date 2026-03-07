@@ -481,6 +481,7 @@ def init_db():
             artist TEXT,
             album TEXT,
             file_path TEXT NOT NULL UNIQUE,
+            "ratingKey" TEXT,
             format TEXT,
             bitrate INTEGER,
             updated_at TIMESTAMP NOT NULL,
@@ -488,6 +489,17 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'plex_songs'
+        """
+    )
+    plex_songs_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'ratingKey' not in plex_songs_columns:
+        cur.execute('ALTER TABLE plex_songs ADD COLUMN "ratingKey" TEXT')
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS jobs (
@@ -711,6 +723,7 @@ def process_plex_sync_job(job_id, payload):
         title = getattr(track, 'title', None) or 'Unknown Title'
         artist = getattr(track, 'grandparentTitle', None) or None
         album = getattr(track, 'parentTitle', None) or None
+        rating_key = str(getattr(track, 'ratingKey', None) or '').strip() or None
 
         media_list = getattr(track, 'media', None) or []
         for media in media_list:
@@ -729,18 +742,19 @@ def process_plex_sync_job(job_id, payload):
 
                 cur.execute(
                     """
-                    INSERT INTO plex_songs (title, artist, album, file_path, format, bitrate, updated_at, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO plex_songs (title, artist, album, file_path, "ratingKey", format, bitrate, updated_at, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(file_path) DO UPDATE SET
                         title = excluded.title,
                         artist = excluded.artist,
                         album = excluded.album,
+                        "ratingKey" = excluded."ratingKey",
                         format = excluded.format,
                         bitrate = excluded.bitrate,
                         updated_at = excluded.updated_at,
                         last_seen_at = excluded.last_seen_at
                     """,
-                    (title, artist, album, file_path, media_format, bitrate, now, now)
+                    (title, artist, album, file_path, rating_key, media_format, bitrate, now, now)
                 )
                 seen_paths.add(file_path)
                 upserted += 1
@@ -909,12 +923,13 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     conn.close()
     return job_id
 
-def queue_pending_playlist_addition(artist, album, title, playlist_name, parent_job_id=None):
+def queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=None):
     """Add a track to the pending playlist additions queue."""
     payload = {
         'artist': artist,
         'album': album,
         'title': title,
+        'file_path': file_path,
         'playlist_name': playlist_name,
         'parent_job_id': parent_job_id
     }
@@ -1614,17 +1629,12 @@ def process_download_job(job_id, payload):
         if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
             try:
                 print("[DOWNLOAD] Plex config OK - attempting playlist update for existing file", flush=True)
-                track_info = {
-                    'artist': artist_name,
-                    'album': album_name,
-                    'title': track_title
-                }
                 success, plex_message = add_tracks_to_plex_playlist(
                     plex_config['server_url'],
                     plex_config['api_token'],
                     plex_config['library_name'] or 'Music',
                     playlist_name,
-                    track_info
+                    full_path
                 )
 
                 if success:
@@ -1638,6 +1648,7 @@ def process_download_job(job_id, payload):
                             artist_name,
                             album_name,
                             track_title,
+                            full_path,
                             playlist_name,
                             parent_job_id=job_id
                         )
@@ -1869,17 +1880,12 @@ def process_download_job(job_id, payload):
     if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
         try:
             print("[DOWNLOAD] Plex config OK - attempting playlist update", flush=True)
-            track_info = {
-                'artist': artist_name,
-                'album': album_name,
-                'title': track_title
-            }
             success, plex_message = add_tracks_to_plex_playlist(
                 plex_config['server_url'],
                 plex_config['api_token'],
                 plex_config['library_name'] or 'Music',
                 playlist_name,
-                track_info
+                full_path
             )
 
             if success:
@@ -1893,6 +1899,7 @@ def process_download_job(job_id, payload):
                         artist_name,
                         album_name,
                         track_title,
+                        full_path,
                         playlist_name,
                         parent_job_id=job_id
                     )
@@ -1990,11 +1997,9 @@ def retry_pending_playlist_additions():
                 try:
                     payload = addition.get('payload') or {}
                     parent_job_id = payload.get('parent_job_id')
-                    track_info = {
-                        'artist': payload.get('artist', 'Unknown Artist'),
-                        'album': payload.get('album', 'Unknown Album'),
-                        'title': payload.get('title', 'Unknown Track')
-                    }
+                    artist = payload.get('artist', 'Unknown Artist')
+                    title = payload.get('title', 'Unknown Track')
+                    file_path = str(payload.get('file_path') or '').strip()
                     playlist_name = payload.get('playlist_name')
                     
                     success, message = add_tracks_to_plex_playlist(
@@ -2002,18 +2007,18 @@ def retry_pending_playlist_additions():
                         plex_config['api_token'],
                         plex_config['library_name'] or 'Music',
                         playlist_name,
-                        track_info
+                        file_path
                     )
                     
                     if success:
-                        print(f"[PLEX_WORKER] Successfully added: {track_info['artist']} - {track_info['title']}", flush=True)
+                        print(f"[PLEX_WORKER] Successfully added: {artist} - {title}", flush=True)
                         remove_pending_addition(addition['id'])
                         update_parent_playlist_stage(parent_job_id, 'done')
                     else:
                         update_pending_addition_attempt(addition['id'], message)
                         if addition['attempt_count'] + 1 >= addition['max_attempts']:
                             update_parent_playlist_stage(parent_job_id, 'failed')
-                            print(f"[PLEX_WORKER] Max attempts reached for: {track_info['artist']} - {track_info['title']}", flush=True)
+                            print(f"[PLEX_WORKER] Max attempts reached for: {artist} - {title}", flush=True)
                         else:
                             print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
                     
@@ -2254,7 +2259,7 @@ def get_plex_music_playlists(server_url, api_token):
         print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
         return False, [], str(e)
 
-def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, track_info):
+def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, full_path):
     """
     Add downloaded tracks to a Plex playlist.
     
@@ -2263,52 +2268,11 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         api_token: Plex API token
         library_name: Name of the music library (e.g., "Music")
         playlist_name: Name of the playlist to add to
-        track_info: Dict with 'artist', 'album', 'title' of the downloaded track
+        full_path: Full path of the downloaded (or matched) file
     
     Returns:
         tuple: (success: bool, message: str)
     """
-    def normalize_text(value):
-        text = str(value or '').strip()
-        if not text:
-            return ''
-        text = text.replace('\u2018', "'").replace('\u2019', "'").replace('\u02bc', "'").replace('`', "'")
-        return re.sub(r'\s+', ' ', text).strip()
-
-    def build_variants(value):
-        base = str(value or '').strip()
-        if not base:
-            return []
-
-        variants = []
-        seen = set()
-
-        def add_variant(candidate):
-            candidate_text = str(candidate or '').strip()
-            if not candidate_text:
-                return
-            if candidate_text in seen:
-                return
-            seen.add(candidate_text)
-            variants.append(candidate_text)
-
-        normalized = normalize_text(base)
-        add_variant(base)
-        add_variant(normalized)
-        add_variant(base.replace("'", '’'))
-        add_variant(base.replace('’', "'"))
-        add_variant(normalized.replace("'", '’'))
-        add_variant(normalized.replace('’', "'"))
-        return variants
-
-    def normalize_for_match(value, strip_trailing_parenthetical=False):
-        text = str(value or '').strip().lower()
-        if strip_trailing_parenthetical:
-            text = re.sub(r'\s*\([^)]*\)\s*$', '', text)
-        text = re.sub(r'[^a-z0-9]+', ' ', text)
-        text = re.sub(r'\s+', ' ', text)
-        return text.strip()
-
     try:
         server_url = server_url.rstrip('/')
         token_len = len(api_token) if isinstance(api_token, str) else 0
@@ -2330,238 +2294,71 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
             available = [f"{section.title} ({section.type})" for section in plex.library.sections()]
             print(f"[PLEX] Library not found. Available sections: {available}", flush=True)
             return False, f'Library "{library_name}" not found or is not a music library'
-        
-        # Search for the track in the library
-        artist = track_info.get('artist', 'Unknown')
-        album = track_info.get('album', 'Unknown')
-        title = track_info.get('title', 'Unknown')
-        artist_normalized = normalize_text(artist).casefold()
-        title_normalized = normalize_text(title).casefold()
-        artist_loose = normalize_for_match(artist)
-        title_loose = normalize_for_match(title, strip_trailing_parenthetical=True)
-        album_loose = normalize_for_match(album)
-        title_variants = build_variants(title)
-        artist_variants = build_variants(artist)
-        album_variants = build_variants(album)
-        
-        print(f"[PLEX] Searching for track: {artist} - {album} - {title}", flush=True)
-        print(f"[PLEX] Search variants: title={title_variants}, artist={artist_variants}, album={album_variants}", flush=True)
-        
-        # Try to find the track with multiple search strategies
-        tracks = []
-        try:
-            print(f"[PLEX] Trying search with title + artist + album filters", flush=True)
-            for title_variant in title_variants:
-                if tracks:
+
+        # Resolve track by ratingKey from local plex_songs inventory using only the last 3 path parts
+        raw_full_path = str(full_path or '').strip()
+        if not raw_full_path:
+            return False, 'file_path is required to resolve Plex ratingKey'
+
+        path_parts = [part for part in re.split(r'[\\/]+', raw_full_path) if part]
+        if not path_parts:
+            return False, 'file_path is required to resolve Plex ratingKey'
+
+        tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
+        normalized_file_path = '\\'.join(tail_parts)
+        trailing_suffix = '/'.join(tail_parts)
+        print(f"[PLEX] Resolving ratingKey via plex_songs for file_path={normalized_file_path}", flush=True)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT "ratingKey", title, artist
+            FROM plex_songs
+            WHERE lower(right(replace(file_path, '\\', '/'), length(%s))) = lower(%s)
+              AND "ratingKey" IS NOT NULL
+              AND btrim("ratingKey") <> ''
+            ORDER BY updated_at DESC
+            """,
+            (trailing_suffix, trailing_suffix)
+        )
+        rating_rows = cur.fetchall() or []
+        conn.close()
+
+        first_row = rating_rows[0] if rating_rows else {}
+        resolved_title = str(first_row.get('title') or 'Unknown').strip() or 'Unknown'
+        resolved_artist = str(first_row.get('artist') or 'Unknown').strip() or 'Unknown'
+
+        rating_keys = [
+            str(row.get('ratingKey') or '').strip()
+            for row in rating_rows
+            if str(row.get('ratingKey') or '').strip()
+        ]
+
+        if not rating_keys:
+            print(f"[PLEX] No ratingKey found in plex_songs for file_path={normalized_file_path}", flush=True)
+            return False, (
+                f'file_path "{normalized_file_path}" was not found in plex_songs with a ratingKey. '
+                'Run a Plex library sync first.'
+            )
+
+        track = None
+        for rating_key in rating_keys:
+            metadata_key = rating_key if rating_key.startswith('/library/metadata/') else f'/library/metadata/{rating_key}'
+            try:
+                candidate = plex.fetchItem(metadata_key)
+                if candidate is not None:
+                    track = candidate
+                    print(f"[PLEX] Resolved track using ratingKey={rating_key}", flush=True)
                     break
-                for artist_variant in artist_variants:
-                    if tracks:
-                        break
-                    for album_variant in album_variants:
-                        search_results = library.search(
-                            title=title_variant,
-                            filters={'artist.title': artist_variant, 'album.title': album_variant},
-                            libtype='track'
-                        )
-                        if search_results:
-                            tracks = search_results
-                            print(
-                                f"[PLEX] Using result from artist + album + title search with variants title='{title_variant}', artist='{artist_variant}', album='{album_variant}'",
-                                flush=True
-                            )
-                            break
+            except Exception as e:
+                print(f"[PLEX] Failed to fetch item for ratingKey={rating_key}: {str(e)}", flush=True)
 
-            if not tracks:
-                print(f"[PLEX] Trying search with title + artist filter only", flush=True)
-                for title_variant in title_variants:
-                    if tracks:
-                        break
-                    for artist_variant in artist_variants:
-                        search_results = library.search(
-                            title=title_variant,
-                            filters={'artist.title': artist_variant},
-                            libtype='track'
-                        )
-                        if search_results:
-                            tracks = search_results
-                            print(
-                                f"[PLEX] Using result from artist + title search with variants title='{title_variant}', artist='{artist_variant}'",
-                                flush=True
-                            )
-                            break
-
-            if not tracks:
-                print(f"[PLEX] Trying basic title search", flush=True)
-                for title_variant in title_variants:
-                    search_results = library.search(title=title_variant, libtype='track')
-                    print(f"[PLEX] Basic title search for '{title_variant}' found {len(search_results)} results", flush=True)
-
-                    for result in search_results:
-                        result_artist = ''
-                        result_title = str(getattr(result, 'title', '') or '')
-
-                        if hasattr(result, 'artist'):
-                            try:
-                                result_artist = result.artist().title if callable(result.artist) else result.artist.title
-                            except Exception:
-                                result_artist = ''
-                        if not result_artist:
-                            result_artist = str(getattr(result, 'grandparentTitle', '') or '')
-
-                        result_artist_normalized = normalize_text(result_artist).casefold()
-                        result_title_normalized = normalize_text(result_title).casefold()
-                        result_artist_loose = normalize_for_match(result_artist)
-                        result_title_loose = normalize_for_match(result_title, strip_trailing_parenthetical=True)
-
-                        if result_artist_normalized != artist_normalized and result_artist_loose != artist_loose:
-                            continue
-
-                        if result_title_normalized != title_normalized and result_title_loose != title_loose:
-                            continue
-
-                        tracks.append(result)
-                        print(
-                            f"[PLEX] Found normalized artist/title match in basic search: {result_artist} - {result_title}",
-                            flush=True
-                        )
-                        break
-
-                    if tracks:
-                        break
-
-            if not tracks:
-                print(f"[PLEX] Trying artist-only search with normalized title matching", flush=True)
-                seen_rating_keys = set()
-                for artist_variant in artist_variants:
-                    search_results = library.search(
-                        filters={'artist.title': artist_variant},
-                        libtype='track'
-                    )
-                    print(
-                        f"[PLEX] Artist-only search for '{artist_variant}' found {len(search_results)} results",
-                        flush=True
-                    )
-
-                    for result in search_results:
-                        rating_key = str(getattr(result, 'ratingKey', '') or '')
-                        if rating_key and rating_key in seen_rating_keys:
-                            continue
-
-                        result_title = str(getattr(result, 'title', '') or '')
-                        result_album = str(getattr(result, 'parentTitle', '') or '')
-                        result_title_normalized = normalize_text(result_title).casefold()
-                        result_title_loose = normalize_for_match(result_title, strip_trailing_parenthetical=True)
-
-                        if result_title_normalized != title_normalized and result_title_loose != title_loose:
-                            continue
-
-                        if album_loose:
-                            result_album_loose = normalize_for_match(result_album)
-                            if result_album_loose and result_album_loose != album_loose:
-                                continue
-
-                        tracks.append(result)
-                        if rating_key:
-                            seen_rating_keys.add(rating_key)
-                        print(
-                            f"[PLEX] Found match via artist-only fallback: {artist_variant} - {result_title} ({result_album})",
-                            flush=True
-                        )
-                        break
-
-                    if tracks:
-                        break
-
-            if not tracks:
-                print(f"[PLEX] Trying fuzzy fallback (weighted title/artist with album tie-breaker)", flush=True)
-                candidate_map = {}
-
-                def collect_candidates(candidates):
-                    for candidate in candidates or []:
-                        rating_key = str(getattr(candidate, 'ratingKey', '') or '')
-                        dedupe_key = rating_key or f"id:{id(candidate)}"
-                        if dedupe_key not in candidate_map:
-                            candidate_map[dedupe_key] = candidate
-
-                for title_variant in title_variants:
-                    try:
-                        collect_candidates(library.search(title=title_variant, libtype='track'))
-                    except Exception:
-                        continue
-
-                for artist_variant in artist_variants:
-                    try:
-                        collect_candidates(
-                            library.search(filters={'artist.title': artist_variant}, libtype='track')
-                        )
-                    except Exception:
-                        continue
-
-                target_title = normalize_for_match(title, strip_trailing_parenthetical=True)
-                target_artist = normalize_for_match(artist)
-                target_album = normalize_for_match(album)
-
-                best_candidate = None
-                best_primary_score = -1.0
-                best_album_score = -1.0
-
-                for candidate in candidate_map.values():
-                    candidate_title = str(getattr(candidate, 'title', '') or '')
-                    candidate_artist = str(getattr(candidate, 'grandparentTitle', '') or '')
-                    candidate_album = str(getattr(candidate, 'parentTitle', '') or '')
-
-                    candidate_title_norm = normalize_for_match(candidate_title, strip_trailing_parenthetical=True)
-                    candidate_artist_norm = normalize_for_match(candidate_artist)
-                    candidate_album_norm = normalize_for_match(candidate_album)
-
-                    if not target_title or not target_artist or not candidate_title_norm or not candidate_artist_norm:
-                        continue
-
-                    title_score = SequenceMatcher(None, target_title, candidate_title_norm).ratio()
-                    artist_score = SequenceMatcher(None, target_artist, candidate_artist_norm).ratio()
-                    album_score = SequenceMatcher(None, target_album, candidate_album_norm).ratio() if target_album and candidate_album_norm else 0.0
-
-                    primary_score = (0.65 * title_score) + (0.35 * artist_score)
-
-                    if (
-                        primary_score > best_primary_score
-                        or (
-                            abs(primary_score - best_primary_score) < 1e-9
-                            and album_score > best_album_score
-                        )
-                    ):
-                        best_candidate = candidate
-                        best_primary_score = primary_score
-                        best_album_score = album_score
-
-                fuzzy_threshold = 0.72
-                if best_candidate is not None and best_primary_score >= fuzzy_threshold:
-                    tracks = [best_candidate]
-                    print(
-                        f"[PLEX] Fuzzy fallback matched: {getattr(best_candidate, 'grandparentTitle', '')} - {getattr(best_candidate, 'title', '')} "
-                        f"(primary={best_primary_score:.3f}, album_tiebreak={best_album_score:.3f})",
-                        flush=True
-                    )
-                else:
-                    print(
-                        f"[PLEX] Fuzzy fallback found {len(candidate_map)} candidate(s) but no match met threshold {fuzzy_threshold}",
-                        flush=True
-                    )
-
-            if tracks:
-                print(f"[PLEX] Track search resolved with {len(tracks)} candidate(s)", flush=True)
-            else:
-                print(f"[PLEX] No matching tracks found with any search strategy", flush=True)
-        
-        except Exception as e:
-            print(f"[PLEX] Error searching for track: {str(e)}", flush=True)
-            return False, f'Error searching for track: {str(e)}'
-        
-        if not tracks:
-            print(f"[PLEX] Track not found in Plex library: {artist} - {title}", flush=True)
-            return False, f'Track "{title}" by {artist} not found in {library_name} library. Please ensure the album and tracks have been added to your Plex library and scanned.'
-        
-        track = tracks[0]
+        if track is None:
+            return False, (
+                f'Could not resolve Plex track for file_path "{normalized_file_path}" using stored ratingKeys. '
+                'Run a Plex library sync to refresh plex_songs.'
+            )
         
         # Get or create the playlist
         playlist = None
@@ -2596,7 +2393,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         except Exception as e:
             # Check if track already in playlist
             if 'already in' in str(e).lower():
-                return True, f'Track already in playlist "{playlist_name}"'
+                return True, f'Track already in playlist "{playlist_name}" ({resolved_artist} - {resolved_title})'
             print(f"[PLEX] Error adding track to playlist: {str(e)}", flush=True)
             return False, f'Error adding to playlist: {str(e)}'
     
