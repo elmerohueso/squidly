@@ -155,6 +155,7 @@ import shutil
 import re
 import threading
 import socket
+from difflib import SequenceMatcher
 from urllib.parse import urlparse, parse_qs
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
@@ -2470,6 +2471,82 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
                     if tracks:
                         break
+
+            if not tracks:
+                print(f"[PLEX] Trying fuzzy fallback (weighted title/artist with album tie-breaker)", flush=True)
+                candidate_map = {}
+
+                def collect_candidates(candidates):
+                    for candidate in candidates or []:
+                        rating_key = str(getattr(candidate, 'ratingKey', '') or '')
+                        dedupe_key = rating_key or f"id:{id(candidate)}"
+                        if dedupe_key not in candidate_map:
+                            candidate_map[dedupe_key] = candidate
+
+                for title_variant in title_variants:
+                    try:
+                        collect_candidates(library.search(title=title_variant, libtype='track'))
+                    except Exception:
+                        continue
+
+                for artist_variant in artist_variants:
+                    try:
+                        collect_candidates(
+                            library.search(filters={'artist.title': artist_variant}, libtype='track')
+                        )
+                    except Exception:
+                        continue
+
+                target_title = normalize_for_match(title, strip_trailing_parenthetical=True)
+                target_artist = normalize_for_match(artist)
+                target_album = normalize_for_match(album)
+
+                best_candidate = None
+                best_primary_score = -1.0
+                best_album_score = -1.0
+
+                for candidate in candidate_map.values():
+                    candidate_title = str(getattr(candidate, 'title', '') or '')
+                    candidate_artist = str(getattr(candidate, 'grandparentTitle', '') or '')
+                    candidate_album = str(getattr(candidate, 'parentTitle', '') or '')
+
+                    candidate_title_norm = normalize_for_match(candidate_title, strip_trailing_parenthetical=True)
+                    candidate_artist_norm = normalize_for_match(candidate_artist)
+                    candidate_album_norm = normalize_for_match(candidate_album)
+
+                    if not target_title or not target_artist or not candidate_title_norm or not candidate_artist_norm:
+                        continue
+
+                    title_score = SequenceMatcher(None, target_title, candidate_title_norm).ratio()
+                    artist_score = SequenceMatcher(None, target_artist, candidate_artist_norm).ratio()
+                    album_score = SequenceMatcher(None, target_album, candidate_album_norm).ratio() if target_album and candidate_album_norm else 0.0
+
+                    primary_score = (0.65 * title_score) + (0.35 * artist_score)
+
+                    if (
+                        primary_score > best_primary_score
+                        or (
+                            abs(primary_score - best_primary_score) < 1e-9
+                            and album_score > best_album_score
+                        )
+                    ):
+                        best_candidate = candidate
+                        best_primary_score = primary_score
+                        best_album_score = album_score
+
+                fuzzy_threshold = 0.72
+                if best_candidate is not None and best_primary_score >= fuzzy_threshold:
+                    tracks = [best_candidate]
+                    print(
+                        f"[PLEX] Fuzzy fallback matched: {getattr(best_candidate, 'grandparentTitle', '')} - {getattr(best_candidate, 'title', '')} "
+                        f"(primary={best_primary_score:.3f}, album_tiebreak={best_album_score:.3f})",
+                        flush=True
+                    )
+                else:
+                    print(
+                        f"[PLEX] Fuzzy fallback found {len(candidate_map)} candidate(s) but no match met threshold {fuzzy_threshold}",
+                        flush=True
+                    )
 
             if tracks:
                 print(f"[PLEX] Track search resolved with {len(tracks)} candidate(s)", flush=True)
