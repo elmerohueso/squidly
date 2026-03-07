@@ -3668,6 +3668,15 @@ def list_jobs():
 
         rows = [row for row in rows if matches_jobs_filter(row)]
 
+    if jobs_filter == 'complete':
+        rows.sort(
+            key=lambda row: (
+                row.get('finished_at') is not None,
+                row.get('finished_at') or row.get('created_at')
+            ),
+            reverse=True
+        )
+
     total_count = len(rows)
     if limit is None:
         paged_rows = rows[offset:]
