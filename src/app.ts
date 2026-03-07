@@ -208,6 +208,7 @@ class App {
     private closeJobsButton: HTMLButtonElement;
     private jobsFilterSelect: HTMLSelectElement;
     private cancelPendingJobsButton: HTMLButtonElement;
+    private retryAllJobsButton: HTMLButtonElement;
     private jobsContent: HTMLElement;
     private jobsPagination: HTMLElement;
     private settingsButton: HTMLButtonElement;
@@ -287,6 +288,7 @@ class App {
         this.closeJobsButton = document.getElementById('closeJobs') as HTMLButtonElement;
         this.jobsFilterSelect = document.getElementById('jobsFilter') as HTMLSelectElement;
         this.cancelPendingJobsButton = document.getElementById('cancelPendingJobs') as HTMLButtonElement;
+        this.retryAllJobsButton = document.getElementById('retryAllJobs') as HTMLButtonElement;
         this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
         this.jobsPagination = document.getElementById('jobsPagination') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
@@ -352,11 +354,14 @@ class App {
         this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
         this.jobsFilterSelect.addEventListener('change', () => {
             this.currentJobsPage = 1;
-            this.updateCancelPendingButton(0, this.jobsFilterSelect.value);
+            this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
             void this.loadJobs();
         });
         this.cancelPendingJobsButton.addEventListener('click', () => {
             void this.cancelAllPendingJobs();
+        });
+        this.retryAllJobsButton.addEventListener('click', () => {
+            void this.retryAllFilteredJobs();
         });
         this.jobsContent.addEventListener('click', (e: MouseEvent) => {
             void this.handleJobsContentClick(e);
@@ -510,7 +515,7 @@ class App {
         this.jobsOverlay.classList.add('active');
         document.body.style.overflow = 'hidden';
         this.currentJobsPage = 1;
-        this.updateCancelPendingButton(0, this.jobsFilterSelect.value);
+        this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
         void this.loadJobs();
         this.startJobsPollingInterval();
     }
@@ -546,35 +551,51 @@ class App {
             const totalCount = typeof data.total_count === 'number' && Number.isFinite(data.total_count)
                 ? Math.max(0, Math.floor(data.total_count))
                 : jobs.length;
+            const retryableCount = (filter === 'completed_with_errors' || filter === 'failed')
+                ? jobs.length
+                : 0;
             this.jobsListCache = jobs;
             this.jobsTotalCountCache = totalCount;
             this.updateJobsFilterCounts(totals);
-            this.updateCancelPendingButton(totals.incomplete, filter);
+            this.updateJobsActionButtons(totals.incomplete, filter, retryableCount);
             this.renderJobs(jobs, totalCount);
         } catch (error) {
             this.jobsListCache = [];
             this.jobsTotalCountCache = 0;
             this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
             this.clearJobsPagination();
-            this.updateCancelPendingButton(0, filter);
+            this.updateJobsActionButtons(0, filter, 0);
             console.error('Jobs load error:', error);
         }
     }
 
-    private updateCancelPendingButton(incompleteCount: number, filter: string): void {
-        const shouldShow = filter === 'incomplete';
-        this.cancelPendingJobsButton.classList.toggle('hidden', !shouldShow);
+    private updateJobsActionButtons(incompleteCount: number, filter: string, retryableCount: number): void {
+        const showCancelIncomplete = filter === 'incomplete';
+        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancelIncomplete);
 
-        if (!shouldShow) {
+        if (!showCancelIncomplete) {
             this.cancelPendingJobsButton.disabled = true;
             this.cancelPendingJobsButton.textContent = 'Cancel all incomplete';
+        } else {
+            this.cancelPendingJobsButton.disabled = incompleteCount === 0;
+            this.cancelPendingJobsButton.textContent = incompleteCount > 0
+                ? `Cancel all incomplete (${incompleteCount})`
+                : 'Cancel all incomplete';
+        }
+
+        const showRetryAll = filter === 'completed_with_errors' || filter === 'failed';
+        this.retryAllJobsButton.classList.toggle('hidden', !showRetryAll);
+
+        if (!showRetryAll) {
+            this.retryAllJobsButton.disabled = true;
+            this.retryAllJobsButton.textContent = 'Retry all';
             return;
         }
 
-        this.cancelPendingJobsButton.disabled = incompleteCount === 0;
-        this.cancelPendingJobsButton.textContent = incompleteCount > 0
-            ? `Cancel all incomplete (${incompleteCount})`
-            : 'Cancel all incomplete';
+        this.retryAllJobsButton.disabled = retryableCount === 0;
+        this.retryAllJobsButton.textContent = retryableCount > 0
+            ? `Retry all (${retryableCount})`
+            : 'Retry all';
     }
 
     private async cancelAllPendingJobs(): Promise<void> {
@@ -612,6 +633,59 @@ class App {
             window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
             this.cancelPendingJobsButton.disabled = false;
             this.cancelPendingJobsButton.textContent = pendingCountLabel;
+        }
+    }
+
+    private async retryAllFilteredJobs(): Promise<void> {
+        const selectedFilter = this.jobsFilterSelect.value;
+        if (selectedFilter !== 'completed_with_errors' && selectedFilter !== 'failed') {
+            return;
+        }
+
+        const retryableJobs = this.jobsListCache;
+
+        if (retryableJobs.length === 0 || this.retryAllJobsButton.disabled) {
+            return;
+        }
+
+        const shouldProceed = window.confirm(`Retry all ${retryableJobs.length} jobs in ${selectedFilter.replace(/_/g, ' ')}?`);
+        if (!shouldProceed) {
+            return;
+        }
+
+        const originalText = this.retryAllJobsButton.textContent || 'Retry all';
+        this.retryAllJobsButton.disabled = true;
+        this.retryAllJobsButton.textContent = 'Retrying...';
+
+        const failures: string[] = [];
+
+        for (const job of retryableJobs) {
+            try {
+                const response = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
+                if (!response.ok) {
+                    let message = `Job ${job.id}`;
+                    try {
+                        const data = await response.json() as { error?: string };
+                        if (data?.error) {
+                            message = `Job ${job.id}: ${data.error}`;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
+                    }
+                    failures.push(message);
+                }
+            } catch {
+                failures.push(`Job ${job.id}: request failed`);
+            }
+        }
+
+        await this.loadJobs();
+
+        if (failures.length > 0) {
+            const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
+            window.alert(`Retried ${retryableJobs.length - failures.length} of ${retryableJobs.length} jobs.\n${summary}`);
+            this.retryAllJobsButton.disabled = false;
+            this.retryAllJobsButton.textContent = originalText;
         }
     }
 
