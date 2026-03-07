@@ -3314,6 +3314,66 @@ def extract_year_from_text(text: str) -> str:
     match = re.search(r"\b(19|20)\d{2}\b", text)
     return match.group(0) if match else ''
 
+def _requested_download_format(file_format):
+    normalized = str(file_format or 'original').strip().lower()
+    if normalized not in ('original', 'mp3'):
+        return 'original'
+    return normalized
+
+def _matches_requested_format(file_format, candidate_format):
+    normalized_request = _requested_download_format(file_format)
+    normalized_candidate = str(candidate_format or '').strip().lower()
+
+    if normalized_request == 'mp3':
+        return normalized_candidate in ('mp3', 'mpeg')
+
+    return normalized_candidate not in ('', 'mp3', 'mpeg')
+
+def _download_job_exists_in_plex(cur, result_payload, job_payload):
+    if not isinstance(result_payload, dict):
+        return False
+
+    artist = str(result_payload.get('artist') or '').strip()
+    title = str(result_payload.get('title') or '').strip()
+    album = str(result_payload.get('album') or '').strip()
+
+    if not artist or not title:
+        return False
+
+    requested_format = _requested_download_format(
+        job_payload.get('format') if isinstance(job_payload, dict) else None
+    )
+
+    rows = []
+    if album:
+        cur.execute(
+            """
+            SELECT format
+            FROM plex_songs
+            WHERE lower(COALESCE(title, '')) = lower(%s)
+              AND lower(COALESCE(artist, '')) = lower(%s)
+              AND lower(COALESCE(album, '')) = lower(%s)
+            ORDER BY updated_at DESC
+            """,
+            (title, artist, album)
+        )
+        rows = cur.fetchall() or []
+
+    if not rows:
+        cur.execute(
+            """
+            SELECT format
+            FROM plex_songs
+            WHERE lower(COALESCE(title, '')) = lower(%s)
+              AND lower(COALESCE(artist, '')) = lower(%s)
+            ORDER BY updated_at DESC
+            """,
+            (title, artist)
+        )
+        rows = cur.fetchall() or []
+
+    return any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
+
 def cleanup_file(path: str) -> None:
     try:
         if os.path.exists(path):
@@ -3934,7 +3994,7 @@ def retry_job(job_id):
 
     cur.execute(
         """
-        SELECT job_type, status, result_json
+        SELECT job_type, status, result_json, payload_json
         FROM jobs
         WHERE id = %s
         """,
@@ -3950,20 +4010,39 @@ def retry_job(job_id):
         conn.close()
         return jsonify({'error': 'Only download_track jobs can be retried'}), 400
 
+    try:
+        result = json.loads(row['result_json']) if row['result_json'] else {}
+    except (TypeError, ValueError):
+        result = {}
+
+    try:
+        payload = json.loads(row['payload_json']) if row.get('payload_json') else {}
+    except (TypeError, ValueError):
+        payload = {}
+
+    playlist_name = ''
+    if isinstance(payload, dict):
+        playlist_name = str(payload.get('plex_playlist') or '').strip()
+    if not playlist_name and isinstance(result, dict):
+        playlist_name = str(result.get('playlist_name') or '').strip()
+
     retryable = row['status'] == 'failed'
 
     if not retryable and row['status'] == 'succeeded':
-        try:
-            result = json.loads(row['result_json']) if row['result_json'] else {}
-        except (TypeError, ValueError):
-            result = {}
-
         stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
         retryable = stages.get('playlist_added') == 'failed'
 
     if not retryable:
         conn.close()
         return jsonify({'error': f"Job is not retryable (status={row['status']})"}), 400
+
+    if not playlist_name and _download_job_exists_in_plex(cur, result, payload):
+        conn.close()
+        return jsonify({
+            'error': 'Track already exists in Plex for the selected format. Retry skipped.',
+            'job_id': job_id,
+            'status': 'already_exists_in_plex'
+        }), 409
 
     cur.execute(
         """

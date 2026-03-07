@@ -658,6 +658,7 @@ class App {
         this.retryAllJobsButton.textContent = 'Retrying...';
 
         const failures: string[] = [];
+        let skippedExistingCount = 0;
 
         for (const job of retryableJobs) {
             try {
@@ -665,7 +666,11 @@ class App {
                 if (!response.ok) {
                     let message = `Job ${job.id}`;
                     try {
-                        const data = await response.json() as { error?: string };
+                        const data = await response.json() as { error?: string; status?: string };
+                        if (response.status === 409 && data?.status === 'already_exists_in_plex') {
+                            skippedExistingCount += 1;
+                            continue;
+                        }
                         if (data?.error) {
                             message = `Job ${job.id}: ${data.error}`;
                         }
@@ -681,9 +686,14 @@ class App {
 
         await this.loadJobs();
 
-        if (failures.length > 0) {
+        if (failures.length > 0 || skippedExistingCount > 0) {
+            const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
             const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
-            window.alert(`Retried ${retryableJobs.length - failures.length} of ${retryableJobs.length} jobs.\n${summary}`);
+            const skipLine = skippedExistingCount > 0
+                ? `\nSkipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`
+                : '';
+            const failureLine = failures.length > 0 ? `\n${summary}` : '';
+            window.alert(`Retried ${retriedCount} of ${retryableJobs.length} jobs.${skipLine}${failureLine}`);
             this.retryAllJobsButton.disabled = false;
             this.retryAllJobsButton.textContent = originalText;
         }
@@ -810,7 +820,12 @@ class App {
             if (!response.ok) {
                 let message = 'Failed to retry job';
                 try {
-                    const data = await response.json() as { error?: string };
+                    const data = await response.json() as { error?: string; status?: string };
+                    if (response.status === 409 && data?.status === 'already_exists_in_plex') {
+                        window.alert('Retry skipped: track already exists in Plex for the selected format.');
+                        await this.loadJobs();
+                        return;
+                    }
                     if (data?.error) {
                         message = data.error;
                     }
