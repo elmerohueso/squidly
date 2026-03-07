@@ -3531,17 +3531,33 @@ def list_jobs():
     """
     List jobs with optional filters.
     Query parameters:
-    - status: filter by job status
+    - status: filter by raw job status
     - job_type: filter by job type
-    - limit: max number of rows (default 50, max 200)
+    - jobs_filter: one of incomplete|complete|completed_with_errors|failed
+    - exclude_plex_add: default true
+    - limit: optional max number of rows (no backend-enforced maximum)
+    - offset: pagination offset (default 0)
     """
     status_filter = request.args.get('status')
     job_type_filter = request.args.get('job_type')
+    jobs_filter = request.args.get('jobs_filter')
+    exclude_plex_add = request.args.get('exclude_plex_add', '1').lower() not in ('0', 'false', 'no')
+
+    limit = None
+    limit_raw = request.args.get('limit')
+    if limit_raw is not None:
+        try:
+            parsed_limit = int(limit_raw)
+            if parsed_limit >= 1:
+                limit = parsed_limit
+        except ValueError:
+            limit = None
+
     try:
-        limit = int(request.args.get('limit', '50'))
+        offset = int(request.args.get('offset', '0'))
     except ValueError:
-        limit = 50
-    limit = max(1, min(limit, 200))
+        offset = 0
+    offset = max(0, offset)
 
     where_clauses = []
     params = []
@@ -3551,11 +3567,15 @@ def list_jobs():
     if job_type_filter:
         where_clauses.append('job_type = %s')
         params.append(job_type_filter)
+    if exclude_plex_add:
+        where_clauses.append('job_type <> %s')
+        params.append('plex_add')
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
 
     conn = get_db_connection()
     cur = conn.cursor()
+
     cur.execute(
         f"""
         SELECT id, job_type, status, payload_json, result_json, error_message,
@@ -3564,15 +3584,40 @@ def list_jobs():
         FROM jobs
         {where_sql}
         ORDER BY created_at DESC
-        LIMIT %s
         """,
-        (*params, limit)
+        tuple(params)
     )
-    rows = cur.fetchall()
+    rows = cur.fetchall() or []
+
+    if jobs_filter:
+        def matches_jobs_filter(row):
+            effective_status = _effective_job_status(
+                row.get('job_type'),
+                row.get('status'),
+                row.get('result_json')
+            )
+
+            if jobs_filter == 'failed':
+                return effective_status == 'failed'
+            if jobs_filter == 'completed_with_errors':
+                return effective_status == 'completed_with_errors'
+            if jobs_filter == 'complete':
+                return effective_status == 'succeeded'
+            if jobs_filter == 'incomplete':
+                return effective_status in ('queued', 'in_progress')
+            return True
+
+        rows = [row for row in rows if matches_jobs_filter(row)]
+
+    total_count = len(rows)
+    if limit is None:
+        paged_rows = rows[offset:]
+    else:
+        paged_rows = rows[offset:offset + limit]
     conn.close()
 
     jobs = []
-    for row in rows:
+    for row in paged_rows:
         try:
             payload = json.loads(row['payload_json'])
         except (TypeError, ValueError):
@@ -3601,8 +3646,8 @@ def list_jobs():
             'priority': row['priority']
         })
 
-    totals = get_jobs_filter_totals(exclude_plex_add=True)
-    return jsonify({'jobs': jobs, 'totals': totals})
+    totals = get_jobs_filter_totals(exclude_plex_add=exclude_plex_add)
+    return jsonify({'jobs': jobs, 'totals': totals, 'total_count': total_count})
 
 def _effective_job_status(job_type, status, result_json):
     if job_type != 'download_track':

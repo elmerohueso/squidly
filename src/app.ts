@@ -254,6 +254,8 @@ class App {
     private jobsUpdateInterval: number | null = null;
     private currentJobsPage: number = 1;
     private readonly jobsPageSize = 20;
+    private jobsListCache: JobItem[] = [];
+    private jobsTotalCountCache: number = 0;
     private isDownloadingAll: boolean = false;
     private downloadAllCancelRequested: boolean = false;
     private currentDownloadController: AbortController | null = null;
@@ -529,20 +531,29 @@ class App {
         this.clearJobsPagination();
 
         try {
-            const response = await fetch('/api/jobs?limit=100');
+            const params = new URLSearchParams({
+                jobs_filter: filter,
+                exclude_plex_add: '1'
+            });
+            const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch jobs');
             }
 
             const data = await response.json();
-            const allJobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
-            const totals = this.normalizeJobFilterTotals(data.totals, allJobs);
-            const jobs = allJobs.filter(job => job.job_type !== 'plex_add');
+            const jobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            const totals = this.normalizeJobFilterTotals(data.totals, jobs);
+            const totalCount = typeof data.total_count === 'number' && Number.isFinite(data.total_count)
+                ? Math.max(0, Math.floor(data.total_count))
+                : jobs.length;
+            this.jobsListCache = jobs;
+            this.jobsTotalCountCache = totalCount;
             this.updateJobsFilterCounts(totals);
             this.updateCancelPendingButton(totals.incomplete, filter);
-            const filtered = this.filterJobsByStatus(jobs, filter);
-            this.renderJobs(filtered);
+            this.renderJobs(jobs, totalCount);
         } catch (error) {
+            this.jobsListCache = [];
+            this.jobsTotalCountCache = 0;
             this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
             this.clearJobsPagination();
             this.updateCancelPendingButton(0, filter);
@@ -641,22 +652,20 @@ class App {
         return jobs.filter(job => ['queued', 'in_progress'].includes(this.getEffectiveJobStatus(job)));
     }
 
-    private renderJobs(jobs: JobItem[]): void {
-        if (jobs.length === 0) {
+    private renderJobs(jobs: JobItem[], totalJobs: number): void {
+        if (totalJobs === 0 || jobs.length === 0) {
             this.jobsContent.innerHTML = '<p class="loading-text">No jobs found.</p>';
             this.clearJobsPagination();
             return;
         }
 
-        const totalPages = Math.max(1, Math.ceil(jobs.length / this.jobsPageSize));
+        const totalPages = Math.max(1, Math.ceil(totalJobs / this.jobsPageSize));
         this.currentJobsPage = Math.min(this.currentJobsPage, totalPages);
-
         const startIndex = (this.currentJobsPage - 1) * this.jobsPageSize;
         const endIndex = startIndex + this.jobsPageSize;
         const pageItems = jobs.slice(startIndex, endIndex);
-
         this.jobsContent.innerHTML = pageItems.map(job => this.renderJobItem(job)).join('');
-        this.renderJobsPagination(jobs.length, totalPages);
+        this.renderJobsPagination(totalJobs, totalPages);
     }
 
     private renderJobsPagination(totalJobs: number, totalPages: number): void {
@@ -681,7 +690,7 @@ class App {
             prevButton.addEventListener('click', () => {
                 if (this.currentJobsPage > 1) {
                     this.currentJobsPage -= 1;
-                    void this.loadJobs();
+                    this.renderJobs(this.jobsListCache, this.jobsTotalCountCache);
                 }
             });
         }
@@ -691,7 +700,7 @@ class App {
             nextButton.addEventListener('click', () => {
                 if (this.currentJobsPage < totalPages) {
                     this.currentJobsPage += 1;
-                    void this.loadJobs();
+                    this.renderJobs(this.jobsListCache, this.jobsTotalCountCache);
                 }
             });
         }
