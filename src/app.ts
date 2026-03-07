@@ -560,7 +560,6 @@ class App {
             return;
         }
 
-        const incompleteCount = this.filterJobsByStatus(jobs, 'incomplete').length;
         this.cancelPendingJobsButton.disabled = incompleteCount === 0;
         this.cancelPendingJobsButton.textContent = incompleteCount > 0
             ? `Cancel all incomplete (${incompleteCount})`
@@ -602,33 +601,6 @@ class App {
             window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
             this.cancelPendingJobsButton.disabled = false;
             this.cancelPendingJobsButton.textContent = pendingCountLabel;
-        }
-    }
-
-    private updateJobsFilterCounts(jobs: JobItem[]): void {
-        const incompleteCount = this.filterJobsByStatus(jobs, 'incomplete').length;
-        const completeCount = this.filterJobsByStatus(jobs, 'complete').length;
-        const completedWithErrorsCount = this.filterJobsByStatus(jobs, 'completed_with_errors').length;
-        const failedCount = this.filterJobsByStatus(jobs, 'failed').length;
-
-        const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
-        if (incompleteOption) {
-            incompleteOption.textContent = `Incomplete (${incompleteCount})`;
-        }
-
-        const completeOption = this.jobsFilterSelect.querySelector('option[value="complete"]');
-        if (completeOption) {
-            completeOption.textContent = `Complete (${completeCount})`;
-        }
-
-        const completedWithErrorsOption = this.jobsFilterSelect.querySelector('option[value="completed_with_errors"]');
-        if (completedWithErrorsOption) {
-            completedWithErrorsOption.textContent = `Completed with errors (${completedWithErrorsCount})`;
-        }
-
-        const failedOption = this.jobsFilterSelect.querySelector('option[value="failed"]');
-        if (failedOption) {
-            failedOption.textContent = `Failed (${failedCount})`;
         }
     }
 
@@ -1071,11 +1043,17 @@ class App {
         return null;
     }
 
+    private startJobsPollingInterval(): void {
         if (this.jobsUpdateInterval) {
             window.clearInterval(this.jobsUpdateInterval);
             this.jobsUpdateInterval = null;
         }
 
+        const intervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
+        this.jobsUpdateInterval = window.setInterval(() => {
+            void this.loadJobs();
+        }, intervalSeconds * 1000);
+    }
 
     private normalizeJobFilterTotals(totals: unknown, fallbackJobs: JobItem[]): JobFilterTotals {
         const fallback: JobFilterTotals = {
@@ -1104,12 +1082,34 @@ class App {
             failed: parseCount(raw.failed, fallback.failed)
         };
     }
-        const intervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
+
     private updateJobsFilterCounts(totals: JobFilterTotals): void {
         const incompleteCount = totals.incomplete;
         const completeCount = totals.complete;
         const completedWithErrorsCount = totals.completed_with_errors;
         const failedCount = totals.failed;
+
+        const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
+        if (incompleteOption) {
+            incompleteOption.textContent = `Incomplete (${incompleteCount})`;
+        }
+
+        const completeOption = this.jobsFilterSelect.querySelector('option[value="complete"]');
+        if (completeOption) {
+            completeOption.textContent = `Complete (${completeCount})`;
+        }
+
+        const completedWithErrorsOption = this.jobsFilterSelect.querySelector('option[value="completed_with_errors"]');
+        if (completedWithErrorsOption) {
+            completedWithErrorsOption.textContent = `Completed with errors (${completedWithErrorsCount})`;
+        }
+
+        const failedOption = this.jobsFilterSelect.querySelector('option[value="failed"]');
+        if (failedOption) {
+            failedOption.textContent = `Failed (${failedCount})`;
+        }
+    }
+
     private updateStreamQualityFromForm(): void {
         this.streamQuality = this.streamQualityHighInput.checked ? 'high' : 'low';
         this.saveStreamQualityToCookie(this.streamQuality);

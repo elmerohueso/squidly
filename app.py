@@ -157,7 +157,7 @@ import threading
 import socket
 from urllib.parse import urlparse, parse_qs
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
@@ -1425,6 +1425,7 @@ def process_download_job(job_id, payload):
     album_name = 'Unknown Album'
     track_title = 'Unknown Track'
     track_num = '01'
+    disc_num = ''
     release_year = ''
     cover_url = ''
     album_id = ''
@@ -1470,6 +1471,15 @@ def process_download_job(job_id, payload):
         if 'trackNumber' in track_metadata:
             track_num = str(track_metadata['trackNumber']).zfill(2)
 
+        if 'volumeNumber' in track_metadata:
+            volume_number = track_metadata['volumeNumber']
+            try:
+                parsed_disc_num = int(str(volume_number).strip())
+                if parsed_disc_num > 0:
+                    disc_num = str(parsed_disc_num)
+            except (TypeError, ValueError):
+                disc_num = ''
+
         if 'releaseDate' in track_metadata:
             date_str = track_metadata['releaseDate']
             if isinstance(date_str, str) and len(date_str) >= 4:
@@ -1506,7 +1516,7 @@ def process_download_job(job_id, payload):
                                 cover_url = cover_val
                             break
 
-    print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
+    print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', DiscNum='{disc_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
 
     file_ext = 'flac' if file_format == 'original' else 'mp3'
 
@@ -1796,7 +1806,8 @@ def process_download_job(job_id, payload):
         'title': track_title,
         'album': album_name,
         'year': release_year,
-        'track_number': track_num
+        'track_number': track_num,
+        'disc_number': disc_num
     }
 
     temp_folder = '/app/temp'
@@ -3282,7 +3293,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
     
     Args:
         file_path: Path to the audio file
-        metadata: Dict with keys: artist, title, album, year, track_number
+        metadata: Dict with keys: artist, title, album, year, track_number, disc_number
         cover_image_data: Binary image data to embed as cover art
     """
     try:
@@ -3291,6 +3302,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         album = metadata.get('album', 'Unknown Album')
         year = metadata.get('year', '')
         track_num = metadata.get('track_number', '1')
+        disc_num = metadata.get('disc_number', '')
         
         # Handle FLAC files
         if file_path.lower().endswith('.flac'):
@@ -3302,6 +3314,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 if year:
                     audio['DATE'] = str(year)
                 audio['TRACKNUMBER'] = str(track_num)
+                if disc_num:
+                    audio['DISCNUMBER'] = str(disc_num)
                 
                 # Add cover art if available
                 if cover_image_data:
@@ -3334,6 +3348,13 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                         audio['trkn'] = [(track_number, 0)]
                     except ValueError:
                         pass
+
+                if disc_num:
+                    try:
+                        disc_number = int(disc_num)
+                        audio['disk'] = [(disc_number, 0)]
+                    except ValueError:
+                        pass
                 
                 if cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
@@ -3364,6 +3385,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 if year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
                 audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
+                if disc_num:
+                    audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
                 
                 # Add cover art if available
                 if cover_image_data:
