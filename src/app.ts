@@ -797,6 +797,17 @@ class App {
 
     private async handleJobsContentClick(e: MouseEvent): Promise<void> {
         const target = e.target as HTMLElement;
+        const cancelButton = target.closest('.job-cancel-button') as HTMLButtonElement | null;
+        if (cancelButton) {
+            const jobId = Number(cancelButton.getAttribute('data-job-id') || '0');
+            if (!Number.isFinite(jobId) || jobId <= 0) {
+                return;
+            }
+
+            await this.cancelJob(jobId, cancelButton);
+            return;
+        }
+
         const retryButton = target.closest('.job-retry-button') as HTMLButtonElement | null;
         if (!retryButton) {
             return;
@@ -808,6 +819,35 @@ class App {
         }
 
         await this.retryJob(jobId, retryButton);
+    }
+
+    private async cancelJob(jobId: number, button: HTMLButtonElement): Promise<void> {
+        const originalText = button.textContent || 'Cancel';
+        button.disabled = true;
+        button.textContent = 'Cancelling...';
+
+        try {
+            const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to cancel job';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Cancel job failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel job');
+            button.disabled = false;
+            button.textContent = originalText;
+        }
     }
 
     private async retryJob(jobId: number, button: HTMLButtonElement): Promise<void> {
@@ -849,7 +889,9 @@ class App {
         const effectiveStatus = this.getEffectiveJobStatus(job);
         const statusLabel = this.formatJobStatus(effectiveStatus);
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
+        const showCancelButton = effectiveStatus === 'queued' || effectiveStatus === 'in_progress';
         const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
+        const actionsClass = `job-main-actions${showCancelButton ? ' cancel-on-hover' : ''}`;
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
@@ -886,8 +928,9 @@ class App {
                 <div class="job-item">
                     <div class="job-main">
                         <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="job-main-actions">
+                        <div class="${actionsClass}">
                             <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
                             ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
                         </div>
                     </div>
@@ -925,8 +968,9 @@ class App {
             <div class="job-item">
                 <div class="job-main">
                     <div class="job-title">${this.escapeHtml(title)}</div>
-                    <div class="job-main-actions">
+                    <div class="${actionsClass}">
                         <div class="job-status ${statusClass}">${statusLabel}</div>
+                        ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
                         ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
                     </div>
                 </div>

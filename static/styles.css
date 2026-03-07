@@ -1241,6 +1241,18 @@ footer p {
     gap: 0.5rem;
 }
 
+.job-main-actions.cancel-on-hover .job-cancel-button {
+    display: none;
+}
+
+.job-main-actions.cancel-on-hover:hover .job-status {
+    display: none;
+}
+
+.job-main-actions.cancel-on-hover:hover .job-cancel-button {
+    display: inline-flex;
+}
+
 .job-title {
     font-size: 0.95rem;
     font-weight: 600;
@@ -1301,6 +1313,30 @@ footer p {
     letter-spacing: 0.04em;
     cursor: pointer;
     transition: all var(--transition-fast);
+}
+
+.job-cancel-button {
+    padding: 0.28rem 0.55rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 68, 102, 0.45);
+    background: transparent;
+    color: #ff4466;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.job-cancel-button:hover:enabled {
+    border-color: #ff4466;
+    background: rgba(255, 68, 102, 0.12);
+}
+
+.job-cancel-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .job-retry-button:hover:enabled {
