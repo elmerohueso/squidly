@@ -2256,6 +2256,39 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
     Returns:
         tuple: (success: bool, message: str)
     """
+    def normalize_text(value):
+        text = str(value or '').strip()
+        if not text:
+            return ''
+        text = text.replace('\u2018', "'").replace('\u2019', "'").replace('\u02bc', "'").replace('`', "'")
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def build_variants(value):
+        base = str(value or '').strip()
+        if not base:
+            return []
+
+        variants = []
+        seen = set()
+
+        def add_variant(candidate):
+            candidate_text = str(candidate or '').strip()
+            if not candidate_text:
+                return
+            if candidate_text in seen:
+                return
+            seen.add(candidate_text)
+            variants.append(candidate_text)
+
+        normalized = normalize_text(base)
+        add_variant(base)
+        add_variant(normalized)
+        add_variant(base.replace("'", '’'))
+        add_variant(base.replace('’', "'"))
+        add_variant(normalized.replace("'", '’'))
+        add_variant(normalized.replace('’', "'"))
+        return variants
+
     try:
         server_url = server_url.rstrip('/')
         token_len = len(api_token) if isinstance(api_token, str) else 0
@@ -2282,56 +2315,96 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         artist = track_info.get('artist', 'Unknown')
         album = track_info.get('album', 'Unknown')
         title = track_info.get('title', 'Unknown')
+        artist_normalized = normalize_text(artist).casefold()
+        title_normalized = normalize_text(title).casefold()
+        title_variants = build_variants(title)
+        artist_variants = build_variants(artist)
+        album_variants = build_variants(album)
         
         print(f"[PLEX] Searching for track: {artist} - {album} - {title}", flush=True)
+        print(f"[PLEX] Search variants: title={title_variants}, artist={artist_variants}, album={album_variants}", flush=True)
         
         # Try to find the track with multiple search strategies
         tracks = []
         try:
-            # Strategy 1: Search with title + artist + album filters (most precise)
             print(f"[PLEX] Trying search with title + artist + album filters", flush=True)
-            search_results = library.search(
-                title=title,
-                filters={'artist.title': artist, 'album.title': album},
-                libtype='track'
-            )
-            print(f"[PLEX] Search with all filters found {len(search_results)} results", flush=True)
-            
-            if search_results:
-                tracks = search_results
-                print(f"[PLEX] Using result from artist + album + title search", flush=True)
-            else:
-                # Strategy 2: Search with title + artist only (if album didn't match)
-                print(f"[PLEX] Trying search with title + artist filter only", flush=True)
-                search_results = library.search(
-                    title=title,
-                    filters={'artist.title': artist},
-                    libtype='track'
-                )
-                print(f"[PLEX] Search with artist filter found {len(search_results)} results", flush=True)
-                
-                if search_results:
-                    tracks = search_results
-                    print(f"[PLEX] Using result from artist + title search (album may not match)", flush=True)
-                else:
-                    # Strategy 3: Basic title search as last resort
-                    print(f"[PLEX] Trying basic title search", flush=True)
-                    search_results = library.search(title=title, libtype='track')
-                    print(f"[PLEX] Basic title search found {len(search_results)} results", flush=True)
-                    
-                    # Filter manually for artist match
-                    for result in search_results:
-                        if hasattr(result, 'artist'):
-                            result_artist = result.artist().title if callable(result.artist) else result.artist.title
-                            if result_artist.lower() == artist.lower():
-                                tracks.append(result)
-                                print(f"[PLEX] Found matching artist in basic search: {result_artist}", flush=True)
-                                break
-                    
+            for title_variant in title_variants:
+                if tracks:
+                    break
+                for artist_variant in artist_variants:
                     if tracks:
-                        print(f"[PLEX] Using artist-matched result from basic title search", flush=True)
-                    else:
-                        print(f"[PLEX] No matching tracks found with any search strategy", flush=True)
+                        break
+                    for album_variant in album_variants:
+                        search_results = library.search(
+                            title=title_variant,
+                            filters={'artist.title': artist_variant, 'album.title': album_variant},
+                            libtype='track'
+                        )
+                        if search_results:
+                            tracks = search_results
+                            print(
+                                f"[PLEX] Using result from artist + album + title search with variants title='{title_variant}', artist='{artist_variant}', album='{album_variant}'",
+                                flush=True
+                            )
+                            break
+
+            if not tracks:
+                print(f"[PLEX] Trying search with title + artist filter only", flush=True)
+                for title_variant in title_variants:
+                    if tracks:
+                        break
+                    for artist_variant in artist_variants:
+                        search_results = library.search(
+                            title=title_variant,
+                            filters={'artist.title': artist_variant},
+                            libtype='track'
+                        )
+                        if search_results:
+                            tracks = search_results
+                            print(
+                                f"[PLEX] Using result from artist + title search with variants title='{title_variant}', artist='{artist_variant}'",
+                                flush=True
+                            )
+                            break
+
+            if not tracks:
+                print(f"[PLEX] Trying basic title search", flush=True)
+                for title_variant in title_variants:
+                    search_results = library.search(title=title_variant, libtype='track')
+                    print(f"[PLEX] Basic title search for '{title_variant}' found {len(search_results)} results", flush=True)
+
+                    for result in search_results:
+                        result_artist = ''
+                        result_title = str(getattr(result, 'title', '') or '')
+
+                        if hasattr(result, 'artist'):
+                            try:
+                                result_artist = result.artist().title if callable(result.artist) else result.artist.title
+                            except Exception:
+                                result_artist = ''
+                        if not result_artist:
+                            result_artist = str(getattr(result, 'grandparentTitle', '') or '')
+
+                        if normalize_text(result_artist).casefold() != artist_normalized:
+                            continue
+
+                        if normalize_text(result_title).casefold() != title_normalized:
+                            continue
+
+                        tracks.append(result)
+                        print(
+                            f"[PLEX] Found normalized artist/title match in basic search: {result_artist} - {result_title}",
+                            flush=True
+                        )
+                        break
+
+                    if tracks:
+                        break
+
+            if tracks:
+                print(f"[PLEX] Track search resolved with {len(tracks)} candidate(s)", flush=True)
+            else:
+                print(f"[PLEX] No matching tracks found with any search strategy", flush=True)
         
         except Exception as e:
             print(f"[PLEX] Error searching for track: {str(e)}", flush=True)
@@ -3505,7 +3578,73 @@ def list_jobs():
             'priority': row['priority']
         })
 
-    return jsonify({'jobs': jobs})
+    totals = get_jobs_filter_totals(exclude_plex_add=True)
+    return jsonify({'jobs': jobs, 'totals': totals})
+
+def _effective_job_status(job_type, status, result_json):
+    if job_type != 'download_track':
+        return status
+
+    try:
+        result = json.loads(result_json) if result_json else {}
+    except (TypeError, ValueError):
+        result = {}
+
+    stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
+
+    if stages.get('written') == 'failed':
+        return 'failed'
+
+    if stages.get('playlist_added') == 'failed':
+        return 'completed_with_errors'
+
+    if status == 'succeeded' and stages.get('playlist_added') == 'queued':
+        return 'in_progress'
+
+    return status
+
+def get_jobs_filter_totals(exclude_plex_add=True):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    where_sql = 'WHERE job_type <> %s' if exclude_plex_add else ''
+    params = ('plex_add',) if exclude_plex_add else ()
+
+    cur.execute(
+        f"""
+        SELECT job_type, status, result_json
+        FROM jobs
+        {where_sql}
+        """,
+        params
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+
+    totals = {
+        'incomplete': 0,
+        'complete': 0,
+        'completed_with_errors': 0,
+        'failed': 0
+    }
+
+    for row in rows:
+        effective_status = _effective_job_status(
+            row.get('job_type'),
+            row.get('status'),
+            row.get('result_json')
+        )
+
+        if effective_status in ('queued', 'in_progress'):
+            totals['incomplete'] += 1
+        elif effective_status == 'succeeded':
+            totals['complete'] += 1
+        elif effective_status == 'completed_with_errors':
+            totals['completed_with_errors'] += 1
+        elif effective_status == 'failed':
+            totals['failed'] += 1
+
+    return totals
 
 @app.route('/api/jobs/<int:job_id>', methods=['GET'])
 def get_job(job_id):

@@ -174,6 +174,13 @@ interface JobItem {
     error_message?: string | null;
 }
 
+interface JobFilterTotals {
+    incomplete: number;
+    complete: number;
+    completed_with_errors: number;
+    failed: number;
+}
+
 type DownloadFormat = 'original' | 'mp3';
 type StreamQuality = 'high' | 'low';
 
@@ -343,7 +350,7 @@ class App {
         this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
         this.jobsFilterSelect.addEventListener('change', () => {
             this.currentJobsPage = 1;
-            this.updateCancelPendingButton([], this.jobsFilterSelect.value);
+            this.updateCancelPendingButton(0, this.jobsFilterSelect.value);
             void this.loadJobs();
         });
         this.cancelPendingJobsButton.addEventListener('click', () => {
@@ -501,7 +508,7 @@ class App {
         this.jobsOverlay.classList.add('active');
         document.body.style.overflow = 'hidden';
         this.currentJobsPage = 1;
-        this.updateCancelPendingButton([], this.jobsFilterSelect.value);
+        this.updateCancelPendingButton(0, this.jobsFilterSelect.value);
         void this.loadJobs();
         this.startJobsPollingInterval();
     }
@@ -529,20 +536,21 @@ class App {
 
             const data = await response.json();
             const allJobs = Array.isArray(data.jobs) ? (data.jobs as JobItem[]) : [];
+            const totals = this.normalizeJobFilterTotals(data.totals, allJobs);
             const jobs = allJobs.filter(job => job.job_type !== 'plex_add');
-            this.updateJobsFilterCounts(jobs);
-            this.updateCancelPendingButton(jobs, filter);
+            this.updateJobsFilterCounts(totals);
+            this.updateCancelPendingButton(totals.incomplete, filter);
             const filtered = this.filterJobsByStatus(jobs, filter);
             this.renderJobs(filtered);
         } catch (error) {
             this.jobsContent.innerHTML = '<p class="loading-text">Failed to load jobs.</p>';
             this.clearJobsPagination();
-            this.updateCancelPendingButton([], filter);
+            this.updateCancelPendingButton(0, filter);
             console.error('Jobs load error:', error);
         }
     }
 
-    private updateCancelPendingButton(jobs: JobItem[], filter: string): void {
+    private updateCancelPendingButton(incompleteCount: number, filter: string): void {
         const shouldShow = filter === 'incomplete';
         this.cancelPendingJobsButton.classList.toggle('hidden', !shouldShow);
 
@@ -655,7 +663,7 @@ class App {
         }
 
         if (filter === 'complete') {
-            return jobs.filter(job => ['succeeded', 'cancelled', 'completed_with_errors'].includes(this.getEffectiveJobStatus(job)));
+            return jobs.filter(job => ['succeeded'].includes(this.getEffectiveJobStatus(job)));
         }
 
         return jobs.filter(job => ['queued', 'in_progress'].includes(this.getEffectiveJobStatus(job)));
@@ -1063,18 +1071,45 @@ class App {
         return null;
     }
 
-    private startJobsPollingInterval(): void {
         if (this.jobsUpdateInterval) {
             window.clearInterval(this.jobsUpdateInterval);
             this.jobsUpdateInterval = null;
         }
 
-        const intervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
-        this.jobsUpdateInterval = window.setInterval(() => {
-            void this.loadJobs();
-        }, intervalSeconds * 1000);
-    }
 
+    private normalizeJobFilterTotals(totals: unknown, fallbackJobs: JobItem[]): JobFilterTotals {
+        const fallback: JobFilterTotals = {
+            incomplete: this.filterJobsByStatus(fallbackJobs, 'incomplete').length,
+            complete: this.filterJobsByStatus(fallbackJobs, 'complete').length,
+            completed_with_errors: this.filterJobsByStatus(fallbackJobs, 'completed_with_errors').length,
+            failed: this.filterJobsByStatus(fallbackJobs, 'failed').length
+        };
+
+        if (!totals || typeof totals !== 'object') {
+            return fallback;
+        }
+
+        const raw = totals as Record<string, unknown>;
+        const parseCount = (value: unknown, fallbackValue: number): number => {
+            if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+                return Math.floor(value);
+            }
+            return fallbackValue;
+        };
+
+        return {
+            incomplete: parseCount(raw.incomplete, fallback.incomplete),
+            complete: parseCount(raw.complete, fallback.complete),
+            completed_with_errors: parseCount(raw.completed_with_errors, fallback.completed_with_errors),
+            failed: parseCount(raw.failed, fallback.failed)
+        };
+    }
+        const intervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
+    private updateJobsFilterCounts(totals: JobFilterTotals): void {
+        const incompleteCount = totals.incomplete;
+        const completeCount = totals.complete;
+        const completedWithErrorsCount = totals.completed_with_errors;
+        const failedCount = totals.failed;
     private updateStreamQualityFromForm(): void {
         this.streamQuality = this.streamQualityHighInput.checked ? 'high' : 'low';
         this.saveStreamQualityToCookie(this.streamQuality);
