@@ -56,6 +56,89 @@ def any_download_jobs_running():
     conn.close()
     return count > 0
 
+def _is_plex_library_scan_active(plex, library):
+    """Best-effort check for whether the target Plex library is actively scanning."""
+    try:
+        library.reload()
+        if bool(getattr(library, 'refreshing', False)):
+            return True
+    except Exception:
+        pass
+
+    section_id = str(getattr(library, 'key', '') or '').strip('/')
+
+    try:
+        activities = plex.activities() or []
+    except Exception:
+        activities = []
+
+    for activity in activities:
+        title = str(getattr(activity, 'title', '') or '').lower()
+        activity_type = str(getattr(activity, 'type', '') or '').lower()
+        activity_context = str(getattr(activity, 'context', '') or '').lower()
+
+        data = getattr(activity, '_data', None)
+        data_text = ''
+        if data is not None:
+            try:
+                data_text = json.dumps(data).lower()
+            except Exception:
+                data_text = str(data).lower()
+
+        mentions_scan = ('scan' in title) or ('scan' in activity_type) or ('scan' in activity_context) or ('scan' in data_text)
+        if not mentions_scan:
+            continue
+
+        if section_id:
+            if section_id in data_text or section_id in activity_context:
+                return True
+        else:
+            return True
+
+    return False
+
+def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, poll_interval_seconds=5, startup_grace_seconds=30):
+    """
+    Poll Plex until the library scan appears to finish.
+
+    Returns:
+        tuple[bool, bool]: (completed, saw_scan_active)
+    """
+    start = time.monotonic()
+    saw_active = False
+
+    while True:
+        elapsed = time.monotonic() - start
+        active = _is_plex_library_scan_active(plex, library)
+
+        if active:
+            saw_active = True
+            print('[LIBRARY UPDATE] Plex scan still in progress...', flush=True)
+        elif saw_active:
+            print('[LIBRARY UPDATE] Plex scan appears complete.', flush=True)
+            return True, True
+        elif elapsed >= startup_grace_seconds:
+            print('[LIBRARY UPDATE] Did not observe an active scan during startup grace window.', flush=True)
+            return False, False
+
+        if elapsed >= timeout_seconds:
+            print('[LIBRARY UPDATE] Timed out waiting for Plex scan completion.', flush=True)
+            return False, saw_active
+
+        time.sleep(max(1, poll_interval_seconds))
+
+def start_plex_sync_job(trigger='manual'):
+    """Queue a Plex library sync job if one is not already queued/in progress."""
+    config = get_plex_config()
+    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
+        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
+
+    job_id = queue_plex_library_sync(trigger=trigger)
+    if job_id is None:
+        return {'ok': False, 'status_code': 409, 'error': 'A Plex sync job is already queued or in progress'}
+
+    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
+
 def trigger_plex_library_update():
     print('[LIBRARY UPDATE] Triggering Plex library update...', flush=True)
     plex_config = get_plex_config()
@@ -80,6 +163,27 @@ def trigger_plex_library_update():
         print(f'[LIBRARY UPDATE] Triggering scan on library: {library_name}', flush=True)
         library.update()
         print(f'[LIBRARY UPDATE] Library scan triggered successfully.', flush=True)
+
+        completed, saw_active = wait_for_plex_library_scan_completion(
+            plex,
+            library,
+            timeout_seconds=600,
+            poll_interval_seconds=5,
+            startup_grace_seconds=30
+        )
+
+        if completed:
+            print('[LIBRARY UPDATE] Scan completion confirmed. Starting Plex songs sync job...', flush=True)
+        elif saw_active:
+            print('[LIBRARY UPDATE] Scan started but completion was not confirmed before timeout. Starting Plex songs sync anyway...', flush=True)
+        else:
+            print('[LIBRARY UPDATE] Scan completion could not be observed; proceeding to start Plex songs sync...', flush=True)
+
+        sync_result = start_plex_sync_job(trigger='post_library_update')
+        if sync_result.get('ok'):
+            print(f"[LIBRARY UPDATE] Plex sync job queued: {sync_result.get('job_id')}", flush=True)
+        else:
+            print(f"[LIBRARY UPDATE] Plex sync not queued (status={sync_result.get('status_code')}): {sync_result.get('error')}", flush=True)
     except Exception as e:
         print(f'[LIBRARY UPDATE] Error triggering Plex library update: {e}', flush=True)
 
@@ -4185,15 +4289,11 @@ def save_plex_config_endpoint():
 @app.route('/api/plex/sync', methods=['POST'])
 def start_plex_sync_endpoint():
     """Queue a manual Plex library sync job."""
-    config = get_plex_config()
-    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
-        return jsonify({'error': 'Plex is not fully configured'}), 400
+    result = start_plex_sync_job(trigger='manual')
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error')}), result.get('status_code', 500)
 
-    job_id = queue_plex_library_sync(trigger='manual')
-    if job_id is None:
-        return jsonify({'error': 'A Plex sync job is already queued or in progress'}), 409
-
-    return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
+    return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
 @app.route('/api/plex/test', methods=['POST'])
 def test_plex_connection_endpoint():
