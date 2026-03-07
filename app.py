@@ -2300,6 +2300,14 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         add_variant(normalized.replace('’', "'"))
         return variants
 
+    def normalize_for_match(value, strip_trailing_parenthetical=False):
+        text = str(value or '').strip().lower()
+        if strip_trailing_parenthetical:
+            text = re.sub(r'\s*\([^)]*\)\s*$', '', text)
+        text = re.sub(r'[^a-z0-9]+', ' ', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+
     try:
         server_url = server_url.rstrip('/')
         token_len = len(api_token) if isinstance(api_token, str) else 0
@@ -2328,6 +2336,9 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         title = track_info.get('title', 'Unknown')
         artist_normalized = normalize_text(artist).casefold()
         title_normalized = normalize_text(title).casefold()
+        artist_loose = normalize_for_match(artist)
+        title_loose = normalize_for_match(title, strip_trailing_parenthetical=True)
+        album_loose = normalize_for_match(album)
         title_variants = build_variants(title)
         artist_variants = build_variants(artist)
         album_variants = build_variants(album)
@@ -2396,15 +2407,63 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                         if not result_artist:
                             result_artist = str(getattr(result, 'grandparentTitle', '') or '')
 
-                        if normalize_text(result_artist).casefold() != artist_normalized:
+                        result_artist_normalized = normalize_text(result_artist).casefold()
+                        result_title_normalized = normalize_text(result_title).casefold()
+                        result_artist_loose = normalize_for_match(result_artist)
+                        result_title_loose = normalize_for_match(result_title, strip_trailing_parenthetical=True)
+
+                        if result_artist_normalized != artist_normalized and result_artist_loose != artist_loose:
                             continue
 
-                        if normalize_text(result_title).casefold() != title_normalized:
+                        if result_title_normalized != title_normalized and result_title_loose != title_loose:
                             continue
 
                         tracks.append(result)
                         print(
                             f"[PLEX] Found normalized artist/title match in basic search: {result_artist} - {result_title}",
+                            flush=True
+                        )
+                        break
+
+                    if tracks:
+                        break
+
+            if not tracks:
+                print(f"[PLEX] Trying artist-only search with normalized title matching", flush=True)
+                seen_rating_keys = set()
+                for artist_variant in artist_variants:
+                    search_results = library.search(
+                        filters={'artist.title': artist_variant},
+                        libtype='track'
+                    )
+                    print(
+                        f"[PLEX] Artist-only search for '{artist_variant}' found {len(search_results)} results",
+                        flush=True
+                    )
+
+                    for result in search_results:
+                        rating_key = str(getattr(result, 'ratingKey', '') or '')
+                        if rating_key and rating_key in seen_rating_keys:
+                            continue
+
+                        result_title = str(getattr(result, 'title', '') or '')
+                        result_album = str(getattr(result, 'parentTitle', '') or '')
+                        result_title_normalized = normalize_text(result_title).casefold()
+                        result_title_loose = normalize_for_match(result_title, strip_trailing_parenthetical=True)
+
+                        if result_title_normalized != title_normalized and result_title_loose != title_loose:
+                            continue
+
+                        if album_loose:
+                            result_album_loose = normalize_for_match(result_album)
+                            if result_album_loose and result_album_loose != album_loose:
+                                continue
+
+                        tracks.append(result)
+                        if rating_key:
+                            seen_rating_keys.add(rating_key)
+                        print(
+                            f"[PLEX] Found match via artist-only fallback: {artist_variant} - {result_title} ({result_album})",
                             flush=True
                         )
                         break
