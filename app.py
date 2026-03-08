@@ -139,6 +139,134 @@ def start_plex_sync_job(trigger='manual'):
 
     return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
 
+def any_plex_library_update_jobs_running_or_queued():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM jobs
+        WHERE job_type = 'plex_library_update'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return (row.get('count') or 0) > 0
+
+def queue_plex_library_update(trigger='scheduled'):
+    if any_plex_library_update_jobs_running_or_queued():
+        return None
+
+    payload = {
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return enqueue_job('plex_library_update', payload, max_attempts=5)
+
+def start_plex_library_update_job(trigger='scheduled'):
+    """Queue a Plex library update job if one is not already queued/in progress."""
+    config = get_plex_config()
+    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
+        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
+
+    job_id = queue_plex_library_update(trigger=trigger)
+    if job_id is None:
+        return {'ok': False, 'status_code': 409, 'error': 'A Plex library update job is already queued or in progress'}
+
+    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
+
+def process_plex_library_update_job(job_id, payload):
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+    library_name = (config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        raise ValueError('Plex server_url, api_token, and library_name must be configured before updating library')
+
+    stages = {
+        'connect': 'pending',
+        'locate_library': 'pending',
+        'trigger_scan': 'pending',
+        'wait_for_scan': 'pending',
+        'queue_sync': 'pending'
+    }
+    progress = {
+        'scan_detected': False,
+        'scan_completed': False,
+        'sync_job_id': None,
+        'sync_queue_status': 'pending'
+    }
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
+    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
+    stages['connect'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    library = None
+    for section in plex.library.sections():
+        if section.title == library_name and section.type == 'artist':
+            library = section
+            break
+
+    if not library:
+        raise ValueError(f'Plex music library "{library_name}" not found')
+
+    stages['locate_library'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} triggering scan on library '{library_name}'", flush=True)
+    library.update()
+    stages['trigger_scan'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    completed, saw_active = wait_for_plex_library_scan_completion(
+        plex,
+        library,
+        timeout_seconds=600,
+        poll_interval_seconds=5,
+        startup_grace_seconds=30
+    )
+
+    progress['scan_detected'] = bool(saw_active)
+    progress['scan_completed'] = bool(completed)
+    stages['wait_for_scan'] = 'done' if completed else 'skipped'
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    sync_result = start_plex_sync_job(trigger='post_library_update')
+    if sync_result.get('ok'):
+        progress['sync_job_id'] = sync_result.get('job_id')
+        progress['sync_queue_status'] = 'queued'
+        stages['queue_sync'] = 'done'
+    elif sync_result.get('status_code') == 409:
+        progress['sync_queue_status'] = 'already_queued'
+        stages['queue_sync'] = 'skipped'
+    else:
+        stages['queue_sync'] = 'failed'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
+
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    set_last_library_update_time(datetime.utcnow())
+
+    trigger = payload.get('trigger') if isinstance(payload, dict) else None
+    scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
+    print(
+        f"[LIBRARY_UPDATE_JOB] Job {job_id} finished. scan_outcome={scan_outcome} sync_queue_status={progress['sync_queue_status']}",
+        flush=True
+    )
+
+    return {
+        'trigger': trigger or 'unknown',
+        'stages': stages,
+        'progress': progress,
+        'scan_outcome': scan_outcome,
+        'sync_job_id': progress.get('sync_job_id'),
+        'sync_queue_status': progress.get('sync_queue_status')
+    }
+
 def trigger_plex_library_update():
     print('[LIBRARY UPDATE] Triggering Plex library update...', flush=True)
     plex_config = get_plex_config()
@@ -217,31 +345,70 @@ def library_update_worker():
                 # 15 min since last job finished and last update
                 if last_job_finished_at and last_update_time:
                     if (now - last_job_finished_at >= timedelta(minutes=15)) and (now - last_update_time >= timedelta(minutes=15)):
-                        trigger_plex_library_update()
+                        result = start_plex_library_update_job(trigger='scheduled')
+                        if result.get('ok'):
+                            print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 1)", flush=True)
+                        else:
+                            print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
                         set_library_update_needed(False)
-                        set_last_library_update_time(now)
-                        print('[LIBRARY UPDATE WORKER] Library updated (scenario 1)', flush=True)
+                        print('[LIBRARY UPDATE WORKER] Library update requested (scenario 1)', flush=True)
                 elif last_job_finished_at and not last_update_time:
                     if (now - last_job_finished_at >= timedelta(minutes=15)):
-                        trigger_plex_library_update()
+                        result = start_plex_library_update_job(trigger='scheduled')
+                        if result.get('ok'):
+                            print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 1, no prev update)", flush=True)
+                        else:
+                            print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
                         set_library_update_needed(False)
-                        set_last_library_update_time(now)
-                        print('[LIBRARY UPDATE WORKER] Library updated (scenario 1, no prev update)', flush=True)
+                        print('[LIBRARY UPDATE WORKER] Library update requested (scenario 1, no prev update)', flush=True)
             # Scenario 2
             elif library_update_needed and any_download_jobs_running():
                 if last_update_time and (now - last_update_time >= timedelta(minutes=60)):
-                    trigger_plex_library_update()
+                    result = start_plex_library_update_job(trigger='scheduled')
+                    if result.get('ok'):
+                        print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 2)", flush=True)
+                    else:
+                        print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
                     set_library_update_needed(False)
-                    set_last_library_update_time(now)
-                    print('[LIBRARY UPDATE WORKER] Library updated (scenario 2)', flush=True)
+                    print('[LIBRARY UPDATE WORKER] Library update requested (scenario 2)', flush=True)
                 elif not last_update_time:
-                    trigger_plex_library_update()
+                    result = start_plex_library_update_job(trigger='scheduled')
+                    if result.get('ok'):
+                        print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 2, no prev update)", flush=True)
+                    else:
+                        print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
                     set_library_update_needed(False)
-                    set_last_library_update_time(now)
-                    print('[LIBRARY UPDATE WORKER] Library updated (scenario 2, no prev update)', flush=True)
+                    print('[LIBRARY UPDATE WORKER] Library update requested (scenario 2, no prev update)', flush=True)
         except Exception as e:
             print(f'[LIBRARY UPDATE WORKER] Error: {e}', flush=True)
         time.sleep(60)
+
+def plex_library_update_job_worker():
+    print("[LIBRARY_UPDATE_JOB_WORKER] Background worker started", flush=True)
+
+    while True:
+        try:
+            job = claim_next_job('plex_library_update')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_plex_library_update_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} completed", flush=True)
+            except Exception as e:
+                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import os
@@ -2834,6 +3001,11 @@ print("Download job worker started\n", flush=True)
 plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
 plex_sync_worker_thread.start()
 print("Plex library sync job worker started\n", flush=True)
+
+# Start background worker for Plex library update jobs
+plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
+plex_library_update_worker_thread.start()
+print("Plex library update job worker started\n", flush=True)
 
 # Start scheduler for interval-based Plex sync jobs
 plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)

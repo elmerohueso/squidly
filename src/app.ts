@@ -943,6 +943,60 @@ class App {
             `;
         }
 
+        if (job.job_type === 'plex_library_update') {
+            const stageRows = [
+                { key: 'connect', label: 'Connected to Plex' },
+                { key: 'locate_library', label: 'Located Music Library' },
+                { key: 'trigger_scan', label: 'Triggered Library Scan' },
+                { key: 'wait_for_scan', label: 'Observed Scan Completion' },
+                { key: 'queue_sync', label: 'Queued Songs Sync' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexLibraryUpdateStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const scanCompleted = progress.scan_completed === true;
+            const scanDetected = progress.scan_detected === true;
+            const syncQueueStatus = String(progress.sync_queue_status || 'pending');
+            const syncJobId = Number(progress.sync_job_id || 0);
+
+            let progressText = scanCompleted
+                ? 'Library scan completed'
+                : (scanDetected ? 'Scan started but completion was not observed before timeout' : 'Scan activity could not be observed');
+
+            if (syncQueueStatus === 'queued' && Number.isFinite(syncJobId) && syncJobId > 0) {
+                progressText += ` • Sync job queued (#${syncJobId})`;
+            } else if (syncQueueStatus === 'already_queued') {
+                progressText += ' • Sync already queued';
+            }
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="${actionsClass}">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
+                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'id3_tagged', label: 'ID3 Tag Created' },
@@ -991,6 +1045,17 @@ class App {
     }
 
     private getJobDisplayTitle(job: JobItem): string {
+        if (job.job_type === 'plex_library_update') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'scheduled') {
+                return 'Plex Library Update (Scheduled)';
+            }
+            if (trigger === 'manual') {
+                return 'Plex Library Update (Manual)';
+            }
+            return 'Plex Library Update';
+        }
+
         if (job.job_type === 'plex_library_sync') {
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
             if (trigger === 'interval') {
@@ -1057,6 +1122,23 @@ class App {
     }
 
     private resolvePlexSyncStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
+        const value = stages[key];
+        if (value) {
+            return value;
+        }
+
+        if (job.status === 'succeeded') {
+            return 'done';
+        }
+
+        if (job.status === 'cancelled') {
+            return 'skipped';
+        }
+
+        return 'pending';
+    }
+
+    private resolvePlexLibraryUpdateStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
         const value = stages[key];
         if (value) {
             return value;
