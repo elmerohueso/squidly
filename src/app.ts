@@ -144,6 +144,7 @@ interface JobResult {
     artist?: string;
     title?: string;
     album?: string;
+    format?: string;
     playlist_name?: string | null;
     trigger?: string;
     progress?: {
@@ -956,9 +957,16 @@ class App {
         const stageHtml = stageRows.map(stage => {
             const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
             const stageLabel = this.formatStageStatus(status);
+            let stageDisplayLabel = stage.label;
+            if (stage.key === 'converted' && status === 'skipped') {
+                stageDisplayLabel = 'Conversion not required';
+            }
+            if (stage.key === 'playlist_added' && status === 'skipped') {
+                stageDisplayLabel = 'Playlist add not requested';
+            }
             return `
                 <div class="job-stage">
-                    <span>${stage.label}</span>
+                    <span>${stageDisplayLabel}</span>
                     <span class="job-stage-status status-${status}">${stageLabel}</span>
                 </div>
             `;
@@ -1026,6 +1034,10 @@ class App {
         }
 
         if (job.status === 'succeeded') {
+            if (key === 'converted') {
+                const requestedFormat = String(job.result?.format || job.payload?.format || 'original').toLowerCase();
+                return requestedFormat === 'mp3' ? 'done' : 'skipped';
+            }
             return key === 'playlist_added' ? 'skipped' : 'done';
         }
 

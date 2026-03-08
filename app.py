@@ -1441,11 +1441,15 @@ def _download_track_all_stages_done(stages):
     required_stages = (
         'downloaded',
         'id3_tagged',
-        'converted',
-        'written',
-        'playlist_added'
+        'written'
     )
-    return all(stages.get(stage_name) == 'done' for stage_name in required_stages)
+    if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
+        return False
+
+    if stages.get('converted') not in ('done', 'skipped'):
+        return False
+
+    return stages.get('playlist_added') in ('done', 'skipped')
 
 def mark_job_in_progress(job_id):
     now = datetime.utcnow().isoformat() + 'Z'
@@ -1804,7 +1808,7 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
         stages['downloaded'] = 'done'
         stages['id3_tagged'] = 'done'
-        stages['converted'] = 'done'
+        stages['converted'] = 'skipped'
         stages['written'] = 'done'
         update_job_progress(job_id, {'stages': stages})
 
@@ -1846,16 +1850,18 @@ def process_download_job(job_id, payload):
                 stages['playlist_added'] = 'failed'
                 update_job_progress(job_id, {'stages': stages})
         else:
-            missing = []
-            if not plex_config['server_url']:
-                missing.append('server_url')
-            if not plex_config['api_token']:
-                missing.append('api_token')
             if not playlist_name:
-                missing.append('playlist_name')
-            if missing:
-                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-            stages['playlist_added'] = 'done'
+                print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+                stages['playlist_added'] = 'skipped'
+            else:
+                missing = []
+                if not plex_config['server_url']:
+                    missing.append('server_url')
+                if not plex_config['api_token']:
+                    missing.append('api_token')
+                if missing:
+                    print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+                stages['playlist_added'] = 'done'
             update_job_progress(job_id, {'stages': stages})
 
         return {
@@ -2053,7 +2059,7 @@ def process_download_job(job_id, payload):
 
         print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
         shutil.move(temp_source_path, full_path)
-        stages['converted'] = 'done'
+        stages['converted'] = 'skipped'
         stages['written'] = 'done'
         update_job_progress(job_id, {'stages': stages})
         cleanup_file(temp_source_path)
@@ -2097,16 +2103,18 @@ def process_download_job(job_id, payload):
             stages['playlist_added'] = 'failed'
             update_job_progress(job_id, {'stages': stages})
     else:
-        missing = []
-        if not plex_config['server_url']:
-            missing.append('server_url')
-        if not plex_config['api_token']:
-            missing.append('api_token')
         if not playlist_name:
-            missing.append('playlist_name')
-        if missing:
-            print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-        stages['playlist_added'] = 'done'
+            print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+            stages['playlist_added'] = 'skipped'
+        else:
+            missing = []
+            if not plex_config['server_url']:
+                missing.append('server_url')
+            if not plex_config['api_token']:
+                missing.append('api_token')
+            if missing:
+                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
+            stages['playlist_added'] = 'done'
         update_job_progress(job_id, {'stages': stages})
 
     return {

@@ -1411,7 +1411,7 @@ footer p {
 }
 
 .job-stage-status.status-skipped {
-    color: var(--text-muted);
+    color: var(--text-secondary);
 }
 
 .job-stage-status.status-failed {
