@@ -1979,57 +1979,22 @@ def process_download_job(job_id, payload):
         stages['written'] = 'done'
         update_job_progress(job_id, {'stages': stages})
 
-        plex_config = get_plex_config()
         playlist_name = payload.get('plex_playlist')
-        if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
-            try:
-                print("[DOWNLOAD] Plex config OK - attempting playlist update for existing file", flush=True)
-                success, plex_message = add_tracks_to_plex_playlist(
-                    plex_config['server_url'],
-                    plex_config['api_token'],
-                    plex_config['library_name'] or 'Music',
-                    playlist_name,
-                    full_path
-                )
-
-                if success:
-                    print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
-                    stages['playlist_added'] = 'done'
-                    update_job_progress(job_id, {'stages': stages})
-                else:
-                    print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
-                    if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
-                        queue_pending_playlist_addition(
-                            artist_name,
-                            album_name,
-                            track_title,
-                            full_path,
-                            playlist_name,
-                            parent_job_id=job_id
-                        )
-                        stages['playlist_added'] = 'queued'
-                        update_job_progress(job_id, {'stages': stages})
-                    else:
-                        stages['playlist_added'] = 'failed'
-                        update_job_progress(job_id, {'stages': stages})
-            except Exception as e:
-                print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
-                stages['playlist_added'] = 'failed'
-                update_job_progress(job_id, {'stages': stages})
+        if playlist_name:
+            queue_pending_playlist_addition(
+                artist_name,
+                album_name,
+                track_title,
+                full_path,
+                playlist_name,
+                parent_job_id=job_id
+            )
+            stages['playlist_added'] = 'queued'
+            print("[DOWNLOAD] Playlist requested - queued separate plex_add job", flush=True)
         else:
-            if not playlist_name:
-                print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
-                stages['playlist_added'] = 'skipped'
-            else:
-                missing = []
-                if not plex_config['server_url']:
-                    missing.append('server_url')
-                if not plex_config['api_token']:
-                    missing.append('api_token')
-                if missing:
-                    print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-                stages['playlist_added'] = 'done'
-            update_job_progress(job_id, {'stages': stages})
+            print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+            stages['playlist_added'] = 'skipped'
+        update_job_progress(job_id, {'stages': stages})
 
         return {
             'file_path': full_path,
@@ -2232,57 +2197,22 @@ def process_download_job(job_id, payload):
         cleanup_file(temp_source_path)
         print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
 
-    plex_config = get_plex_config()
     playlist_name = payload.get('plex_playlist')
-    if plex_config['server_url'] and plex_config['api_token'] and playlist_name:
-        try:
-            print("[DOWNLOAD] Plex config OK - attempting playlist update", flush=True)
-            success, plex_message = add_tracks_to_plex_playlist(
-                plex_config['server_url'],
-                plex_config['api_token'],
-                plex_config['library_name'] or 'Music',
-                playlist_name,
-                full_path
-            )
-
-            if success:
-                print(f"[DOWNLOAD] Plex playlist updated: {plex_message}", flush=True)
-                stages['playlist_added'] = 'done'
-                update_job_progress(job_id, {'stages': stages})
-            else:
-                print(f"[DOWNLOAD] Plex playlist note: {plex_message}", flush=True)
-                if 'not yet indexed' in plex_message.lower() or 'not found' in plex_message.lower():
-                    queue_pending_playlist_addition(
-                        artist_name,
-                        album_name,
-                        track_title,
-                        full_path,
-                        playlist_name,
-                        parent_job_id=job_id
-                    )
-                    stages['playlist_added'] = 'queued'
-                    update_job_progress(job_id, {'stages': stages})
-                else:
-                    stages['playlist_added'] = 'failed'
-                    update_job_progress(job_id, {'stages': stages})
-        except Exception as e:
-            print(f"[DOWNLOAD] Warning: Failed to update Plex playlist: {str(e)}", flush=True)
-            stages['playlist_added'] = 'failed'
-            update_job_progress(job_id, {'stages': stages})
+    if playlist_name:
+        queue_pending_playlist_addition(
+            artist_name,
+            album_name,
+            track_title,
+            full_path,
+            playlist_name,
+            parent_job_id=job_id
+        )
+        stages['playlist_added'] = 'queued'
+        print("[DOWNLOAD] Playlist requested - queued separate plex_add job", flush=True)
     else:
-        if not playlist_name:
-            print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
-            stages['playlist_added'] = 'skipped'
-        else:
-            missing = []
-            if not plex_config['server_url']:
-                missing.append('server_url')
-            if not plex_config['api_token']:
-                missing.append('api_token')
-            if missing:
-                print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-            stages['playlist_added'] = 'done'
-        update_job_progress(job_id, {'stages': stages})
+        print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+        stages['playlist_added'] = 'skipped'
+    update_job_progress(job_id, {'stages': stages})
 
     return {
         'file_path': full_path,
