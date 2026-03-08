@@ -1097,6 +1097,55 @@ def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
     stages['playlist_added'] = playlist_stage_status
     update_job_progress(parent_job_id, {'stages': stages})
 
+    if playlist_stage_status == 'done' and _download_track_all_stages_done(stages):
+        now = datetime.utcnow().isoformat() + 'Z'
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'succeeded',
+                error_message = NULL,
+                updated_at = %s,
+                finished_at = %s,
+                locked_at = NULL,
+                locked_by = NULL
+            WHERE id = %s
+              AND job_type = 'download_track'
+              AND status <> 'cancelled'
+            """,
+            (now, now, parent_job_id)
+        )
+        transitioned = (cur.rowcount or 0) > 0
+        conn.commit()
+        conn.close()
+
+        if transitioned:
+            set_library_update_needed(True)
+            set_last_job_finished_at(datetime.utcnow())
+
+    if playlist_stage_status == 'failed':
+        now = datetime.utcnow().isoformat() + 'Z'
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed',
+                error_message = COALESCE(error_message, %s),
+                updated_at = %s,
+                finished_at = %s,
+                locked_at = NULL,
+                locked_by = NULL
+            WHERE id = %s
+              AND job_type = 'download_track'
+              AND status <> 'cancelled'
+            """,
+            ('playlist_added stage failed', now, now, parent_job_id)
+        )
+        conn.commit()
+        conn.close()
+
 def backfill_plex_add_parent_links():
     """One-time repair for legacy plex_add jobs missing parent_job_id in payload."""
     print("[PLEX_REPAIR] Starting parent link backfill", flush=True)
@@ -1384,6 +1433,37 @@ def mark_job_succeeded(job_id, result):
         # Set library_update_needed True and update last_job_finished_at
         set_library_update_needed(True)
         set_last_job_finished_at(datetime.utcnow())
+
+def _download_track_all_stages_done(stages):
+    if not isinstance(stages, dict):
+        return False
+
+    required_stages = (
+        'downloaded',
+        'id3_tagged',
+        'converted',
+        'written',
+        'playlist_added'
+    )
+    return all(stages.get(stage_name) == 'done' for stage_name in required_stages)
+
+def mark_job_in_progress(job_id):
+    now = datetime.utcnow().isoformat() + 'Z'
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'in_progress',
+            updated_at = %s,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = %s
+        """,
+        (now, job_id)
+    )
+    conn.commit()
+    conn.close()
 
 def update_job_progress(job_id, updates):
     now = datetime.utcnow().isoformat() + 'Z'
@@ -1775,7 +1855,7 @@ def process_download_job(job_id, payload):
                 missing.append('playlist_name')
             if missing:
                 print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-            stages['playlist_added'] = 'skipped'
+            stages['playlist_added'] = 'done'
             update_job_progress(job_id, {'stages': stages})
 
         return {
@@ -1973,7 +2053,7 @@ def process_download_job(job_id, payload):
 
         print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
         shutil.move(temp_source_path, full_path)
-        stages['converted'] = 'skipped'
+        stages['converted'] = 'done'
         stages['written'] = 'done'
         update_job_progress(job_id, {'stages': stages})
         cleanup_file(temp_source_path)
@@ -2026,7 +2106,7 @@ def process_download_job(job_id, payload):
             missing.append('playlist_name')
         if missing:
             print(f"[DOWNLOAD] Plex playlist update skipped. Missing: {', '.join(missing)}", flush=True)
-        stages['playlist_added'] = 'skipped'
+        stages['playlist_added'] = 'done'
         update_job_progress(job_id, {'stages': stages})
 
     return {
@@ -2056,8 +2136,19 @@ def download_job_worker():
 
             try:
                 result = process_download_job(job['id'], payload)
-                mark_job_succeeded(job['id'], result)
-                print(f"[DOWNLOAD_WORKER] Job {job['id']} completed", flush=True)
+                stages = result.get('stages') if isinstance(result, dict) else {}
+
+                if _download_track_all_stages_done(stages):
+                    mark_job_succeeded(job['id'], result)
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} completed", flush=True)
+                elif isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
+                    mark_job_in_progress(job['id'])
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} waiting for playlist_add completion", flush=True)
+                else:
+                    stage_state = stages if isinstance(stages, dict) else {}
+                    error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
+                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_message}", flush=True)
+                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
             except (ManifestDownloadError, TransientDownloadError) as e:
                 if job['attempt_count'] + 1 >= job['max_attempts']:
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
