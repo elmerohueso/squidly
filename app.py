@@ -4505,7 +4505,7 @@ def match_plex_songs_endpoint():
         if not rows:
             normalized_title = normalize_match_text(title, strip_trailing_parenthetical=True)
             normalized_artist = normalize_match_text(artist)
-            normalized_album = normalize_match_text(album) if album else ''
+            normalized_album = normalize_match_text(album, strip_trailing_parenthetical=True) if album else ''
 
             cur.execute(
                 """
@@ -4520,7 +4520,7 @@ def match_plex_songs_endpoint():
 
             for candidate in candidate_rows:
                 candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
-                candidate_album = normalize_match_text(candidate.get('album'))
+                candidate_album = normalize_match_text(candidate.get('album'), strip_trailing_parenthetical=True)
 
                 if candidate_title != normalized_title:
                     continue
