@@ -793,6 +793,15 @@ def init_db():
         )
         """
     )
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET job_type = %s
+        WHERE job_type = %s
+        """,
+        ('plex_playlist_add', 'plex_add')
+    )
     
     conn.commit()
     conn.close()
@@ -1219,7 +1228,7 @@ def queue_pending_playlist_addition(artist, album, title, file_path, playlist_na
                                 OR (status = 'failed' AND attempt_count < max_attempts)
                             )
         """,
-        ('plex_add', payload_json)
+        ('plex_playlist_add', payload_json)
     )
     existing = cur.fetchone()
     
@@ -1228,7 +1237,7 @@ def queue_pending_playlist_addition(artist, album, title, file_path, playlist_na
         conn.close()
         return
     conn.close()
-    job_id = enqueue_job('plex_add', payload)
+    job_id = enqueue_job('plex_playlist_add', payload)
     print(f"[PLEX_QUEUE] Queued for retry (job {job_id}, parent {parent_job_id}): {artist} - {title}", flush=True)
 
 def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
@@ -1313,8 +1322,8 @@ def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
         conn.commit()
         conn.close()
 
-def backfill_plex_add_parent_links():
-    """One-time repair for legacy plex_add jobs missing parent_job_id in payload."""
+def backfill_plex_playlist_add_parent_links():
+    """One-time repair for legacy plex_playlist_add jobs missing parent_job_id in payload."""
     print("[PLEX_REPAIR] Starting parent link backfill", flush=True)
     now = datetime.utcnow().isoformat() + 'Z'
 
@@ -1327,7 +1336,7 @@ def backfill_plex_add_parent_links():
         WHERE job_type = %s
         ORDER BY created_at ASC
         """,
-        ('plex_add',)
+        ('plex_playlist_add',)
     )
     additions = cur.fetchall()
 
@@ -1413,7 +1422,7 @@ def backfill_plex_add_parent_links():
                 updated_at = %s
             WHERE id = %s AND job_type = %s
             """,
-            (serialize_job_payload(payload), now, addition['id'], 'plex_add')
+            (serialize_job_payload(payload), now, addition['id'], 'plex_playlist_add')
         )
         linked_count += 1
 
@@ -1446,7 +1455,7 @@ def get_pending_playlist_additions():
           AND (run_after IS NULL OR run_after <= %s)
         ORDER BY created_at ASC
         """,
-        ('plex_add', now)
+        ('plex_playlist_add', now)
     )
     rows = cur.fetchall()
     conn.close()
@@ -1481,7 +1490,7 @@ def update_pending_addition_attempt(addition_id, error_message=None):
             error_message = COALESCE(%s, error_message)
         WHERE id = %s AND job_type = %s
         """,
-        (now, now, error_message, addition_id, 'plex_add')
+        (now, now, error_message, addition_id, 'plex_playlist_add')
     )
     conn.commit()
     conn.close()
@@ -1499,7 +1508,7 @@ def remove_pending_addition(addition_id):
             finished_at = %s
         WHERE id = %s AND job_type = %s
         """,
-        (now, now, addition_id, 'plex_add')
+        (now, now, addition_id, 'plex_playlist_add')
     )
     conn.commit()
     conn.close()
@@ -1990,7 +1999,7 @@ def process_download_job(job_id, payload):
                 parent_job_id=job_id
             )
             stages['playlist_added'] = 'queued'
-            print("[DOWNLOAD] Playlist requested - queued separate plex_add job", flush=True)
+            print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
         else:
             print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
             stages['playlist_added'] = 'skipped'
@@ -2208,7 +2217,7 @@ def process_download_job(job_id, payload):
             parent_job_id=job_id
         )
         stages['playlist_added'] = 'queued'
-        print("[DOWNLOAD] Playlist requested - queued separate plex_add job", flush=True)
+        print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
     else:
         print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
         stages['playlist_added'] = 'skipped'
@@ -2912,7 +2921,7 @@ url_iterator = cycle(SQUID_URLS)
 # With gunicorn --preload, this runs once before workers are forked
 print("Squidly starting up...", flush=True)
 validate_all_endpoints()
-backfill_plex_add_parent_links()
+backfill_plex_playlist_add_parent_links()
 print("Validation complete, server ready to accept requests.\n", flush=True)
 
 # Start background worker for retrying failed Plex playlist additions
@@ -3832,14 +3841,14 @@ def list_jobs():
     - status: filter by raw job status
     - job_type: filter by job type
     - jobs_filter: one of incomplete|complete|completed_with_errors|failed
-    - exclude_plex_add: default true
+    - exclude_plex_playlist_add: default true
     - limit: optional max number of rows (no backend-enforced maximum)
     - offset: pagination offset (default 0)
     """
     status_filter = request.args.get('status')
     job_type_filter = request.args.get('job_type')
     jobs_filter = request.args.get('jobs_filter')
-    exclude_plex_add = request.args.get('exclude_plex_add', '1').lower() not in ('0', 'false', 'no')
+    exclude_plex_playlist_add = request.args.get('exclude_plex_playlist_add', '1').lower() not in ('0', 'false', 'no')
 
     limit = None
     limit_raw = request.args.get('limit')
@@ -3865,9 +3874,9 @@ def list_jobs():
     if job_type_filter:
         where_clauses.append('job_type = %s')
         params.append(job_type_filter)
-    if exclude_plex_add:
+    if exclude_plex_playlist_add:
         where_clauses.append('job_type <> %s')
-        params.append('plex_add')
+        params.append('plex_playlist_add')
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
 
@@ -3953,7 +3962,7 @@ def list_jobs():
             'priority': row['priority']
         })
 
-    totals = get_jobs_filter_totals(exclude_plex_add=exclude_plex_add)
+    totals = get_jobs_filter_totals(exclude_plex_playlist_add=exclude_plex_playlist_add)
     return jsonify({'jobs': jobs, 'totals': totals, 'total_count': total_count})
 
 def _effective_job_status(job_type, status, result_json):
@@ -3978,12 +3987,12 @@ def _effective_job_status(job_type, status, result_json):
 
     return status
 
-def get_jobs_filter_totals(exclude_plex_add=True):
+def get_jobs_filter_totals(exclude_plex_playlist_add=True):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    where_sql = 'WHERE job_type <> %s' if exclude_plex_add else ''
-    params = ('plex_add',) if exclude_plex_add else ()
+    where_sql = 'WHERE job_type <> %s' if exclude_plex_playlist_add else ''
+    params = ('plex_playlist_add',) if exclude_plex_playlist_add else ()
 
     cur.execute(
         f"""
@@ -4130,7 +4139,7 @@ def cancel_all_pending_jobs():
         status = row.get('status')
         job_type = row.get('job_type')
 
-        if job_type == 'plex_add':
+        if job_type == 'plex_playlist_add':
             continue
 
         if status in ('queued', 'in_progress'):

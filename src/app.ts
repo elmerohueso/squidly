@@ -539,7 +539,7 @@ class App {
         try {
             const params = new URLSearchParams({
                 jobs_filter: filter,
-                exclude_plex_add: '1'
+                exclude_plex_playlist_add: '1'
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
