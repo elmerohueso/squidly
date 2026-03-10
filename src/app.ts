@@ -394,6 +394,8 @@ class App {
 
             if (selectedName) {
                 this.plexPlaylistNameInput.value = selectedName;
+            } else {
+                this.plexPlaylistNameInput.value = '';
             }
 
             this.setPlexPlaylistMode('existing');
@@ -899,10 +901,8 @@ class App {
 
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
-                { key: 'connect', label: 'Connected to Plex' },
-                { key: 'fetch_tracks', label: 'Fetched Library Tracks' },
-                { key: 'sync_songs', label: 'Synced Songs to Database' },
-                { key: 'cleanup', label: 'Removed Missing Songs' }
+                { key: 'reading_plex_library', label: 'Reading Plex Library' },
+                { key: 'updating_local_index', label: 'Updating Local Index' }
             ];
 
             const stageHtml = stageRows.map(stage => {
@@ -945,11 +945,7 @@ class App {
 
         if (job.job_type === 'plex_library_update') {
             const stageRows = [
-                { key: 'connect', label: 'Connected to Plex' },
-                { key: 'locate_library', label: 'Located Music Library' },
-                { key: 'trigger_scan', label: 'Triggered Library Scan' },
-                { key: 'wait_for_scan', label: 'Observed Scan Completion' },
-                { key: 'queue_sync', label: 'Queued Songs Sync' }
+                { key: 'scanning_plex_library', label: 'Scanning Plex Library' }
             ];
 
             const stageHtml = stageRows.map(stage => {
@@ -973,11 +969,6 @@ class App {
                 ? 'Library scan completed'
                 : (scanDetected ? 'Scan started but completion was not observed before timeout' : 'Scan activity could not be observed');
 
-            if (syncQueueStatus === 'queued' && Number.isFinite(syncJobId) && syncJobId > 0) {
-                progressText += ` • Sync job queued (#${syncJobId})`;
-            } else if (syncQueueStatus === 'already_queued') {
-                progressText += ' • Sync already queued';
-            }
 
             return `
                 <div class="job-item">
@@ -1707,7 +1698,7 @@ class App {
 
         const defaultOption = document.createElement('option');
         defaultOption.value = '';
-        defaultOption.textContent = 'Select existing...';
+        defaultOption.textContent = 'No Playlist';
         this.plexPlaylistOptions.appendChild(defaultOption);
 
         if (playlists.length === 0 && showEmptyPlaceholder) {

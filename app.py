@@ -307,11 +307,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         raise ValueError('Plex server_url, api_token, and library_name must be configured before updating library')
 
     stages = {
-        'wait_for_downloads': 'pending',
-        'connect': 'pending',
-        'locate_library': 'pending',
-        'trigger_scan': 'pending',
-        'wait_for_scan': 'pending'
+        'scanning_plex_library': 'pending'
     }
     progress = {
         'download_gate_status': 'pending',
@@ -335,13 +331,13 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     progress['download_gate_required_idle_seconds'] = gate.get('required_idle_seconds') or 180
     progress['download_gate_last_activity_at'] = gate.get('last_activity_at')
     progress['download_gate_status'] = 'ready'
-    stages['wait_for_downloads'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    stages['scanning_plex_library'] = 'in_progress'
+    update_job_progress(job_id, {'stages': stages})
 
     print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
-    stages['connect'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
 
     library = None
     for section in plex.library.sections():
@@ -352,13 +348,8 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     if not library:
         raise ValueError(f'Plex music library "{library_name}" not found')
 
-    stages['locate_library'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
-
     print(f"[LIBRARY_UPDATE_JOB] Job {job_id} triggering scan on library '{library_name}'", flush=True)
     library.update()
-    stages['trigger_scan'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
 
     completed, saw_active = wait_for_plex_library_scan_completion(
         plex,
@@ -370,7 +361,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
 
     progress['scan_detected'] = bool(saw_active)
     progress['scan_completed'] = bool(completed)
-    stages['wait_for_scan'] = 'done' if completed else 'skipped'
+    stages['scanning_plex_library'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     sync_result = start_plex_sync_job(trigger='post_library_update')
@@ -1103,10 +1094,8 @@ def process_plex_sync_job(job_id, payload):
         raise ValueError('Plex server_url and api_token must be configured before syncing')
 
     stages = {
-        'connect': 'pending',
-        'fetch_tracks': 'pending',
-        'sync_songs': 'pending',
-        'cleanup': 'pending'
+        'reading_plex_library': 'in_progress',
+        'updating_local_index': 'pending'
     }
     progress = {
         'processed_tracks': 0,
@@ -1118,7 +1107,6 @@ def process_plex_sync_job(job_id, payload):
 
     print(f"[PLEX_SYNC] Job {job_id} connecting to Plex at {server_url}", flush=True)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
-    stages['connect'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
     library = None
@@ -1138,7 +1126,8 @@ def process_plex_sync_job(job_id, payload):
         tracks = library.search(libtype='track')
 
     progress['total_tracks'] = len(tracks)
-    stages['fetch_tracks'] = 'done'
+    stages['reading_plex_library'] = 'done'
+    stages['updating_local_index'] = 'in_progress'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     conn = get_db_connection()
@@ -1193,7 +1182,6 @@ def process_plex_sync_job(job_id, payload):
             update_job_progress(job_id, {'progress': progress})
 
     conn.commit()
-    stages['sync_songs'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     deleted = 0
@@ -1211,7 +1199,7 @@ def process_plex_sync_job(job_id, payload):
     conn.close()
 
     progress['deleted_songs'] = deleted
-    stages['cleanup'] = 'done'
+    stages['updating_local_index'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
