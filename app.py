@@ -7,10 +7,22 @@ def init_library_update_status():
             id INTEGER PRIMARY KEY,
             last_update_time TIMESTAMP,
             library_update_needed BOOLEAN NOT NULL DEFAULT FALSE,
-            last_job_finished_at TIMESTAMP
+            last_job_finished_at TIMESTAMP,
+            last_download_activity_at TIMESTAMP
         )
         '''
     )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'library_update_status'
+          AND column_name = 'last_download_activity_at'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute('ALTER TABLE library_update_status ADD COLUMN last_download_activity_at TIMESTAMP')
+
     # Ensure a single row exists
     cur.execute('SELECT id FROM library_update_status WHERE id = 1')
     if not cur.fetchone():
@@ -21,10 +33,35 @@ def init_library_update_status():
 def get_library_update_status():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT last_update_time, library_update_needed, last_job_finished_at FROM library_update_status WHERE id = 1')
+    cur.execute(
+        '''
+        SELECT last_update_time, library_update_needed, last_job_finished_at, last_download_activity_at
+        FROM library_update_status
+        WHERE id = 1
+        '''
+    )
     row = cur.fetchone()
     conn.close()
     return row
+
+def normalize_db_timestamp(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        if raw.endswith('Z'):
+            raw = raw[:-1] + '+00:00'
+        try:
+            dt = datetime.fromisoformat(raw)
+        except Exception:
+            return None
+    if hasattr(dt, 'replace'):
+        dt = dt.replace(tzinfo=None)
+    return dt
 
 def set_library_update_needed(value: bool):
     conn = get_db_connection()
@@ -46,6 +83,90 @@ def set_last_job_finished_at(ts):
     cur.execute('UPDATE library_update_status SET last_job_finished_at = %s WHERE id = 1', (ts,))
     conn.commit()
     conn.close()
+
+def set_last_download_activity_at(ts):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE library_update_status SET last_download_activity_at = %s WHERE id = 1', (ts,))
+    conn.commit()
+    conn.close()
+
+def get_last_download_activity_at():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT last_download_activity_at FROM library_update_status WHERE id = 1')
+    row = cur.fetchone() or {}
+    conn.close()
+    return normalize_db_timestamp(row.get('last_download_activity_at'))
+
+def get_download_write_gate_state():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, status, result_json
+        FROM jobs
+        WHERE job_type = 'download_track'
+          AND status IN ('queued', 'in_progress')
+        ORDER BY created_at ASC
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+
+    blocking_jobs = []
+    ready_count = 0
+
+    for row in rows:
+        job_id = row.get('id')
+        status = str(row.get('status') or '').strip().lower()
+
+        if status == 'queued':
+            blocking_jobs.append(job_id)
+            continue
+
+        stages = {}
+        try:
+            parsed = json.loads(row.get('result_json')) if row.get('result_json') else {}
+            if isinstance(parsed, dict) and isinstance(parsed.get('stages'), dict):
+                stages = parsed.get('stages')
+        except (TypeError, ValueError):
+            stages = {}
+
+        written_stage = str(stages.get('written') or '').strip().lower()
+        if written_stage in ('done', 'skipped'):
+            ready_count += 1
+            continue
+
+        blocking_jobs.append(job_id)
+
+    return {
+        'total_current_jobs': len(rows),
+        'written_ready_jobs': ready_count,
+        'blocking_count': len(blocking_jobs),
+        'blocking_job_ids': blocking_jobs,
+        'all_written_ready': len(blocking_jobs) == 0
+    }
+
+def can_start_plex_library_update(required_idle_seconds=180):
+    gate_state = get_download_write_gate_state()
+    last_activity_at = get_last_download_activity_at()
+    now = datetime.utcnow()
+
+    idle_seconds = None
+    if last_activity_at:
+        idle_seconds = max(0, int((now - last_activity_at).total_seconds()))
+
+    is_idle = idle_seconds is not None and idle_seconds >= required_idle_seconds
+    can_start = gate_state['all_written_ready'] and is_idle
+
+    return {
+        'can_start': can_start,
+        'gate_state': gate_state,
+        'idle_seconds': idle_seconds,
+        'required_idle_seconds': required_idle_seconds,
+        'last_activity_at': last_activity_at.isoformat() + 'Z' if last_activity_at else None
+    }
 
 def any_download_jobs_running():
     conn = get_db_connection()
@@ -176,7 +297,7 @@ def start_plex_library_update_job(trigger='scheduled'):
 
     return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
 
-def process_plex_library_update_job(job_id, payload):
+def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     config = get_plex_config()
     server_url = (config.get('server_url') or '').strip()
     api_token = (config.get('api_token') or '').strip()
@@ -186,18 +307,35 @@ def process_plex_library_update_job(job_id, payload):
         raise ValueError('Plex server_url, api_token, and library_name must be configured before updating library')
 
     stages = {
+        'wait_for_downloads': 'pending',
         'connect': 'pending',
         'locate_library': 'pending',
         'trigger_scan': 'pending',
-        'wait_for_scan': 'pending',
-        'queue_sync': 'pending'
+        'wait_for_scan': 'pending'
     }
     progress = {
+        'download_gate_status': 'pending',
+        'download_gate_checks': 0,
+        'download_gate_blocking_count': 0,
+        'download_gate_idle_seconds': 0,
+        'download_gate_required_idle_seconds': 180,
+        'download_gate_last_activity_at': None,
         'scan_detected': False,
         'scan_completed': False,
         'sync_job_id': None,
         'sync_queue_status': 'pending'
     }
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    gate = gate_snapshot or can_start_plex_library_update(required_idle_seconds=180)
+    gate_state = gate.get('gate_state') or {}
+    progress['download_gate_checks'] = 1
+    progress['download_gate_blocking_count'] = gate_state.get('blocking_count') or 0
+    progress['download_gate_idle_seconds'] = gate.get('idle_seconds') or 0
+    progress['download_gate_required_idle_seconds'] = gate.get('required_idle_seconds') or 180
+    progress['download_gate_last_activity_at'] = gate.get('last_activity_at')
+    progress['download_gate_status'] = 'ready'
+    stages['wait_for_downloads'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
@@ -239,12 +377,9 @@ def process_plex_library_update_job(job_id, payload):
     if sync_result.get('ok'):
         progress['sync_job_id'] = sync_result.get('job_id')
         progress['sync_queue_status'] = 'queued'
-        stages['queue_sync'] = 'done'
     elif sync_result.get('status_code') == 409:
         progress['sync_queue_status'] = 'already_queued'
-        stages['queue_sync'] = 'skipped'
     else:
-        stages['queue_sync'] = 'failed'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
         raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
 
@@ -323,23 +458,10 @@ def library_update_worker():
             if not status:
                 time.sleep(30)
                 continue
-            last_update_time, library_update_needed, last_job_finished_at = status
+            last_update_time, library_update_needed, last_job_finished_at, _last_download_activity_at = status
             now = datetime.utcnow()
-            # Convert timestamps if not None and not already datetime
-            if last_update_time and not isinstance(last_update_time, datetime):
-                try:
-                    last_update_time = datetime.fromisoformat(str(last_update_time))
-                except Exception:
-                    last_update_time = None
-            if last_update_time and hasattr(last_update_time, 'replace'):
-                last_update_time = last_update_time.replace(tzinfo=None)
-            if last_job_finished_at and not isinstance(last_job_finished_at, datetime):
-                try:
-                    last_job_finished_at = datetime.fromisoformat(str(last_job_finished_at))
-                except Exception:
-                    last_job_finished_at = None
-            if last_job_finished_at and hasattr(last_job_finished_at, 'replace'):
-                last_job_finished_at = last_job_finished_at.replace(tzinfo=None)
+            last_update_time = normalize_db_timestamp(last_update_time)
+            last_job_finished_at = normalize_db_timestamp(last_job_finished_at)
             # Scenario 1
             if library_update_needed and not any_download_jobs_running():
                 # 15 min since last job finished and last update
@@ -385,9 +507,24 @@ def library_update_worker():
 
 def plex_library_update_job_worker():
     print("[LIBRARY_UPDATE_JOB_WORKER] Background worker started", flush=True)
+    gate_poll_seconds = 15
 
     while True:
         try:
+            gate = can_start_plex_library_update(required_idle_seconds=180)
+            if not gate.get('can_start'):
+                if any_plex_library_update_jobs_running_or_queued():
+                    gate_state = gate.get('gate_state') or {}
+                    blocking_count = gate_state.get('blocking_count') or 0
+                    idle_seconds = gate.get('idle_seconds')
+                    required_idle = gate.get('required_idle_seconds') or 180
+                    print(
+                        f"[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking={blocking_count} idle_seconds={idle_seconds} required_idle={required_idle}",
+                        flush=True
+                    )
+                time.sleep(gate_poll_seconds)
+                continue
+
             job = claim_next_job('plex_library_update')
             if not job:
                 time.sleep(5)
@@ -399,7 +536,18 @@ def plex_library_update_job_worker():
                 payload = {}
 
             try:
-                result = process_plex_library_update_job(job['id'], payload)
+                gate_after_claim = can_start_plex_library_update(required_idle_seconds=180)
+                if not gate_after_claim.get('can_start'):
+                    requeue_claimed_job(
+                        job['id'],
+                        delay_seconds=gate_poll_seconds,
+                        error_message='Waiting for downloads gate before starting Plex library update'
+                    )
+                    print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} deferred until downloads gate is ready", flush=True)
+                    time.sleep(1)
+                    continue
+
+                result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
                 mark_job_succeeded(job['id'], result)
                 print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} completed", flush=True)
             except Exception as e:
@@ -1096,6 +1244,16 @@ def plex_sync_job_worker():
             except (TypeError, ValueError):
                 payload = {}
 
+            if any_plex_library_update_jobs_running_or_queued():
+                requeue_claimed_job(
+                    job['id'],
+                    delay_seconds=20,
+                    error_message='Waiting for plex_library_update jobs to finish before sync'
+                )
+                print(f"[PLEX_SYNC_WORKER] Job {job['id']} deferred until library update completes", flush=True)
+                time.sleep(1)
+                continue
+
             try:
                 result = process_plex_sync_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
@@ -1645,6 +1803,119 @@ def mark_job_in_progress(job_id):
     conn.commit()
     conn.close()
 
+def requeue_claimed_job(job_id, delay_seconds=30, error_message=None):
+    now = datetime.utcnow()
+    now_iso = now.isoformat() + 'Z'
+    run_after = (now + timedelta(seconds=max(1, int(delay_seconds)))).isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'queued',
+            updated_at = %s,
+            run_after = %s,
+            locked_at = NULL,
+            locked_by = NULL,
+            error_message = COALESCE(%s, error_message)
+        WHERE id = %s
+        """,
+        (now_iso, run_after, error_message, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+def recover_stale_in_progress_jobs(stale_after_minutes=15):
+    now = datetime.utcnow()
+    stale_cutoff = now - timedelta(minutes=max(1, int(stale_after_minutes)))
+    now_iso = now.isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, job_type, attempt_count, max_attempts, result_json, locked_at, started_at, updated_at
+        FROM jobs
+        WHERE status = 'in_progress'
+        """
+    )
+    rows = cur.fetchall() or []
+
+    recovered = 0
+    exhausted = 0
+    skipped_waiting_playlist = 0
+
+    for row in rows:
+        job_id = row.get('id')
+        job_type = str(row.get('job_type') or '').strip()
+
+        # download_track jobs can intentionally stay in_progress while waiting on queued playlist_add.
+        if job_type == 'download_track':
+            try:
+                result = json.loads(row.get('result_json')) if row.get('result_json') else {}
+            except (TypeError, ValueError):
+                result = {}
+            stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
+            if stages.get('playlist_added') == 'queued':
+                skipped_waiting_playlist += 1
+                continue
+
+        lock_time = normalize_db_timestamp(row.get('locked_at'))
+        started_at = normalize_db_timestamp(row.get('started_at'))
+        updated_at = normalize_db_timestamp(row.get('updated_at'))
+        reference_ts = lock_time or started_at or updated_at
+
+        if reference_ts and reference_ts > stale_cutoff:
+            continue
+
+        attempt_count = int(row.get('attempt_count') or 0)
+        max_attempts = int(row.get('max_attempts') or 0)
+
+        if attempt_count >= max_attempts:
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = 'failed',
+                    error_message = COALESCE(error_message, %s),
+                    updated_at = %s,
+                    finished_at = %s,
+                    locked_at = NULL,
+                    locked_by = NULL
+                WHERE id = %s
+                """,
+                ('Recovered stale in_progress job reached max attempts', now_iso, now_iso, job_id)
+            )
+            exhausted += 1
+            continue
+
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = 'queued',
+                error_message = COALESCE(error_message, %s),
+                updated_at = %s,
+                run_after = %s,
+                locked_at = NULL,
+                locked_by = NULL
+            WHERE id = %s
+            """,
+            ('Recovered stale in_progress job on startup', now_iso, now_iso, job_id)
+        )
+        recovered += 1
+
+    conn.commit()
+    conn.close()
+
+    print(
+        (
+            f"[JOB_RECOVERY] stale_cutoff_minutes={max(1, int(stale_after_minutes))} "
+            f"recovered={recovered} exhausted={exhausted} "
+            f"skipped_waiting_playlist={skipped_waiting_playlist}"
+        ),
+        flush=True
+    )
+
 def update_job_progress(job_id, updates):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
@@ -1986,6 +2257,7 @@ def process_download_job(job_id, payload):
         stages['id3_tagged'] = 'done'
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
+        set_last_download_activity_at(datetime.utcnow())
         update_job_progress(job_id, {'stages': stages})
 
         playlist_name = payload.get('plex_playlist')
@@ -2166,6 +2438,7 @@ def process_download_job(job_id, payload):
         f.write(track_response.content)
 
     stages['downloaded'] = 'done'
+    set_last_download_activity_at(datetime.utcnow())
     update_job_progress(job_id, {'stages': stages})
 
     print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
@@ -2186,6 +2459,7 @@ def process_download_job(job_id, payload):
         shutil.move(temp_mp3_path, full_path)
         stages['converted'] = 'done'
         stages['written'] = 'done'
+        set_last_download_activity_at(datetime.utcnow())
         update_job_progress(job_id, {'stages': stages})
         cleanup_file(temp_source_path)
         cleanup_file(temp_mp3_path)
@@ -2202,6 +2476,7 @@ def process_download_job(job_id, payload):
         shutil.move(temp_source_path, full_path)
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
+        set_last_download_activity_at(datetime.utcnow())
         update_job_progress(job_id, {'stages': stages})
         cleanup_file(temp_source_path)
         print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
@@ -2911,6 +3186,7 @@ def load_squid_urls():
 # Initialize SQLite and mirror data
 init_db()
 init_library_update_status()
+recover_stale_in_progress_jobs(stale_after_minutes=15)
 seed_mirrors_from_json()
 
 # Initialize URL list and round-robin iterator
@@ -2951,10 +3227,8 @@ plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker,
 plex_sync_scheduler_thread.start()
 print("Plex library sync scheduler started\n", flush=True)
 
-# Start background worker for library update
-library_update_thread = threading.Thread(target=library_update_worker, daemon=True)
-library_update_thread.start()
-print("Library update worker started\n", flush=True)
+# Legacy timed library update worker is intentionally disabled.
+# Updates are now queued on download enqueue and gated in process_plex_library_update_job.
 
 # Download folders already created and validated at module level above
 
@@ -3830,6 +4104,20 @@ def download_track():
     }
 
     job_id = enqueue_job('download_track', job_payload)
+    set_last_download_activity_at(datetime.utcnow())
+
+    update_job_id = queue_plex_library_update(trigger='download_enqueue')
+    if update_job_id:
+        print(f"[DOWNLOAD] Queued plex_library_update job {update_job_id} (download enqueue)", flush=True)
+    else:
+        print("[DOWNLOAD] plex_library_update already queued/in progress; not queueing another", flush=True)
+
+    sync_job_id = queue_plex_library_sync(trigger='download_enqueue')
+    if sync_job_id:
+        print(f"[DOWNLOAD] Queued plex_library_sync job {sync_job_id} (download enqueue)", flush=True)
+    else:
+        print("[DOWNLOAD] plex_library_sync already queued/in progress; not queueing another", flush=True)
+
     print(f"[DOWNLOAD] Queued download job {job_id} for track {track_id}", flush=True)
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
