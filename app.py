@@ -2243,7 +2243,7 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
         stages['downloaded'] = 'done'
         stages['id3_tagged'] = 'done'
-        stages['converted'] = 'skipped'
+        stages['converted'] = 'done' if file_format == 'mp3' else 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
         update_job_progress(job_id, {
