@@ -2246,7 +2246,13 @@ def process_download_job(job_id, payload):
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
-        update_job_progress(job_id, {'stages': stages})
+        update_job_progress(job_id, {
+            'artist': artist_name,
+            'album': album_name,
+            'title': track_title,
+            'playlist_name': payload.get('plex_playlist'),
+            'stages': stages
+        })
 
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
