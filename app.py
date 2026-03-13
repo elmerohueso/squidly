@@ -3306,14 +3306,19 @@ def track_info():
     Query parameter:
     - id={trackId} : Tidal track ID
     """
-    track_id = request.args.get('id')
-    
+    track_id = (request.args.get('id') or '').strip()
+
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    upstream_query = urlencode({'id': track_id})
     
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/info/?id={track_id}",
+            f"/info/?{upstream_query}",
             url_iterator,
             method='GET',
             timeout=10,
