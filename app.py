@@ -2989,92 +2989,50 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         return False, f'Unexpected error: {str(e)}'
 
 # Validation Functions
-def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
+def validate_endpoint(url, name, timeout=5):
     """
-    Validate a single endpoint by performing a search query.
-    Records response time, checks if endpoint is online, and optionally validates search results.
-    
+    Validate a single endpoint using the upstream health check (GET /).
+    Records response time and whether the mirror is reachable and returning valid JSON.
+
     Args:
         url: Base URL of the endpoint
         name: Name of the endpoint
-        test_query: Query to search for (default: "22 by Taylor Swift")
         timeout: Request timeout in seconds
-    
+
     Returns:
-        Dict with validation results including online status, response time, and search validation
+        Dict with validation results including online status and response time
     """
     timestamp = datetime.utcnow().isoformat() + 'Z'
-    
+
     try:
         start_time = time.time()
-        response = requests.get(
-            f"{url}/search/?s={requests.utils.quote(test_query)}",
-            timeout=timeout
-        )
+        response = requests.get(f"{url}/", timeout=timeout)
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-        
-        # Check if endpoint is online and returning valid data
+
         online = False
-        search_working = False
-        song_found = False
-        results_count = 0
         error = None
-        
+
         if response.status_code == 200:
             try:
-                data = response.json()
-                
-                # Valid squid.wtf response should have 'data' field
-                if 'data' in data:
-                    online = True
-                    items = data.get('data', {}).get('items', [])
-                    results_count = len(items)
-                    
-                    if results_count > 0:
-                        search_working = True
-                        
-                        # Look for "22" by Taylor Swift in the results
-                        for track in items:
-                            title = track.get('title', '').lower()
-                            
-                            # Check artists array
-                            artists = track.get('artists', [])
-                            artist_names = ' '.join([a.get('name', '').lower() for a in artists])
-                            
-                            # Also check singular artist field as fallback
-                            if not artist_names and 'artist' in track:
-                                artist_names = track.get('artist', {}).get('name', '').lower()
-                            
-                            # Check if this is the song we're looking for
-                            if '22' in title and 'taylor swift' in artist_names:
-                                song_found = True
-                                break
-                else:
-                    error = 'Invalid response structure'
-                    
+                response.json()
+                online = True
             except json.JSONDecodeError:
                 error = 'Invalid JSON response'
         else:
             error = f'HTTP {response.status_code}'
-        
+
         return {
             'online': online,
             'responseTime': round(response_time, 2) if online else None,
             'lastChecked': timestamp,
-            'searchWorking': search_working,
-            'songFound': song_found,
-            'resultsCount': results_count,
             'error': error
         }
-        
+
     except requests.exceptions.Timeout:
         return {
             'online': False,
             'responseTime': None,
             'lastChecked': timestamp,
-            'searchWorking': False,
-            'songFound': False,
-            'resultsCount': 0,
             'error': 'Timeout'
         }
     except requests.exceptions.RequestException as e:
@@ -3082,9 +3040,6 @@ def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
             'online': False,
             'responseTime': None,
             'lastChecked': timestamp,
-            'searchWorking': False,
-            'songFound': False,
-            'resultsCount': 0,
             'error': str(e)
         }
 
@@ -3103,21 +3058,19 @@ def validate_all_endpoints():
     
     online_count = 0
     offline_count = 0
-    search_working_count = 0
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # Validate each endpoint
     for entry in urls_data:
         name = entry['name']
         decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-        
+
         print(f"\n[{name}] Checking {decoded_url}...", flush=True)
-        
-        # Validate endpoint (ping + search test in one call)
+
         result = validate_endpoint(decoded_url, name, timeout=5)
-        
+
         # Update database with results
         cur.execute(
             """
@@ -3132,27 +3085,17 @@ def validate_all_endpoints():
                 name
             )
         )
-        
+
         if result['online']:
             online_count += 1
             print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
-            
-            if result['searchWorking']:
-                if result['songFound']:
-                    search_working_count += 1
-                    print(f"  ✓ Search working - Found '22 by Taylor Swift' ({result['resultsCount']} results)", flush=True)
-                else:
-                    print(f"  ⚠ Search working but song not found ({result['resultsCount']} results)", flush=True)
-            else:
-                print(f"  ✗ Search failed - {result.get('error', 'No results')}", flush=True)
         else:
             offline_count += 1
-            error_msg = result.get('error', 'Unknown error')
-            print(f"  ✗ OFFLINE - {error_msg}", flush=True)
-    
+            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
+
     conn.commit()
     conn.close()
-    
+
     # Print summary
     print("\n" + "="*60, flush=True)
     print("Validation Complete", flush=True)
@@ -3160,14 +3103,12 @@ def validate_all_endpoints():
     print(f"Total endpoints: {len(urls_data)}", flush=True)
     print(f"Online: {online_count}", flush=True)
     print(f"Offline: {offline_count}", flush=True)
-    print(f"Search functionality working: {search_working_count}", flush=True)
     print("="*60 + "\n", flush=True)
-    
+
     return {
         'total': len(urls_data),
         'online': online_count,
-        'offline': offline_count,
-        'search_working': search_working_count
+        'offline': offline_count
     }
 
 # Load squid URLs and set up round-robin
