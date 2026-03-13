@@ -3424,13 +3424,39 @@ class App {
             this.updatePlexPlaylistContainerVisibility(true);
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
-                    <h2>More Like This - Similar Tracks</h2>
+                    <div class="results-header-top">
+                        <h2>More Like This - Similar Tracks</h2>
+                    </div>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                    <div class="progress-info" style="display: none;">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
+                    </div>
                 </div>
                 <div class="results-list">
                     ${tracks.map((track) => this.formatTrackCard(track)).join('')}
                 </div>
             `;
+
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement | null;
+            if (resultsHeaderTop) {
+                const downloadAllBtn = document.createElement('button');
+                downloadAllBtn.id = 'downloadAllBtn';
+                downloadAllBtn.className = 'download-all-btn';
+                downloadAllBtn.title = 'Download all tracks sequentially';
+                downloadAllBtn.textContent = 'Download All';
+                downloadAllBtn.addEventListener('click', () => {
+                    const progressInfo = document.querySelector('.progress-info') as HTMLElement | null;
+                    if (progressInfo) {
+                        progressInfo.style.display = 'block';
+                    }
+                    void this.downloadAllTracks();
+                });
+                resultsHeaderTop.appendChild(downloadAllBtn);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
 
             void this.annotateTrackCardsWithPlexStatus(tracks);
         } catch (error) {
