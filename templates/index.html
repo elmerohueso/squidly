@@ -48,7 +48,9 @@
                     <option value="s">Tracks</option>
                     <option value="a">Artists</option>
                     <option value="al">Albums</option>
+                    <option value="p">Playlists</option>
                     <option value="lastfm">Last.fm Playlist</option>
+                    <option value="youtube_music">YouTube Music Playlist</option>
                     <option value="listenbrainz">ListenBrainz Playlists</option>
                 </select>
                 <input 
@@ -66,9 +68,13 @@
                 </button>
             </div>
             
-            <div style="padding: 1rem; display: none;" id="plexPlaylistContainer">
-                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.9rem; font-weight: 500;">Plex Playlist Name</label>
-                <input type="text" id="plexPlaylistName" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 1rem;">
+            <div class="plex-playlist-container" style="padding: 1rem; display: none; align-items: center; gap: 0.75rem; width: fit-content; margin-left: auto;" id="plexPlaylistContainer">
+                <label style="font-size: 0.9rem; font-weight: 500; white-space: nowrap;">Plex Playlist:</label>
+                <select id="plexPlaylistOptions" class="search-type-select plex-playlist-select" title="No Playlist">
+                    <option value="">No Playlist</option>
+                </select>
+                <input type="text" id="plexPlaylistName" class="search-type-select plex-playlist-input" title="Enter a new playlist name" style="display: none;">
+                <button type="button" id="plexPlaylistBack" class="plex-playlist-back" style="display: none;" title="Back to existing playlists" aria-label="Back to existing playlists">←</button>
             </div>
             
             <div id="results" class="results-container"></div>
@@ -125,11 +131,18 @@
             <select id="jobsFilter" class="jobs-filter-select">
                 <option value="incomplete">Incomplete</option>
                 <option value="complete">Complete</option>
+                <option value="completed_with_errors">Completed with errors</option>
+                <option value="failed">Failed</option>
             </select>
+        </div>
+        <div class="jobs-actions">
+            <button type="button" id="cancelPendingJobs" class="jobs-bulk-button">Cancel all incomplete</button>
+            <button type="button" id="retryAllJobs" class="jobs-bulk-button hidden">Retry all</button>
         </div>
         <div class="jobs-content" id="jobsContent">
             <p class="loading-text">Loading jobs...</p>
         </div>
+        <div class="jobs-pagination" id="jobsPagination"></div>
     </div>
     <div id="jobsOverlay" class="flyout-overlay"></div>
 
@@ -165,9 +178,13 @@
                 <p class="settings-hint">Folder: /downloads/full_albums</p>
                 <div style="margin-top: 1.5rem;"></div>
                 <label class="settings-label" for="fileNamingLoose">Loose Tracks</label>
-                <input type="text" id="fileNamingLoose" class="settings-input" placeholder="{artist} - {title}.{ext}">
+                <input type="text" id="fileNamingLoose" class="settings-input" placeholder="{artist}/{album}/{track} - {title}.{ext}">
                 <p class="settings-hint">Folder: /downloads/loose_tracks</p>
                 <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
+
+                <label class="settings-label" for="jobsRefreshIntervalSeconds" style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
+                <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1" value="30" placeholder="30">
+                <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
             </div>
             <div class="settings-section">
                 <div class="settings-section-title">Streaming Settings</div>
@@ -212,6 +229,13 @@
                 <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
                 <button id="savePlexConfig" class="save-button" style="margin-top: 1rem;">Save Plex Config</button>
                 <p class="settings-note" id="plexConfigStatus"></p>
+
+                <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library Sync Interval (hours)</label>
+                <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1" value="24" placeholder="24">
+                <p class="settings-hint">Default: 24 hours</p>
+
+                <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library Sync Now</button>
+                <p class="settings-note" id="plexSyncStatus"></p>
             </div>
         </div>
     </div>

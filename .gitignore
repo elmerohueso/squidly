@@ -72,3 +72,6 @@ logs/
 
 # Docker
 docker-compose.override.yml
+
+# Local docs
+copilot-instructions.md
