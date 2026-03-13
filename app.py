@@ -566,7 +566,7 @@ import re
 import threading
 import socket
 from difflib import SequenceMatcher
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
 from mutagen.mp3 import MP3
@@ -2086,7 +2086,7 @@ def process_download_job(job_id, payload):
             if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
                 cover_val = track_metadata['album']['cover']
                 if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_album_cover_url(cover_val)
+                    cover_url = format_tidal_image_url(cover_val, 1280)
                 else:
                     cover_url = cover_val
 
@@ -2096,7 +2096,7 @@ def process_download_job(job_id, payload):
                         cover_val = track_metadata['album'][cover_field]
                         if isinstance(cover_val, str):
                             if not cover_val.startswith('http'):
-                                cover_url = format_album_cover_url(cover_val)
+                                cover_url = format_tidal_image_url(cover_val, 1280)
                             else:
                                 cover_url = cover_val
                             break
@@ -2134,13 +2134,13 @@ def process_download_job(job_id, payload):
             release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
 
         if not cover_url and album_id:
-            cover_url = format_album_cover_url(str(album_id))
+            cover_url = format_tidal_image_url(str(album_id), 1280)
 
         if not cover_url:
             if 'cover' in track_metadata:
                 cover_val = track_metadata['cover']
                 if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_album_cover_url(cover_val)
+                    cover_url = format_tidal_image_url(cover_val, 1280)
                 else:
                     cover_url = cover_val
 
@@ -2150,7 +2150,7 @@ def process_download_job(job_id, payload):
                         cover_val = track_metadata[cover_field]
                         if isinstance(cover_val, str):
                             if not cover_val.startswith('http'):
-                                cover_url = format_album_cover_url(cover_val)
+                                cover_url = format_tidal_image_url(cover_val, 1280)
                             else:
                                 cover_url = cover_val
                             break
@@ -2342,13 +2342,22 @@ def process_download_job(job_id, payload):
         manifest_data = manifest_response.json()
         print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
 
+        manifest_mime_type = None
         if isinstance(manifest_data, dict):
             data = manifest_data.get('data')
             if isinstance(data, dict):
                 manifest_base64 = data.get('manifest') or data.get('manifestBase64')
+                manifest_mime_type = data.get('manifestMimeType')
 
             if not manifest_base64:
                 manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
+            if not manifest_mime_type:
+                manifest_mime_type = manifest_data.get('manifestMimeType')
+
+        if manifest_mime_type == 'application/dash+xml':
+            print(f"[DOWNLOAD] Quality {quality} returned MPD/DASH manifest (not supported), trying next quality...", flush=True)
+            manifest_base64 = None
+            continue
 
         if isinstance(manifest_base64, str) and manifest_base64:
             break
@@ -2980,92 +2989,50 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         return False, f'Unexpected error: {str(e)}'
 
 # Validation Functions
-def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
+def validate_endpoint(url, name, timeout=5):
     """
-    Validate a single endpoint by performing a search query.
-    Records response time, checks if endpoint is online, and optionally validates search results.
-    
+    Validate a single endpoint using the upstream health check (GET /).
+    Records response time and whether the mirror is reachable and returning valid JSON.
+
     Args:
         url: Base URL of the endpoint
         name: Name of the endpoint
-        test_query: Query to search for (default: "22 by Taylor Swift")
         timeout: Request timeout in seconds
-    
+
     Returns:
-        Dict with validation results including online status, response time, and search validation
+        Dict with validation results including online status and response time
     """
     timestamp = datetime.utcnow().isoformat() + 'Z'
-    
+
     try:
         start_time = time.time()
-        response = requests.get(
-            f"{url}/search/?s={requests.utils.quote(test_query)}",
-            timeout=timeout
-        )
+        response = requests.get(f"{url}/", timeout=timeout)
         response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-        
-        # Check if endpoint is online and returning valid data
+
         online = False
-        search_working = False
-        song_found = False
-        results_count = 0
         error = None
-        
+
         if response.status_code == 200:
             try:
-                data = response.json()
-                
-                # Valid squid.wtf response should have 'data' field
-                if 'data' in data:
-                    online = True
-                    items = data.get('data', {}).get('items', [])
-                    results_count = len(items)
-                    
-                    if results_count > 0:
-                        search_working = True
-                        
-                        # Look for "22" by Taylor Swift in the results
-                        for track in items:
-                            title = track.get('title', '').lower()
-                            
-                            # Check artists array
-                            artists = track.get('artists', [])
-                            artist_names = ' '.join([a.get('name', '').lower() for a in artists])
-                            
-                            # Also check singular artist field as fallback
-                            if not artist_names and 'artist' in track:
-                                artist_names = track.get('artist', {}).get('name', '').lower()
-                            
-                            # Check if this is the song we're looking for
-                            if '22' in title and 'taylor swift' in artist_names:
-                                song_found = True
-                                break
-                else:
-                    error = 'Invalid response structure'
-                    
+                response.json()
+                online = True
             except json.JSONDecodeError:
                 error = 'Invalid JSON response'
         else:
             error = f'HTTP {response.status_code}'
-        
+
         return {
             'online': online,
             'responseTime': round(response_time, 2) if online else None,
             'lastChecked': timestamp,
-            'searchWorking': search_working,
-            'songFound': song_found,
-            'resultsCount': results_count,
             'error': error
         }
-        
+
     except requests.exceptions.Timeout:
         return {
             'online': False,
             'responseTime': None,
             'lastChecked': timestamp,
-            'searchWorking': False,
-            'songFound': False,
-            'resultsCount': 0,
             'error': 'Timeout'
         }
     except requests.exceptions.RequestException as e:
@@ -3073,9 +3040,6 @@ def validate_endpoint(url, name, test_query="22 by Taylor Swift", timeout=5):
             'online': False,
             'responseTime': None,
             'lastChecked': timestamp,
-            'searchWorking': False,
-            'songFound': False,
-            'resultsCount': 0,
             'error': str(e)
         }
 
@@ -3094,21 +3058,19 @@ def validate_all_endpoints():
     
     online_count = 0
     offline_count = 0
-    search_working_count = 0
-    
+
     conn = get_db_connection()
     cur = conn.cursor()
-    
+
     # Validate each endpoint
     for entry in urls_data:
         name = entry['name']
         decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-        
+
         print(f"\n[{name}] Checking {decoded_url}...", flush=True)
-        
-        # Validate endpoint (ping + search test in one call)
+
         result = validate_endpoint(decoded_url, name, timeout=5)
-        
+
         # Update database with results
         cur.execute(
             """
@@ -3123,27 +3085,17 @@ def validate_all_endpoints():
                 name
             )
         )
-        
+
         if result['online']:
             online_count += 1
             print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
-            
-            if result['searchWorking']:
-                if result['songFound']:
-                    search_working_count += 1
-                    print(f"  ✓ Search working - Found '22 by Taylor Swift' ({result['resultsCount']} results)", flush=True)
-                else:
-                    print(f"  ⚠ Search working but song not found ({result['resultsCount']} results)", flush=True)
-            else:
-                print(f"  ✗ Search failed - {result.get('error', 'No results')}", flush=True)
         else:
             offline_count += 1
-            error_msg = result.get('error', 'Unknown error')
-            print(f"  ✗ OFFLINE - {error_msg}", flush=True)
-    
+            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
+
     conn.commit()
     conn.close()
-    
+
     # Print summary
     print("\n" + "="*60, flush=True)
     print("Validation Complete", flush=True)
@@ -3151,14 +3103,12 @@ def validate_all_endpoints():
     print(f"Total endpoints: {len(urls_data)}", flush=True)
     print(f"Online: {online_count}", flush=True)
     print(f"Offline: {offline_count}", flush=True)
-    print(f"Search functionality working: {search_working_count}", flush=True)
     print("="*60 + "\n", flush=True)
-    
+
     return {
         'total': len(urls_data),
         'online': online_count,
-        'offline': offline_count,
-        'search_working': search_working_count
+        'offline': offline_count
     }
 
 # Load squid URLs and set up round-robin
@@ -3246,32 +3196,35 @@ def search():
     - a={query}  : Search artists
     - al={query} : Search albums
     - p={query}  : Search playlists
+    - limit={n}  : Optional page size
+    - offset={n} : Optional page offset
     """
-    # Determine search type based on query parameters
-    search_type = None
-    query = None
-    
-    if 's' in request.args:
-        search_type = 's'
-        query = request.args.get('s')
-    elif 'a' in request.args:
-        search_type = 'a'
-        query = request.args.get('a')
-    elif 'al' in request.args:
-        search_type = 'al'
-        query = request.args.get('al')
-    elif 'p' in request.args:
-        search_type = 'p'
-        query = request.args.get('p')
-    else:
+    supported_search_types = ('s', 'a', 'al', 'p')
+    provided_search_types = [key for key in supported_search_types if key in request.args]
+
+    if not provided_search_types:
         return jsonify({'error': 'No search parameter provided. Use s, a, al, or p'}), 400
-    
+
+    if len(provided_search_types) > 1:
+        return jsonify({'error': 'Provide exactly one search parameter: s, a, al, or p'}), 400
+
+    search_type = provided_search_types[0]
+    query = request.args.get(search_type)
+
     if not query:
         return jsonify({'error': 'Query value cannot be empty'}), 400
+
+    upstream_params = [(search_type, query)]
+    for param_name in ('limit', 'offset'):
+        param_value = request.args.get(param_name)
+        if param_value:
+            upstream_params.append((param_name, param_value))
+
+    upstream_query = urlencode(upstream_params)
     
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/search/?{search_type}={query}",
+            f"/search/?{upstream_query}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3303,14 +3256,19 @@ def track_info():
     Query parameter:
     - id={trackId} : Tidal track ID
     """
-    track_id = request.args.get('id')
-    
+    track_id = (request.args.get('id') or '').strip()
+
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    upstream_query = urlencode({'id': track_id})
     
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/info/?id={track_id}",
+            f"/info/?{upstream_query}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3341,14 +3299,25 @@ def album_info():
     Query parameter:
     - id={albumId} : Tidal album ID
     """
-    album_id = request.args.get('id')
-    
+    album_id = request.args.get('id', '').strip()
+
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
-    
+
+    if not album_id.isdigit():
+        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+
+    params = {'id': album_id}
+    limit = request.args.get('limit')
+    offset = request.args.get('offset')
+    if limit is not None:
+        params['limit'] = limit
+    if offset is not None:
+        params['offset'] = offset
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/album/?id={album_id}",
+            f"/album/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3379,14 +3348,22 @@ def artist_info():
     Query parameter:
     - f={artistId} : Tidal artist ID
     """
-    artist_id = request.args.get('f')
-    
+    artist_id = request.args.get('f', '').strip()
+
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter (f) is required'}), 400
-    
+
+    if not artist_id.isdigit():
+        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
+
+    params = {'f': artist_id}
+    skip_tracks = request.args.get('skip_tracks')
+    if skip_tracks is not None:
+        params['skip_tracks'] = skip_tracks
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/artist/?f={artist_id}",
+            f"/artist/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3417,14 +3394,22 @@ def playlist_info():
     Query parameter:
     - id={playlistId} : Tidal playlist UUID
     """
-    playlist_id = request.args.get('id')
-    
+    playlist_id = request.args.get('id', '').strip()
+
     if not playlist_id:
         return jsonify({'error': 'Playlist ID parameter is required'}), 400
-    
+
+    params = {'id': playlist_id}
+    limit = request.args.get('limit')
+    offset = request.args.get('offset')
+    if limit is not None:
+        params['limit'] = limit
+    if offset is not None:
+        params['offset'] = offset
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/playlist/?id={playlist_id}",
+            f"/playlist/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3456,15 +3441,22 @@ def track_download():
     - id={trackId} : Tidal track ID
     - quality={quality} : Quality level (HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW)
     """
-    track_id = request.args.get('id')
+    track_id = request.args.get('id', '').strip()
     quality = request.args.get('quality', 'HIGH')
-    
+
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
-    
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
+    if quality not in valid_qualities:
+        return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/track/?id={track_id}&quality={quality}",
+            f"/track/?{urlencode({'id': track_id, 'quality': quality})}",
             url_iterator,
             method='GET',
             timeout=10,
@@ -3482,6 +3474,143 @@ def track_download():
         
         return jsonify(result)
     
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
+@app.route('/recommendations/', methods=['GET'])
+def track_recommendations():
+    """
+    Get recommendations for a track.
+    Query parameter:
+    - id={trackId} : Tidal track ID
+    """
+    track_id = (request.args.get('id') or '').strip()
+
+    if not track_id:
+        return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    params = {'id': track_id}
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/recommendations/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
+@app.route('/artist/similar/', methods=['GET'])
+def artist_similar():
+    """
+    Get similar artists.
+    Query parameters:
+    - id={artistId} : Tidal artist ID
+    - cursor={cursor} : Optional cursor for paginated results
+    """
+    artist_id = (request.args.get('id') or '').strip()
+
+    if not artist_id:
+        return jsonify({'error': 'Artist ID parameter is required'}), 400
+
+    if not artist_id.isdigit():
+        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
+
+    params = {'id': artist_id}
+    cursor = request.args.get('cursor')
+    if cursor is not None:
+        params['cursor'] = cursor
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/artist/similar/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
+@app.route('/album/similar/', methods=['GET'])
+def album_similar():
+    """
+    Get similar albums.
+    Query parameters:
+    - id={albumId} : Tidal album ID
+    - cursor={cursor} : Optional cursor for paginated results
+    """
+    album_id = (request.args.get('id') or '').strip()
+
+    if not album_id:
+        return jsonify({'error': 'Album ID parameter is required'}), 400
+
+    if not album_id.isdigit():
+        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+
+    params = {'id': album_id}
+    cursor = request.args.get('cursor')
+    if cursor is not None:
+        params['cursor'] = cursor
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/album/similar/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
     except requests.exceptions.RequestException as e:
         return jsonify({
             'error': f'Proxy error',
@@ -3680,23 +3809,22 @@ def youtube_music_playlist():
             'details': str(e)
         }), 500
 
-def format_album_cover_url(cover: str) -> str:
+def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
     """
-    Format album cover URL for Tidal CDN.
-    Converts dashes to forward slashes in the cover path.
-    
+    Format a Tidal CDN image URL from a UUID/path and requested square size.
+
     Args:
-        cover: Cover ID or path (may contain dashes)
-    
+        image_id_or_path: Tidal image UUID/path (may contain dashes)
+        size: Square image size in pixels
+
     Returns:
-        Full URL to the cover image
+        Full URL to the image
     """
-    if not cover:
+    if not image_id_or_path:
         return ''
-    
-    # Convert dashes to forward slashes for Tidal CDN format
-    cover_path = cover.replace('-', '/')
-    return f"https://resources.tidal.com/images/{cover_path}/1280x1280.jpg"
+
+    image_path = image_id_or_path.replace('-', '/')
+    return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
 
 def sanitize_filename_component(value: str) -> str:
     """
