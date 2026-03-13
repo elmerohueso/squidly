@@ -2342,13 +2342,22 @@ def process_download_job(job_id, payload):
         manifest_data = manifest_response.json()
         print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
 
+        manifest_mime_type = None
         if isinstance(manifest_data, dict):
             data = manifest_data.get('data')
             if isinstance(data, dict):
                 manifest_base64 = data.get('manifest') or data.get('manifestBase64')
+                manifest_mime_type = data.get('manifestMimeType')
 
             if not manifest_base64:
                 manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
+            if not manifest_mime_type:
+                manifest_mime_type = manifest_data.get('manifestMimeType')
+
+        if manifest_mime_type == 'application/dash+xml':
+            print(f"[DOWNLOAD] Quality {quality} returned MPD/DASH manifest (not supported), trying next quality...", flush=True)
+            manifest_base64 = None
+            continue
 
         if isinstance(manifest_base64, str) and manifest_base64:
             break
@@ -3491,15 +3500,22 @@ def track_download():
     - id={trackId} : Tidal track ID
     - quality={quality} : Quality level (HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW)
     """
-    track_id = request.args.get('id')
+    track_id = request.args.get('id', '').strip()
     quality = request.args.get('quality', 'HIGH')
-    
+
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
-    
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
+    if quality not in valid_qualities:
+        return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/track/?id={track_id}&quality={quality}",
+            f"/track/?{urlencode({'id': track_id, 'quality': quality})}",
             url_iterator,
             method='GET',
             timeout=10,
