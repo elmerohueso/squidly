@@ -3444,14 +3444,22 @@ def playlist_info():
     Query parameter:
     - id={playlistId} : Tidal playlist UUID
     """
-    playlist_id = request.args.get('id')
-    
+    playlist_id = request.args.get('id', '').strip()
+
     if not playlist_id:
         return jsonify({'error': 'Playlist ID parameter is required'}), 400
-    
+
+    params = {'id': playlist_id}
+    limit = request.args.get('limit')
+    offset = request.args.get('offset')
+    if limit is not None:
+        params['limit'] = limit
+    if offset is not None:
+        params['offset'] = offset
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/playlist/?id={playlist_id}",
+            f"/playlist/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
