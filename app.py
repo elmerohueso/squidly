@@ -3349,14 +3349,25 @@ def album_info():
     Query parameter:
     - id={albumId} : Tidal album ID
     """
-    album_id = request.args.get('id')
-    
+    album_id = request.args.get('id', '').strip()
+
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
-    
+
+    if not album_id.isdigit():
+        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+
+    params = {'id': album_id}
+    limit = request.args.get('limit')
+    offset = request.args.get('offset')
+    if limit is not None:
+        params['limit'] = limit
+    if offset is not None:
+        params['offset'] = offset
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/album/?id={album_id}",
+            f"/album/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
