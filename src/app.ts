@@ -436,6 +436,39 @@ class App {
                 }
                 return; // Stop here if it was a download button
             }
+
+            // Check for "More Like This" actions before generic card click handlers
+            const moreLikeBtn = target.closest('.track-more-btn') as HTMLButtonElement | null;
+            if (moreLikeBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = moreLikeBtn.closest('.track-card') as HTMLElement | null;
+                if (!card) {
+                    return;
+                }
+
+                const trackId = card.getAttribute('data-track-id');
+                if (trackId) {
+                    void this.fetchSimilarTracks(parseInt(trackId, 10));
+                    return;
+                }
+
+                if (card.classList.contains('album-card')) {
+                    const albumId = card.getAttribute('data-album-id');
+                    if (albumId) {
+                        void this.fetchSimilarAlbums(parseInt(albumId, 10));
+                    }
+                    return;
+                }
+
+                if (card.classList.contains('artist-card')) {
+                    const artistId = card.getAttribute('data-artist-id');
+                    if (artistId) {
+                        void this.fetchSimilarArtists(parseInt(artistId, 10));
+                    }
+                    return;
+                }
+            }
             
             // Check for artist name clicks within track cards
             const artistName = target.closest('.track-artist-name');
@@ -2855,6 +2888,9 @@ class App {
                     </div>
                 </div>
                 <div class="track-actions">
+                    <button class="track-more-btn" title="More Like This" aria-label="More Like This">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
                     <button class="track-download-btn" title="Download" data-track-id="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -3067,6 +3103,11 @@ class App {
                         ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
                     </div>
                 </div>
+                <div class="track-actions">
+                    <button class="track-more-btn" title="More Like This" aria-label="More Like This">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -3095,7 +3136,27 @@ class App {
                         ${popularity ? `<span>${popularity}</span>` : ''}
                     </div>
                 </div>
+                <div class="track-actions">
+                    <button class="track-more-btn" title="More Like This" aria-label="More Like This">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                </div>
             </div>
+        `;
+    }
+
+    private getMoreLikeIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v6"></path>
+                <path d="M12 16v6"></path>
+                <path d="M4.93 4.93l4.24 4.24"></path>
+                <path d="M14.83 14.83l4.24 4.24"></path>
+                <path d="M2 12h6"></path>
+                <path d="M16 12h6"></path>
+                <path d="M4.93 19.07l4.24-4.24"></path>
+                <path d="M14.83 9.17l4.24-4.24"></path>
+            </svg>
         `;
     }
 
@@ -3330,6 +3391,129 @@ class App {
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
             console.error('Album fetch error:', error);
+        }
+    }
+
+    private async fetchSimilarTracks(trackId: number): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.stopPlayback();
+        this.displayMessage('Loading track recommendations...');
+
+        try {
+            const response = await fetch(`/recommendations/?id=${encodeURIComponent(String(trackId))}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch recommendations');
+            }
+
+            const data: any = await response.json();
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchSimilarTracks(trackId));
+                return;
+            }
+
+            const recommendationItems = Array.isArray(data?.data?.items) ? data.data.items : [];
+            const tracks = recommendationItems
+                .map((item: any) => item?.track || item?.item || item)
+                .filter((track: any) => track && typeof track === 'object' && 'id' in track && 'title' in track) as Track[];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No recommendations found for this track');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <h2>More Like This - Similar Tracks</h2>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                </div>
+                <div class="results-list">
+                    ${tracks.map((track) => this.formatTrackCard(track)).join('')}
+                </div>
+            `;
+
+            void this.annotateTrackCardsWithPlexStatus(tracks);
+        } catch (error) {
+            this.displayMessage('Error loading recommendations. Please try again.', () => this.fetchSimilarTracks(trackId));
+            console.error('Recommendations fetch error:', error);
+        }
+    }
+
+    private async fetchSimilarAlbums(albumId: number): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.stopPlayback();
+        this.displayMessage('Loading similar albums...');
+
+        try {
+            const response = await fetch(`/album/similar/?id=${encodeURIComponent(String(albumId))}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch similar albums');
+            }
+
+            const data: any = await response.json();
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchSimilarAlbums(albumId));
+                return;
+            }
+
+            const albums = Array.isArray(data?.albums) ? data.albums : [];
+            if (albums.length === 0) {
+                this.displayMessage('No similar albums found');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <h2>More Like This - Similar Albums</h2>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                </div>
+                <div class="results-list">
+                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
+                </div>
+            `;
+        } catch (error) {
+            this.displayMessage('Error loading similar albums. Please try again.', () => this.fetchSimilarAlbums(albumId));
+            console.error('Similar albums fetch error:', error);
+        }
+    }
+
+    private async fetchSimilarArtists(artistId: number): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.stopPlayback();
+        this.displayMessage('Loading similar artists...');
+
+        try {
+            const response = await fetch(`/artist/similar/?id=${encodeURIComponent(String(artistId))}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch similar artists');
+            }
+
+            const data: any = await response.json();
+            if (data.error) {
+                this.displayMessage(`Error: ${data.error}`, () => this.fetchSimilarArtists(artistId));
+                return;
+            }
+
+            const artists = Array.isArray(data?.artists) ? data.artists : [];
+            if (artists.length === 0) {
+                this.displayMessage('No similar artists found');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <h2>More Like This - Similar Artists</h2>
+                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                </div>
+                <div class="results-list">
+                    ${artists.map((artist: ArtistSearchItem) => this.formatArtistCard(artist)).join('')}
+                </div>
+            `;
+        } catch (error) {
+            this.displayMessage('Error loading similar artists. Please try again.', () => this.fetchSimilarArtists(artistId));
+            console.error('Similar artists fetch error:', error);
         }
     }
 

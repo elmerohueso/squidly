@@ -3480,6 +3480,143 @@ def track_download():
             'details': str(e)
         }), 502
 
+@app.route('/recommendations/', methods=['GET'])
+def track_recommendations():
+    """
+    Get recommendations for a track.
+    Query parameter:
+    - id={trackId} : Tidal track ID
+    """
+    track_id = (request.args.get('id') or '').strip()
+
+    if not track_id:
+        return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    params = {'id': track_id}
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/recommendations/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
+@app.route('/artist/similar/', methods=['GET'])
+def artist_similar():
+    """
+    Get similar artists.
+    Query parameters:
+    - id={artistId} : Tidal artist ID
+    - cursor={cursor} : Optional cursor for paginated results
+    """
+    artist_id = (request.args.get('id') or '').strip()
+
+    if not artist_id:
+        return jsonify({'error': 'Artist ID parameter is required'}), 400
+
+    if not artist_id.isdigit():
+        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
+
+    params = {'id': artist_id}
+    cursor = request.args.get('cursor')
+    if cursor is not None:
+        params['cursor'] = cursor
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/artist/similar/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
+@app.route('/album/similar/', methods=['GET'])
+def album_similar():
+    """
+    Get similar albums.
+    Query parameters:
+    - id={albumId} : Tidal album ID
+    - cursor={cursor} : Optional cursor for paginated results
+    """
+    album_id = (request.args.get('id') or '').strip()
+
+    if not album_id:
+        return jsonify({'error': 'Album ID parameter is required'}), 400
+
+    if not album_id.isdigit():
+        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+
+    params = {'id': album_id}
+    cursor = request.args.get('cursor')
+    if cursor is not None:
+        params['cursor'] = cursor
+
+    try:
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/album/similar/?{urlencode(params)}",
+            url_iterator,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+
+        if not response.ok:
+            return jsonify({
+                'error': f'Upstream API error via {target["name"]}',
+                'status_code': response.status_code
+            }), response.status_code
+
+        result = response.json()
+        result['proxied_via'] = target['name']
+
+        return jsonify(result)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            'error': f'Proxy error',
+            'details': str(e)
+        }), 502
+
 @app.route('/api/search', methods=['POST'])
 def api_search():
     """
