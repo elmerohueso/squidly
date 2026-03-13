@@ -2660,12 +2660,7 @@ class App {
             return rawCover;
         }
 
-        return this.formatPlaylistCoverUrl(rawCover);
-    }
-
-    private formatPlaylistCoverUrl(cover: string): string {
-        const coverPath = cover.replace(/-/g, '/');
-        return `https://resources.tidal.com/images/${coverPath}/640x640.jpg`;
+        return this.formatTidalImageUrl(rawCover, 640);
     }
 
     private normalizePlaylistId(value: string): string {
@@ -2840,7 +2835,7 @@ class App {
                 </button>
                 <div class="track-artwork">
                     ${albumCover 
-                        ? `<img src="${this.formatAlbumCoverUrl(albumCover)}" alt="${track.title}" loading="lazy">`
+                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
                         : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
@@ -3049,7 +3044,7 @@ class App {
             <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
                     ${album.cover 
-                        ? `<img src="${this.formatAlbumCoverUrl(album.cover)}" alt="${album.title}" loading="lazy">`
+                        ? `<img src="${this.formatTidalImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
                         : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -3084,7 +3079,7 @@ class App {
             <div class="track-card artist-card clickable" data-artist-id="${artist.id}" title="Click to view albums">
                 <div class="track-artwork">
                     ${artist.picture 
-                        ? `<img src="${this.formatArtistPictureUrl(artist.picture)}" alt="${artist.name}" loading="lazy">`
+                        ? `<img src="${this.formatTidalImageUrl(artist.picture, 750)}" alt="${artist.name}" loading="lazy">`
                         : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
@@ -3119,16 +3114,9 @@ class App {
         return qualityMap[quality] || quality;
     }
 
-    private formatAlbumCoverUrl(cover: string): string {
-        // Convert dashes to forward slashes for Tidal CDN format
-        const coverPath = cover.replace(/-/g, '/');
-        return `https://resources.tidal.com/images/${coverPath}/1280x1280.jpg`;
-    }
-
-    private formatArtistPictureUrl(picture: string): string {
-        // Convert dashes to forward slashes for Tidal CDN format
-        const picturePath = picture.replace(/-/g, '/');
-        return `https://resources.tidal.com/images/${picturePath}/750x750.jpg`;
+    private formatTidalImageUrl(imageIdOrPath: string, size: number): string {
+        const imagePath = imageIdOrPath.replace(/-/g, '/');
+        return `https://resources.tidal.com/images/${imagePath}/${size}x${size}.jpg`;
     }
 
     private escapeHtml(text: string): string {

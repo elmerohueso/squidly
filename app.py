@@ -2086,7 +2086,7 @@ def process_download_job(job_id, payload):
             if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
                 cover_val = track_metadata['album']['cover']
                 if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_album_cover_url(cover_val)
+                    cover_url = format_tidal_image_url(cover_val, 1280)
                 else:
                     cover_url = cover_val
 
@@ -2096,7 +2096,7 @@ def process_download_job(job_id, payload):
                         cover_val = track_metadata['album'][cover_field]
                         if isinstance(cover_val, str):
                             if not cover_val.startswith('http'):
-                                cover_url = format_album_cover_url(cover_val)
+                                cover_url = format_tidal_image_url(cover_val, 1280)
                             else:
                                 cover_url = cover_val
                             break
@@ -2134,13 +2134,13 @@ def process_download_job(job_id, payload):
             release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
 
         if not cover_url and album_id:
-            cover_url = format_album_cover_url(str(album_id))
+            cover_url = format_tidal_image_url(str(album_id), 1280)
 
         if not cover_url:
             if 'cover' in track_metadata:
                 cover_val = track_metadata['cover']
                 if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_album_cover_url(cover_val)
+                    cover_url = format_tidal_image_url(cover_val, 1280)
                 else:
                     cover_url = cover_val
 
@@ -2150,7 +2150,7 @@ def process_download_job(job_id, payload):
                         cover_val = track_metadata[cover_field]
                         if isinstance(cover_val, str):
                             if not cover_val.startswith('http'):
-                                cover_url = format_album_cover_url(cover_val)
+                                cover_url = format_tidal_image_url(cover_val, 1280)
                             else:
                                 cover_url = cover_val
                             break
@@ -3672,23 +3672,22 @@ def youtube_music_playlist():
             'details': str(e)
         }), 500
 
-def format_album_cover_url(cover: str) -> str:
+def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
     """
-    Format album cover URL for Tidal CDN.
-    Converts dashes to forward slashes in the cover path.
-    
+    Format a Tidal CDN image URL from a UUID/path and requested square size.
+
     Args:
-        cover: Cover ID or path (may contain dashes)
-    
+        image_id_or_path: Tidal image UUID/path (may contain dashes)
+        size: Square image size in pixels
+
     Returns:
-        Full URL to the cover image
+        Full URL to the image
     """
-    if not cover:
+    if not image_id_or_path:
         return ''
-    
-    # Convert dashes to forward slashes for Tidal CDN format
-    cover_path = cover.replace('-', '/')
-    return f"https://resources.tidal.com/images/{cover_path}/1280x1280.jpg"
+
+    image_path = image_id_or_path.replace('-', '/')
+    return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
 
 def sanitize_filename_component(value: str) -> str:
     """
