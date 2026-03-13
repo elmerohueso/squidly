@@ -566,7 +566,7 @@ import re
 import threading
 import socket
 from difflib import SequenceMatcher
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
 from mutagen.mp3 import MP3
@@ -3246,32 +3246,35 @@ def search():
     - a={query}  : Search artists
     - al={query} : Search albums
     - p={query}  : Search playlists
+    - limit={n}  : Optional page size
+    - offset={n} : Optional page offset
     """
-    # Determine search type based on query parameters
-    search_type = None
-    query = None
-    
-    if 's' in request.args:
-        search_type = 's'
-        query = request.args.get('s')
-    elif 'a' in request.args:
-        search_type = 'a'
-        query = request.args.get('a')
-    elif 'al' in request.args:
-        search_type = 'al'
-        query = request.args.get('al')
-    elif 'p' in request.args:
-        search_type = 'p'
-        query = request.args.get('p')
-    else:
+    supported_search_types = ('s', 'a', 'al', 'p')
+    provided_search_types = [key for key in supported_search_types if key in request.args]
+
+    if not provided_search_types:
         return jsonify({'error': 'No search parameter provided. Use s, a, al, or p'}), 400
-    
+
+    if len(provided_search_types) > 1:
+        return jsonify({'error': 'Provide exactly one search parameter: s, a, al, or p'}), 400
+
+    search_type = provided_search_types[0]
+    query = request.args.get(search_type)
+
     if not query:
         return jsonify({'error': 'Query value cannot be empty'}), 400
+
+    upstream_params = [(search_type, query)]
+    for param_name in ('limit', 'offset'):
+        param_value = request.args.get(param_name)
+        if param_value:
+            upstream_params.append((param_name, param_value))
+
+    upstream_query = urlencode(upstream_params)
     
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/search/?{search_type}={query}",
+            f"/search/?{upstream_query}",
             url_iterator,
             method='GET',
             timeout=10,
