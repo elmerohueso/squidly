@@ -3398,14 +3398,22 @@ def artist_info():
     Query parameter:
     - f={artistId} : Tidal artist ID
     """
-    artist_id = request.args.get('f')
-    
+    artist_id = request.args.get('f', '').strip()
+
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter (f) is required'}), 400
-    
+
+    if not artist_id.isdigit():
+        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
+
+    params = {'f': artist_id}
+    skip_tracks = request.args.get('skip_tracks')
+    if skip_tracks is not None:
+        params['skip_tracks'] = skip_tracks
+
     try:
         response, target = make_request_with_retry_rotating_mirrors(
-            f"/artist/?f={artist_id}",
+            f"/artist/?{urlencode(params)}",
             url_iterator,
             method='GET',
             timeout=10,
