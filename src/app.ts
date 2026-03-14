@@ -138,6 +138,7 @@ interface JobStageMap {
     converted?: string;
     written?: string;
     playlist_added?: string;
+    upgraded_existing?: string;
 }
 
 interface JobResult {
@@ -159,6 +160,7 @@ interface JobResult {
 interface PlexSongVariant {
     format?: string;
     bitrate?: number | null;
+    file_path?: string | null;
 }
 
 interface PlexTrackMatch {
@@ -190,6 +192,23 @@ interface DownloadSettings {
     fileNamingLoose: string;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
+}
+
+interface AppRouteState {
+    view: string;
+    searchType?: string;
+    query?: string;
+    artistId?: number;
+    albumId?: number;
+    trackId?: number;
+    playlistId?: string;
+    username?: string;
+    playlistUrl?: string;
+}
+
+interface AppHistoryState {
+    app: 'squidly';
+    route: AppRouteState;
 }
 
 class App {
@@ -272,6 +291,7 @@ class App {
     } | null = null;
     private lastRetryFunction: (() => Promise<void>) | null = null;
     private isPlexConfigured: boolean = false;
+    private isHandlingPopState: boolean = false;
 
     constructor() {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
@@ -327,6 +347,7 @@ class App {
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
         this.applyStreamQualityToForm();
+        this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadPlexConfig();
@@ -531,6 +552,244 @@ class App {
                 }
             }
         });
+    }
+
+    private initializeHistoryNavigation(): void {
+        window.addEventListener('popstate', (event: PopStateEvent) => {
+            void this.handlePopState(event);
+        });
+
+        const historyRoute = this.parseHistoryState(window.history.state);
+        const initialRoute = historyRoute || this.parseRouteFromUrl() || { view: 'home' };
+        this.replaceHistoryRoute(initialRoute);
+
+        if (initialRoute.view !== 'home') {
+            void this.navigateToRoute(initialRoute, false);
+        }
+    }
+
+    private async handlePopState(event: PopStateEvent): Promise<void> {
+        const route = this.parseHistoryState(event.state) || this.parseRouteFromUrl() || { view: 'home' };
+        this.isHandlingPopState = true;
+        try {
+            await this.navigateToRoute(route, false);
+        } finally {
+            this.isHandlingPopState = false;
+        }
+    }
+
+    private parseHistoryState(rawState: unknown): AppRouteState | null {
+        if (!rawState || typeof rawState !== 'object') {
+            return null;
+        }
+
+        const state = rawState as Partial<AppHistoryState>;
+        if (state.app !== 'squidly' || !state.route || typeof state.route !== 'object') {
+            return null;
+        }
+
+        const route = state.route as AppRouteState;
+        return route.view ? route : null;
+    }
+
+    private parseRouteFromUrl(): AppRouteState | null {
+        const params = new URLSearchParams(window.location.search);
+        const view = params.get('view');
+        if (!view) {
+            return null;
+        }
+
+        if (view === 'search') {
+            const searchType = params.get('type') || 's';
+            const query = params.get('q') || '';
+            return { view, searchType, query };
+        }
+
+        if (view === 'artist') {
+            const artistId = Number(params.get('id') || '0');
+            return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
+        }
+
+        if (view === 'album') {
+            const albumId = Number(params.get('id') || '0');
+            return Number.isFinite(albumId) && albumId > 0 ? { view, albumId } : null;
+        }
+
+        if (view === 'playlist') {
+            const playlistId = params.get('id') || '';
+            return playlistId ? { view, playlistId } : null;
+        }
+
+        if (view === 'listenbrainz_playlists') {
+            const username = params.get('username') || '';
+            return username ? { view, username } : null;
+        }
+
+        if (view === 'listenbrainz_playlist_tracks') {
+            const playlistId = params.get('id') || '';
+            return playlistId ? { view, playlistId } : null;
+        }
+
+        if (view === 'lastfm_playlist' || view === 'youtube_music_playlist') {
+            const playlistUrl = params.get('url') || '';
+            return playlistUrl ? { view, playlistUrl } : null;
+        }
+
+        if (view === 'similar_tracks') {
+            const trackId = Number(params.get('id') || '0');
+            return Number.isFinite(trackId) && trackId > 0 ? { view, trackId } : null;
+        }
+
+        if (view === 'similar_albums') {
+            const albumId = Number(params.get('id') || '0');
+            return Number.isFinite(albumId) && albumId > 0 ? { view, albumId } : null;
+        }
+
+        if (view === 'similar_artists') {
+            const artistId = Number(params.get('id') || '0');
+            return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
+        }
+
+        return view === 'home' ? { view: 'home' } : null;
+    }
+
+    private buildRouteUrl(route: AppRouteState): string {
+        if (route.view === 'home') {
+            return window.location.pathname;
+        }
+
+        const params = new URLSearchParams();
+        params.set('view', route.view);
+
+        if (route.view === 'search') {
+            params.set('type', route.searchType || 's');
+            if (route.query) {
+                params.set('q', route.query);
+            }
+        }
+
+        if (route.view === 'artist' && route.artistId) {
+            params.set('id', String(route.artistId));
+        }
+
+        if ((route.view === 'album' || route.view === 'similar_albums') && route.albumId) {
+            params.set('id', String(route.albumId));
+        }
+
+        if (route.view === 'similar_tracks' && route.trackId) {
+            params.set('id', String(route.trackId));
+        }
+
+        if ((route.view === 'playlist' || route.view === 'listenbrainz_playlist_tracks') && route.playlistId) {
+            params.set('id', route.playlistId);
+        }
+
+        if (route.view === 'listenbrainz_playlists' && route.username) {
+            params.set('username', route.username);
+        }
+
+        if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
+            params.set('url', route.playlistUrl);
+        }
+
+        if (route.view === 'similar_artists' && route.artistId) {
+            params.set('id', String(route.artistId));
+        }
+
+        return `${window.location.pathname}?${params.toString()}`;
+    }
+
+    private pushHistoryRoute(route: AppRouteState): void {
+        if (this.isHandlingPopState) {
+            return;
+        }
+
+        const state: AppHistoryState = { app: 'squidly', route };
+        window.history.pushState(state, '', this.buildRouteUrl(route));
+    }
+
+    private replaceHistoryRoute(route: AppRouteState): void {
+        const state: AppHistoryState = { app: 'squidly', route };
+        window.history.replaceState(state, '', this.buildRouteUrl(route));
+    }
+
+    private async navigateToRoute(route: AppRouteState, updateHistory: boolean): Promise<void> {
+        if (route.view === 'home') {
+            this.stopPlayback();
+            this.updatePlexPlaylistContainerVisibility(false);
+            this.resultsContainer.innerHTML = '';
+            if (updateHistory) {
+                this.pushHistoryRoute({ view: 'home' });
+            }
+            return;
+        }
+
+        if (route.view === 'search') {
+            this.searchTypeSelect.value = route.searchType || 's';
+            this.searchInput.value = route.query || '';
+            this.updateSearchPlaceholder();
+            await this.handleSearch(updateHistory);
+            return;
+        }
+
+        if (route.view === 'artist' && route.artistId) {
+            await this.fetchArtistAlbums(route.artistId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'album' && route.albumId) {
+            await this.fetchAlbumTracks(route.albumId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'playlist' && route.playlistId) {
+            await this.fetchPlaylistTracks(route.playlistId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'listenbrainz_playlists' && route.username) {
+            this.searchTypeSelect.value = 'listenbrainz';
+            this.searchInput.value = route.username;
+            this.updateSearchPlaceholder();
+            await this.handleListenbrainzPlaylists(route.username, updateHistory);
+            return;
+        }
+
+        if (route.view === 'listenbrainz_playlist_tracks' && route.playlistId) {
+            await this.fetchListenbrainzPlaylistTracks(route.playlistId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'lastfm_playlist' && route.playlistUrl) {
+            this.searchTypeSelect.value = 'lastfm';
+            this.searchInput.value = route.playlistUrl;
+            this.updateSearchPlaceholder();
+            await this.handleLastfmPlaylist(route.playlistUrl, updateHistory);
+            return;
+        }
+
+        if (route.view === 'youtube_music_playlist' && route.playlistUrl) {
+            this.searchTypeSelect.value = 'youtube_music';
+            this.searchInput.value = route.playlistUrl;
+            this.updateSearchPlaceholder();
+            await this.handleYoutubeMusicPlaylist(route.playlistUrl, updateHistory);
+            return;
+        }
+
+        if (route.view === 'similar_tracks' && route.trackId) {
+            await this.fetchSimilarTracks(route.trackId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'similar_albums' && route.albumId) {
+            await this.fetchSimilarAlbums(route.albumId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'similar_artists' && route.artistId) {
+            await this.fetchSimilarArtists(route.artistId, updateHistory);
+            return;
+        }
     }
 
     private openFlyout(): void {
@@ -931,6 +1190,8 @@ class App {
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
+        const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
+        const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
 
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
@@ -1026,6 +1287,7 @@ class App {
             { key: 'id3_tagged', label: 'ID3 Tag Created' },
             { key: 'converted', label: 'Converted to MP3' },
             { key: 'written', label: 'Written to Disk' },
+            ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
             {
                 key: 'playlist_added',
                 label: playlistName ? `Added to Playlist "${this.escapeHtml(String(playlistName))}"` : 'Added to Playlist'
@@ -1061,6 +1323,7 @@ class App {
                     </div>
                 </div>
                 ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
+                ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
                 <div class="job-stages">
                     ${stageHtml}
                 </div>
@@ -1888,13 +2151,13 @@ class App {
         }
     }
 
-    private async handleSearch(): Promise<void> {
+    private async handleSearch(updateHistory: boolean = true): Promise<void> {
         const searchType = this.searchTypeSelect.value;
         const query = this.searchInput.value.trim();
         
         if (searchType === 'listenbrainz') {
             // Handle ListenBrainz playlists without requiring query
-            await this.handleListenbrainzPlaylists();
+            await this.handleListenbrainzPlaylists(undefined, updateHistory);
             return;
         }
 
@@ -1905,14 +2168,22 @@ class App {
 
         if (searchType === 'lastfm') {
             // Handle Last.fm playlist with progressive search
-            await this.handleLastfmPlaylist(query);
+            await this.handleLastfmPlaylist(query, updateHistory);
             return;
         }
 
         if (searchType === 'youtube_music') {
             // Handle YouTube Music playlist with progressive search
-            await this.handleYoutubeMusicPlaylist(query);
+            await this.handleYoutubeMusicPlaylist(query, updateHistory);
             return;
+        }
+
+        if (updateHistory) {
+            this.pushHistoryRoute({
+                view: 'search',
+                searchType,
+                query
+            });
         }
 
         this.displayMessage('Searching...');
@@ -1932,8 +2203,11 @@ class App {
         }
     }
 
-    private async handleLastfmPlaylist(playlistUrl: string): Promise<void> {
+    private async handleLastfmPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'lastfm_playlist', playlistUrl });
+        }
         this.displayMessage('Scraping Last.fm playlist...');
 
         try {
@@ -2065,8 +2339,11 @@ class App {
         }
     }
 
-    private async handleYoutubeMusicPlaylist(playlistUrl: string): Promise<void> {
+    private async handleYoutubeMusicPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'youtube_music_playlist', playlistUrl });
+        }
         this.displayMessage('Loading YouTube Music playlist...');
 
         try {
@@ -2191,12 +2468,16 @@ class App {
         }
     }
 
-    private async handleListenbrainzPlaylists(): Promise<void> {
-        const username = this.searchInput.value.trim();
+    private async handleListenbrainzPlaylists(usernameOverride?: string, updateHistory: boolean = true): Promise<void> {
+        const username = (usernameOverride ?? this.searchInput.value).trim();
         
         if (!username) {
             this.displayMessage('Please enter ListenBrainz username');
             return;
+        }
+
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'listenbrainz_playlists', username });
         }
 
         this.displayMessage('Loading ListenBrainz playlists...');
@@ -2259,8 +2540,11 @@ class App {
         `;
     }
 
-    private async fetchListenbrainzPlaylistTracks(playlistId: string): Promise<void> {
+    private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading ListenBrainz playlist tracks...');
 
@@ -2562,9 +2846,16 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
+                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
+                    match.variants.every(v =>
+                        (v.format === 'mp3' || v.format === 'mpeg') &&
+                        typeof v.bitrate === 'number' && v.bitrate <= 192
+                    );
                 const chip = document.createElement('span');
-                chip.className = 'plex-existing-chip';
-                chip.textContent = 'In Plex';
+                chip.className = allLowQualityMp3
+                    ? 'plex-existing-chip plex-existing-chip--low-quality'
+                    : 'plex-existing-chip';
+                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
                 chip.title = this.buildPlexExistingTooltip(match.variants || []);
                 metadataEl.appendChild(chip);
             }
@@ -2579,11 +2870,13 @@ class App {
         }
 
         const details = variants.map((variant) => {
-            const fmt = (variant.format || 'unknown').toUpperCase();
             const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? `${variant.bitrate} kbps`
-                : 'bitrate unknown';
-            return `${fmt} • ${bitrate}`;
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            const path = variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+            return path;
         });
 
         return `Exists in Plex\n${details.join('\n')}`;
@@ -2711,8 +3004,11 @@ class App {
         return '';
     }
 
-    private async fetchPlaylistTracks(playlistId: string): Promise<void> {
+    private async fetchPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'playlist', playlistId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading playlist tracks...');
 
@@ -3255,8 +3551,11 @@ class App {
         }
     }
 
-    private async fetchArtistAlbums(artistId: number): Promise<void> {
+    private async fetchArtistAlbums(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'artist', artistId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading artist albums...');
 
@@ -3303,8 +3602,11 @@ class App {
         }
     }
 
-    private async fetchAlbumTracks(albumId: number): Promise<void> {
+    private async fetchAlbumTracks(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'album';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'album', albumId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading album tracks...');
 
@@ -3394,8 +3696,11 @@ class App {
         }
     }
 
-    private async fetchSimilarTracks(trackId: number): Promise<void> {
+    private async fetchSimilarTracks(trackId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'similar_tracks', trackId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading track recommendations...');
 
@@ -3465,8 +3770,11 @@ class App {
         }
     }
 
-    private async fetchSimilarAlbums(albumId: number): Promise<void> {
+    private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'similar_albums', albumId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading similar albums...');
 
@@ -3504,8 +3812,11 @@ class App {
         }
     }
 
-    private async fetchSimilarArtists(artistId: number): Promise<void> {
+    private async fetchSimilarArtists(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'similar_artists', artistId });
+        }
         this.stopPlayback();
         this.displayMessage('Loading similar artists...');
 

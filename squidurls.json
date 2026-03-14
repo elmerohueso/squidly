@@ -25,7 +25,7 @@
     },
     {
         "name": "hund",
-        "encodedUrl": "aHR0cDovL2h1bmQucXFkbC5zaXRl"
+        "encodedUrl": "aHR0cHM6Ly9odW5kLnFxZGwuc2l0ZQ=="
     },
     {
         "name": "katze",
@@ -38,5 +38,9 @@
     {
         "name": "maus",
         "encodedUrl": "aHR0cHM6Ly9tYXVzLnFxZGwuc2l0ZQ=="
+    },
+    {
+        "name": "monochrome",
+        "encodedUrl": "aHR0cHM6Ly9hcnJhbi5tb25vY2hyb21lLnRm"
     }
 ]

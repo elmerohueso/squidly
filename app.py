@@ -2180,43 +2180,29 @@ def process_download_job(job_id, payload):
         flush=True
     )
 
-    metadata_rows = []
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT title, artist, album, format, bitrate, file_path
-        FROM plex_songs
-        WHERE lower(COALESCE(title, '')) = lower(%s)
-          AND lower(COALESCE(artist, '')) = lower(%s)
-          AND lower(COALESCE(album, '')) = lower(%s)
-        ORDER BY updated_at DESC
-        """,
-        (track_title, artist_name, album_name)
-    )
-    metadata_rows = cur.fetchall() or []
-
-    if not metadata_rows:
-        cur.execute(
-            """
-            SELECT title, artist, album, format, bitrate, file_path
-            FROM plex_songs
-            WHERE lower(COALESCE(title, '')) = lower(%s)
-              AND lower(COALESCE(artist, '')) = lower(%s)
-            ORDER BY updated_at DESC
-            """,
-            (track_title, artist_name)
-        )
-        metadata_rows = cur.fetchall() or []
+    metadata_rows = _lookup_plex_songs(cur, track_title, artist_name, album_name)
     conn.close()
 
-    def format_matches_selected(row_format):
-        fmt = str(row_format or '').strip().lower()
-        if file_format == 'mp3':
-            return fmt in ('mp3', 'mpeg')
-        return fmt not in ('', 'mp3', 'mpeg')
+    matching_rows = [row for row in metadata_rows if _matches_requested_format(file_format, row.get('format'))]
 
-    matching_rows = [row for row in metadata_rows if format_matches_selected(row.get('format'))]
+    # If downloading MP3, skip the "existing match" shortcut for low-quality copies (≤192 kbps).
+    # Those will be re-downloaded and overwrite the existing file.
+    low_quality_mp3_rows = []
+    if file_format == 'mp3':
+        kept, low_quality_mp3_rows = [], []
+        for row in matching_rows:
+            if (_matches_requested_format('mp3', row.get('format'))
+                    and isinstance(row.get('bitrate'), int)
+                    and row['bitrate'] <= 192):
+                low_quality_mp3_rows.append(row)
+            else:
+                kept.append(row)
+        matching_rows = kept
+
+    is_upgrading = not matching_rows and bool(low_quality_mp3_rows)
+    upgrade_from_bitrate = low_quality_mp3_rows[0].get('bitrate') if is_upgrading else None
 
     summary_rows = [
         {
@@ -2230,6 +2216,11 @@ def process_download_job(job_id, payload):
         f"[DOWNLOAD_DECISION] Job {job_id}: metadata_candidates={len(metadata_rows)}, matching_selected_format={len(matching_rows)}, candidate_summary={summary_rows}",
         flush=True
     )
+    if is_upgrading:
+        print(
+            f"[DOWNLOAD_DECISION] Job {job_id}: re-downloading to upgrade existing MP3 ({upgrade_from_bitrate} kbps ≤ 192 threshold)",
+            flush=True
+        )
 
     if matching_rows:
         matched_row = matching_rows[0]
@@ -2237,7 +2228,7 @@ def process_download_job(job_id, payload):
         if matched_path:
             full_path = matched_path
         print(
-            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
+            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format and quality (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
             flush=True
         )
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
@@ -2499,9 +2490,11 @@ def process_download_job(job_id, payload):
     else:
         print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
         stages['playlist_added'] = 'skipped'
+    if is_upgrading:
+        stages['upgraded_existing'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
-    return {
+    result = {
         'file_path': full_path,
         'format': file_format,
         'artist': artist_name,
@@ -2510,6 +2503,10 @@ def process_download_job(job_id, payload):
         'playlist_name': playlist_name,
         'stages': stages
     }
+    if is_upgrading:
+        result['download_upgraded_existing'] = True
+        result['upgraded_from_bitrate'] = upgrade_from_bitrate
+    return result
 
 def download_job_worker():
     print("[DOWNLOAD_WORKER] Background worker started", flush=True)
@@ -3913,6 +3910,78 @@ def _matches_requested_format(file_format, candidate_format):
 
     return normalized_candidate not in ('', 'mp3', 'mpeg')
 
+def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
+    """Query plex_songs for rows matching title+artist+album, falling back to title+artist.
+    If fuzzy=True, falls back further to normalized text matching when exact matches fail."""
+    rows = []
+    if album:
+        cur.execute(
+            """
+            SELECT title, artist, album, format, bitrate, file_path
+            FROM plex_songs
+            WHERE lower(COALESCE(title, '')) = lower(%s)
+              AND lower(COALESCE(artist, '')) = lower(%s)
+              AND lower(COALESCE(album, '')) = lower(%s)
+            ORDER BY updated_at DESC
+            """,
+            (title, artist, album)
+        )
+        rows = cur.fetchall() or []
+
+    if not rows:
+        cur.execute(
+            """
+            SELECT title, artist, album, format, bitrate, file_path
+            FROM plex_songs
+            WHERE lower(COALESCE(title, '')) = lower(%s)
+              AND lower(COALESCE(artist, '')) = lower(%s)
+            ORDER BY updated_at DESC
+            """,
+            (title, artist)
+        )
+        rows = cur.fetchall() or []
+
+    if not rows and fuzzy:
+        normalized_title = normalize_match_text(title, strip_trailing_parenthetical=True)
+        normalized_artist = normalize_match_text(artist)
+        normalized_album = normalize_match_text(album, strip_trailing_parenthetical=True) if album else ''
+
+        # For multi-artist strings like "Evanescence, K.Flay", also try each individual
+        # artist so a Plex track stored under one artist still gets matched.
+        artist_candidates = [normalized_artist]
+        split_parts = [normalize_match_text(a.strip()) for a in artist.split(',') if a.strip()]
+        if len(split_parts) > 1:
+            artist_candidates.extend(split_parts)
+
+        seen_file_paths = set()
+        for candidate_artist in artist_candidates:
+            cur.execute(
+                """
+                SELECT title, artist, album, format, bitrate, file_path
+                FROM plex_songs
+                WHERE trim(regexp_replace(regexp_replace(lower(COALESCE(artist, '')), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g')) = %s
+                """,
+                (candidate_artist,)
+            )
+            for candidate in (cur.fetchall() or []):
+                fp = candidate.get('file_path')
+                if fp in seen_file_paths:
+                    continue
+                candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
+                candidate_album = normalize_match_text(candidate.get('album'), strip_trailing_parenthetical=True)
+
+                if candidate_title != normalized_title:
+                    continue
+
+                if normalized_album and candidate_album != normalized_album:
+                    continue
+
+                seen_file_paths.add(fp)
+                rows.append(candidate)
+
+    return rows
+
+
 def _download_job_exists_in_plex(cur, result_payload, job_payload):
     if not isinstance(result_payload, dict):
         return False
@@ -3928,34 +3997,7 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
         job_payload.get('format') if isinstance(job_payload, dict) else None
     )
 
-    rows = []
-    if album:
-        cur.execute(
-            """
-            SELECT format
-            FROM plex_songs
-            WHERE lower(COALESCE(title, '')) = lower(%s)
-              AND lower(COALESCE(artist, '')) = lower(%s)
-              AND lower(COALESCE(album, '')) = lower(%s)
-            ORDER BY updated_at DESC
-            """,
-            (title, artist, album)
-        )
-        rows = cur.fetchall() or []
-
-    if not rows:
-        cur.execute(
-            """
-            SELECT format
-            FROM plex_songs
-            WHERE lower(COALESCE(title, '')) = lower(%s)
-              AND lower(COALESCE(artist, '')) = lower(%s)
-            ORDER BY updated_at DESC
-            """,
-            (title, artist)
-        )
-        rows = cur.fetchall() or []
-
+    rows = _lookup_plex_songs(cur, title, artist, album)
     return any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
 
 def cleanup_file(path: str) -> None:
@@ -4996,65 +5038,7 @@ def match_plex_songs_endpoint():
             matches.append({'exists': False, 'variants': []})
             continue
 
-        rows = []
-
-        if album:
-            cur.execute(
-                """
-                SELECT format, bitrate
-                FROM plex_songs
-                WHERE lower(title) = lower(%s)
-                  AND lower(COALESCE(artist, '')) = lower(%s)
-                  AND lower(COALESCE(album, '')) = lower(%s)
-                """,
-                (title, artist, album)
-            )
-            rows = cur.fetchall() or []
-
-        if not rows:
-            cur.execute(
-                """
-                SELECT format, bitrate
-                FROM plex_songs
-                WHERE lower(title) = lower(%s)
-                  AND lower(COALESCE(artist, '')) = lower(%s)
-                """,
-                (title, artist)
-            )
-            rows = cur.fetchall() or []
-
-        if not rows:
-            normalized_title = normalize_match_text(title, strip_trailing_parenthetical=True)
-            normalized_artist = normalize_match_text(artist)
-            normalized_album = normalize_match_text(album, strip_trailing_parenthetical=True) if album else ''
-
-            cur.execute(
-                """
-                SELECT title, artist, album, format, bitrate
-                FROM plex_songs
-                WHERE trim(regexp_replace(regexp_replace(lower(COALESCE(artist, '')), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g')) = %s
-                """,
-                (normalized_artist,)
-            )
-            candidate_rows = cur.fetchall() or []
-            normalized_rows = []
-
-            for candidate in candidate_rows:
-                candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
-                candidate_album = normalize_match_text(candidate.get('album'), strip_trailing_parenthetical=True)
-
-                if candidate_title != normalized_title:
-                    continue
-
-                if normalized_album and candidate_album != normalized_album:
-                    continue
-
-                normalized_rows.append({
-                    'format': candidate.get('format'),
-                    'bitrate': candidate.get('bitrate')
-                })
-
-            rows = normalized_rows
+        rows = _lookup_plex_songs(cur, title, artist, album, fuzzy=True)
 
         variants = []
         seen = set()
@@ -5068,7 +5052,8 @@ def match_plex_songs_endpoint():
             seen.add(key)
             variants.append({
                 'format': fmt,
-                'bitrate': bitrate_int
+                'bitrate': bitrate_int,
+                'file_path': str(row.get('file_path') or '').strip() or None
             })
 
         matches.append({
