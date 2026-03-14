@@ -138,6 +138,7 @@ interface JobStageMap {
     converted?: string;
     written?: string;
     playlist_added?: string;
+    upgraded_existing?: string;
 }
 
 interface JobResult {
@@ -932,6 +933,8 @@ class App {
         const stages = job.result?.stages || {};
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
+        const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
+        const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
 
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
@@ -1027,6 +1030,7 @@ class App {
             { key: 'id3_tagged', label: 'ID3 Tag Created' },
             { key: 'converted', label: 'Converted to MP3' },
             { key: 'written', label: 'Written to Disk' },
+            ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
             {
                 key: 'playlist_added',
                 label: playlistName ? `Added to Playlist "${this.escapeHtml(String(playlistName))}"` : 'Added to Playlist'
@@ -1062,6 +1066,7 @@ class App {
                     </div>
                 </div>
                 ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
+                ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
                 <div class="job-stages">
                     ${stageHtml}
                 </div>
@@ -2563,9 +2568,16 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
+                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
+                    match.variants.every(v =>
+                        (v.format === 'mp3' || v.format === 'mpeg') &&
+                        typeof v.bitrate === 'number' && v.bitrate <= 192
+                    );
                 const chip = document.createElement('span');
-                chip.className = 'plex-existing-chip';
-                chip.textContent = 'In Plex';
+                chip.className = allLowQualityMp3
+                    ? 'plex-existing-chip plex-existing-chip--low-quality'
+                    : 'plex-existing-chip';
+                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
                 chip.title = this.buildPlexExistingTooltip(match.variants || []);
                 metadataEl.appendChild(chip);
             }

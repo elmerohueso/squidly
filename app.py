@@ -2187,6 +2187,23 @@ def process_download_job(job_id, payload):
 
     matching_rows = [row for row in metadata_rows if _matches_requested_format(file_format, row.get('format'))]
 
+    # If downloading MP3, skip the "existing match" shortcut for low-quality copies (≤192 kbps).
+    # Those will be re-downloaded and overwrite the existing file.
+    low_quality_mp3_rows = []
+    if file_format == 'mp3':
+        kept, low_quality_mp3_rows = [], []
+        for row in matching_rows:
+            if (_matches_requested_format('mp3', row.get('format'))
+                    and isinstance(row.get('bitrate'), int)
+                    and row['bitrate'] <= 192):
+                low_quality_mp3_rows.append(row)
+            else:
+                kept.append(row)
+        matching_rows = kept
+
+    is_upgrading = not matching_rows and bool(low_quality_mp3_rows)
+    upgrade_from_bitrate = low_quality_mp3_rows[0].get('bitrate') if is_upgrading else None
+
     summary_rows = [
         {
             'format': str(row.get('format') or '').strip().lower() or 'unknown',
@@ -2199,6 +2216,11 @@ def process_download_job(job_id, payload):
         f"[DOWNLOAD_DECISION] Job {job_id}: metadata_candidates={len(metadata_rows)}, matching_selected_format={len(matching_rows)}, candidate_summary={summary_rows}",
         flush=True
     )
+    if is_upgrading:
+        print(
+            f"[DOWNLOAD_DECISION] Job {job_id}: re-downloading to upgrade existing MP3 ({upgrade_from_bitrate} kbps ≤ 192 threshold)",
+            flush=True
+        )
 
     if matching_rows:
         matched_row = matching_rows[0]
@@ -2206,7 +2228,7 @@ def process_download_job(job_id, payload):
         if matched_path:
             full_path = matched_path
         print(
-            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
+            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format and quality (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
             flush=True
         )
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
@@ -2468,9 +2490,11 @@ def process_download_job(job_id, payload):
     else:
         print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
         stages['playlist_added'] = 'skipped'
+    if is_upgrading:
+        stages['upgraded_existing'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
-    return {
+    result = {
         'file_path': full_path,
         'format': file_format,
         'artist': artist_name,
@@ -2479,6 +2503,10 @@ def process_download_job(job_id, payload):
         'playlist_name': playlist_name,
         'stages': stages
     }
+    if is_upgrading:
+        result['download_upgraded_existing'] = True
+        result['upgraded_from_bitrate'] = upgrade_from_bitrate
+    return result
 
 def download_job_worker():
     print("[DOWNLOAD_WORKER] Background worker started", flush=True)

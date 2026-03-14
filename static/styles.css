@@ -552,6 +552,12 @@ main {
     cursor: help;
 }
 
+.plex-existing-chip--low-quality {
+    border-color: rgba(255, 180, 0, 0.45);
+    background: rgba(255, 180, 0, 0.1);
+    color: #e6a800;
+}
+
 .plex-chip-separator {
     color: var(--text-muted);
 }
