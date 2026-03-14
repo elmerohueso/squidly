@@ -11,17 +11,23 @@ A music downloader via SquidWTF and its mirrors, built with Flask and TypeScript
 
 ## Quick Start
 
-1. **Download the compose file:**
+1. **Create environment files:**
    ```bash
-   curl -O https://raw.githubusercontent.com/elmerohueso/squidly/main/docker-compose.yml
+   cp .env.example .env
+   cp .env.dev.example .env.dev
    ```
 
-2. **Run the application:**
+2. **Run the production stack:**
    ```bash
-   docker-compose up
+   docker compose up
    ```
 
-3. **Access the application:**
+3. **Or run the development stack:**
+   ```bash
+   docker compose -f docker-compose.dev.yml up
+   ```
+
+4. **Access the application:**
    Open your browser to `http://localhost:5000`
 
 ## Volume Mounts

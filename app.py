@@ -566,7 +566,7 @@ import re
 import threading
 import socket
 from difflib import SequenceMatcher
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode, quote_plus
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
 from mutagen.mp3 import MP3
@@ -580,8 +580,31 @@ app = Flask(__name__,
             template_folder='templates')
 CORS(app)
 
-# Get database URL from environment
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://squidly:squidly@localhost:5432/squidly')
+# Build database URL from required PostgreSQL environment variables.
+postgres_host = (os.environ.get('POSTGRES_HOST') or os.environ.get('PORTGRES_HOST') or '').strip()
+postgres_db = (os.environ.get('POSTGRES_DB') or '').strip()
+postgres_user = (os.environ.get('POSTGRES_USER') or '').strip()
+postgres_password = (os.environ.get('POSTGRES_PASSWORD') or '').strip()
+
+missing_postgres_vars = []
+if not postgres_host:
+    missing_postgres_vars.append('POSTGRES_HOST')
+if not postgres_db:
+    missing_postgres_vars.append('POSTGRES_DB')
+if not postgres_user:
+    missing_postgres_vars.append('POSTGRES_USER')
+if not postgres_password:
+    missing_postgres_vars.append('POSTGRES_PASSWORD')
+
+if missing_postgres_vars:
+    raise RuntimeError(
+        'Missing required PostgreSQL environment variables: ' + ', '.join(missing_postgres_vars)
+    )
+
+DATABASE_URL = (
+    f"postgresql://{quote_plus(postgres_user)}:{quote_plus(postgres_password)}"
+    f"@{postgres_host}:5432/{postgres_db}"
+)
 DOWNLOADS_ROOT = '/downloads'
 DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
 DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
