@@ -159,6 +159,7 @@ interface JobResult {
 interface PlexSongVariant {
     format?: string;
     bitrate?: number | null;
+    file_path?: string | null;
 }
 
 interface PlexTrackMatch {
@@ -2579,11 +2580,13 @@ class App {
         }
 
         const details = variants.map((variant) => {
-            const fmt = (variant.format || 'unknown').toUpperCase();
             const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? `${variant.bitrate} kbps`
-                : 'bitrate unknown';
-            return `${fmt} • ${bitrate}`;
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            const path = variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+            return path;
         });
 
         return `Exists in Plex\n${details.join('\n')}`;
