@@ -550,6 +550,25 @@ def plex_library_update_job_worker():
             time.sleep(5)
 from flask import Flask, render_template, jsonify, request, session
 from flask_cors import CORS
+import threading
+# --- Plex Healthcheck Status Tracking ---
+_plex_health_status = {
+    'ok': None,           # True/False/None
+    'value': None,        # server name or error
+    'timestamp': None     # datetime of last check
+}
+_plex_health_status_lock = threading.Lock()
+
+def set_plex_health_status(ok, value):
+    from datetime import datetime
+    with _plex_health_status_lock:
+        _plex_health_status['ok'] = ok
+        _plex_health_status['value'] = value
+        _plex_health_status['timestamp'] = datetime.utcnow().isoformat() + 'Z'
+
+def get_plex_health_status():
+    with _plex_health_status_lock:
+        return dict(_plex_health_status)
 import os
 import json
 import base64
@@ -589,20 +608,43 @@ plex_pin_sessions = {}
 import threading
 
 @app.route('/api/plex/healthcheck', methods=['GET'])
+def run_plex_healthcheck():
+    ok, value = plex_healthcheck()
+    if ok:
+        return jsonify({'ok': True, 'server_name': value})
+    else:
+        # 400 for missing config, 200 for other errors (to match previous behavior)
+        status = 400 if value == 'No Plex credentials configured' else 200
+        return jsonify({'ok': False, 'error': value}), status
+
+@app.route('/api/plex/health', methods=['GET'])
+def plex_health_status():
+    """Return the cached Plex healthcheck state without triggering a new check."""
+    return jsonify(get_plex_health_status())
+
 def plex_healthcheck():
-    """Check if current plex_config credentials can connect to Plex server."""
+    """Check if current plex_config credentials can connect to Plex server. Returns (ok, value_or_error) tuple."""
+    print('[DEBUG] /api/plex/healthcheck called', flush=True)
     config = get_plex_config()
     server_url = (config.get('server_url') or '').strip()
     api_token = (config.get('api_token') or '').strip()
+    print(f'[DEBUG] server_url={server_url!r}, api_token={(api_token[:4] + "..." + api_token[-4:]) if api_token else None}', flush=True)
     if not server_url or not api_token:
-        return jsonify({'ok': False, 'error': 'No Plex credentials configured'}), 400
+        print('[DEBUG] No Plex credentials configured', flush=True)
+        set_plex_health_status(False, 'No Plex credentials configured')
+        return (False, 'No Plex credentials configured')
     try:
+        print('[DEBUG] Attempting to connect to Plex server for healthcheck...', flush=True)
         plex = PlexServer(server_url, api_token, timeout=10)
         # Try to fetch server friendlyName as a health check
         name = getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'
-        return jsonify({'ok': True, 'server_name': name})
+        print(f'[DEBUG] Plex healthcheck succeeded, server_name={name}', flush=True)
+        set_plex_health_status(True, name)
+        return (True, name)
     except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 200
+        print(f'[DEBUG] Plex healthcheck failed: {e}', flush=True)
+        set_plex_health_status(False, str(e))
+        return (False, str(e))
 
 @app.route('/api/plex/clear_credentials', methods=['POST'])
 def plex_clear_credentials():
@@ -612,6 +654,8 @@ def plex_clear_credentials():
     cur.execute('UPDATE plex_config SET server_url = NULL, api_token = NULL, updated_at = NOW() WHERE id = 1')
     conn.commit()
     conn.close()
+    # Keep the cached health state in sync: credentials are now missing.
+    set_plex_health_status(False, 'No Plex credentials configured')
     return jsonify({'ok': True})
 
 @app.route('/api/plex/pin/start', methods=['POST'])
@@ -3286,7 +3330,7 @@ url_iterator = cycle(SQUID_URLS)
 print("Squidly starting up...", flush=True)
 validate_all_endpoints()
 backfill_plex_playlist_add_parent_links()
-print("Validation complete, server ready to accept requests.\n", flush=True)
+plex_healthcheck()
 
 # Start background worker for retrying failed Plex playlist additions
 plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
@@ -3326,10 +3370,16 @@ try:
 except Exception as e:
     print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
 
+
+# Helper to check if Plex credentials are valid
+def get_plex_credentials_valid():
+    ok, _ = plex_healthcheck()
+    return ok
+
 @app.route('/')
 def index():
     """Serve the main page"""
-    return render_template('index.html')
+    return render_template('index.html', plex_credentials_valid=get_plex_credentials_valid())
 
 @app.route('/search/', methods=['GET'])
 def search():

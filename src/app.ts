@@ -262,6 +262,7 @@ class App {
     private startPlexSyncButton: HTMLButtonElement;
     private plexSyncStatusEl: HTMLElement;
     private plexConfigStatusEl: HTMLElement;
+    private plexClearCredentialsButton: HTMLButtonElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
@@ -345,6 +346,7 @@ class App {
         this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
         this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
         this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
+        this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         
         this.initializeEventListeners();
         this.streamQuality = this.loadStreamQualityFromCookie();
@@ -355,6 +357,7 @@ class App {
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadPlexConfig();
+        void this.updatePlexClearCredentialsButton();
         this.updateEndpointStatus(); // Initial load
         
         // Update status every 30 seconds
@@ -406,7 +409,39 @@ class App {
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         // Remove save/test config listeners, add PIN login logic
-        this.plexLoginButton.addEventListener('click', () => this.startPlexPinLogin());
+        this.plexLoginButton.addEventListener('click', async () => {
+            await this.startPlexPinLogin();
+            void this.updatePlexClearCredentialsButton();
+        });
+
+        if (this.plexClearCredentialsButton) {
+            this.plexClearCredentialsButton.addEventListener('click', async () => {
+                try {
+                    const resp = await fetch('/api/plex/clear_credentials', { method: 'POST' });
+                    if (!resp.ok) {
+                        throw new Error('Failed to clear Plex credentials');
+                    }
+
+                    // Ensure the cached health status is updated (server sets ok=false when credentials are cleared)
+                    await fetch('/api/plex/health', { cache: 'no-store' });
+                } catch (e) {
+                    console.warn('Failed to clear Plex credentials:', e);
+                } finally {
+                    // Immediately reflect cleared state in the UI, regardless of timing
+                    if (this.plexClearCredentialsButton) {
+                        this.plexClearCredentialsButton.style.display = 'none';
+                    }
+                    if (this.plexLoginButton) {
+                        this.plexLoginButton.style.display = '';
+                        this.plexLoginButton.disabled = false;
+                    }
+
+                    await this.loadPlexConfig();
+                    void this.updatePlexClearCredentialsButton();
+                }
+            });
+        }
+
         this.plexPinCopyButton.addEventListener('click', () => {
             const pin = this.plexPinDisplay.textContent || '';
             if (pin) {
@@ -1809,23 +1844,28 @@ class App {
 
     // --- PIN OAuth logic ---
     private async startPlexPinLogin(): Promise<void> {
+        console.debug('[PLEX_UI] startPlexPinLogin called');
         this.plexPinStatus.textContent = '';
         this.plexPinDisplay.textContent = '';
         this.plexPinContainer.style.display = 'block';
         this.plexPinStatus.textContent = 'Requesting PIN...';
         try {
             const resp = await fetch('/api/plex/pin/start', { method: 'POST' });
+            console.debug('[PLEX_UI] /api/plex/pin/start response', resp.status);
             const data = await resp.json();
+            console.debug('[PLEX_UI] /api/plex/pin/start data', data);
             if (!data.ok) throw new Error(data.error || 'Failed to start PIN login');
             this.plexPinDisplay.textContent = data.pin;
             this.plexPinStatus.textContent = 'Enter this PIN at plex.tv/link';
             await this.pollPlexPinStatus(data.client_id, data.pin, 300);
         } catch (e) {
+            console.debug('[PLEX_UI] startPlexPinLogin error', e);
             this.plexPinStatus.textContent = 'Failed to start PIN login.';
         }
     }
 
     private async pollPlexPinStatus(client_id: string, pin: string, timeoutSeconds: number): Promise<void> {
+        console.debug('[PLEX_UI] pollPlexPinStatus started', { client_id, pin });
         let elapsed = 0;
         const pollInterval = 2000;
         while (elapsed < timeoutSeconds * 1000) {
@@ -1837,7 +1877,9 @@ class App {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ client_id, pin })
                 });
+                console.debug('[PLEX_UI] /api/plex/pin/status response', resp.status);
                 const data = await resp.json();
+                console.debug('[PLEX_UI] /api/plex/pin/status data', data);
                 if (data.ok && data.token && data.baseurl) {
                     this.plexPinStatus.textContent = '✓ Plex login successful!';
                     this.plexPinDisplay.textContent = '';
@@ -1845,6 +1887,9 @@ class App {
                     this.isPlexConfigured = true;
                     this.updatePlexConfigStatus('✓ Configured');
                     await this.loadPlexConfig();
+
+                    // Refresh cached health status so the UI can update properly
+                    await fetch('/api/plex/healthcheck', { cache: 'no-store' }).catch(() => null);
                     return;
                 } else if (data.expired) {
                     this.plexPinStatus.textContent = 'PIN expired. Please try again.';
@@ -1852,10 +1897,12 @@ class App {
                     return;
                 }
             } catch (e) {
+                console.debug('[PLEX_UI] pollPlexPinStatus error', e);
                 this.plexPinStatus.textContent = 'Error polling PIN status.';
                 return;
             }
         }
+        console.debug('[PLEX_UI] pollPlexPinStatus timed out');
         this.plexPinStatus.textContent = 'Login timed out. Please try again.';
         this.plexPinDisplay.textContent = '';
     }
@@ -1891,8 +1938,41 @@ class App {
     }
 
     private updatePlexConfigStatus(message: string): void {
+        if (!this.plexConfigStatusEl) {
+            console.debug('[PLEX_UI] updatePlexConfigStatus: plexConfigStatusEl not found');
+            return;
+        }
         this.plexConfigStatusEl.textContent = message;
         this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
+    }
+
+    private async updatePlexClearCredentialsButton(): Promise<void> {
+        if (!this.plexClearCredentialsButton) {
+            console.debug('[PLEX_UI] plexClearCredentialsButton not found in DOM');
+            return;
+        }
+
+        try {
+            const resp = await fetch('/api/plex/health', { cache: 'no-store' });
+            console.log('[PLEX_UI] /api/plex/health response', resp.status);
+            if (!resp.ok) {
+                throw new Error('Failed to fetch Plex health status');
+            }
+            const data = await resp.json();
+            const showClear = Boolean(data && data.ok);
+            console.log('[PLEX_UI] plex health data', data, 'showClear', showClear);
+            this.plexClearCredentialsButton.style.display = showClear ? 'inline-block' : 'none';
+            if (this.plexLoginButton) {
+                // Hide login button when clear-credentials is shown (i.e., plex is already connected)
+                this.plexLoginButton.style.display = showClear ? 'none' : '';
+            }
+        } catch (err) {
+            console.debug('[PLEX_UI] updatePlexClearCredentialsButton error', err);
+            this.plexClearCredentialsButton.style.display = 'none';
+            if (this.plexLoginButton) {
+                this.plexLoginButton.disabled = false;
+            }
+        }
     }
 
     private updatePlexPlaylistContainerVisibility(show: boolean): void {
