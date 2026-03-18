@@ -262,6 +262,7 @@ class App {
     private startPlexSyncButton: HTMLButtonElement;
     private plexSyncStatusEl: HTMLElement;
     private plexConfigStatusEl: HTMLElement;
+    private plexConnectedStatusEl: HTMLElement;
     private plexClearCredentialsButton: HTMLButtonElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
@@ -346,6 +347,7 @@ class App {
         this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
         this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
         this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
+        this.plexConnectedStatusEl = document.getElementById('plexConnectedStatus') as HTMLElement;
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         
         this.initializeEventListeners();
@@ -1961,6 +1963,18 @@ class App {
             const data = await resp.json();
             const showClear = Boolean(data && data.ok);
             console.log('[PLEX_UI] plex health data', data, 'showClear', showClear);
+
+            // Update connected-server label
+            if (this.plexConnectedStatusEl) {
+                if (showClear && typeof data.value === 'string' && data.value.trim()) {
+                    this.plexConnectedStatusEl.textContent = `Connected to ${data.value}`;
+                    this.plexConnectedStatusEl.style.display = 'block';
+                } else {
+                    this.plexConnectedStatusEl.textContent = '';
+                    this.plexConnectedStatusEl.style.display = 'none';
+                }
+            }
+
             this.plexClearCredentialsButton.style.display = showClear ? 'inline-block' : 'none';
             if (this.plexLoginButton) {
                 // Hide login button when clear-credentials is shown (i.e., plex is already connected)
@@ -1968,9 +1982,14 @@ class App {
             }
         } catch (err) {
             console.debug('[PLEX_UI] updatePlexClearCredentialsButton error', err);
+            if (this.plexConnectedStatusEl) {
+                this.plexConnectedStatusEl.textContent = '';
+                this.plexConnectedStatusEl.style.display = 'none';
+            }
             this.plexClearCredentialsButton.style.display = 'none';
             if (this.plexLoginButton) {
                 this.plexLoginButton.disabled = false;
+                this.plexLoginButton.style.display = '';
             }
         }
     }
