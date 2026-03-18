@@ -210,30 +210,31 @@
             </div>
             <div class="settings-section">
                 <div class="settings-section-title">Plex Integration</div>
-                <label class="settings-label" for="plexServerUrl">Server URL</label>
-                <input type="text" id="plexServerUrl" class="settings-input" placeholder="http://192.168.1.100:32400 or http://localhost:32400">
-                <p class="settings-hint">Your Plex server address and port</p>
-                
-                <label class="settings-label" for="plexApiToken" style="margin-top: 1rem;">X-Plex-Token</label>
-                <input type="text" id="plexApiToken" class="settings-input" placeholder="Your Plex authentication token">
-                <p class="settings-hint">See <a href="https://docs.wizarr.dev/plex/obtain-a-plex-token" target="_blank" style="color: var(--accent-primary); text-decoration: none;">how to obtain your X-Plex-Token</a></p>
-                
-                <label class="settings-label" for="plexLibraryName" style="margin-top: 1rem;">Music Library</label>
-                <div id="plexLibraryDropdown" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
-                    <select id="plexLibraryName" class="settings-input" style="flex: 1;">
+                <div id="plexConnectedStatus" style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></div>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;">
+                    <button id="plexLoginButton" class="save-button">Login to Plex</button>
+                    <button id="plexClearCredentialsButton" class="save-button" style="background: #b00020; color: #fff; display: none;">Clear credentials</button>
+                </div>
+                <div id="plexPinContainer" style="display:none; margin-bottom: 1rem;">
+                    <label class="settings-label">Plex PIN</label>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <span id="plexPinDisplay" style="font-size: 1.5rem; font-weight: bold; letter-spacing: 0.2em;"></span>
+                        <button id="plexPinCopy" type="button" class="save-button" style="padding: 0.2rem 0.7rem; font-size: 1rem;">Copy</button>
+                    </div>
+                    <p class="settings-hint">Go to <a href="https://plex.tv/link" target="_blank" style="color: var(--accent-primary); text-decoration: none;">plex.tv/link</a> and enter the PIN above.</p>
+                    <p class="settings-note" id="plexPinStatus"></p>
+                </div>
+                <div id="plexLibraryConfig" style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; margin-bottom: 0.75rem;">
+                    <label class="settings-label" for="plexLibraryName">Music Library</label>
+                    <select id="plexLibraryName" class="settings-input" style="width: 100%;">
                         <option value="">Select a library...</option>
                     </select>
-                    
+                    <button id="savePlexConfig" class="save-button" style="white-space: nowrap; width: fit-content;">Save</button>
                 </div>
-                
-                <button id="testPlexConnection" class="save-button" style="flex: 0 0 auto;">Test Connection</button>
-                <button id="savePlexConfig" class="save-button" style="margin-top: 1rem;">Save Plex Config</button>
-                <p class="settings-note" id="plexConfigStatus"></p>
-
                 <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library Sync Interval (hours)</label>
                 <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1" value="24" placeholder="24">
                 <p class="settings-hint">Default: 24 hours</p>
-
+                <p class="settings-note" id="plexConfigStatus"></p>
                 <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library Sync Now</button>
                 <p class="settings-note" id="plexSyncStatus"></p>
             </div>

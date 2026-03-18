@@ -548,8 +548,27 @@ def plex_library_update_job_worker():
         except Exception as e:
             print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
             time.sleep(5)
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session
 from flask_cors import CORS
+import threading
+# --- Plex Healthcheck Status Tracking ---
+_plex_health_status = {
+    'ok': None,           # True/False/None
+    'value': None,        # server name or error
+    'timestamp': None     # datetime of last check
+}
+_plex_health_status_lock = threading.Lock()
+
+def set_plex_health_status(ok, value):
+    from datetime import datetime
+    with _plex_health_status_lock:
+        _plex_health_status['ok'] = ok
+        _plex_health_status['value'] = value
+        _plex_health_status['timestamp'] = datetime.utcnow().isoformat() + 'Z'
+
+def get_plex_health_status():
+    with _plex_health_status_lock:
+        return dict(_plex_health_status)
 import os
 import json
 import base64
@@ -573,12 +592,162 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexPinLogin, MyPlexAccount
 from ytmusicapi import YTMusic
 
 app = Flask(__name__, 
             static_folder='static',
             template_folder='templates')
 CORS(app)
+
+# For PIN login state (in-memory, per-process; production should use persistent store)
+plex_pin_sessions = {}
+# ...existing code...
+
+# --- Plex PIN OAuth API ---
+import threading
+
+@app.route('/api/plex/healthcheck', methods=['GET'])
+def run_plex_healthcheck():
+    ok, value = plex_healthcheck()
+    if ok:
+        return jsonify({'ok': True, 'server_name': value})
+    else:
+        # 400 for missing config, 200 for other errors (to match previous behavior)
+        status = 400 if value == 'No Plex credentials configured' else 200
+        return jsonify({'ok': False, 'error': value}), status
+
+@app.route('/api/plex/health', methods=['GET'])
+def plex_health_status():
+    """Return the cached Plex healthcheck state without triggering a new check."""
+    return jsonify(get_plex_health_status())
+
+def plex_healthcheck():
+    """Check if current plex_config credentials can connect to Plex server. Returns (ok, value_or_error) tuple."""
+    print('[DEBUG] /api/plex/healthcheck called', flush=True)
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+    print(f'[DEBUG] server_url={server_url!r}, api_token={(api_token[:4] + "..." + api_token[-4:]) if api_token else None}', flush=True)
+    if not server_url or not api_token:
+        print('[DEBUG] No Plex credentials configured', flush=True)
+        set_plex_health_status(False, 'No Plex credentials configured')
+        return (False, 'No Plex credentials configured')
+    try:
+        print('[DEBUG] Attempting to connect to Plex server for healthcheck...', flush=True)
+        plex = PlexServer(server_url, api_token, timeout=10)
+        # Try to fetch server friendlyName as a health check
+        name = getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'
+        print(f'[DEBUG] Plex healthcheck succeeded, server_name={name}', flush=True)
+        set_plex_health_status(True, name)
+        return (True, name)
+    except Exception as e:
+        print(f'[DEBUG] Plex healthcheck failed: {e}', flush=True)
+        set_plex_health_status(False, str(e))
+        return (False, str(e))
+
+@app.route('/api/plex/clear_credentials', methods=['POST'])
+def plex_clear_credentials():
+    """Clear the plex_config table (remove credentials and library selection)."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Completely remove any saved config row so it behaves like "never configured".
+    cur.execute('TRUNCATE TABLE plex_config')
+    conn.commit()
+    conn.close()
+    # Keep the cached health state in sync: credentials are now missing.
+    set_plex_health_status(False, 'No Plex credentials configured')
+    return jsonify({'ok': True})
+
+@app.route('/api/plex/pin/start', methods=['POST'])
+def plex_pin_start():
+    print('[DEBUG] /api/plex/pin/start called', flush=True)
+    try:
+        print('[DEBUG] Attempting to create MyPlexPinLogin...', flush=True)
+        pinlogin = MyPlexPinLogin(oauth=False)
+        print('[DEBUG] MyPlexPinLogin created', flush=True)
+        pin = pinlogin.pin
+        print(f'[DEBUG] PIN generated: {pin}', flush=True)
+        client_id = id(pinlogin)
+        plex_pin_sessions[client_id] = pinlogin
+        print(f'[DEBUG] Stored pinlogin in session with client_id: {client_id}', flush=True)
+        return jsonify({
+            'ok': True,
+            'pin': pin,
+            'client_id': client_id
+        })
+    except Exception as e:
+        print(f'[ERROR] Exception in /api/plex/pin/start: {e}', flush=True)
+        import traceback; traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+@app.route('/api/plex/pin/status', methods=['POST'])
+def plex_pin_status():
+    print('[DEBUG] /api/plex/pin/status called', flush=True)
+    data = request.get_json(force=True)
+    client_id = data.get('client_id')
+    pin = data.get('pin')
+    print(f'[DEBUG] Received client_id={client_id}, pin={pin}', flush=True)
+    if not client_id or not pin:
+        print('[DEBUG] Missing client_id or pin', flush=True)
+        return jsonify({'ok': False, 'error': 'Missing client_id or pin'}), 400
+    pinlogin = plex_pin_sessions.get(client_id)
+    if not pinlogin:
+        print('[DEBUG] Session expired or not found for client_id', flush=True)
+        return jsonify({'ok': False, 'error': 'Session expired or not found'}), 404
+    # Check if already expired
+    if getattr(pinlogin, 'expired', False):
+        print('[DEBUG] PIN expired for client_id', flush=True)
+        return jsonify({'ok': False, 'expired': True, 'error': 'PIN expired'}), 410
+    try:
+        print('[DEBUG] Calling pinlogin.checkLogin()', flush=True)
+        if pinlogin.checkLogin():
+            print('[DEBUG] pinlogin.checkLogin() returned True', flush=True)
+            token = getattr(pinlogin, 'token', None)
+            acc = None
+            try:
+                print('[DEBUG] Creating MyPlexAccount', flush=True)
+                acc = MyPlexAccount(token=token)
+            except Exception as e:
+                print(f'[DEBUG] Failed to create MyPlexAccount: {e}', flush=True)
+                return jsonify({'ok': False, 'error': f'Login succeeded but failed to create MyPlexAccount: {e}'}), 500
+            # Find local server baseurl
+            try:
+                print('[DEBUG] Fetching acc.resources()', flush=True)
+                res = acc.resources()
+            except Exception as e:
+                print(f'[DEBUG] Failed to fetch resources: {e}', flush=True)
+                return jsonify({'ok': False, 'error': f'Login succeeded but failed to fetch resources: {e}'}), 500
+            server_res = None
+            for r in res:
+                provides = getattr(r, 'provides', '') or ''
+                if 'server' in provides:
+                    server_res = r
+                    break
+            baseurl = None
+            if server_res:
+                conns = getattr(server_res, 'connections', []) or []
+                local_conn = next((c for c in conns if getattr(c, 'local', False)), None)
+                if local_conn:
+                    baseurl = getattr(local_conn, 'uri', None)
+            print(f'[DEBUG] baseurl={baseurl}, token={token}', flush=True)
+            # Save to DB
+            if baseurl and token:
+                print('[DEBUG] Saving Plex config to DB', flush=True)
+                config = get_plex_config()
+                save_plex_config(baseurl, token, config.get('library_name') or '', config.get('sync_interval_hours') or 24)
+            # Clean up session
+            print('[DEBUG] Cleaning up pin session', flush=True)
+            plex_pin_sessions.pop(client_id, None)
+            return jsonify({'ok': True, 'token': token, 'baseurl': baseurl, 'username': getattr(acc, 'username', None)})
+        else:
+            print('[DEBUG] pinlogin.checkLogin() returned False (pending)', flush=True)
+            return jsonify({'ok': False, 'pending': True})
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f'[DEBUG] Exception in /api/plex/pin/status: {e}\n{tb}', flush=True)
+        return jsonify({'ok': False, 'error': str(e), 'traceback': tb}), 500
 
 # Build database URL from required PostgreSQL environment variables.
 postgres_host = (os.environ.get('POSTGRES_HOST') or os.environ.get('PORTGRES_HOST') or '').strip()
@@ -3162,7 +3331,7 @@ url_iterator = cycle(SQUID_URLS)
 print("Squidly starting up...", flush=True)
 validate_all_endpoints()
 backfill_plex_playlist_add_parent_links()
-print("Validation complete, server ready to accept requests.\n", flush=True)
+plex_healthcheck()
 
 # Start background worker for retrying failed Plex playlist additions
 plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
@@ -3202,10 +3371,16 @@ try:
 except Exception as e:
     print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
 
+
+# Helper to check if Plex credentials are valid
+def get_plex_credentials_valid():
+    ok, _ = plex_healthcheck()
+    return ok
+
 @app.route('/')
 def index():
     """Serve the main page"""
-    return render_template('index.html')
+    return render_template('index.html', plex_credentials_valid=get_plex_credentials_valid())
 
 @app.route('/search/', methods=['GET'])
 def search():
@@ -5023,6 +5198,22 @@ def get_plex_playlists_endpoint():
         return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
 
     return jsonify({'playlists': playlists})
+
+@app.route('/api/plex/libraries', methods=['GET'])
+def get_plex_libraries_endpoint():
+    """Get Plex music libraries for current configuration."""
+    config = get_plex_config()
+    server_url = config.get('server_url')
+    api_token = config.get('api_token')
+
+    if not server_url or not api_token:
+        return jsonify({'error': 'Plex is not configured'}), 400
+
+    success, message, libraries = test_plex_connection(server_url, api_token)
+    if not success:
+        return jsonify({'error': f'Failed to fetch Plex libraries: {message}'}), 500
+
+    return jsonify({'libraries': libraries or []})
 
 def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
     text = str(value or '').strip().lower()
