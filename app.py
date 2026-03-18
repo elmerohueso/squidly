@@ -648,10 +648,11 @@ def plex_healthcheck():
 
 @app.route('/api/plex/clear_credentials', methods=['POST'])
 def plex_clear_credentials():
-    """Clear the plex_config table (remove credentials)."""
+    """Clear the plex_config table (remove credentials and library selection)."""
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('UPDATE plex_config SET server_url = NULL, api_token = NULL, updated_at = NOW() WHERE id = 1')
+    # Completely remove any saved config row so it behaves like "never configured".
+    cur.execute('TRUNCATE TABLE plex_config')
     conn.commit()
     conn.close()
     # Keep the cached health state in sync: credentials are now missing.
@@ -5197,6 +5198,22 @@ def get_plex_playlists_endpoint():
         return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
 
     return jsonify({'playlists': playlists})
+
+@app.route('/api/plex/libraries', methods=['GET'])
+def get_plex_libraries_endpoint():
+    """Get Plex music libraries for current configuration."""
+    config = get_plex_config()
+    server_url = config.get('server_url')
+    api_token = config.get('api_token')
+
+    if not server_url or not api_token:
+        return jsonify({'error': 'Plex is not configured'}), 400
+
+    success, message, libraries = test_plex_connection(server_url, api_token)
+    if not success:
+        return jsonify({'error': f'Failed to fetch Plex libraries: {message}'}), 500
+
+    return jsonify({'libraries': libraries or []})
 
 def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
     text = str(value or '').strip().lower()

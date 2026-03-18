@@ -250,6 +250,7 @@ class App {
     private plexPinDisplay: HTMLElement;
     private plexPinCopyButton: HTMLButtonElement;
     private plexPinStatus: HTMLElement;
+    private plexLibraryConfigContainer: HTMLElement;
     private plexLibraryNameSelect: HTMLSelectElement;
     private plexPlaylistContainer: HTMLElement;
     private plexPlaylistContainerHomeParent: HTMLElement;
@@ -335,6 +336,7 @@ class App {
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
         this.plexPinCopyButton = document.getElementById('plexPinCopy') as HTMLButtonElement;
         this.plexPinStatus = document.getElementById('plexPinStatus') as HTMLElement;
+        this.plexLibraryConfigContainer = document.getElementById('plexLibraryConfig') as HTMLElement;
         this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
         this.plexPlaylistContainer = document.getElementById('plexPlaylistContainer') as HTMLElement;
         this.plexPlaylistContainerHomeParent = this.plexPlaylistContainer.parentElement as HTMLElement;
@@ -410,10 +412,14 @@ class App {
         this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
+        this.savePlexConfigButton.addEventListener('click', () => {
+            void this.savePlexConfig();
+        });
         // Remove save/test config listeners, add PIN login logic
         this.plexLoginButton.addEventListener('click', async () => {
             await this.startPlexPinLogin();
             void this.updatePlexClearCredentialsButton();
+            void this.loadPlexLibraries();
         });
 
         if (this.plexClearCredentialsButton) {
@@ -1829,9 +1835,16 @@ class App {
                     : '24';
                 this.isPlexConfigured = data.has_config ? true : false;
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
+
+                // Show library selector only when Plex is configured (server+token exist) and a library hasn't been saved yet.
+                const shouldShowLibraryConfig = Boolean(data.has_config) && !Boolean(data.library_name);
+                if (this.plexLibraryConfigContainer) {
+                    this.plexLibraryConfigContainer.style.display = shouldShowLibraryConfig ? '' : 'none';
+                }
+
                 this.updatePlexPlaylistContainerVisibility(false);
                 if (this.isPlexConfigured) {
-                    void this.loadPlexPlaylists();
+                    void this.loadPlexLibraries();
                 } else {
                     this.populatePlexPlaylistOptions([]);
                 }
@@ -1841,12 +1854,103 @@ class App {
         }
     }
 
+    private async loadPlexLibraries(): Promise<void> {
+        try {
+            const response = await fetch('/api/plex/libraries');
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex libraries');
+            }
+            const data = await response.json();
+            const libraries = Array.isArray(data.libraries) ? data.libraries : [];
+            const current = this.plexLibraryNameSelect.value || '';
+
+            this.plexLibraryNameSelect.innerHTML = '';
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'Select a library...';
+            this.plexLibraryNameSelect.appendChild(defaultOption);
+
+            libraries.forEach((library: string) => {
+                const option = document.createElement('option');
+                option.value = library;
+                option.textContent = library;
+                this.plexLibraryNameSelect.appendChild(option);
+            });
+
+            if (current) {
+                this.plexLibraryNameSelect.value = current;
+            }
+        } catch (error) {
+            console.warn('Failed to load Plex libraries.', error);
+        }
+    }
+
+    private async savePlexConfig(): Promise<void> {
+        const libraryName = this.plexLibraryNameSelect.value.trim();
+        if (!libraryName) {
+            window.alert('Please select a library before saving.');
+            return;
+        }
+
+        try {
+            const payload = {
+                library_name: libraryName
+            };
+
+            const response = await fetch('/api/plex/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || 'Failed to save Plex configuration');
+            }
+
+            await this.loadPlexConfig();
+            void this.updatePlexClearCredentialsButton();
+
+            // Show saved state and hide config controls
+            const library = this.plexLibraryNameSelect.value.trim();
+            if (this.plexConnectedStatusEl) {
+                const serverLabel = this.plexConnectedStatusEl.textContent?.replace(/^Connected to\s*/, '') || '';
+                const serverName = serverLabel || '';
+                const libraryText = library ? ` (library: ${library})` : '';
+                this.plexConnectedStatusEl.textContent = `Connected to ${serverName}${libraryText}`.trim();
+                this.plexConnectedStatusEl.style.display = 'block';
+            }
+            if (this.plexLibraryConfigContainer) {
+                this.plexLibraryConfigContainer.style.display = 'none';
+            }
+
+            window.alert('Plex configuration saved.');
+        } catch (error) {
+            console.error('Failed to save Plex config:', error);
+            window.alert((error as Error).message || 'Failed to save Plex configuration');
+        }
+    }
+
 
 
 
     // --- PIN OAuth logic ---
     private async startPlexPinLogin(): Promise<void> {
         console.debug('[PLEX_UI] startPlexPinLogin called');
+        // Prepare UI for PIN-based login flow
+        if (this.plexLoginButton) {
+            this.plexLoginButton.disabled = true;
+            this.plexLoginButton.style.display = 'none';
+        }
+        if (this.plexLibraryConfigContainer) {
+            this.plexLibraryConfigContainer.style.display = 'none';
+        }
+        if (this.plexConnectedStatusEl) {
+            this.plexConnectedStatusEl.style.display = 'none';
+        }
+
         this.plexPinStatus.textContent = '';
         this.plexPinDisplay.textContent = '';
         this.plexPinContainer.style.display = 'block';
@@ -1858,11 +1962,16 @@ class App {
             console.debug('[PLEX_UI] /api/plex/pin/start data', data);
             if (!data.ok) throw new Error(data.error || 'Failed to start PIN login');
             this.plexPinDisplay.textContent = data.pin;
-            this.plexPinStatus.textContent = 'Enter this PIN at plex.tv/link';
+            this.plexPinStatus.textContent = '';
             await this.pollPlexPinStatus(data.client_id, data.pin, 300);
         } catch (e) {
             console.debug('[PLEX_UI] startPlexPinLogin error', e);
             this.plexPinStatus.textContent = 'Failed to start PIN login.';
+            // Restore login button so user can retry
+            if (this.plexLoginButton) {
+                this.plexLoginButton.disabled = false;
+                this.plexLoginButton.style.display = '';
+            }
         }
     }
 
@@ -1896,17 +2005,29 @@ class App {
                 } else if (data.expired) {
                     this.plexPinStatus.textContent = 'PIN expired. Please try again.';
                     this.plexPinDisplay.textContent = '';
+                    if (this.plexLoginButton) {
+                        this.plexLoginButton.disabled = false;
+                        this.plexLoginButton.style.display = '';
+                    }
                     return;
                 }
             } catch (e) {
                 console.debug('[PLEX_UI] pollPlexPinStatus error', e);
                 this.plexPinStatus.textContent = 'Error polling PIN status.';
+                if (this.plexLoginButton) {
+                    this.plexLoginButton.disabled = false;
+                    this.plexLoginButton.style.display = '';
+                }
                 return;
             }
         }
         console.debug('[PLEX_UI] pollPlexPinStatus timed out');
         this.plexPinStatus.textContent = 'Login timed out. Please try again.';
         this.plexPinDisplay.textContent = '';
+        if (this.plexLoginButton) {
+            this.plexLoginButton.disabled = false;
+            this.plexLoginButton.style.display = '';
+        }
     }
 
     private async startPlexSync(): Promise<void> {
@@ -1955,30 +2076,40 @@ class App {
         }
 
         try {
-            const resp = await fetch('/api/plex/health', { cache: 'no-store' });
-            console.log('[PLEX_UI] /api/plex/health response', resp.status);
-            if (!resp.ok) {
-                throw new Error('Failed to fetch Plex health status');
-            }
-            const data = await resp.json();
-            const showClear = Boolean(data && data.ok);
-            console.log('[PLEX_UI] plex health data', data, 'showClear', showClear);
+            // First check whether the app has a configured Plex credential set.
+            const configResp = await fetch('/api/plex/config', { cache: 'no-store' });
+            const configData = configResp.ok ? await configResp.json() : { has_config: false };
+            const hasConfig = Boolean(configData && configData.has_config);
+            const hasLibrary = Boolean(configData && configData.library_name);
 
-            // Update connected-server label
+            // Show the Login button when Plex has not been configured yet.
+            if (this.plexLoginButton) {
+                this.plexLoginButton.disabled = false;
+                this.plexLoginButton.style.display = hasConfig ? 'none' : '';
+            }
+
+            // Only show Clear Credentials after the library has been selected (full configuration).
+            if (hasConfig && hasLibrary) {
+                this.plexClearCredentialsButton.style.display = 'inline-block';
+            } else {
+                this.plexClearCredentialsButton.style.display = 'none';
+            }
+
+            // Update connected-server label only if health is good.
+            const healthResp = await fetch('/api/plex/healthcheck', { cache: 'no-store' });
+            const healthData = healthResp.ok ? await healthResp.json() : { ok: false };
+            const healthOk = Boolean(healthData && healthData.ok);
+
             if (this.plexConnectedStatusEl) {
-                if (showClear && typeof data.value === 'string' && data.value.trim()) {
-                    this.plexConnectedStatusEl.textContent = `Connected to ${data.value}`;
+                if (healthOk && typeof healthData.server_name === 'string' && healthData.server_name.trim()) {
+                    const library = this.plexLibraryNameSelect?.value?.trim() || '';
+                    const libraryText = library ? ` (library: ${library})` : '';
+                    this.plexConnectedStatusEl.textContent = `Connected to ${healthData.server_name}${libraryText}`;
                     this.plexConnectedStatusEl.style.display = 'block';
                 } else {
                     this.plexConnectedStatusEl.textContent = '';
                     this.plexConnectedStatusEl.style.display = 'none';
                 }
-            }
-
-            this.plexClearCredentialsButton.style.display = showClear ? 'inline-block' : 'none';
-            if (this.plexLoginButton) {
-                // Hide login button when clear-credentials is shown (i.e., plex is already connected)
-                this.plexLoginButton.style.display = showClear ? 'none' : '';
             }
         } catch (err) {
             console.debug('[PLEX_UI] updatePlexClearCredentialsButton error', err);
