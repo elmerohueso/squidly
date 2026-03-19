@@ -75,3 +75,6 @@ docker-compose.override.yml
 
 # Local docs
 copilot-instructions.md
+
+# Test scripts
+scripts/
