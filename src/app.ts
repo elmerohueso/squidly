@@ -265,6 +265,8 @@ class App {
     private plexConfigStatusEl: HTMLElement;
     private plexConnectedStatusEl: HTMLElement;
     private plexClearCredentialsButton: HTMLButtonElement;
+    private plexUserDropdownContainer: HTMLElement;
+    private plexUserSelect: HTMLSelectElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
@@ -351,6 +353,8 @@ class App {
         this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
         this.plexConnectedStatusEl = document.getElementById('plexConnectedStatus') as HTMLElement;
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
+        this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
+        this.plexUserSelect = document.getElementById('plexUserSelect') as HTMLSelectElement;
         
         this.initializeEventListeners();
         this.streamQuality = this.loadStreamQualityFromCookie();
@@ -444,9 +448,17 @@ class App {
                         this.plexLoginButton.disabled = false;
                     }
 
+                    window.localStorage.removeItem('plexSelectedUserId');
                     await this.loadPlexConfig();
                     void this.updatePlexClearCredentialsButton();
                 }
+            });
+        }
+
+        if (this.plexUserSelect) {
+            this.plexUserSelect.addEventListener('change', async () => {
+                window.localStorage.setItem('plexSelectedUserId', this.plexUserSelect.value);
+                await this.loadPlexPlaylists();
             });
         }
 
@@ -2088,11 +2100,15 @@ class App {
                 this.plexLoginButton.style.display = hasConfig ? 'none' : '';
             }
 
-            // Only show Clear Credentials after the library has been selected (full configuration).
-            if (hasConfig && hasLibrary) {
+            // Only show Clear Credentials and the playlist controls after the library has been selected (full configuration).
+            const showPlexControls = hasConfig && hasLibrary;
+            if (showPlexControls) {
                 this.plexClearCredentialsButton.style.display = 'inline-block';
+                this.updatePlexPlaylistContainerVisibility(true);
+                await this.loadPlexUsers();
             } else {
                 this.plexClearCredentialsButton.style.display = 'none';
+                this.updatePlexPlaylistContainerVisibility(false);
             }
 
             // Update connected-server label only if health is good.
@@ -2118,10 +2134,65 @@ class App {
                 this.plexConnectedStatusEl.style.display = 'none';
             }
             this.plexClearCredentialsButton.style.display = 'none';
+            this.updatePlexPlaylistContainerVisibility(false);
             if (this.plexLoginButton) {
                 this.plexLoginButton.disabled = false;
                 this.plexLoginButton.style.display = '';
             }
+        }
+    }
+
+    private async loadPlexUsers(): Promise<void> {
+        if (!this.plexUserSelect) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/users', { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex users');
+            }
+
+            const data = await response.json();
+            const users = Array.isArray(data.users) ? data.users : [];
+
+            this.plexUserSelect.innerHTML = '';
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = users.length ? 'Select a user...' : '(no users found)';
+            placeholder.disabled = users.length === 0;
+            this.plexUserSelect.appendChild(placeholder);
+
+            const savedId = window.localStorage.getItem('plexSelectedUserId') || '';
+            let selectedSet = false;
+
+            users.forEach((user: any) => {
+                const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
+                const label = String(user.username || user.title || id);
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = label;
+                this.plexUserSelect.appendChild(option);
+
+                if (!selectedSet && savedId && id === savedId) {
+                    option.selected = true;
+                    selectedSet = true;
+                }
+            });
+
+            if (!selectedSet && users.length > 0) {
+                const owner = users.find((u: any) => u.is_owner);
+                const ownerId = owner ? String(owner.id ?? owner.username ?? '') : '';
+                if (ownerId) {
+                    const ownerOption = Array.from(this.plexUserSelect.options).find((opt) => opt.value === ownerId);
+                    if (ownerOption) {
+                        ownerOption.selected = true;
+                        window.localStorage.setItem('plexSelectedUserId', ownerId);
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Plex users:', error);
         }
     }
 
@@ -2228,14 +2299,25 @@ class App {
         this.plexPlaylistBackButton.style.display = 'none';
     }
 
+    private getSelectedPlexUserId(): string | null {
+        const stored = window.localStorage.getItem('plexSelectedUserId');
+        if (stored && stored.trim()) {
+            return stored.trim();
+        }
+        return null;
+    }
+
     private async loadPlexPlaylists(): Promise<void> {
         if (!this.isPlexConfigured) {
             this.populatePlexPlaylistOptions([]);
             return;
         }
 
+        const userId = this.getSelectedPlexUserId();
+        const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+
         try {
-            const response = await fetch('/api/plex/playlists');
+            const response = await fetch(`/api/plex/playlists${query}`, { cache: 'no-store' });
             if (!response.ok) {
                 this.populatePlexPlaylistOptions([], false);
                 return;
@@ -4098,21 +4180,23 @@ class App {
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
-            const response = await this.fetchWithRetry('/api/download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    trackId,
-                    format: this.downloadSettings.format,
-                    downloadType,
-                    fileNaming: downloadType === 'album'
-                        ? this.downloadSettings.fileNamingAlbum
-                        : this.downloadSettings.fileNamingLoose,
-                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                    fileNamingLoose: this.downloadSettings.fileNamingLoose,
-                    plex_playlist: plexPlaylistName
+const plexUserId = this.getSelectedPlexUserId();
+                    const response = await this.fetchWithRetry('/api/download', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            trackId,
+                            format: this.downloadSettings.format,
+                            downloadType,
+                            fileNaming: downloadType === 'album'
+                                ? this.downloadSettings.fileNamingAlbum
+                                : this.downloadSettings.fileNamingLoose,
+                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                            fileNamingLoose: this.downloadSettings.fileNamingLoose,
+                            plex_playlist: plexPlaylistName,
+                            plex_user_id: plexUserId
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);

@@ -1,3 +1,4 @@
+
 def init_library_update_status():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -593,6 +594,51 @@ from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexPinLogin, MyPlexAccount
+# --- Plex User Listing ---
+def get_all_plex_users():
+    """
+    Return a list of Plex users including the main (owner) account and managed users.
+    Each entry is a dict with at least: { 'username', 'id', 'is_owner', 'is_managed', 'user_obj' }
+    """
+    config = get_plex_config()
+    token = config.get('api_token')
+    if not token:
+        return []
+    try:
+        acc = MyPlexAccount(token=token)
+    except Exception as e:
+        print(f"[PLEX] Failed to create MyPlexAccount: {e}", flush=True)
+        return []
+
+    users = []
+    # Add main account
+    owner_id = str(getattr(acc, 'id', '') or '').strip() or str(getattr(acc, 'username', '') or '').strip() or str(getattr(acc, 'title', '') or '').strip()
+    users.append({
+        'client_id': owner_id,
+        'username': getattr(acc, 'username', None),
+        'title': getattr(acc, 'title', None),
+        'id': getattr(acc, 'id', None),
+        'is_owner': True,
+        'is_managed': False,
+        'user_obj': acc
+    })
+    # Add managed users
+    try:
+        managed = [u for u in acc.users() if getattr(u, 'restricted', None) in (True, 1, '1')]
+        for u in managed:
+            managed_id = str(getattr(u, 'id', '') or '').strip() or str(getattr(u, 'username', '') or '').strip() or str(getattr(u, 'title', '') or '').strip()
+            users.append({
+                'client_id': managed_id,
+                'username': getattr(u, 'username', None),
+                'title': getattr(u, 'title', None),
+                'id': getattr(u, 'id', None),
+                'is_owner': False,
+                'is_managed': True,
+                'user_obj': u
+            })
+    except Exception as e:
+        print(f"[PLEX] Failed to fetch managed users: {e}", flush=True)
+    return users
 from ytmusicapi import YTMusic
 
 app = Flask(__name__, 
@@ -603,7 +649,16 @@ CORS(app)
 # For PIN login state (in-memory, per-process; production should use persistent store)
 plex_pin_sessions = {}
 # ...existing code...
-
+@app.route('/api/plex/users', methods=['GET'])
+def plex_list_users():
+    """Return a list of Plex users (owner and managed) as JSON."""
+    users = get_all_plex_users()
+    # Remove user_obj (not serializable)
+    result = [
+        {k: v for k, v in user.items() if k not in ('user_obj',)}
+        for user in users
+    ]
+    return jsonify({'users': result})
 # --- Plex PIN OAuth API ---
 import threading
 
@@ -1541,7 +1596,7 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     conn.close()
     return job_id
 
-def queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=None):
+def queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=None, plex_user_id=None):
     """Add a track to the pending playlist additions queue."""
     payload = {
         'artist': artist,
@@ -1549,7 +1604,8 @@ def queue_pending_playlist_addition(artist, album, title, file_path, playlist_na
         'title': title,
         'file_path': file_path,
         'playlist_name': playlist_name,
-        'parent_job_id': parent_job_id
+        'parent_job_id': parent_job_id,
+        'plex_user_id': plex_user_id
     }
     payload_json = serialize_job_payload(payload)
     conn = get_db_connection()
@@ -2445,7 +2501,8 @@ def process_download_job(job_id, payload):
                 track_title,
                 full_path,
                 playlist_name,
-                parent_job_id=job_id
+                parent_job_id=job_id,
+                plex_user_id=payload.get('plex_user_id')
             )
             stages['playlist_added'] = 'queued'
             print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
@@ -2675,7 +2732,8 @@ def process_download_job(job_id, payload):
             track_title,
             full_path,
             playlist_name,
-            parent_job_id=job_id
+            parent_job_id=job_id,
+            plex_user_id=payload.get('plex_user_id')
         )
         stages['playlist_added'] = 'queued'
         print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
@@ -2783,7 +2841,8 @@ def retry_pending_playlist_additions():
                         plex_config['api_token'],
                         plex_config['library_name'] or 'Music',
                         playlist_name,
-                        file_path
+                        file_path,
+                        payload.get('plex_user_id')
                     )
                     
                     if success:
@@ -3001,7 +3060,48 @@ def test_plex_connection(server_url, api_token):
         print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
         return False, f'Failed to connect to Plex: {error_msg}', None
 
-def get_plex_music_playlists(server_url, api_token):
+def _get_plex_server_for_user(server_url, api_token, user_id=None):
+    """Return a PlexServer instance for the given user (main owner or managed)."""
+    try:
+        server_url = server_url.rstrip('/')
+        plex = PlexServer(server_url, api_token, timeout=10)
+        if not user_id:
+            return plex
+
+        # Attempt to use managed user if specified
+        try:
+            acc = MyPlexAccount(token=api_token)
+            users = list(acc.users())
+            user_id_str = str(user_id or '').strip()
+            user_id_lower = user_id_str.lower()
+            for u in users:
+                # Try several fields that may represent the identifier
+                candidate_ids = [
+                    str(getattr(u, 'id', '') or '').strip(),
+                    str(getattr(u, 'username', '') or '').strip(),
+                    str(getattr(u, 'title', '') or '').strip(),
+                    str(getattr(u, 'uuid', '') or '').strip(),
+                    str(getattr(u, 'client_id', '') or '').strip(),
+                ]
+                candidate_ids_lower = [c.lower() for c in candidate_ids if c]
+                if user_id_lower and user_id_lower in candidate_ids_lower:
+                    try:
+                        # Use the PlexServer.switchUser method so playlists and other calls are executed under the managed user.
+                        return plex.switchUser(u)
+                    except Exception as e:
+                        print(f"[PLEX] Failed to switch to managed user {user_id_str}: {e}", flush=True)
+                        # Continue searching in case multiple managed users match the provided identifier.
+                        continue
+        except Exception as e:
+            print(f"[PLEX] Failed to fetch managed users for user selection {user_id}: {e}", flush=True)
+
+        return plex
+    except Exception as e:
+        print(f"[PLEX] Failed to create PlexServer for user {user_id}: {e}", flush=True)
+        raise
+
+
+def get_plex_music_playlists(server_url, api_token, user_id=None):
     """
     Get existing Plex music playlists, excluding smart playlists.
 
@@ -3009,7 +3109,7 @@ def get_plex_music_playlists(server_url, api_token):
         tuple: (success: bool, playlists: list[str], error: str | None)
     """
     try:
-        plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+        plex = _get_plex_server_for_user(server_url, api_token, user_id)
         playlist_titles = []
 
         for playlist in plex.playlists():
@@ -3035,7 +3135,7 @@ def get_plex_music_playlists(server_url, api_token):
         print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
         return False, [], str(e)
 
-def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, full_path):
+def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, full_path, user_id=None):
     """
     Add downloaded tracks to a Plex playlist.
     
@@ -3045,6 +3145,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         library_name: Name of the music library (e.g., "Music")
         playlist_name: Name of the playlist to add to
         full_path: Full path of the downloaded (or matched) file
+        user_id: Optional user ID/username/title to use when applying managed user context
     
     Returns:
         tuple: (success: bool, message: str)
@@ -3053,10 +3154,10 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         server_url = server_url.rstrip('/')
         token_len = len(api_token) if isinstance(api_token, str) else 0
         print(
-            f"[PLEX] Add-to-playlist start: url={server_url}, library='{library_name}', playlist='{playlist_name}', token_len={token_len}",
+            f"[PLEX] Add-to-playlist start: url={server_url}, library='{library_name}', playlist='{playlist_name}', token_len={token_len}, user_id={user_id}",
             flush=True
         )
-        plex = PlexServer(server_url, api_token, timeout=10)
+        plex = _get_plex_server_for_user(server_url, api_token, user_id)
         print("[PLEX] Connected to Plex server", flush=True)
         
         # Get the music library
@@ -4462,7 +4563,8 @@ def download_track():
         'fileNaming': file_naming,
         'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
         'fileNamingLoose': payload.get('fileNamingLoose') or file_naming_loose,
-        'plex_playlist': payload.get('plex_playlist')
+        'plex_playlist': payload.get('plex_playlist'),
+        'plex_user_id': payload.get('plex_user_id')
     }
 
     job_id = enqueue_job('download_track', job_payload)
@@ -5193,7 +5295,9 @@ def get_plex_playlists_endpoint():
     if not server_url or not api_token:
         return jsonify({'error': 'Plex is not configured'}), 400
 
-    success, playlists, message = get_plex_music_playlists(server_url, api_token)
+    user_id = request.args.get('user_id')
+
+    success, playlists, message = get_plex_music_playlists(server_url, api_token, user_id=user_id)
     if not success:
         return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
 
