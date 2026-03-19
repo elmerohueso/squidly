@@ -456,8 +456,9 @@ class App {
         }
 
         if (this.plexUserSelect) {
-            this.plexUserSelect.addEventListener('change', () => {
+            this.plexUserSelect.addEventListener('change', async () => {
                 window.localStorage.setItem('plexSelectedUserId', this.plexUserSelect.value);
+                await this.loadPlexPlaylists();
             });
         }
 
@@ -2169,8 +2170,8 @@ class App {
             let selectedSet = false;
 
             users.forEach((user: any) => {
-                const id = String(user.id ?? user.username ?? '');
-                const label = String(user.username ?? user.title ?? id);
+                const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
+                const label = String(user.username || user.title || id);
                 const option = document.createElement('option');
                 option.value = id;
                 option.textContent = label;
@@ -2301,14 +2302,25 @@ class App {
         this.plexPlaylistBackButton.style.display = 'none';
     }
 
+    private getSelectedPlexUserId(): string | null {
+        const stored = window.localStorage.getItem('plexSelectedUserId');
+        if (stored && stored.trim()) {
+            return stored.trim();
+        }
+        return null;
+    }
+
     private async loadPlexPlaylists(): Promise<void> {
         if (!this.isPlexConfigured) {
             this.populatePlexPlaylistOptions([]);
             return;
         }
 
+        const userId = this.getSelectedPlexUserId();
+        const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+
         try {
-            const response = await fetch('/api/plex/playlists');
+            const response = await fetch(`/api/plex/playlists${query}`, { cache: 'no-store' });
             if (!response.ok) {
                 this.populatePlexPlaylistOptions([], false);
                 return;
@@ -4171,21 +4183,23 @@ class App {
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
-            const response = await this.fetchWithRetry('/api/download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    trackId,
-                    format: this.downloadSettings.format,
-                    downloadType,
-                    fileNaming: downloadType === 'album'
-                        ? this.downloadSettings.fileNamingAlbum
-                        : this.downloadSettings.fileNamingLoose,
-                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                    fileNamingLoose: this.downloadSettings.fileNamingLoose,
-                    plex_playlist: plexPlaylistName
+const plexUserId = this.getSelectedPlexUserId();
+                    const response = await this.fetchWithRetry('/api/download', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            trackId,
+                            format: this.downloadSettings.format,
+                            downloadType,
+                            fileNaming: downloadType === 'album'
+                                ? this.downloadSettings.fileNamingAlbum
+                                : this.downloadSettings.fileNamingLoose,
+                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                            fileNamingLoose: this.downloadSettings.fileNamingLoose,
+                            plex_playlist: plexPlaylistName,
+                            plex_user_id: plexUserId
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);
