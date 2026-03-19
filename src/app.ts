@@ -2100,19 +2100,15 @@ class App {
                 this.plexLoginButton.style.display = hasConfig ? 'none' : '';
             }
 
-            // Only show Clear Credentials after the library has been selected (full configuration).
-            const showUserDropdown = hasConfig && hasLibrary;
-            if (showUserDropdown) {
+            // Only show Clear Credentials and the playlist controls after the library has been selected (full configuration).
+            const showPlexControls = hasConfig && hasLibrary;
+            if (showPlexControls) {
                 this.plexClearCredentialsButton.style.display = 'inline-block';
-                if (this.plexUserDropdownContainer) {
-                    this.plexUserDropdownContainer.style.display = '';
-                }
+                this.updatePlexPlaylistContainerVisibility(true);
                 await this.loadPlexUsers();
             } else {
                 this.plexClearCredentialsButton.style.display = 'none';
-                if (this.plexUserDropdownContainer) {
-                    this.plexUserDropdownContainer.style.display = 'none';
-                }
+                this.updatePlexPlaylistContainerVisibility(false);
             }
 
             // Update connected-server label only if health is good.
@@ -2138,6 +2134,7 @@ class App {
                 this.plexConnectedStatusEl.style.display = 'none';
             }
             this.plexClearCredentialsButton.style.display = 'none';
+            this.updatePlexPlaylistContainerVisibility(false);
             if (this.plexLoginButton) {
                 this.plexLoginButton.disabled = false;
                 this.plexLoginButton.style.display = '';

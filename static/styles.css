@@ -208,10 +208,49 @@ main {
 .plex-playlist-container {
     padding: 1rem;
     display: none;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-end;
     gap: 0.75rem;
     width: fit-content;
     margin-left: auto;
+}
+
+.plex-playlist-row,
+.plex-user-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.plex-playlist-label {
+    font-size: 0.9rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+    .plex-playlist-container {
+        width: 100%;
+        margin-left: 0;
+        align-items: stretch;
+    }
+
+    .plex-playlist-row,
+    .plex-user-row {
+        justify-content: flex-start;
+    }
+
+    .plex-playlist-row .search-type-select,
+    .plex-user-row .search-type-select {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    .plex-playlist-label {
+        flex: 0 0 auto;
+    }
 }
 
 .search-type-select {
