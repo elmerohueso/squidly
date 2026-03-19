@@ -1,3 +1,4 @@
+
 def init_library_update_status():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -593,6 +594,45 @@ from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexPinLogin, MyPlexAccount
+# --- Plex User Listing ---
+def get_all_plex_users():
+    """
+    Return a list of Plex users including the main (owner) account and managed users.
+    Each entry is a dict with at least: { 'username', 'id', 'is_owner', 'is_managed', 'user_obj' }
+    """
+    config = get_plex_config()
+    token = config.get('api_token')
+    if not token:
+        return []
+    try:
+        acc = MyPlexAccount(token=token)
+    except Exception as e:
+        print(f"[PLEX] Failed to create MyPlexAccount: {e}", flush=True)
+        return []
+
+    users = []
+    # Add main account
+    users.append({
+        'username': getattr(acc, 'username', None),
+        'id': getattr(acc, 'id', None),
+        'is_owner': True,
+        'is_managed': False,
+        'user_obj': acc
+    })
+    # Add managed users
+    try:
+        managed = [u for u in acc.users() if getattr(u, 'restricted', None) in (True, 1, '1')]
+        for u in managed:
+            users.append({
+                'username': getattr(u, 'username', None) or getattr(u, 'title', None),
+                'id': getattr(u, 'id', None),
+                'is_owner': False,
+                'is_managed': True,
+                'user_obj': u
+            })
+    except Exception as e:
+        print(f"[PLEX] Failed to fetch managed users: {e}", flush=True)
+    return users
 from ytmusicapi import YTMusic
 
 app = Flask(__name__, 
@@ -603,7 +643,16 @@ CORS(app)
 # For PIN login state (in-memory, per-process; production should use persistent store)
 plex_pin_sessions = {}
 # ...existing code...
-
+@app.route('/api/plex/users', methods=['GET'])
+def plex_list_users():
+    """Return a list of Plex users (owner and managed) as JSON."""
+    users = get_all_plex_users()
+    # Remove user_obj (not serializable)
+    result = [
+        {k: v for k, v in user.items() if k != 'user_obj'}
+        for user in users
+    ]
+    return jsonify({'users': result})
 # --- Plex PIN OAuth API ---
 import threading
 
