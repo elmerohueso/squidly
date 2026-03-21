@@ -515,21 +515,6 @@ def mark_job_succeeded(job_id, result):
     cur = conn.cursor()
     cur.execute(
         """
-        UPDATE jobs
-        SET status = 'succeeded',
-            result_json = %s,
-            error_message = NULL,
-            updated_at = %s,
-            finished_at = %s,
-            locked_at = NULL,
-            locked_by = NULL
-        WHERE id = %s
-        """,
-        (result_json, now, now, job_id)
-    )
-
-    cur.execute(
-        """
         SELECT job_type
         FROM jobs
         WHERE id = %s
@@ -545,6 +530,66 @@ def mark_job_succeeded(job_id, result):
         # Set library_update_needed True and update last_job_finished_at
         set_library_update_needed(True)
         set_last_job_finished_at(datetime.utcnow())
+
+
+def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
+    now = datetime.utcnow()
+    now_iso = now.isoformat() + 'Z'
+    new_attempt_count = (int(attempt_count or 0) + 1)
+
+    if new_attempt_count < int(max_attempts or 0):
+        run_after = (now + timedelta(seconds=compute_job_backoff_seconds(new_attempt_count))).isoformat() + 'Z'
+        finished_at = None
+    else:
+        run_after = None
+        finished_at = now_iso
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'failed',
+            attempt_count = %s,
+            error_message = COALESCE(%s, error_message),
+            updated_at = %s,
+            run_after = %s,
+            finished_at = %s,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = %s
+        """,
+        (new_attempt_count, error_message, now_iso, run_after, finished_at, job_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_job_retrying(job_id, attempt_count, error_message):
+    now = datetime.utcnow()
+    now_iso = now.isoformat() + 'Z'
+    new_attempt_count = (int(attempt_count or 0) + 1)
+    run_after = (now + timedelta(seconds=compute_job_backoff_seconds(new_attempt_count))).isoformat() + 'Z'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'queued',
+            attempt_count = %s,
+            error_message = COALESCE(%s, error_message),
+            updated_at = %s,
+            run_after = %s,
+            locked_at = NULL,
+            locked_by = NULL,
+            finished_at = NULL
+        WHERE id = %s
+        """,
+        (new_attempt_count, error_message, now_iso, run_after, job_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 def _download_track_all_stages_done(stages):
