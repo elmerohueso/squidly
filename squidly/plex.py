@@ -116,6 +116,10 @@ def get_all_plex_users():
 
     try:
         for u in acc.users():
+            # Only include restricted managed users (not Plex friends) to match UI behavior.
+            if getattr(u, 'restricted', None) not in (True, 1, '1'):
+                continue
+
             managed_id = str(getattr(u, 'id', '') or '').strip() or str(getattr(u, 'username', '') or '').strip() or str(getattr(u, 'title', '') or '').strip()
             users.append({
                 'client_id': managed_id,
