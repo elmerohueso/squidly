@@ -111,7 +111,12 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
 
             response = make_request_with_retry(full_url, method=method, timeout=timeout, backoff_factor=backoff_factor, **kwargs)
             if response is not None:
-                return response, target
+                if response.ok:
+                    return response, target
+
+                # non-2xx response from a mirror is treated as mirror-specific failure; try next mirror
+                last_exception = requests.exceptions.HTTPError(f"{response.status_code}: {response.text}")
+                continue
 
         except requests.exceptions.Timeout as e:
             last_exception = e
