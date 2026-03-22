@@ -1594,6 +1594,7 @@ def process_download_job(job_id, payload):
     print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
     manifest_base64 = None
     last_manifest_status = None
+    manifest_error_message = None
 
     for quality in quality_candidates:
         try:
@@ -1605,7 +1606,10 @@ def process_download_job(job_id, payload):
                 max_retries=3
             )
         except requests.exceptions.RequestException as e:
-            raise TransientDownloadError(f"Failed to fetch track manifest: {str(e)}") from e
+            manifest_error_message = str(e)
+            print(f"[DOWNLOAD] Quality '{quality}' manifest fetch failed: {manifest_error_message}", flush=True)
+            continue
+
         last_manifest_status = manifest_response.status_code
         mirror_name = target.get('name') if isinstance(target, dict) else 'unknown'
 
@@ -1616,19 +1620,19 @@ def process_download_job(job_id, payload):
 
         if manifest_response.status_code in (401, 403):
             body_text = manifest_response.text or ''
-            if 'Token refresh failed' in body_text or 'auth.tidal.com' in body_text or 'Forbidden' in body_text:
-                raise PermanentDownloadError(
-                    f"Failed to fetch track manifest (mirror '{mirror_name}'): {manifest_response.status_code}: {body_text.strip()}"
-                )
-            raise TransientDownloadError(
-                f"Failed to fetch track manifest (mirror '{mirror_name}'): {manifest_response.status_code}: {body_text.strip()}"
+            manifest_error_message = f"{manifest_response.status_code}: {body_text.strip()}"
+            print(
+                f"[DOWNLOAD] Quality '{quality}' returned {manifest_response.status_code}. Trying next quality if available...",
+                flush=True
             )
+            continue
 
         if not manifest_response.ok:
             print(
                 f"[DOWNLOAD] Mirror '{mirror_name}' returned non-OK status {manifest_response.status_code} for quality '{quality}'",
                 flush=True
             )
+            manifest_error_message = f"{manifest_response.status_code}: {manifest_response.text or ''}".strip()
             continue
 
         manifest_data = manifest_response.json()
@@ -1656,7 +1660,8 @@ def process_download_job(job_id, payload):
 
     if not isinstance(manifest_base64, str) or not manifest_base64:
         status_note = f" Status: {last_manifest_status}" if last_manifest_status is not None else ""
-        raise ManifestDownloadError(f"Failed to get track manifest.{status_note}")
+        error_note = f" Last error: {manifest_error_message}" if manifest_error_message else ""
+        raise ManifestDownloadError(f"Failed to get track manifest.{status_note}{error_note}")
 
     print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
 
