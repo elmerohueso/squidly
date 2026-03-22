@@ -2542,16 +2542,17 @@ def index():
 @app.route('/search/', methods=['GET'])
 def search():
     """
-    Unified search endpoint for tracks, albums, artists, and playlists.
+    Unified search endpoint for tracks, albums, artists, playlists, and track-by-ID.
     Query parameters:
-    - s={query}  : Search tracks
-    - a={query}  : Search artists
-    - al={query} : Search albums
-    - p={query}  : Search playlists
-    - limit={n}  : Optional page size
-    - offset={n} : Optional page offset
+    - s={query}       : Search tracks
+    - a={query}       : Search artists
+    - al={query}      : Search albums
+    - p={query}       : Search playlists
+    - trackid={query} : Search by exact Tidal track ID
+    - limit={n}       : Optional page size
+    - offset={n}      : Optional page offset
     """
-    supported_search_types = ('s', 'a', 'al', 'p')
+    supported_search_types = ('s', 'a', 'al', 'p', 'trackid')
     provided_search_types = [key for key in supported_search_types if key in request.args]
 
     if not provided_search_types:
@@ -2565,6 +2566,63 @@ def search():
 
     if not query:
         return jsonify({'error': 'Query value cannot be empty'}), 400
+
+    if search_type == 'trackid':
+        if not query.isdigit():
+            return jsonify({'error': 'Track ID must be numeric'}), 400
+
+        try:
+            response, target = make_request_with_retry_rotating_mirrors(
+                f"/info/?{urlencode({'id': query})}",
+                SQUID_URLS,
+                method='GET',
+                timeout=10,
+                max_retries=3
+            )
+
+            if not response.ok:
+                return jsonify({
+                    'error': f'Upstream API error via {target["name"]}',
+                    'status_code': response.status_code
+                }), response.status_code
+
+            result = response.json() if response.content else {}
+            track_item = None
+
+            if isinstance(result, dict):
+                data = result.get('data') or {}
+                if isinstance(data, dict) and data.get('track'):
+                    track_item = data.get('track')
+                elif isinstance(data, dict) and data.get('items'):
+                    items = data.get('items')
+                    if isinstance(items, list) and items:
+                        track_item = items[0]
+                elif isinstance(result.get('track'), dict):
+                    track_item = result.get('track')
+                elif isinstance(result.get('data'), dict):
+                    track_item = result.get('data')
+
+            if not track_item:
+                return jsonify({
+                    'data': {'items': []},
+                    'proxied_via': target['name']
+                })
+
+            if 'id' not in track_item or not track_item.get('id'):
+                track_item['id'] = int(query)
+
+            # Coerce to track-list shape for front-end
+            return jsonify({
+                'data': {'items': [track_item]},
+                'proxied_via': target['name']
+            })
+
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'error': 'Proxy error',
+                'details': str(e),
+                'query': query
+            }), 502
 
     upstream_params = [(search_type, query)]
     for param_name in ('limit', 'offset'):

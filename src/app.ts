@@ -2413,6 +2413,8 @@ class App {
             this.searchInput.placeholder = 'Search for albums...';
         } else if (searchType === 'p') {
             this.searchInput.placeholder = 'Search for playlists...';
+        } else if (searchType === 'trackid') {
+            this.searchInput.placeholder = 'Enter numeric Track ID...';
         } else {
             this.searchInput.placeholder = 'Search for tracks...';
         }
@@ -2430,6 +2432,11 @@ class App {
 
         if (!query) {
             this.displayMessage('Please enter a search query');
+            return;
+        }
+
+        if (searchType === 'trackid' && !/^[0-9]+$/.test(query)) {
+            this.displayMessage('Track ID must be a numeric value');
             return;
         }
 
@@ -3034,7 +3041,9 @@ class App {
         const searchTypeName = searchType === 's' ? 'Tracks' : 
                               searchType === 'a' ? 'Artists' :
                               searchType === 'al' ? 'Albums' :
-                              searchType === 'p' ? 'Playlists' : 'Results';
+                              searchType === 'p' ? 'Playlists' :
+                              searchType === 'trackid' ? 'Track ID' :
+                              'Results';
 
         this.resultsContainer.innerHTML = `
             <div class="results-header">
@@ -3051,7 +3060,7 @@ class App {
             </div>
         `;
 
-        if (searchType === 's') {
+        if (searchType === 's' || searchType === 'trackid') {
             void this.annotateTrackCardsWithPlexStatus(items as Track[]);
         }
     }
