@@ -419,6 +419,10 @@ class TransientDownloadError(Exception):
     pass
 
 
+class PermanentDownloadError(Exception):
+    pass
+
+
 def any_plex_sync_jobs_running_or_queued():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -511,6 +515,7 @@ def claim_next_job(job_type):
 def mark_job_succeeded(job_id, result):
     now = datetime.utcnow().isoformat() + 'Z'
     result_json = serialize_job_payload(result) if result is not None else None
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -522,6 +527,22 @@ def mark_job_succeeded(job_id, result):
         (job_id,)
     )
     type_row = cur.fetchone()
+
+    # Ensure job row is marked finished and unlocked
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'succeeded',
+            result_json = %s,
+            error_message = NULL,
+            updated_at = %s,
+            finished_at = %s,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = %s
+        """,
+        (result_json, now, now, job_id)
+    )
 
     conn.commit()
     conn.close()

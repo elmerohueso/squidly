@@ -1229,6 +1229,9 @@ class ManifestDownloadError(Exception):
 class TransientDownloadError(Exception):
     pass
 
+class PermanentDownloadError(Exception):
+    pass
+
 def claim_next_job(job_type):
     return jobs.claim_next_job(job_type)
 
@@ -1323,8 +1326,13 @@ def process_download_job(job_id, payload):
     except requests.exceptions.RequestException as e:
         raise TransientDownloadError(f"Failed to fetch track info: {str(e)}") from e
 
+    mirror_name = target.get('name') if isinstance(target, dict) else 'unknown'
+    print(f"[DOWNLOAD] Track info fetched from mirror '{mirror_name}' with status {info_response.status_code}", flush=True)
+
     if not info_response.ok:
-        raise TransientDownloadError(f"Failed to get track info. Status: {info_response.status_code}")
+        raise TransientDownloadError(
+            f"Failed to get track info. Status: {info_response.status_code} from mirror '{mirror_name}'"
+        )
 
     info_data = info_response.json()
     print(f"[DOWNLOAD] Track info response structure: {info_data.keys() if isinstance(info_data, dict) else type(info_data)}", flush=True)
@@ -1599,8 +1607,28 @@ def process_download_job(job_id, payload):
         except requests.exceptions.RequestException as e:
             raise TransientDownloadError(f"Failed to fetch track manifest: {str(e)}") from e
         last_manifest_status = manifest_response.status_code
+        mirror_name = target.get('name') if isinstance(target, dict) else 'unknown'
+
+        print(
+            f"[DOWNLOAD] Track manifest request via mirror '{mirror_name}' quality='{quality}' got status {manifest_response.status_code}",
+            flush=True
+        )
+
+        if manifest_response.status_code in (401, 403):
+            body_text = manifest_response.text or ''
+            if 'Token refresh failed' in body_text or 'auth.tidal.com' in body_text or 'Forbidden' in body_text:
+                raise PermanentDownloadError(
+                    f"Failed to fetch track manifest (mirror '{mirror_name}'): {manifest_response.status_code}: {body_text.strip()}"
+                )
+            raise TransientDownloadError(
+                f"Failed to fetch track manifest (mirror '{mirror_name}'): {manifest_response.status_code}: {body_text.strip()}"
+            )
 
         if not manifest_response.ok:
+            print(
+                f"[DOWNLOAD] Mirror '{mirror_name}' returned non-OK status {manifest_response.status_code} for quality '{quality}'",
+                flush=True
+            )
             continue
 
         manifest_data = manifest_response.json()
@@ -1812,6 +1840,10 @@ def download_job_worker():
                     error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_message}", flush=True)
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
+            except PermanentDownloadError as e:
+                print(f"[DOWNLOAD_WORKER] Job {job['id']} failed (permanent): {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
             except (ManifestDownloadError, TransientDownloadError) as e:
                 if job['attempt_count'] + 1 >= job['max_attempts']:
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
