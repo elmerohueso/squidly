@@ -85,6 +85,93 @@ def select_next_mirror(url_iterator, allowed_names, total_count):
     return next(url_iterator)
 
 
+# Rate-limit tuning state (in-memory).
+RATE_LIMIT_HISTORY_SECONDS = 300
+RATE_LIMIT_TARGET_429_RATE = 0.05
+RATE_LIMIT_MIN_INTERVAL = 0.5  # seconds
+RATE_LIMIT_MAX_INTERVAL = 60.0  # seconds
+RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE = 5
+RATE_LIMIT_DECREASE_FACTOR = 0.9
+RATE_LIMIT_INCREASE_FACTOR = 2.0
+
+_mirror_rate_limit_state = {
+    'current_interval': RATE_LIMIT_MIN_INTERVAL,
+    'last_request_timestamp': None,
+    'request_history': [],  # [(timestamp, status_code)]
+    'consecutive_successes': 0
+}
+
+
+def _prune_rate_limit_history():
+    cutoff = time.time() - RATE_LIMIT_HISTORY_SECONDS
+    _mirror_rate_limit_state['request_history'] = [
+        (t, code) for (t, code) in _mirror_rate_limit_state['request_history'] if t >= cutoff
+    ]
+
+
+def _record_rate_limit_event(status_code):
+    now = time.time()
+    _mirror_rate_limit_state['request_history'].append((now, status_code))
+    _mirror_rate_limit_state['last_request_timestamp'] = now
+
+    if status_code == 429:
+        _mirror_rate_limit_state['consecutive_successes'] = 0
+        current = _mirror_rate_limit_state['current_interval']
+        if current < 30.0:
+            _mirror_rate_limit_state['current_interval'] = min(RATE_LIMIT_MAX_INTERVAL, 30.0)
+        else:
+            _mirror_rate_limit_state['current_interval'] = min(
+                RATE_LIMIT_MAX_INTERVAL,
+                current * RATE_LIMIT_INCREASE_FACTOR
+            )
+    elif status_code >= 500 or status_code == 0:
+        # transient failure, do not decay the interval quickly
+        _mirror_rate_limit_state['consecutive_successes'] = 0
+    else:
+        _mirror_rate_limit_state['consecutive_successes'] += 1
+        if _mirror_rate_limit_state['consecutive_successes'] >= RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE:
+            _mirror_rate_limit_state['current_interval'] = max(
+                RATE_LIMIT_MIN_INTERVAL,
+                _mirror_rate_limit_state['current_interval'] * RATE_LIMIT_DECREASE_FACTOR
+            )
+            _mirror_rate_limit_state['consecutive_successes'] = 0
+
+
+def get_mirror_rate_limit_status():
+    _prune_rate_limit_history()
+    history = _mirror_rate_limit_state['request_history']
+    total = len(history)
+    if total == 0:
+        return {
+            'safe_interval': _mirror_rate_limit_state['current_interval'],
+            'safe_rps': round(1.0 / _mirror_rate_limit_state['current_interval'], 2),
+            'safe_rpm': round(60.0 / _mirror_rate_limit_state['current_interval'], 2),
+            'error_rate_429': 0.0,
+            'sample_size': 0
+        }
+
+    count_429 = sum(1 for (_, code) in history if code == 429)
+    return {
+        'safe_interval': _mirror_rate_limit_state['current_interval'],
+        'safe_rps': round(1.0 / _mirror_rate_limit_state['current_interval'], 2),
+        'safe_rpm': round(60.0 / _mirror_rate_limit_state['current_interval'], 2),
+        'error_rate_429': round(count_429 / total, 4),
+        'sample_size': total
+    }
+
+
+def enforce_mirror_rate_limit():
+    last = _mirror_rate_limit_state.get('last_request_timestamp')
+    if last is None:
+        return
+
+    elapsed = time.time() - last
+    needed = _mirror_rate_limit_state['current_interval'] - elapsed
+    if needed > 0:
+        print(f"[DOWNLOAD] Rate limiter sleeping {needed:.2f}s to enforce interval { _mirror_rate_limit_state['current_interval'] }s", flush=True)
+        time.sleep(needed)
+
+
 def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
     """Make an HTTP request via rotating mirrors with retry/backoff.
 
@@ -102,7 +189,12 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     total_count = len(url_list)
     url_iterator = cycle(url_list)
 
+    rate_limit_sleep_seconds = 30
+    rate_limit_attempts = 0
+
     for attempt in range(max_retries + 1):
+        enforce_mirror_rate_limit()
+
         try:
             target = select_next_mirror(url_iterator, allowed_names, total_count)
             target_url = target['url'].rstrip('/')
@@ -111,20 +203,49 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
 
             print(f"[DOWNLOAD] Trying mirror '{target['name']}' ({full_url}) attempt {attempt + 1}/{max_retries + 1}", flush=True)
             response = make_request_with_retry(full_url, method=method, timeout=timeout, backoff_factor=backoff_factor, **kwargs)
+
             if response is not None:
                 print(f"[DOWNLOAD] Mirror '{target['name']}' returned {response.status_code} for {url_base}", flush=True)
+
+                if response.status_code == 429:
+                    _record_rate_limit_event(429)
+                    if rate_limit_attempts == 0:
+                        print(
+                            f"[DOWNLOAD] Mirror '{target['name']}' returned 429 Too Many Requests. Waiting {rate_limit_sleep_seconds}s before retrying...",
+                            flush=True
+                        )
+                    else:
+                        print(
+                            f"[DOWNLOAD] Mirror '{target['name']}' still returning 429. Doubling wait to {rate_limit_sleep_seconds}s and retrying...",
+                            flush=True
+                        )
+
+                    if attempt >= max_retries:
+                        last_exception = requests.exceptions.HTTPError(f"429: {response.text}")
+                        continue
+
+                    time.sleep(rate_limit_sleep_seconds)
+                    rate_limit_attempts += 1
+                    rate_limit_sleep_seconds *= 2
+                    continue
+
                 if response.ok:
+                    _record_rate_limit_event(response.status_code)
                     return response, target
 
                 # non-2xx response from a mirror is treated as mirror-specific failure; try next mirror
+                _record_rate_limit_event(response.status_code)
                 last_exception = requests.exceptions.HTTPError(f"{response.status_code}: {response.text}")
                 continue
 
         except requests.exceptions.Timeout as e:
+            _record_rate_limit_event(0)
             last_exception = e
         except requests.exceptions.ConnectionError as e:
+            _record_rate_limit_event(0)
             last_exception = e
         except requests.exceptions.RequestException as e:
+            _record_rate_limit_event(0)
             last_exception = e
 
     if last_exception:

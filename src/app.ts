@@ -123,6 +123,14 @@ interface Endpoint {
     lastChecked: string | null;
 }
 
+interface MirrorRateLimitStatus {
+    safe_interval: number;
+    safe_rps: number;
+    safe_rpm: number;
+    error_rate_429: number;
+    sample_size: number;
+}
+
 interface EndpointStatus {
     endpoints: Endpoint[];
     summary: {
@@ -130,6 +138,7 @@ interface EndpointStatus {
         online: number;
         offline: number;
     };
+    mirrorRateLimitStatus?: MirrorRateLimitStatus;
 }
 
 interface JobStageMap {
@@ -2362,6 +2371,11 @@ class App {
         if (onlineCount) onlineCount.textContent = data.summary.online.toString();
         if (offlineCount) offlineCount.textContent = data.summary.offline.toString();
 
+        const rateLimit = data.mirrorRateLimitStatus;
+        const safeRateLabel = rateLimit
+            ? `${rateLimit.safe_rpm.toFixed(2)} RPM (${rateLimit.safe_rps.toFixed(2)} RPS)`
+            : 'Unknown';
+
         // Update endpoint list
         this.flyoutContent.innerHTML = data.endpoints.map(endpoint => {
             const url = atob(endpoint.encodedUrl);
@@ -2392,6 +2406,10 @@ class App {
                         <div class="endpoint-detail">
                             <span class="detail-label">Last Checked</span>
                             <span class="detail-value">${lastChecked}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Safe Rate</span>
+                            <span class="detail-value">${safeRateLabel}</span>
                         </div>
                     </div>
                 </div>

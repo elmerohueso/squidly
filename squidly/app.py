@@ -4200,13 +4200,20 @@ def endpoints_status():
             'lastChecked': row['last_checked']
         })
 
+    mirror_rate_limit_status = {}
+    try:
+        mirror_rate_limit_status = downloads.get_mirror_rate_limit_status() or {}
+    except Exception as e:
+        print(f"[ENDPOINTS] Failed to get mirror rate limit status: {e}", flush=True)
+
     return jsonify({
         'endpoints': endpoints,
         'summary': {
             'total': len(endpoints),
             'online': sum(1 for e in endpoints if e.get('online')),
             'offline': sum(1 for e in endpoints if not e.get('online'))
-        }
+        },
+        'mirrorRateLimitStatus': mirror_rate_limit_status,
     })
 
 @app.route('/api/listenbrainz/config', methods=['GET'])
