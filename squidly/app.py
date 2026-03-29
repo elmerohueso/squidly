@@ -1344,6 +1344,7 @@ def process_download_job(job_id, payload):
     album_artist_name = None
     album_name = 'Unknown Album'
     track_title = 'Unknown Track'
+    track_version = ''
     track_num = '01'
     disc_num = ''
     release_year = ''
@@ -1390,9 +1391,15 @@ def process_download_job(job_id, payload):
             track_title = track_metadata['title']
 
         # Add Explicit tag to title if marked as explicit in TIDAL metadata
+        if 'version' in track_metadata and track_metadata['version']:
+            track_version = str(track_metadata['version']).strip()
+
         if 'explicit' in track_metadata:
             if bool(track_metadata['explicit']) == True:
                 track_title += ' [Explicit]'
+
+        if track_version:
+            track_title = f"{track_title} ({track_version})"
 
         if 'trackNumber' in track_metadata:
             track_num = str(track_metadata['trackNumber']).zfill(2)
@@ -1776,7 +1783,8 @@ def process_download_job(job_id, payload):
         'album': album_name,
         'year': release_year,
         'track_number': track_num,
-        'disc_number': disc_num
+        'disc_number': disc_num,
+        'version': track_version
     }
 
     temp_folder = '/app/temp'
