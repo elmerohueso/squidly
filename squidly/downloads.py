@@ -9,7 +9,7 @@ import subprocess
 import time
 from itertools import cycle
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TPE2, TALB, TDRC, TRCK, TPOS, TCOP, TXXX
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 import requests
@@ -477,6 +477,9 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         year = metadata.get('year', '')
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
+        copyright_text = metadata.get('copyright', '')
+        tidal_track_id = metadata.get('tidal_track_id', None)
+        tidal_album_id = metadata.get('tidal_album_id', None)
 
         # Handle FLAC files
         if file_path.lower().endswith('.flac'):
@@ -487,6 +490,12 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio['ALBUM'] = album
                 if year:
                     audio['DATE'] = str(year)
+                if copyright_text:
+                    audio['COPYRIGHT'] = copyright_text
+                if tidal_track_id:
+                    audio['TIDAL_TRACK_ID'] = str(tidal_track_id)
+                if tidal_album_id:
+                    audio['TIDAL_ALBUM_ID'] = str(tidal_album_id)
                 audio['TRACKNUMBER'] = str(track_num)
                 if disc_num:
                     audio['DISCNUMBER'] = str(disc_num)
@@ -515,6 +524,14 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
 
                 if year:
                     audio['\xa9day'] = str(year)
+
+                if copyright_text:
+                    audio['\xa9c'] = copyright_text
+
+                if tidal_track_id:
+                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(tidal_track_id)]
+                if tidal_album_id:
+                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(tidal_album_id)]
 
                 if track_num:
                     try:
@@ -558,6 +575,12 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio['TALB'] = TALB(encoding=3, text=album)
                 if year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
+                if copyright_text:
+                    audio['TCOP'] = TCOP(encoding=3, text=copyright_text)
+                if tidal_track_id:
+                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(tidal_track_id))
+                if tidal_album_id:
+                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(tidal_album_id))
                 audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
                 if disc_num:
                     audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))

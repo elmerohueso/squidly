@@ -565,7 +565,7 @@ import socket
 from difflib import SequenceMatcher
 from urllib.parse import urlparse, parse_qs, urlencode, quote_plus
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TPOS
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TPE2, TALB, TDRC, TRCK, TPOS, TCOP, TXXX
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
@@ -1348,6 +1348,7 @@ def process_download_job(job_id, payload):
     track_num = '01'
     disc_num = ''
     release_year = ''
+    copyright_text = ''
     cover_url = ''
     album_id = ''
 
@@ -1422,8 +1423,16 @@ def process_download_job(job_id, payload):
             if isinstance(date_str, str) and len(date_str) >= 4:
                 release_year = date_str[:4]
 
+        if 'copyright' in track_metadata and track_metadata['copyright']:
+            copyright_text = str(track_metadata['copyright']).strip()
+
+        if not copyright_text and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
+            raw_copyright = track_metadata['album'].get('copyright')
+            if raw_copyright:
+                copyright_text = str(raw_copyright).strip()
+
         if not release_year:
-            release_year = extract_year_from_text(track_metadata.get('copyright', ''))
+            release_year = extract_year_from_text(copyright_text)
         if not release_year and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
             release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
 
@@ -1784,7 +1793,10 @@ def process_download_job(job_id, payload):
         'year': release_year,
         'track_number': track_num,
         'disc_number': disc_num,
-        'version': track_version
+        'version': track_version,
+        'copyright': copyright_text,
+        'tidal_track_id': track_id,
+        'tidal_album_id': album_id
     }
 
     temp_folder = '/app/temp'
@@ -1819,6 +1831,10 @@ def process_download_job(job_id, payload):
             raise Exception(f"Failed to convert {temp_source_ext.upper()} to MP3")
 
         shutil.move(temp_mp3_path, full_path)
+
+        # Ensure final MP3 has correct ID3 metadata after conversion.
+        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+
         stages['converted'] = 'done'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
@@ -3541,7 +3557,15 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio['TRACKNUMBER'] = str(track_num)
                 if disc_num:
                     audio['DISCNUMBER'] = str(disc_num)
-                
+                if metadata.get('copyright'):
+                    audio['COPYRIGHT'] = str(metadata.get('copyright'))
+                if metadata.get('tidal_track_id'):
+                    audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
+                if metadata.get('tidal_album_id'):
+                    audio['TIDAL_ALBUM_ID'] = str(metadata.get('tidal_album_id'))
+                if metadata.get('version'):
+                    audio['VERSION'] = str(metadata.get('version'))
+
                 # Add cover art if available
                 if cover_image_data:
                     from mutagen.flac import Picture
@@ -3582,6 +3606,15 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                         audio['disk'] = [(disc_number, 0)]
                     except ValueError:
                         pass
+
+                if metadata.get('copyright'):
+                    audio['©cpy'] = str(metadata.get('copyright'))
+                if metadata.get('tidal_track_id'):
+                    audio['----:com.apple.iTunes:tidal_track_id'] = [metadata.get('tidal_track_id').encode('utf-8')]
+                if metadata.get('tidal_album_id'):
+                    audio['----:com.apple.iTunes:tidal_album_id'] = [metadata.get('tidal_album_id').encode('utf-8')]
+                if metadata.get('version'):
+                    audio['----:com.apple.iTunes:version'] = [metadata.get('version').encode('utf-8')]
                 
                 if cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
@@ -3616,6 +3649,14 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
                 if disc_num:
                     audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
+                if metadata.get('copyright'):
+                    audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
+                if metadata.get('tidal_track_id'):
+                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(metadata.get('tidal_track_id')))
+                if metadata.get('tidal_album_id'):
+                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
+                if metadata.get('version'):
+                    audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
                 
                 # Add cover art if available
                 if cover_image_data:
