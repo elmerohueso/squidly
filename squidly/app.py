@@ -1340,7 +1340,8 @@ def process_download_job(job_id, payload):
     track_info = info_data.get('data', info_data) if isinstance(info_data, dict) else {}
     track_metadata = track_info.get('track', track_info) if 'track' in track_info else track_info
 
-    artist_name = 'Unknown Artist'
+    track_artist_name = 'Unknown Artist'
+    album_artist_name = None
     album_name = 'Unknown Album'
     track_title = 'Unknown Track'
     track_num = '01'
@@ -1351,11 +1352,11 @@ def process_download_job(job_id, payload):
 
     if isinstance(track_metadata, dict):
         if 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
-            artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
+            track_artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
         elif 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
-            artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
+            track_artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
         elif 'artistName' in track_metadata:
-            artist_name = track_metadata['artistName']
+            track_artist_name = track_metadata['artistName']
 
 
         if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
@@ -1430,22 +1431,41 @@ def process_download_job(job_id, payload):
                 else:
                     cover_url = cover_val
 
-            if not cover_url:
-                for cover_field in ['coverUri', 'imageUri', 'image']:
-                    if cover_field in track_metadata:
-                        cover_val = track_metadata[cover_field]
-                        if isinstance(cover_val, str):
-                            if not cover_val.startswith('http'):
-                                cover_url = format_tidal_image_url(cover_val, 1280)
-                            else:
-                                cover_url = cover_val
-                            break
+    # Attempt to resolve album artist from album metadata endpoint (preferred over track-level artist)
+    album_artist_name = None
+    if album_id:
+        try:
+            album_response, album_target = make_request_with_retry_rotating_mirrors(
+                f"/album/?id={album_id}",
+                SQUID_URLS,
+                method='GET',
+                timeout=10,
+                max_retries=3
+            )
+            if album_response.ok:
+                album_data = album_response.json()
+                album_payload = album_data.get('data', album_data) if isinstance(album_data, dict) else {}
+                album_obj = album_payload.get('album', album_payload) if isinstance(album_payload, dict) else {}
 
-    print(f"[DOWNLOAD] Extracted metadata: Artist='{artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', DiscNum='{disc_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
+                if isinstance(album_obj, dict):
+                    if 'artist' in album_obj and isinstance(album_obj['artist'], dict):
+                        album_artist_name = album_obj['artist'].get('name')
+                    elif 'artists' in album_obj and isinstance(album_obj['artists'], list) and len(album_obj['artists']) > 0:
+                        first_artist = album_obj['artists'][0]
+                        if isinstance(first_artist, dict):
+                            album_artist_name = first_artist.get('name')
+
+        except requests.exceptions.RequestException as e:
+            print(f"[DOWNLOAD] Warning: Failed to fetch album artist for album {album_id}: {str(e)}", flush=True)
+
+    artist_name = track_artist_name
+    effective_artist_name = album_artist_name or track_artist_name
+
+    print(f"[DOWNLOAD] Extracted metadata: TrackArtist='{track_artist_name}', AlbumArtist='{album_artist_name or ''}', EffectiveArtistForPath='{effective_artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', DiscNum='{disc_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
 
     file_ext = 'flac' if file_format == 'original' else 'mp3'
 
-    safe_artist = sanitize_filename_component(artist_name)
+    safe_artist = sanitize_filename_component(effective_artist_name)
     safe_album = sanitize_filename_component(album_name)
     safe_title = sanitize_filename_component(track_title)
     safe_track = sanitize_filename_component(track_num)
@@ -1462,7 +1482,7 @@ def process_download_job(job_id, payload):
     full_path = os.path.normpath(full_path)
 
     print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{file_format}', title='{track_title}', artist='{artist_name}', album='{album_name}'",
+        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{file_format}', title='{track_title}', artist='{artist_name}', album='{album_name}', effective_artist='{effective_artist_name}'",
         flush=True
     )
 
@@ -1727,6 +1747,7 @@ def process_download_job(job_id, payload):
 
     metadata_dict = {
         'artist': artist_name,
+        'album_artist': album_artist_name,
         'title': track_title,
         'album': album_name,
         'year': release_year,
@@ -3480,6 +3501,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio = FLAC(file_path)
                 audio['TITLE'] = title
                 audio['ARTIST'] = artist
+                if metadata.get('album_artist'):
+                    audio['ALBUMARTIST'] = metadata.get('album_artist')
                 audio['ALBUM'] = album
                 if year:
                     audio['DATE'] = str(year)
@@ -3507,6 +3530,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 audio = MP4(file_path)
                 audio['\xa9nam'] = title
                 audio['\xa9ART'] = artist
+                if metadata.get('album_artist'):
+                    audio['aART'] = metadata.get('album_artist')
                 audio['\xa9alb'] = album
                 
                 if year:
@@ -3551,6 +3576,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 # Add text tags
                 audio['TIT2'] = TIT2(encoding=3, text=title)
                 audio['TPE1'] = TPE1(encoding=3, text=artist)
+                if metadata.get('album_artist'):
+                    audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
                 audio['TALB'] = TALB(encoding=3, text=album)
                 if year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
