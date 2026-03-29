@@ -218,6 +218,10 @@
             <div class="settings-section">
                 <div class="settings-section-title">Plex Integration</div>
                 <div id="plexConnectedStatus" style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></div>
+                <label class="settings-label" for="ignoreMatchesCheckbox" style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="ignoreMatchesCheckbox">
+                    <span>Always re-download track (ignore existing Plex matches)</span>
+                </label>
                 <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;">
                     <button id="plexLoginButton" class="save-button">Login to Plex</button>
                     <button id="plexClearCredentialsButton" class="save-button" style="background: #b00020; color: #fff; display: none;">Clear credentials</button>

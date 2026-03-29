@@ -1471,7 +1471,10 @@ def process_download_job(job_id, payload):
     metadata_rows = _lookup_plex_songs(cur, track_title, artist_name, album_name)
     conn.close()
 
-    matching_rows = [row for row in metadata_rows if _matches_requested_format(file_format, row.get('format'))]
+    ignore_matches = bool(payload.get('ignore_matches', False))
+    matching_rows = []
+    if not ignore_matches:
+        matching_rows = [row for row in metadata_rows if _matches_requested_format(file_format, row.get('format'))]
 
     # If downloading MP3, skip the "existing match" shortcut for low-quality copies (≤192 kbps).
     # Those will be re-downloaded and overwrite the existing file.
@@ -3679,6 +3682,8 @@ def download_track():
     if file_format not in ('original', 'mp3'):
         return jsonify({'error': 'Invalid format value'}), 400
 
+    ignore_matches = bool(payload.get('ignore_matches', False))
+
     job_payload = {
         'trackId': track_id,
         'format': file_format,
@@ -3687,7 +3692,8 @@ def download_track():
         'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
         'fileNamingLoose': payload.get('fileNamingLoose') or file_naming_loose,
         'plex_playlist': payload.get('plex_playlist'),
-        'plex_user_id': payload.get('plex_user_id')
+        'plex_user_id': payload.get('plex_user_id'),
+        'ignore_matches': ignore_matches
     }
 
     job_id = enqueue_job('download_track', job_payload)

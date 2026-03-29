@@ -201,6 +201,7 @@ interface DownloadSettings {
     fileNamingLoose: string;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
+    ignoreMatches: boolean;
 }
 
 interface AppRouteState {
@@ -276,6 +277,7 @@ class App {
     private plexClearCredentialsButton: HTMLButtonElement;
     private plexUserDropdownContainer: HTMLElement;
     private plexUserSelect: HTMLSelectElement;
+    private ignoreMatchesCheckbox: HTMLInputElement;
     private downloadSettings: DownloadSettings;
     private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
@@ -364,6 +366,7 @@ class App {
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
         this.plexUserSelect = document.getElementById('plexUserSelect') as HTMLSelectElement;
+        this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
         
         this.initializeEventListeners();
         this.streamQuality = this.loadStreamQualityFromCookie();
@@ -424,6 +427,7 @@ class App {
         this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
+        this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         this.savePlexConfigButton.addEventListener('click', () => {
             void this.savePlexConfig();
@@ -1535,7 +1539,8 @@ class App {
             format: 'original',
             fileNamingLoose: '{artist}/{album}/{track} - {title}.{ext}',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
-            jobsRefreshIntervalSeconds: 30
+            jobsRefreshIntervalSeconds: 30,
+            ignoreMatches: false
         };
     }
 
@@ -1571,7 +1576,10 @@ class App {
                         : typeof fileNaming === 'string'
                             ? fileNaming
                             : fallback.fileNamingAlbum,
-            jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds
+            jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds,
+            ignoreMatches: typeof (raw as DownloadSettings).ignoreMatches === 'boolean'
+                ? (raw as DownloadSettings).ignoreMatches
+                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches)
         };
     }
 
@@ -1596,6 +1604,7 @@ class App {
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.fileNamingLooseInput.value = settings.fileNamingLoose;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
+        this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
         this.syncFormatToggleStyles();
     }
 
@@ -1613,7 +1622,8 @@ class App {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             fileNamingLoose: this.fileNamingLooseInput.value.trim(),
-            jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds
+            jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
+            ignoreMatches: this.ignoreMatchesCheckbox.checked
         };
     }
 
@@ -4223,7 +4233,8 @@ const plexUserId = this.getSelectedPlexUserId();
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
                             fileNamingLoose: this.downloadSettings.fileNamingLoose,
                             plex_playlist: plexPlaylistName,
-                            plex_user_id: plexUserId
+                            plex_user_id: plexUserId,
+                            ignore_matches: this.downloadSettings.ignoreMatches
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);
