@@ -1357,6 +1357,7 @@ def process_download_job(job_id, payload):
         elif 'artistName' in track_metadata:
             artist_name = track_metadata['artistName']
 
+
         if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
             album_name = track_metadata['album'].get('title', 'Unknown Album')
 
@@ -1386,6 +1387,11 @@ def process_download_job(job_id, payload):
 
         if 'title' in track_metadata:
             track_title = track_metadata['title']
+
+        # Add Explicit tag to title if marked as explicit in TIDAL metadata
+        if 'explicit' in track_metadata:
+            if bool(track_metadata['explicit']) == True:
+                track_title += ' [Explicit]'
 
         if 'trackNumber' in track_metadata:
             track_num = str(track_metadata['trackNumber']).zfill(2)
