@@ -1433,6 +1433,8 @@ def process_download_job(job_id, payload):
 
     # Attempt to resolve album artist from album metadata endpoint (preferred over track-level artist)
     album_artist_name = None
+    album_disc_count = 1
+    album_has_multiple_discs = False
     if album_id:
         try:
             album_response, album_target = make_request_with_retry_rotating_mirrors(
@@ -1446,6 +1448,24 @@ def process_download_job(job_id, payload):
                 album_data = album_response.json()
                 album_payload = album_data.get('data', album_data) if isinstance(album_data, dict) else {}
                 album_obj = album_payload.get('album', album_payload) if isinstance(album_payload, dict) else {}
+
+                # Detect multi-disc album by inspecting the track-level volumeNumber values
+                if isinstance(album_payload, dict):
+                    album_items = album_payload.get('items', [])
+                    volume_numbers = set()
+                    if isinstance(album_items, list):
+                        for entry in album_items:
+                            if isinstance(entry, dict):
+                                item = entry.get('item') if isinstance(entry.get('item'), dict) else {}
+                                volume_number = item.get('volumeNumber')
+                                try:
+                                    if volume_number is not None:
+                                        volume_numbers.add(int(volume_number))
+                                except (TypeError, ValueError):
+                                    pass
+                    if len(volume_numbers) > 1:
+                        album_disc_count = len(volume_numbers)
+                        album_has_multiple_discs = True
 
                 if isinstance(album_obj, dict):
                     if 'artist' in album_obj and isinstance(album_obj['artist'], dict):
@@ -1469,6 +1489,10 @@ def process_download_job(job_id, payload):
     safe_album = sanitize_filename_component(album_name)
     safe_title = sanitize_filename_component(track_title)
     safe_track = sanitize_filename_component(track_num)
+
+    if album_has_multiple_discs and disc_num:
+        prefixed_track = f"{disc_num}-{safe_track}"
+        safe_track = sanitize_filename_component(prefixed_track)
 
     file_path = file_naming.replace('{artist}', safe_artist)
     file_path = file_path.replace('{album}', safe_album)
