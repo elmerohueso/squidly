@@ -31,6 +31,7 @@ interface Track {
     audioQuality?: string;
     cover?: string;
     trackNumber?: number;
+    explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
     };
@@ -57,6 +58,7 @@ interface AlbumSearchItem {
     numberOfTracks?: number;
     duration?: number;
     audioQuality?: string;
+    explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
     };
@@ -3485,6 +3487,7 @@ class App {
                     <div class="track-metadata">
                         <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
                         ${qualityDisplay ? `<span>•</span><span>${qualityDisplay}</span>` : ''}
+                        ${track.explicit ? `<span>•</span><span class="explicit-badge" title="Explicit content">E</span>` : ''}
                     </div>
                 </div>
                 <div class="track-actions">
@@ -3701,6 +3704,7 @@ class App {
                         ${trackCount ? `<span>${trackCount}</span>` : ''}
                         ${trackCount && qualityDisplay ? `<span>•</span>` : ''}
                         ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
+                        ${album.explicit ? `<span>•</span><span class="explicit-badge" title="Explicit content">E</span>` : ''}
                     </div>
                 </div>
                 <div class="track-actions">

@@ -597,6 +597,23 @@ main {
     color: #e6a800;
 }
 
+.explicit-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.2em;
+    height: 1.2em;
+    border-radius: 2px;
+    background: rgba(255, 64, 129, 0.15);
+    border: 1px solid rgba(255, 64, 129, 0.4);
+    color: #ff4081;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
 .plex-chip-separator {
     color: var(--text-muted);
 }
