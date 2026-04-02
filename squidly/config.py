@@ -48,7 +48,8 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'parent_folder': '',
     'file_naming_loose': '{artist}/{album}/{track} - {title}.{ext}',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
-    'jobs_refresh_interval_seconds': 30
+    'jobs_refresh_interval_seconds': 30,
+    'ignore_matches': False
 }
 
 # Temporary scratch directory used during downloads

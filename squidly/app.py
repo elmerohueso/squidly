@@ -836,6 +836,8 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_album TEXT")
     if 'jobs_refresh_interval_seconds' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN jobs_refresh_interval_seconds INTEGER")
+    if 'ignore_matches' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN ignore_matches BOOLEAN NOT NULL DEFAULT FALSE")
     
     cur.execute(
         """
@@ -2045,7 +2047,7 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds
+        SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
         FROM download_settings
         WHERE id = 1
         """
@@ -2057,9 +2059,9 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, updated_at
+                id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
@@ -2068,13 +2070,14 @@ def get_download_settings():
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'],
+                DEFAULT_DOWNLOAD_SETTINGS['ignore_matches'],
                 now
             )
         )
         conn.commit()
         cur.execute(
             """
-            SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds
+            SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
             FROM download_settings
             WHERE id = 1
             """
@@ -2086,6 +2089,8 @@ def get_download_settings():
     jobs_refresh_interval_seconds = row['jobs_refresh_interval_seconds']
     if not isinstance(jobs_refresh_interval_seconds, int) or jobs_refresh_interval_seconds < 1:
         jobs_refresh_interval_seconds = DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']
+    
+    ignore_matches = bool(row['ignore_matches'])
 
     if row['file_naming_loose'] is None or row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
         now = datetime.utcnow().isoformat() + 'Z'
@@ -2111,7 +2116,8 @@ def get_download_settings():
         'file_naming': file_naming_loose,
         'file_naming_loose': file_naming_loose,
         'file_naming_album': file_naming_album,
-        'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds
+        'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds,
+        'ignore_matches': ignore_matches
     }
 
 def save_download_settings(settings):
@@ -2121,9 +2127,9 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, updated_at
+            id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             parent_folder = excluded.parent_folder,
@@ -2131,6 +2137,7 @@ def save_download_settings(settings):
             file_naming_loose = excluded.file_naming_loose,
             file_naming_album = excluded.file_naming_album,
             jobs_refresh_interval_seconds = excluded.jobs_refresh_interval_seconds,
+            ignore_matches = excluded.ignore_matches,
             updated_at = excluded.updated_at
         """,
         (
@@ -2140,6 +2147,7 @@ def save_download_settings(settings):
             settings['file_naming_loose'],
             settings['file_naming_album'],
             settings['jobs_refresh_interval_seconds'],
+            bool(settings.get('ignore_matches', False)),
             now
         )
     )
@@ -3782,7 +3790,11 @@ def download_track():
     if file_format not in ('original', 'mp3'):
         return jsonify({'error': 'Invalid format value'}), 400
 
-    ignore_matches = bool(payload.get('ignore_matches', False))
+    # Use global setting as fallback if not specified in payload
+    ignore_matches = payload.get('ignore_matches')
+    if ignore_matches is None:
+        ignore_matches = settings.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))
+    ignore_matches = bool(ignore_matches)
 
     job_payload = {
         'trackId': track_id,
@@ -4261,7 +4273,8 @@ def download_settings():
         'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
         'file_naming_loose': file_naming_loose,
         'file_naming_album': file_naming_album,
-        'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'])))
+        'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
+        'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))))
     }
 
     if updated['format'] not in ('original', 'mp3'):
@@ -4278,13 +4291,16 @@ def download_settings():
     if updated['jobs_refresh_interval_seconds'] < 1:
         return jsonify({'error': 'Jobs refresh interval must be at least 1 second'}), 400
 
+    updated['ignore_matches'] = bool(updated['ignore_matches'])
+
     save_download_settings(updated)
     return jsonify({
         'format': updated['format'],
         'file_naming': updated['file_naming_loose'],
         'file_naming_loose': updated['file_naming_loose'],
         'file_naming_album': updated['file_naming_album'],
-        'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds']
+        'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
+        'ignore_matches': updated['ignore_matches']
     })
 
 @app.route('/api/endpoints/status', methods=['GET'])
