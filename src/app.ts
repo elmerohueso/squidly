@@ -31,6 +31,7 @@ interface Track {
     audioQuality?: string;
     cover?: string;
     trackNumber?: number;
+    volumeNumber?: number;
     explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
@@ -56,6 +57,7 @@ interface AlbumSearchItem {
     artist?: Artist;
     releaseDate?: string;
     numberOfTracks?: number;
+    numberOfVolumes?: number;
     duration?: number;
     audioQuality?: string;
     explicit?: boolean;
@@ -108,6 +110,7 @@ interface AlbumInfo {
         artists?: Artist[];
         releaseDate?: string;
         numberOfTracks?: number;
+        numberOfVolumes?: number;
         items?: Array<{
             type: string;
             item: Track;
@@ -3426,7 +3429,7 @@ class App {
         }
     }
 
-    private formatTrackCard(track: Track, showTrackNumber: boolean = false): string {
+    private formatTrackCard(track: Track, showTrackNumber: boolean = false, numberOfVolumes?: number): string {
         // Get artist names and IDs
         const artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(a => a.name).join(', ')
@@ -3459,9 +3462,15 @@ class App {
         const qualityDisplay = this.formatQuality(quality);
 
         // Format track title with optional track number
-        const trackTitle = showTrackNumber && track.trackNumber
-            ? `${track.trackNumber}. ${this.escapeHtml(track.title)}`
-            : this.escapeHtml(track.title);
+        // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
+        let trackTitle = this.escapeHtml(track.title);
+        if (showTrackNumber && track.trackNumber) {
+            const volumeNumber = track.volumeNumber || 1;
+            const displayTrackNumber = numberOfVolumes && numberOfVolumes > 1
+                ? `${volumeNumber}-${String(track.trackNumber).padStart(2, '0')}`
+                : String(track.trackNumber);
+            trackTitle = `${displayTrackNumber}. ${trackTitle}`;
+        }
 
         return `
             <div class="track-card" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
@@ -3950,6 +3959,15 @@ class App {
                 return;
             }
 
+            // Calculate numberOfVolumes by finding unique volumeNumbers
+            const volumeNumbers = new Set<number>();
+            tracks.forEach(track => {
+                if (track.volumeNumber !== undefined && track.volumeNumber !== null) {
+                    volumeNumbers.add(track.volumeNumber);
+                }
+            });
+            const numberOfVolumes = volumeNumbers.size > 0 ? volumeNumbers.size : 1;
+
             this.updatePlexPlaylistContainerVisibility(true);
 
             // Get album info for display
@@ -3973,7 +3991,7 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map(track => this.formatTrackCard(track, true)).join('')}
+                    ${tracks.map(track => this.formatTrackCard(track, true, numberOfVolumes)).join('')}
                 </div>
             `;
 
