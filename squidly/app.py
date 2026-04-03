@@ -389,109 +389,6 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         'sync_queue_status': progress.get('sync_queue_status')
     }
 
-def trigger_plex_library_update():
-    print('[LIBRARY UPDATE] Triggering Plex library update...', flush=True)
-    plex_config = get_plex_config()
-    server_url = plex_config.get('server_url')
-    api_token = plex_config.get('api_token')
-    library_name = plex_config.get('library_name')
-    if not (server_url and api_token and library_name):
-        print('[LIBRARY UPDATE] Plex config missing, cannot update library.', flush=True)
-        return
-    try:
-        plex = PlexServer(server_url, api_token, timeout=20)
-        print(f'[LIBRARY UPDATE] Connected to Plex server at {server_url}', flush=True)
-        # Find the music library by name
-        library = None
-        for section in plex.library.sections():
-            if section.title == library_name and section.type == 'artist':
-                library = section
-                break
-        if not library:
-            print(f'[LIBRARY UPDATE] Library "{library_name}" not found or not a music library.', flush=True)
-            return
-        print(f'[LIBRARY UPDATE] Triggering scan on library: {library_name}', flush=True)
-        library.update()
-        print(f'[LIBRARY UPDATE] Library scan triggered successfully.', flush=True)
-
-        completed, saw_active = wait_for_plex_library_scan_completion(
-            plex,
-            library,
-            timeout_seconds=600,
-            poll_interval_seconds=5,
-            startup_grace_seconds=30
-        )
-
-        if completed:
-            print('[LIBRARY UPDATE] Scan completion confirmed. Starting Plex songs sync job...', flush=True)
-        elif saw_active:
-            print('[LIBRARY UPDATE] Scan started but completion was not confirmed before timeout. Starting Plex songs sync anyway...', flush=True)
-        else:
-            print('[LIBRARY UPDATE] Scan completion could not be observed; proceeding to start Plex songs sync...', flush=True)
-
-        sync_result = start_plex_sync_job(trigger='post_library_update')
-        if sync_result.get('ok'):
-            print(f"[LIBRARY UPDATE] Plex sync job queued: {sync_result.get('job_id')}", flush=True)
-        else:
-            print(f"[LIBRARY UPDATE] Plex sync not queued (status={sync_result.get('status_code')}): {sync_result.get('error')}", flush=True)
-    except Exception as e:
-        print(f'[LIBRARY UPDATE] Error triggering Plex library update: {e}', flush=True)
-
-def library_update_worker():
-    print('[LIBRARY UPDATE WORKER] Started', flush=True)
-    while True:
-        try:
-            status = get_library_update_status()
-            if not status:
-                time.sleep(30)
-                continue
-            last_update_time, library_update_needed, last_job_finished_at, _last_download_activity_at = status
-            now = datetime.utcnow()
-            last_update_time = normalize_db_timestamp(last_update_time)
-            last_job_finished_at = normalize_db_timestamp(last_job_finished_at)
-            # Scenario 1
-            if library_update_needed and not any_download_jobs_running():
-                # 15 min since last job finished and last update
-                if last_job_finished_at and last_update_time:
-                    if (now - last_job_finished_at >= timedelta(minutes=15)) and (now - last_update_time >= timedelta(minutes=15)):
-                        result = start_plex_library_update_job(trigger='scheduled')
-                        if result.get('ok'):
-                            print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 1)", flush=True)
-                        else:
-                            print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
-                        set_library_update_needed(False)
-                        print('[LIBRARY UPDATE WORKER] Library update requested (scenario 1)', flush=True)
-                elif last_job_finished_at and not last_update_time:
-                    if (now - last_job_finished_at >= timedelta(minutes=15)):
-                        result = start_plex_library_update_job(trigger='scheduled')
-                        if result.get('ok'):
-                            print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 1, no prev update)", flush=True)
-                        else:
-                            print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
-                        set_library_update_needed(False)
-                        print('[LIBRARY UPDATE WORKER] Library update requested (scenario 1, no prev update)', flush=True)
-            # Scenario 2
-            elif library_update_needed and any_download_jobs_running():
-                if last_update_time and (now - last_update_time >= timedelta(minutes=60)):
-                    result = start_plex_library_update_job(trigger='scheduled')
-                    if result.get('ok'):
-                        print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 2)", flush=True)
-                    else:
-                        print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
-                    set_library_update_needed(False)
-                    print('[LIBRARY UPDATE WORKER] Library update requested (scenario 2)', flush=True)
-                elif not last_update_time:
-                    result = start_plex_library_update_job(trigger='scheduled')
-                    if result.get('ok'):
-                        print(f"[LIBRARY UPDATE WORKER] Queued library update job {result.get('job_id')} (scenario 2, no prev update)", flush=True)
-                    else:
-                        print(f"[LIBRARY UPDATE WORKER] Library update job not queued (status={result.get('status_code')}): {result.get('error')}", flush=True)
-                    set_library_update_needed(False)
-                    print('[LIBRARY UPDATE WORKER] Library update requested (scenario 2, no prev update)', flush=True)
-        except Exception as e:
-            print(f'[LIBRARY UPDATE WORKER] Error: {e}', flush=True)
-        time.sleep(60)
-
 def plex_library_update_job_worker():
     print("[LIBRARY_UPDATE_JOB_WORKER] Background worker started", flush=True)
     gate_poll_seconds = 15
@@ -774,31 +671,6 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     )
 
 from squidly.db import get_db_connection
-
-def get_online_mirror_names():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT name
-        FROM mirror_endpoints
-        WHERE online = 1
-        """
-    )
-    rows = cur.fetchall()
-    conn.close()
-    return {row['name'] for row in rows}
-
-def select_next_mirror(url_iterator, allowed_names, total_count):
-    if not allowed_names:
-        return next(url_iterator)
-
-    for _ in range(total_count):
-        candidate = next(url_iterator)
-        if candidate['name'] in allowed_names:
-            return candidate
-
-    return next(url_iterator)
 
 def init_db():
     conn = get_db_connection()
@@ -3114,45 +2986,6 @@ def album_similar():
         return jsonify({
             'error': f'Proxy error',
             'details': str(e)
-        }), 502
-
-@app.route('/api/search', methods=['POST'])
-def api_search():
-    """
-    Legacy POST endpoint for backward compatibility with the UI.
-    Accepts JSON body with 'query' field and searches for tracks.
-    """
-    data = request.get_json()
-    query = data.get('query', '')
-    
-    if not query:
-        return jsonify({'error': 'No query provided'}), 400
-    
-    try:
-        response, target = make_request_with_retry_rotating_mirrors(
-            f"/search/?s={requests.utils.quote(query)}",
-            url_iterator,
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-        
-        if not response.ok:
-            return jsonify({
-                'error': f'Upstream API error via {target["name"]}',
-                'status_code': response.status_code
-            }), response.status_code
-        
-        result = response.json()
-        result['proxied_via'] = target['name']
-        
-        return jsonify(result)
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': f'Proxy error',
-            'details': str(e),
-            'query': query
         }), 502
 
 @app.route('/api/health', methods=['GET'])
