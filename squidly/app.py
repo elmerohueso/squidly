@@ -2495,6 +2495,92 @@ def get_plex_credentials_valid():
     ok, _ = plex_healthcheck()
     return ok
 
+def _get_album_quality_rank(album):
+    """
+    Extract audio quality rank from an album object.
+    Higher numbers = better quality.
+    """
+    quality_order = {
+        'HI_RES_LOSSLESS': 5,
+        'HIRES_LOSSLESS': 5,
+        'DOLBY_ATMOS': 5,  # Treat as hi-res
+        'LOSSLESS': 4,
+        'HIGH': 2,
+        'LOW': 1
+    }
+    
+    # Default to LOW if unknown
+    rank = 0
+    
+    # Check mediaMetadata.tags
+    media_metadata = album.get('mediaMetadata')
+    if isinstance(media_metadata, dict):
+        tags = media_metadata.get('tags')
+        if isinstance(tags, list):
+            for tag in tags:
+                if tag in quality_order:
+                    rank = max(rank, quality_order[tag])
+    
+    # Check audioQuality field (as fallback)
+    audio_quality = album.get('audioQuality')
+    if isinstance(audio_quality, str) and audio_quality in quality_order:
+        rank = max(rank, quality_order[audio_quality])
+    
+    return rank
+
+def _deduplicate_albums(albums):
+    """
+    Deduplicate albums based on (title, artist, year, numberOfTracks).
+    Keep explicit and non-explicit as separate duplicates.
+    For each dedup group, return only the highest quality version.
+    
+    Returns a list of deduplicated albums.
+    """
+    if not isinstance(albums, list):
+        return albums
+    
+    dedup_dict = {}  # key -> list of albums with that key
+    
+    for album in albums:
+        if not isinstance(album, dict):
+            continue
+        
+        # Extract dedup key components
+        title = str(album.get('title') or '').strip().lower()
+        explicit = bool(album.get('explicit', False))
+        
+        # Get artist name (prefer primaryArtist, fallback to artists array)
+        artist_name = ''
+        if isinstance(album.get('primaryArtist'), dict):
+            artist_name = str(album['primaryArtist'].get('name') or '').strip().lower()
+        elif isinstance(album.get('artists'), list) and album['artists']:
+            artist_name = str(album['artists'][0].get('name') or '').strip().lower()
+        
+        # Get year from releaseDate YYYY-MM-DD format
+        year = ''
+        release_date = album.get('releaseDate')
+        if isinstance(release_date, str) and len(release_date) >= 4:
+            year = release_date[:4]
+        
+        # Get track count
+        num_tracks = album.get('numberOfTracks', 0)
+        
+        # Create dedup key: (title, artist, year, num_tracks, explicit)
+        # This keeps explicit/non-explicit separate within same album metadata
+        key = (title, artist_name, year, num_tracks, explicit)
+        
+        if key not in dedup_dict:
+            dedup_dict[key] = []
+        dedup_dict[key].append(album)
+    
+    # From each group, keep only the highest quality version
+    result = []
+    for key, group in dedup_dict.items():
+        best_album = max(group, key=_get_album_quality_rank)
+        result.append(best_album)
+    
+    return result
+
 @app.route('/')
 def index():
     """Serve the main page"""
@@ -2608,6 +2694,18 @@ def search():
         
         result = response.json()
         result['proxied_via'] = target['name']
+        
+        # Deduplicate albums if searching for albums
+        if search_type == 'al':
+            if isinstance(result, dict):
+                # Handle different response structures
+                data = result.get('data')
+                if isinstance(data, dict):
+                    albums_container = data.get('albums')
+                    if isinstance(albums_container, dict):
+                        items = albums_container.get('items')
+                        if isinstance(items, list):
+                            data['albums']['items'] = _deduplicate_albums(items)
         
         return jsonify(result)
     
@@ -2747,6 +2845,15 @@ def artist_info():
         
         result = response.json()
         result['proxied_via'] = target['name']
+        
+        # Deduplicate albums in artist result
+        if isinstance(result, dict):
+            # Direct structure: result['albums']['items']
+            albums = result.get('albums')
+            if isinstance(albums, dict):
+                items = albums.get('items')
+                if isinstance(items, list):
+                    albums['items'] = _deduplicate_albums(items)
         
         return jsonify(result)
     
@@ -2982,6 +3089,12 @@ def album_similar():
 
         result = response.json()
         result['proxied_via'] = target['name']
+        
+        # Deduplicate similar albums
+        if isinstance(result, dict):
+            albums = result.get('albums')
+            if isinstance(albums, list):
+                result['albums'] = _deduplicate_albums(albums)
 
         return jsonify(result)
 
