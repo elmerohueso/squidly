@@ -23,6 +23,7 @@ interface SearchResult {
 interface Track {
     id: number;
     title: string;
+    version?: string;
     duration?: number;
     artists?: Artist[];
     artist?: Artist;
@@ -3420,9 +3421,15 @@ class App {
         }
         const qualityDisplay = this.formatQuality(quality);
 
-        // Format track title with optional track number
+        // Format track title with optional track number and version
         // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
         let trackTitle = this.escapeHtml(track.title);
+        
+        // Append version info if available
+        if (track.version && typeof track.version === 'string' && track.version.trim()) {
+            trackTitle += ` (${this.escapeHtml(track.version)})`;
+        }
+        
         if (showTrackNumber && track.trackNumber) {
             const volumeNumber = track.volumeNumber || 1;
             const displayTrackNumber = numberOfVolumes && numberOfVolumes > 1
