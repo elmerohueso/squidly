@@ -3205,6 +3205,8 @@ class App {
             const tags = playlist.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
+                quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
             } else if (tags.includes('LOW')) {
@@ -3449,9 +3451,11 @@ class App {
         // Get quality info - check mediaMetadata.tags for best quality
         let quality = track.audioQuality || track.quality || '';
         if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             const tags = track.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
@@ -3676,9 +3680,11 @@ class App {
         // Format audio quality if available - check mediaMetadata.tags for best quality
         let quality = album.audioQuality || '';
         if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             const tags = album.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
@@ -3781,9 +3787,11 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
+            'HI_RES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
             'HIRES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
             'LOSSLESS': 'CD • 16-bit/44.1kHz FLAC',
-            'LOW': '320kbps AAC'
+            'HIGH': '320kbps AAC',
+            'LOW': '96kbps AAC'
         };
         return qualityMap[quality] || quality;
     }

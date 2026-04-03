@@ -1524,6 +1524,10 @@ def process_download_job(job_id, payload):
     if isinstance(audio_quality, str) and audio_quality:
         media_tags.append(audio_quality)
 
+    # Treat DOLBY_ATMOS as HIRES_LOSSLESS since it requires high-quality audio
+    if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
+        media_tags.append('HIRES_LOSSLESS')
+
     quality_priority = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
     for quality in quality_priority:
         if quality in media_tags and quality not in quality_candidates:
