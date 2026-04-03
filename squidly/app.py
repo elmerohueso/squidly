@@ -1528,13 +1528,7 @@ def process_download_job(job_id, payload):
     if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
         media_tags.append('HIRES_LOSSLESS')
 
-    quality_priority = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
-    for quality in quality_priority:
-        if quality in media_tags and quality not in quality_candidates:
-            quality_candidates.append(quality)
-
-    if not quality_candidates:
-        quality_candidates = ['HIGH', 'LOW']
+    quality_candidates = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
 
     print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
 
@@ -2817,7 +2811,7 @@ def track_download():
     - quality={quality} : Quality level (HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW)
     """
     track_id = request.args.get('id', '').strip()
-    quality = request.args.get('quality', 'HIGH')
+    quality = request.args.get('quality', 'LOSSLESS')
 
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
@@ -2828,6 +2822,11 @@ def track_download():
     valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
     if quality not in valid_qualities:
         return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
+    
+    # Ignore qualities less than LOSSLESS; treat them as LOSSLESS
+    low_quality_choices = {'HIGH', 'LOW'}
+    if quality in low_quality_choices:
+        quality = 'LOSSLESS'
 
     try:
         response, target = make_request_with_retry_rotating_mirrors(
