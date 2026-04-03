@@ -199,7 +199,6 @@ interface JobFilterTotals {
 }
 
 type DownloadFormat = 'original' | 'mp3';
-type StreamQuality = 'high' | 'low';
 
 interface DownloadSettings {
     format: DownloadFormat;
@@ -254,8 +253,6 @@ class App {
     private formatMp3Input: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private fileNamingLooseInput: HTMLInputElement;
-    private streamQualityHighInput: HTMLInputElement;
-    private streamQualityLowInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
@@ -284,7 +281,6 @@ class App {
     private plexUserSelect: HTMLSelectElement;
     private ignoreMatchesCheckbox: HTMLInputElement;
     private downloadSettings: DownloadSettings;
-    private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
@@ -343,8 +339,6 @@ class App {
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
-        this.streamQualityHighInput = document.getElementById('streamQualityHigh') as HTMLInputElement;
-        this.streamQualityLowInput = document.getElementById('streamQualityLow') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
@@ -374,10 +368,8 @@ class App {
         this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
         
         this.initializeEventListeners();
-        this.streamQuality = this.loadStreamQualityFromCookie();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
-        this.applyStreamQualityToForm();
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
@@ -429,8 +421,6 @@ class App {
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
         this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
-        this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
@@ -1613,12 +1603,6 @@ class App {
         this.syncFormatToggleStyles();
     }
 
-    private applyStreamQualityToForm(): void {
-        this.streamQualityHighInput.checked = this.streamQuality === 'high';
-        this.streamQualityLowInput.checked = this.streamQuality === 'low';
-        this.syncStreamQualityToggleStyles();
-    }
-
     private readSettingsFromForm(): DownloadSettings {
         const fallbackIntervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
         const parsedJobsRefreshIntervalSeconds = this.normalizeJobsRefreshIntervalSeconds(this.jobsRefreshIntervalSecondsInput.value);
@@ -1724,22 +1708,6 @@ class App {
         }
     }
 
-    private updateStreamQualityFromForm(): void {
-        this.streamQuality = this.streamQualityHighInput.checked ? 'high' : 'low';
-        this.saveStreamQualityToCookie(this.streamQuality);
-        this.syncStreamQualityToggleStyles();
-    }
-
-    private loadStreamQualityFromCookie(): StreamQuality {
-        const value = this.getCookieValue('streamQuality');
-        return value === 'low' ? 'low' : 'high';
-    }
-
-    private saveStreamQualityToCookie(quality: StreamQuality): void {
-        const maxAgeSeconds = 60 * 60 * 24 * 365;
-        document.cookie = `streamQuality=${quality}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
-    }
-
     private getCookieValue(name: string): string | null {
         const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}=([^;]*)`));
         return match ? decodeURIComponent(match[1]) : null;
@@ -1779,19 +1747,6 @@ class App {
 
         if (mp3Label) {
             mp3Label.classList.toggle('active', this.formatMp3Input.checked);
-        }
-    }
-
-    private syncStreamQualityToggleStyles(): void {
-        const highLabel = this.streamQualityHighInput.closest('label');
-        const lowLabel = this.streamQualityLowInput.closest('label');
-
-        if (highLabel) {
-            highLabel.classList.toggle('active', this.streamQualityHighInput.checked);
-        }
-
-        if (lowLabel) {
-            lowLabel.classList.toggle('active', this.streamQualityLowInput.checked);
         }
     }
 
@@ -3619,9 +3574,7 @@ class App {
     }
 
     private async fetchTrackStreamUrl(trackId: number): Promise<string> {
-        const qualities = this.streamQuality === 'high'
-            ? ['HIGH']
-            : ['LOW'];
+        const qualities = ['LOSSLESS'];
 
         for (const quality of qualities) {
             try {
