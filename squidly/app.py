@@ -2528,6 +2528,63 @@ def _get_album_quality_rank(album):
     
     return rank
 
+def _deduplicate_tracks(tracks):
+    """
+    Deduplicate tracks based on (title, artist, album, duration).
+    Keep explicit and non-explicit as separate duplicates.
+    For each dedup group, return only the highest quality version.
+    
+    Returns a list of deduplicated tracks.
+    """
+    if not isinstance(tracks, list):
+        return tracks
+    
+    dedup_dict = {}  # key -> list of tracks with that key
+    
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        
+        # Extract dedup key components
+        title = str(track.get('title') or '').strip().lower()
+        explicit = bool(track.get('explicit', False))
+        
+        # Get artist name(s)
+        artist_name = ''
+        if isinstance(track.get('artists'), list) and track['artists']:
+            artist_name = str(track['artists'][0].get('name') or '').strip().lower()
+        elif isinstance(track.get('artist'), dict):
+            artist_name = str(track['artist'].get('name') or '').strip().lower()
+        
+        # Get album name
+        album_name = ''
+        if isinstance(track.get('album'), dict):
+            album_name = str(track['album'].get('title') or '').strip().lower()
+        
+        # Get duration (int, not string)
+        duration = track.get('duration', 0)
+        if isinstance(duration, str):
+            try:
+                duration = int(duration)
+            except (ValueError, TypeError):
+                duration = 0
+        
+        # Create dedup key: (title, artist, album, duration, explicit)
+        # This keeps explicit/non-explicit separate within same track
+        key = (title, artist_name, album_name, duration, explicit)
+        
+        if key not in dedup_dict:
+            dedup_dict[key] = []
+        dedup_dict[key].append(track)
+    
+    # From each group, keep only the highest quality version
+    result = []
+    for key, group in dedup_dict.items():
+        best_track = max(group, key=_get_album_quality_rank)
+        result.append(best_track)
+    
+    return result
+
 def _deduplicate_albums(albums):
     """
     Deduplicate albums based on (title, artist, year, numberOfTracks).
@@ -2695,12 +2752,18 @@ def search():
         result = response.json()
         result['proxied_via'] = target['name']
         
-        # Deduplicate albums if searching for albums
-        if search_type == 'al':
-            if isinstance(result, dict):
-                # Handle different response structures
-                data = result.get('data')
-                if isinstance(data, dict):
+        # Deduplicate results based on search type
+        if isinstance(result, dict):
+            data = result.get('data')
+            if isinstance(data, dict):
+                # Deduplicate tracks if searching for tracks
+                if search_type == 's':
+                    items = data.get('items')
+                    if isinstance(items, list):
+                        data['items'] = _deduplicate_tracks(items)
+                
+                # Deduplicate albums if searching for albums
+                if search_type == 'al':
                     albums_container = data.get('albums')
                     if isinstance(albums_container, dict):
                         items = albums_container.get('items')
@@ -2995,6 +3058,14 @@ def track_recommendations():
 
         result = response.json()
         result['proxied_via'] = target['name']
+        
+        # Deduplicate track recommendations
+        if isinstance(result, dict):
+            data = result.get('data')
+            if isinstance(data, dict):
+                items = data.get('items')
+                if isinstance(items, list):
+                    data['items'] = _deduplicate_tracks(items)
 
         return jsonify(result)
 
