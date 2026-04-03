@@ -526,12 +526,12 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['\xa9day'] = str(year)
 
                 if copyright_text:
-                    audio['\xa9c'] = copyright_text
+                    audio['\xa9c'] = str(copyright_text)
 
                 if tidal_track_id:
-                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(tidal_track_id)]
+                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(tidal_track_id).encode('utf-8')]
                 if tidal_album_id:
-                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(tidal_album_id)]
+                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(tidal_album_id).encode('utf-8')]
 
                 if track_num:
                     try:

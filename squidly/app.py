@@ -3451,11 +3451,11 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 if metadata.get('copyright'):
                     audio['©cpy'] = str(metadata.get('copyright'))
                 if metadata.get('tidal_track_id'):
-                    audio['----:com.apple.iTunes:tidal_track_id'] = [metadata.get('tidal_track_id').encode('utf-8')]
+                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
                 if metadata.get('tidal_album_id'):
-                    audio['----:com.apple.iTunes:tidal_album_id'] = [metadata.get('tidal_album_id').encode('utf-8')]
+                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(metadata.get('tidal_album_id')).encode('utf-8')]
                 if metadata.get('version'):
-                    audio['----:com.apple.iTunes:version'] = [metadata.get('version').encode('utf-8')]
+                    audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
                 
                 if cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
