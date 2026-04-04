@@ -1241,6 +1241,11 @@ def process_download_job(job_id, payload):
             if 'id' in track_metadata['album']:
                 album_id = track_metadata['album']['id']
 
+            # Append [Explicit] to album name if album is marked as explicit
+            if bool(track_metadata['album'].get('explicit', False)):
+                if '[Explicit]' not in album_name:
+                    album_name += ' [Explicit]'
+
             if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
                 cover_val = track_metadata['album']['cover']
                 if isinstance(cover_val, str) and not cover_val.startswith('http'):
@@ -1358,6 +1363,11 @@ def process_download_job(job_id, payload):
                         album_has_multiple_discs = True
 
                 if isinstance(album_obj, dict):
+                    # Check if album is explicit and append to album name if needed
+                    if bool(album_obj.get('explicit', False)):
+                        if '[Explicit]' not in album_name:
+                            album_name += ' [Explicit]'
+
                     if 'artist' in album_obj and isinstance(album_obj['artist'], dict):
                         album_artist_name = album_obj['artist'].get('name')
                     elif 'artists' in album_obj and isinstance(album_obj['artists'], list) and len(album_obj['artists']) > 0:
