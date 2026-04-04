@@ -784,6 +784,8 @@ def init_db():
     plex_songs_columns = {row['column_name'] for row in cur.fetchall()}
     if 'ratingKey' not in plex_songs_columns:
         cur.execute('ALTER TABLE plex_songs ADD COLUMN "ratingKey" TEXT')
+    if 'album_key' not in plex_songs_columns:
+        cur.execute('ALTER TABLE plex_songs ADD COLUMN album_key TEXT')
 
     cur.execute(
         """
@@ -913,6 +915,7 @@ def process_plex_sync_job(job_id, payload):
         artist = getattr(track, 'grandparentTitle', None) or None
         album = getattr(track, 'parentTitle', None) or None
         rating_key = str(getattr(track, 'ratingKey', None) or '').strip() or None
+        album_key = str(getattr(track, 'parentKey', None) or '').strip() or None
 
         media_list = getattr(track, 'media', None) or []
         for media in media_list:
@@ -931,19 +934,20 @@ def process_plex_sync_job(job_id, payload):
 
                 cur.execute(
                     """
-                    INSERT INTO plex_songs (title, artist, album, file_path, "ratingKey", format, bitrate, updated_at, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO plex_songs (title, artist, album, file_path, "ratingKey", album_key, format, bitrate, updated_at, last_seen_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(file_path) DO UPDATE SET
                         title = excluded.title,
                         artist = excluded.artist,
                         album = excluded.album,
                         "ratingKey" = excluded."ratingKey",
+                        album_key = excluded.album_key,
                         format = excluded.format,
                         bitrate = excluded.bitrate,
                         updated_at = excluded.updated_at,
                         last_seen_at = excluded.last_seen_at
                     """,
-                    (title, artist, album, file_path, rating_key, media_format, bitrate, now, now)
+                    (title, artist, album, file_path, rating_key, album_key, media_format, bitrate, now, now)
                 )
                 seen_paths.add(file_path)
                 upserted += 1
@@ -968,15 +972,49 @@ def process_plex_sync_job(job_id, payload):
         deleted = cur.rowcount or 0
 
     conn.commit()
+
+    # Add "Explicit" label to albums that contain [Explicit] in their name (before closing connection)
+    explicit_album_keys = set()
+    cur.execute(
+        """
+        SELECT DISTINCT album_key
+        FROM plex_songs
+        WHERE album_key IS NOT NULL
+          AND album IS NOT NULL
+          AND album LIKE '%[Explicit]%'
+        """
+    )
+    for row in (cur.fetchall() or []):
+        album_key = row.get('album_key')
+        if album_key:
+            explicit_album_keys.add(album_key)
+
     conn.close()
 
     progress['deleted_songs'] = deleted
     stages['updating_local_index'] = 'done'
     update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
+    labeled_count = 0
+    if explicit_album_keys:
+        print(f"[PLEX_SYNC] Job {job_id}: Adding 'Explicit' label to {len(explicit_album_keys)} albums", flush=True)
+        for album_key in explicit_album_keys:
+            try:
+                # album_key format is /library/metadata/ID, extract the ID
+                album_id = int(album_key.split('/')[-1])
+                album = plex.fetchItem(album_id)
+                if album and hasattr(album, 'addLabel'):
+                    album.addLabel('Explicit')
+                    labeled_count += 1
+                    print(f"[PLEX_SYNC] Job {job_id}: Added 'Explicit' label to album {album_key}", flush=True)
+            except Exception as e:
+                print(f"[PLEX_SYNC] Job {job_id}: Failed to add 'Explicit' label to album {album_key}: {str(e)}", flush=True)
+        
+        print(f"[PLEX_SYNC] Job {job_id}: Successfully labeled {labeled_count} albums as Explicit", flush=True)
+
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     print(
-        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted}",
+        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted} explicit_albums_labeled={labeled_count}",
         flush=True
     )
 
@@ -986,7 +1024,8 @@ def process_plex_sync_job(job_id, payload):
         'progress': progress,
         'total_tracks': progress['total_tracks'],
         'upserted_songs': upserted,
-        'deleted_songs': deleted
+        'deleted_songs': deleted,
+        'explicit_albums_labeled': labeled_count
     }
 
 def plex_sync_job_worker():
