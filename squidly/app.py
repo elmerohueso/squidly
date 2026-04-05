@@ -4533,6 +4533,15 @@ def start_plex_sync_endpoint():
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
+@app.route('/api/plex/library-update', methods=['POST'])
+def start_plex_library_update_endpoint():
+    """Queue a manual Plex library update job."""
+    result = start_plex_library_update_job(trigger='manual')
+    if not result.get('ok'):
+        return jsonify({'error': result.get('error')}), result.get('status_code', 500)
+
+    return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
+
 @app.route('/api/plex/test', methods=['POST'])
 def test_plex_connection_endpoint():
     """Test Plex server connection"""

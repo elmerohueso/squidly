@@ -1327,13 +1327,10 @@ class App {
 
             const progress = (job.result?.progress || {}) as Record<string, unknown>;
             const scanCompleted = progress.scan_completed === true;
-            const scanDetected = progress.scan_detected === true;
             const syncQueueStatus = String(progress.sync_queue_status || 'pending');
             const syncJobId = Number(progress.sync_job_id || 0);
 
-            let progressText = scanCompleted
-                ? 'Library scan completed'
-                : (scanDetected ? 'Scan started but completion was not observed before timeout' : 'Scan activity could not be observed');
+            const progressText = scanCompleted ? 'Library scan completed' : 'Scan in progress...';
 
 
             return `
@@ -2006,29 +2003,44 @@ class App {
     }
 
     private async startPlexSync(): Promise<void> {
-        this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+        this.plexSyncStatusEl.textContent = 'Starting library update...';
         this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
         this.startPlexSyncButton.disabled = true;
 
         try {
-            const response = await fetch('/api/plex/sync', {
+            // First, trigger the library update
+            const libUpdateResponse = await fetch('/api/plex/library-update', {
                 method: 'POST'
             });
 
-            if (response.status === 202) {
-                this.plexSyncStatusEl.textContent = '✓ Plex sync job queued';
+            if (libUpdateResponse.status !== 202) {
+                const data = await libUpdateResponse.json().catch(() => ({}));
+                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start library update'}`;
+                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+                return;
+            }
+
+            // Then, trigger the sync
+            this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+
+            const syncResponse = await fetch('/api/plex/sync', {
+                method: 'POST'
+            });
+
+            if (syncResponse.status === 202) {
+                this.plexSyncStatusEl.textContent = '✓ Plex library update and sync jobs queued';
                 this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
                 if (this.jobsFlyout.classList.contains('active')) {
                     await this.loadJobs();
                 }
             } else {
-                const data = await response.json().catch(() => ({}));
+                const data = await syncResponse.json().catch(() => ({}));
                 this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start sync'}`;
                 this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
             }
         } catch (error) {
             console.error('Error starting Plex sync:', error);
-            this.plexSyncStatusEl.textContent = '✗ Error starting sync';
+            this.plexSyncStatusEl.textContent = '✗ Error starting update/sync';
             this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
         } finally {
             this.startPlexSyncButton.disabled = false;
