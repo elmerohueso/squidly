@@ -376,7 +376,7 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+        SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
         FROM download_settings
         WHERE id = 1
         """
@@ -388,15 +388,14 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+                id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
                 DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
-                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
-                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'],
                 DEFAULT_DOWNLOAD_SETTINGS['ignore_matches'],
@@ -406,14 +405,13 @@ def get_download_settings():
         conn.commit()
         cur.execute(
             """
-            SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+            SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
             FROM download_settings
             WHERE id = 1
             """
         )
         row = cur.fetchone()
 
-    file_naming_loose = row['file_naming_loose'] or row['file_naming']
     file_naming_album = row['file_naming_album'] or row['file_naming']
     jobs_refresh_interval_seconds = row['jobs_refresh_interval_seconds']
     if not isinstance(jobs_refresh_interval_seconds, int) or jobs_refresh_interval_seconds < 1:
@@ -421,16 +419,15 @@ def get_download_settings():
     
     ignore_matches = bool(row['ignore_matches'])
 
-    if row['file_naming_loose'] is None or row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
+    if row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
         now = datetime.utcnow().isoformat() + 'Z'
         cur.execute(
             """
             UPDATE download_settings
-            SET file_naming_loose = %s, file_naming_album = %s, jobs_refresh_interval_seconds = %s, updated_at = %s
+            SET file_naming_album = %s, jobs_refresh_interval_seconds = %s, updated_at = %s
             WHERE id = 1
             """,
             (
-                file_naming_loose,
                 file_naming_album,
                 jobs_refresh_interval_seconds,
                 now
@@ -442,8 +439,7 @@ def get_download_settings():
     return {
         'format': row['format'],
         'parent_folder': row['parent_folder'],
-        'file_naming': file_naming_loose,
-        'file_naming_loose': file_naming_loose,
+        'file_naming': file_naming_album,
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds,
         'ignore_matches': ignore_matches
@@ -457,14 +453,13 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+            id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
-            file_naming_loose = excluded.file_naming_loose,
             file_naming_album = excluded.file_naming_album,
             jobs_refresh_interval_seconds = excluded.jobs_refresh_interval_seconds,
             ignore_matches = excluded.ignore_matches,
@@ -473,8 +468,7 @@ def save_download_settings(settings):
         (
             settings['format'],
             settings['parent_folder'],
-            settings['file_naming_loose'],
-            settings['file_naming_loose'],
+            settings['file_naming_album'],
             settings['file_naming_album'],
             settings['jobs_refresh_interval_seconds'],
             bool(settings.get('ignore_matches', False)),

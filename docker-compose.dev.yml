@@ -20,9 +20,8 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # Mount downloads folders for track downloads
-      - ./downloads/full_albums:/downloads/full_albums
-      - ./downloads/loose_tracks:/downloads/loose_tracks
+      # Mount downloads folder for track downloads
+      - ./downloads:/downloads
     depends_on:
       squidly-postgres-dev:
         condition: service_healthy

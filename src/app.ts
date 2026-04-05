@@ -203,7 +203,6 @@ type DownloadFormat = 'original' | 'mp3';
 
 interface DownloadSettings {
     format: DownloadFormat;
-    fileNamingLoose: string;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
     ignoreMatches: boolean;
@@ -253,7 +252,6 @@ class App {
     private formatOriginalInput: HTMLInputElement;
     private formatMp3Input: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
-    private fileNamingLooseInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
@@ -339,7 +337,6 @@ class App {
         this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
-        this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
@@ -421,7 +418,6 @@ class App {
         this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
         this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
@@ -1533,7 +1529,6 @@ class App {
     private defaultDownloadSettings(): DownloadSettings {
         return {
             format: 'original',
-            fileNamingLoose: '{artist}/{album}/{track} - {title}.{ext}',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
             jobsRefreshIntervalSeconds: 30,
             ignoreMatches: false
@@ -1543,7 +1538,6 @@ class App {
     private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
-        const fileNamingLoose = (raw as { file_naming_loose?: string }).file_naming_loose;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
         const legacyFileNaming = (raw as { fileNaming?: string }).fileNaming;
         const jobsRefreshIntervalSecondsRaw = (raw as { jobs_refresh_interval_seconds?: number | string }).jobs_refresh_interval_seconds;
@@ -1554,15 +1548,6 @@ class App {
 
         return {
             format: raw.format === 'mp3' ? 'mp3' : 'original',
-            fileNamingLoose: typeof (raw as DownloadSettings).fileNamingLoose === 'string'
-                ? (raw as DownloadSettings).fileNamingLoose
-                : typeof fileNamingLoose === 'string'
-                    ? fileNamingLoose
-                    : typeof legacyFileNaming === 'string'
-                        ? legacyFileNaming
-                        : typeof fileNaming === 'string'
-                            ? fileNaming
-                            : fallback.fileNamingLoose,
             fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
                 ? (raw as DownloadSettings).fileNamingAlbum
                 : typeof fileNamingAlbum === 'string'
@@ -1598,7 +1583,6 @@ class App {
         this.formatOriginalInput.checked = settings.format === 'original';
         this.formatMp3Input.checked = settings.format === 'mp3';
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
-        this.fileNamingLooseInput.value = settings.fileNamingLoose;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
         this.syncFormatToggleStyles();
@@ -1611,7 +1595,6 @@ class App {
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
-            fileNamingLoose: this.fileNamingLooseInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
             ignoreMatches: this.ignoreMatchesCheckbox.checked
         };
@@ -4217,11 +4200,8 @@ const plexUserId = this.getSelectedPlexUserId();
                             trackId,
                             format: this.downloadSettings.format,
                             downloadType,
-                            fileNaming: downloadType === 'album'
-                                ? this.downloadSettings.fileNamingAlbum
-                                : this.downloadSettings.fileNamingLoose,
+                            fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                            fileNamingLoose: this.downloadSettings.fileNamingLoose,
                             plex_playlist: plexPlaylistName,
                             plex_user_id: plexUserId,
                             ignore_matches: this.downloadSettings.ignoreMatches

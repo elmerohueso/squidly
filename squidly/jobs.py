@@ -8,8 +8,6 @@ from datetime import datetime, timedelta
 
 from squidly.config import (
     DEFAULT_DOWNLOAD_SETTINGS,
-    DOWNLOADS_FULL_ALBUMS_FOLDER,
-    DOWNLOADS_LOOSE_TRACKS_FOLDER,
     DOWNLOADS_ROOT,
     WORKER_ID,
 )

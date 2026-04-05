@@ -631,36 +631,22 @@ def plex_pin_status():
 
 from squidly.config import (
     DATABASE_URL,
-    DOWNLOADS_FULL_ALBUMS_FOLDER,
-    DOWNLOADS_LOOSE_TRACKS_FOLDER,
     DOWNLOADS_ROOT,
     DEFAULT_DOWNLOAD_SETTINGS,
     WORKER_ID,
 )
 
-# Create downloads directories if they don't exist
-full_albums_path = os.path.join(DOWNLOADS_ROOT, DOWNLOADS_FULL_ALBUMS_FOLDER)
-loose_tracks_path = os.path.join(DOWNLOADS_ROOT, DOWNLOADS_LOOSE_TRACKS_FOLDER)
-
+# Verify downloads directory exists and is writable
 # Note: Don't call os.makedirs() here - volume mounts are configured in docker-compose
 # Attempting to create them can shadow the mount points
 
-# Verify downloads directories exist and are writable
-if not os.path.exists(full_albums_path):
-    print(f"Error: Full albums directory does not exist: {full_albums_path}", file=sys.stderr)
+if not os.path.exists(DOWNLOADS_ROOT):
+    print(f"Error: Downloads directory does not exist: {DOWNLOADS_ROOT}", file=sys.stderr)
     print(f"Check docker-compose volume mounts are configured correctly", file=sys.stderr)
-elif not os.access(full_albums_path, os.W_OK):
-    print(f"Error: Full albums directory is not writable: {full_albums_path}", file=sys.stderr)
+elif not os.access(DOWNLOADS_ROOT, os.W_OK):
+    print(f"Error: Downloads directory is not writable: {DOWNLOADS_ROOT}", file=sys.stderr)
 else:
-    print(f"Full albums directory ready: {full_albums_path}", flush=True)
-
-if not os.path.exists(loose_tracks_path):
-    print(f"Error: Loose tracks directory does not exist: {loose_tracks_path}", file=sys.stderr)
-    print(f"Check docker-compose volume mounts are configured correctly", file=sys.stderr)
-elif not os.access(loose_tracks_path, os.W_OK):
-    print(f"Error: Loose tracks directory is not writable: {loose_tracks_path}", file=sys.stderr)
-else:
-    print(f"Loose tracks directory ready: {loose_tracks_path}", flush=True)
+    print(f"Downloads directory ready: {DOWNLOADS_ROOT}", flush=True)
 
 def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
     return downloads.make_request_with_retry(url, method=method, timeout=timeout, max_retries=max_retries, backoff_factor=backoff_factor, **kwargs)
@@ -1206,16 +1192,12 @@ def process_download_job(job_id, payload):
 
     file_naming = payload.get('fileNaming')
     if not file_naming:
-        if download_type == 'album':
-            file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
-        else:
-            file_naming = payload.get('fileNamingLoose') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose']
+        file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
 
     if file_format not in ('original', 'mp3'):
         raise ValueError('Invalid format value')
 
-    target_folder_name = DOWNLOADS_FULL_ALBUMS_FOLDER if download_type == 'album' else DOWNLOADS_LOOSE_TRACKS_FOLDER
-    downloads_folder = os.path.join(DOWNLOADS_ROOT, target_folder_name)
+    downloads_folder = DOWNLOADS_ROOT
 
     print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
     print(f"[DOWNLOAD] Format: {file_format}", flush=True)
@@ -1966,7 +1948,7 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+        SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
         FROM download_settings
         WHERE id = 1
         """
@@ -1978,15 +1960,14 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+                id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
                 DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
-                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
-                DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'],
+                DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'],
                 DEFAULT_DOWNLOAD_SETTINGS['ignore_matches'],
@@ -1996,14 +1977,13 @@ def get_download_settings():
         conn.commit()
         cur.execute(
             """
-            SELECT format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+            SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
             FROM download_settings
             WHERE id = 1
             """
         )
         row = cur.fetchone()
 
-    file_naming_loose = row['file_naming_loose'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose']
     file_naming_album = row['file_naming_album'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
     jobs_refresh_interval_seconds = row['jobs_refresh_interval_seconds']
     if not isinstance(jobs_refresh_interval_seconds, int) or jobs_refresh_interval_seconds < 1:
@@ -2011,16 +1991,15 @@ def get_download_settings():
     
     ignore_matches = bool(row['ignore_matches'])
 
-    if row['file_naming_loose'] is None or row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
+    if row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
         now = datetime.utcnow().isoformat() + 'Z'
         cur.execute(
             """
             UPDATE download_settings
-            SET file_naming_loose = %s, file_naming_album = %s, jobs_refresh_interval_seconds = %s, updated_at = %s
+            SET file_naming_album = %s, jobs_refresh_interval_seconds = %s, updated_at = %s
             WHERE id = 1
             """,
             (
-                file_naming_loose,
                 file_naming_album,
                 jobs_refresh_interval_seconds,
                 now
@@ -2032,8 +2011,7 @@ def get_download_settings():
     return {
         'format': row['format'],
         'parent_folder': row['parent_folder'],
-        'file_naming': file_naming_loose,
-        'file_naming_loose': file_naming_loose,
+        'file_naming': file_naming_album,
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds,
         'ignore_matches': ignore_matches
@@ -2046,14 +2024,13 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, parent_folder, file_naming, file_naming_loose, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+            id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
-            file_naming_loose = excluded.file_naming_loose,
             file_naming_album = excluded.file_naming_album,
             jobs_refresh_interval_seconds = excluded.jobs_refresh_interval_seconds,
             ignore_matches = excluded.ignore_matches,
@@ -2062,8 +2039,7 @@ def save_download_settings(settings):
         (
             settings['format'],
             settings['parent_folder'],
-            settings['file_naming_loose'],
-            settings['file_naming_loose'],
+            settings['file_naming_album'],
             settings['file_naming_album'],
             settings['jobs_refresh_interval_seconds'],
             bool(settings.get('ignore_matches', False)),
@@ -3830,27 +3806,19 @@ def download_track():
     Expects JSON body with:
     - trackId: integer
     - format: 'original' or 'mp3'
-    - downloadType: 'album' or 'loose'
+    - downloadType: 'album'
     - fileNaming: string (template for filename, e.g. '{artist}/{album}/{track} - {title}.{ext}')
-    - fileNamingAlbum: string (optional override for album downloads)
-    - fileNamingLoose: string (optional override for loose track downloads)
+    - fileNamingAlbum: string (file naming template)
     """
     payload = request.get_json(silent=True) or {}
     track_id = payload.get('trackId')
     file_format = payload.get('format', 'original')
-    download_type = payload.get('downloadType', 'loose')
-
-    if download_type not in ('album', 'loose'):
-        download_type = 'loose'
+    download_type = 'album'  # All downloads treated as albums
 
     settings = get_download_settings()
-    file_naming_loose = settings.get('file_naming_loose', DEFAULT_DOWNLOAD_SETTINGS['file_naming_loose'])
     file_naming_album = settings.get('file_naming_album', DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'])
 
-    if download_type == 'album':
-        file_naming = payload.get('fileNamingAlbum') or payload.get('fileNaming') or file_naming_album
-    else:
-        file_naming = payload.get('fileNamingLoose') or payload.get('fileNaming') or file_naming_loose
+    file_naming = payload.get('fileNamingAlbum') or payload.get('fileNaming') or file_naming_album
 
     if not track_id:
         print(f"[DOWNLOAD] ERROR: trackId is missing", flush=True)
@@ -3871,7 +3839,6 @@ def download_track():
         'downloadType': download_type,
         'fileNaming': file_naming,
         'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
-        'fileNamingLoose': payload.get('fileNamingLoose') or file_naming_loose,
         'plex_playlist': payload.get('plex_playlist'),
         'plex_user_id': payload.get('plex_user_id'),
         'ignore_matches': ignore_matches
@@ -4322,13 +4289,6 @@ def download_settings():
     payload = request.get_json(silent=True) or {}
     current = get_download_settings()
 
-    file_naming_loose = (
-        payload.get('fileNamingLoose')
-        or payload.get('file_naming_loose')
-        or payload.get('fileNaming')
-        or payload.get('file_naming')
-        or current['file_naming_loose']
-    )
     file_naming_album = (
         payload.get('fileNamingAlbum')
         or payload.get('file_naming_album')
@@ -4340,7 +4300,6 @@ def download_settings():
     updated = {
         'format': payload.get('format', current['format']),
         'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
-        'file_naming_loose': file_naming_loose,
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))))
@@ -4349,7 +4308,7 @@ def download_settings():
     if updated['format'] not in ('original', 'mp3'):
         return jsonify({'error': 'Invalid format value'}), 400
 
-    if not isinstance(updated['file_naming_loose'], str) or not isinstance(updated['file_naming_album'], str):
+    if not isinstance(updated['file_naming_album'], str):
         return jsonify({'error': 'Invalid settings payload'}), 400
 
     try:
@@ -4365,8 +4324,7 @@ def download_settings():
     save_download_settings(updated)
     return jsonify({
         'format': updated['format'],
-        'file_naming': updated['file_naming_loose'],
-        'file_naming_loose': updated['file_naming_loose'],
+        'file_naming': updated['file_naming_album'],
         'file_naming_album': updated['file_naming_album'],
         'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
         'ignore_matches': updated['ignore_matches']

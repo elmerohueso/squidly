@@ -36,8 +36,6 @@ DATABASE_URL = (
 
 # Download paths
 DOWNLOADS_ROOT = '/downloads'
-DOWNLOADS_FULL_ALBUMS_FOLDER = 'full_albums'
-DOWNLOADS_LOOSE_TRACKS_FOLDER = 'loose_tracks'
 
 # Worker identifier used for job locking
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
@@ -46,7 +44,6 @@ WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 DEFAULT_DOWNLOAD_SETTINGS = {
     'format': 'original',
     'parent_folder': '',
-    'file_naming_loose': '{artist}/{album}/{track} - {title}.{ext}',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
     'jobs_refresh_interval_seconds': 30,
     'ignore_matches': False

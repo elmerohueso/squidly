@@ -33,8 +33,7 @@ A music downloader via SquidWTF and its mirrors, built with Flask and TypeScript
 ## Volume Mounts
 
 - **`data/`** - SQLite database and persistent application data
-- **`downloads/full_albums/`** - Downloaded full albums
-- **`downloads/loose_tracks/`** - Downloaded individual tracks
+- **`downloads/`** - Downloaded music files
 
 ## Disclaimer
 
