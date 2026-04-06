@@ -3461,6 +3461,8 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
     """Query plex_songs for rows matching title+artist+album, falling back to title+artist.
     If fuzzy=True, falls back further to normalized text matching when exact matches fail."""
     rows = []
+    # print(f"[PLEX_MATCH] Looking up: title='{title}', artist='{artist}', album='{album}', fuzzy={fuzzy}", flush=True)
+    
     if album:
         cur.execute(
             """
@@ -3474,6 +3476,7 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
             (title, artist, album)
         )
         rows = cur.fetchall() or []
+        # print(f"[PLEX_MATCH] Exact match (title+artist+album): found {len(rows)} rows", flush=True)
 
     if not rows:
         cur.execute(
@@ -3487,11 +3490,17 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
             (title, artist)
         )
         rows = cur.fetchall() or []
+        # print(f"[PLEX_MATCH] Exact match (title+artist): found {len(rows)} rows", flush=True)
 
     if not rows and fuzzy:
+        # print(f"[PLEX_MATCH] No exact matches, attempting fuzzy match...", flush=True)
         normalized_title = normalize_match_text(title, strip_trailing_parenthetical=True)
         normalized_artist = normalize_match_text(artist)
         normalized_album = normalize_match_text(album, strip_trailing_parenthetical=True) if album else ''
+        
+        # print(f"[PLEX_MATCH] SEARCH INPUT: title='{title}' -> normalized='{normalized_title}'", flush=True)
+        # print(f"[PLEX_MATCH] SEARCH INPUT: artist='{artist}' -> normalized='{normalized_artist}'", flush=True)
+        # print(f"[PLEX_MATCH] SEARCH INPUT: album='{album}' -> normalized='{normalized_album}'", flush=True)
 
         # For multi-artist strings like "Evanescence, K.Flay", also try each individual
         # artist so a Plex track stored under one artist still gets matched.
@@ -3499,6 +3508,7 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
         split_parts = [normalize_match_text(a.strip()) for a in artist.split(',') if a.strip()]
         if len(split_parts) > 1:
             artist_candidates.extend(split_parts)
+            # print(f"[PLEX_MATCH] Multi-artist detected, candidates: {artist_candidates}", flush=True)
 
         seen_file_paths = set()
         for candidate_artist in artist_candidates:
@@ -3510,22 +3520,32 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
                 """,
                 (candidate_artist,)
             )
-            for candidate in (cur.fetchall() or []):
+            candidates_found = cur.fetchall() or []
+            # print(f"[PLEX_MATCH] Fuzzy artist '{candidate_artist}': found {len(candidates_found)} candidates", flush=True)
+            
+            for candidate in candidates_found:
                 fp = candidate.get('file_path')
                 if fp in seen_file_paths:
                     continue
                 candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
                 candidate_album = normalize_match_text(candidate.get('album'), strip_trailing_parenthetical=True)
+                
+                title_match = candidate_title == normalized_title
+                album_match = (not normalized_album) or (candidate_album == normalized_album)
+                
+                # print(f"[PLEX_MATCH] Candidate: '{candidate.get('title')}' (normalized: '{candidate_title}'). Title match: {title_match}, Album match: {album_match}", flush=True)
 
-                if candidate_title != normalized_title:
+                if not title_match:
                     continue
 
-                if normalized_album and candidate_album != normalized_album:
+                if normalized_album and not album_match:
                     continue
 
                 seen_file_paths.add(fp)
                 rows.append(candidate)
+                # print(f"[PLEX_MATCH] ✓ MATCHED: {candidate.get('title')} by {candidate.get('artist')}", flush=True)
 
+    # print(f"[PLEX_MATCH] Final result: {len(rows)} matching rows", flush=True)
     return rows
 
 
@@ -3544,8 +3564,11 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
         job_payload.get('format') if isinstance(job_payload, dict) else None
     )
 
+    # print(f"[PLEX_EXISTS_CHECK] Checking: '{title}' by '{artist}' in format {requested_format}", flush=True)
     rows = _lookup_plex_songs(cur, title, artist, album)
-    return any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
+    exists = any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
+    # print(f"[PLEX_EXISTS_CHECK] Result: exists={exists}, found {len(rows)} rows with matching format={requested_format}", flush=True)
+    return exists
 
 def cleanup_file(path: str) -> None:
     try:
@@ -4607,7 +4630,9 @@ def get_plex_libraries_endpoint():
 def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
     text = str(value or '').strip().lower()
     if strip_trailing_parenthetical:
-        text = re.sub(r'\s*\([^)]*\)\s*$', '', text)
+        # Strip trailing parentheses and square brackets: "(xxx)" or "[xxx]"
+        # Match from the first opening bracket to the end, removing all trailing qualifiers
+        text = re.sub(r'\s*[\(\[].*[\)\]]\s*$', '', text)
     text = re.sub(r'[^a-z0-9]+', ' ', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
@@ -4623,12 +4648,14 @@ def match_plex_songs_endpoint():
 
     if len(tracks) > 200:
         return jsonify({'error': 'tracks array too large (max 200)'}), 400
+    
+    # print(f"[PLEX_MATCH_ENDPOINT] Matching {len(tracks)} tracks", flush=True)
 
     conn = get_db_connection()
     cur = conn.cursor()
     matches = []
 
-    for item in tracks:
+    for idx, item in enumerate(tracks):
         if not isinstance(item, dict):
             matches.append({'exists': False, 'variants': []})
             continue
@@ -4641,6 +4668,8 @@ def match_plex_songs_endpoint():
             matches.append({'exists': False, 'variants': []})
             continue
 
+        # print(f"[PLEX_MATCH_ENDPOINT] Track {idx}: '{title}' by '{artist}' from '{album}'", flush=True)
+        
         rows = _lookup_plex_songs(cur, title, artist, album, fuzzy=True)
 
         variants = []
@@ -4659,8 +4688,11 @@ def match_plex_songs_endpoint():
                 'file_path': str(row.get('file_path') or '').strip() or None
             })
 
+        exists = len(rows) > 0
+        # print(f"[PLEX_MATCH_ENDPOINT] Track {idx} result: exists={exists}, variants={len(variants)}", flush=True)
+        
         matches.append({
-            'exists': len(rows) > 0,
+            'exists': exists,
             'variants': variants
         })
 
