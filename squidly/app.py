@@ -3084,14 +3084,6 @@ def track_recommendations():
         result = response.json()
         result['proxied_via'] = target['name']
         
-        # Deduplicate track recommendations
-        if isinstance(result, dict):
-            data = result.get('data')
-            if isinstance(data, dict):
-                items = data.get('items')
-                if isinstance(items, list):
-                    data['items'] = _deduplicate_tracks(items)
-
         return jsonify(result)
 
     except requests.exceptions.RequestException as e:
