@@ -23,6 +23,7 @@ interface SearchResult {
 interface Track {
     id: number;
     title: string;
+    version?: string;
     duration?: number;
     artists?: Artist[];
     artist?: Artist;
@@ -31,6 +32,8 @@ interface Track {
     audioQuality?: string;
     cover?: string;
     trackNumber?: number;
+    volumeNumber?: number;
+    explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
     };
@@ -55,8 +58,10 @@ interface AlbumSearchItem {
     artist?: Artist;
     releaseDate?: string;
     numberOfTracks?: number;
+    numberOfVolumes?: number;
     duration?: number;
     audioQuality?: string;
+    explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
     };
@@ -106,6 +111,7 @@ interface AlbumInfo {
         artists?: Artist[];
         releaseDate?: string;
         numberOfTracks?: number;
+        numberOfVolumes?: number;
         items?: Array<{
             type: string;
             item: Track;
@@ -123,6 +129,14 @@ interface Endpoint {
     lastChecked: string | null;
 }
 
+interface MirrorRateLimitStatus {
+    safe_interval: number;
+    safe_rps: number;
+    safe_rpm: number;
+    error_rate_429: number;
+    sample_size: number;
+}
+
 interface EndpointStatus {
     endpoints: Endpoint[];
     summary: {
@@ -130,6 +144,7 @@ interface EndpointStatus {
         online: number;
         offline: number;
     };
+    mirrorRateLimitStatus?: MirrorRateLimitStatus;
 }
 
 interface JobStageMap {
@@ -185,13 +200,12 @@ interface JobFilterTotals {
 }
 
 type DownloadFormat = 'original' | 'mp3';
-type StreamQuality = 'high' | 'low';
 
 interface DownloadSettings {
     format: DownloadFormat;
-    fileNamingLoose: string;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
+    ignoreMatches: boolean;
 }
 
 interface AppRouteState {
@@ -238,9 +252,6 @@ class App {
     private formatOriginalInput: HTMLInputElement;
     private formatMp3Input: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
-    private fileNamingLooseInput: HTMLInputElement;
-    private streamQualityHighInput: HTMLInputElement;
-    private streamQualityLowInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
@@ -267,8 +278,8 @@ class App {
     private plexClearCredentialsButton: HTMLButtonElement;
     private plexUserDropdownContainer: HTMLElement;
     private plexUserSelect: HTMLSelectElement;
+    private ignoreMatchesCheckbox: HTMLInputElement;
     private downloadSettings: DownloadSettings;
-    private streamQuality: StreamQuality = 'high';
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
@@ -326,9 +337,6 @@ class App {
         this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
         this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
-        this.fileNamingLooseInput = document.getElementById('fileNamingLoose') as HTMLInputElement;
-        this.streamQualityHighInput = document.getElementById('streamQualityHigh') as HTMLInputElement;
-        this.streamQualityLowInput = document.getElementById('streamQualityLow') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
@@ -355,12 +363,11 @@ class App {
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
         this.plexUserSelect = document.getElementById('plexUserSelect') as HTMLSelectElement;
+        this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
         
         this.initializeEventListeners();
-        this.streamQuality = this.loadStreamQualityFromCookie();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
-        this.applyStreamQualityToForm();
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
@@ -411,10 +418,8 @@ class App {
         this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
         this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
         this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.fileNamingLooseInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.streamQualityHighInput.addEventListener('change', () => this.updateStreamQualityFromForm());
-        this.streamQualityLowInput.addEventListener('change', () => this.updateStreamQualityFromForm());
         this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
+        this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
         this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
         this.savePlexConfigButton.addEventListener('click', () => {
             void this.savePlexConfig();
@@ -1322,13 +1327,10 @@ class App {
 
             const progress = (job.result?.progress || {}) as Record<string, unknown>;
             const scanCompleted = progress.scan_completed === true;
-            const scanDetected = progress.scan_detected === true;
             const syncQueueStatus = String(progress.sync_queue_status || 'pending');
             const syncJobId = Number(progress.sync_job_id || 0);
 
-            let progressText = scanCompleted
-                ? 'Library scan completed'
-                : (scanDetected ? 'Scan started but completion was not observed before timeout' : 'Scan activity could not be observed');
+            const progressText = scanCompleted ? 'Library scan completed' : 'Scan in progress...';
 
 
             return `
@@ -1524,16 +1526,15 @@ class App {
     private defaultDownloadSettings(): DownloadSettings {
         return {
             format: 'original',
-            fileNamingLoose: '{artist}/{album}/{track} - {title}.{ext}',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
-            jobsRefreshIntervalSeconds: 30
+            jobsRefreshIntervalSeconds: 30,
+            ignoreMatches: false
         };
     }
 
     private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
-        const fileNamingLoose = (raw as { file_naming_loose?: string }).file_naming_loose;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
         const legacyFileNaming = (raw as { fileNaming?: string }).fileNaming;
         const jobsRefreshIntervalSecondsRaw = (raw as { jobs_refresh_interval_seconds?: number | string }).jobs_refresh_interval_seconds;
@@ -1544,15 +1545,6 @@ class App {
 
         return {
             format: raw.format === 'mp3' ? 'mp3' : 'original',
-            fileNamingLoose: typeof (raw as DownloadSettings).fileNamingLoose === 'string'
-                ? (raw as DownloadSettings).fileNamingLoose
-                : typeof fileNamingLoose === 'string'
-                    ? fileNamingLoose
-                    : typeof legacyFileNaming === 'string'
-                        ? legacyFileNaming
-                        : typeof fileNaming === 'string'
-                            ? fileNaming
-                            : fallback.fileNamingLoose,
             fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
                 ? (raw as DownloadSettings).fileNamingAlbum
                 : typeof fileNamingAlbum === 'string'
@@ -1562,7 +1554,10 @@ class App {
                         : typeof fileNaming === 'string'
                             ? fileNaming
                             : fallback.fileNamingAlbum,
-            jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds
+            jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds,
+            ignoreMatches: typeof (raw as DownloadSettings).ignoreMatches === 'boolean'
+                ? (raw as DownloadSettings).ignoreMatches
+                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches)
         };
     }
 
@@ -1585,15 +1580,9 @@ class App {
         this.formatOriginalInput.checked = settings.format === 'original';
         this.formatMp3Input.checked = settings.format === 'mp3';
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
-        this.fileNamingLooseInput.value = settings.fileNamingLoose;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
+        this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
         this.syncFormatToggleStyles();
-    }
-
-    private applyStreamQualityToForm(): void {
-        this.streamQualityHighInput.checked = this.streamQuality === 'high';
-        this.streamQualityLowInput.checked = this.streamQuality === 'low';
-        this.syncStreamQualityToggleStyles();
     }
 
     private readSettingsFromForm(): DownloadSettings {
@@ -1603,8 +1592,8 @@ class App {
         return {
             format: this.formatMp3Input.checked ? 'mp3' : 'original',
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
-            fileNamingLoose: this.fileNamingLooseInput.value.trim(),
-            jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds
+            jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
+            ignoreMatches: this.ignoreMatchesCheckbox.checked
         };
     }
 
@@ -1700,22 +1689,6 @@ class App {
         }
     }
 
-    private updateStreamQualityFromForm(): void {
-        this.streamQuality = this.streamQualityHighInput.checked ? 'high' : 'low';
-        this.saveStreamQualityToCookie(this.streamQuality);
-        this.syncStreamQualityToggleStyles();
-    }
-
-    private loadStreamQualityFromCookie(): StreamQuality {
-        const value = this.getCookieValue('streamQuality');
-        return value === 'low' ? 'low' : 'high';
-    }
-
-    private saveStreamQualityToCookie(quality: StreamQuality): void {
-        const maxAgeSeconds = 60 * 60 * 24 * 365;
-        document.cookie = `streamQuality=${quality}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
-    }
-
     private getCookieValue(name: string): string | null {
         const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}=([^;]*)`));
         return match ? decodeURIComponent(match[1]) : null;
@@ -1755,19 +1728,6 @@ class App {
 
         if (mp3Label) {
             mp3Label.classList.toggle('active', this.formatMp3Input.checked);
-        }
-    }
-
-    private syncStreamQualityToggleStyles(): void {
-        const highLabel = this.streamQualityHighInput.closest('label');
-        const lowLabel = this.streamQualityLowInput.closest('label');
-
-        if (highLabel) {
-            highLabel.classList.toggle('active', this.streamQualityHighInput.checked);
-        }
-
-        if (lowLabel) {
-            lowLabel.classList.toggle('active', this.streamQualityLowInput.checked);
         }
     }
 
@@ -2043,29 +2003,44 @@ class App {
     }
 
     private async startPlexSync(): Promise<void> {
-        this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+        this.plexSyncStatusEl.textContent = 'Starting library update...';
         this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
         this.startPlexSyncButton.disabled = true;
 
         try {
-            const response = await fetch('/api/plex/sync', {
+            // First, trigger the library update
+            const libUpdateResponse = await fetch('/api/plex/library-update', {
                 method: 'POST'
             });
 
-            if (response.status === 202) {
-                this.plexSyncStatusEl.textContent = '✓ Plex sync job queued';
+            if (libUpdateResponse.status !== 202) {
+                const data = await libUpdateResponse.json().catch(() => ({}));
+                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start library update'}`;
+                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+                return;
+            }
+
+            // Then, trigger the sync
+            this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+
+            const syncResponse = await fetch('/api/plex/sync', {
+                method: 'POST'
+            });
+
+            if (syncResponse.status === 202) {
+                this.plexSyncStatusEl.textContent = '✓ Plex library update and sync jobs queued';
                 this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
                 if (this.jobsFlyout.classList.contains('active')) {
                     await this.loadJobs();
                 }
             } else {
-                const data = await response.json().catch(() => ({}));
+                const data = await syncResponse.json().catch(() => ({}));
                 this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start sync'}`;
                 this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
             }
         } catch (error) {
             console.error('Error starting Plex sync:', error);
-            this.plexSyncStatusEl.textContent = '✗ Error starting sync';
+            this.plexSyncStatusEl.textContent = '✗ Error starting update/sync';
             this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
         } finally {
             this.startPlexSyncButton.disabled = false;
@@ -2362,6 +2337,11 @@ class App {
         if (onlineCount) onlineCount.textContent = data.summary.online.toString();
         if (offlineCount) offlineCount.textContent = data.summary.offline.toString();
 
+        const rateLimit = data.mirrorRateLimitStatus;
+        const safeRateLabel = rateLimit
+            ? `${rateLimit.safe_rpm.toFixed(2)} RPM (${rateLimit.safe_rps.toFixed(2)} RPS)`
+            : 'Unknown';
+
         // Update endpoint list
         this.flyoutContent.innerHTML = data.endpoints.map(endpoint => {
             const url = atob(endpoint.encodedUrl);
@@ -2393,6 +2373,10 @@ class App {
                             <span class="detail-label">Last Checked</span>
                             <span class="detail-value">${lastChecked}</span>
                         </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Safe Rate</span>
+                            <span class="detail-value">${safeRateLabel}</span>
+                        </div>
                     </div>
                 </div>
             `;
@@ -2413,6 +2397,8 @@ class App {
             this.searchInput.placeholder = 'Search for albums...';
         } else if (searchType === 'p') {
             this.searchInput.placeholder = 'Search for playlists...';
+        } else if (searchType === 'trackid') {
+            this.searchInput.placeholder = 'Enter numeric Track ID...';
         } else {
             this.searchInput.placeholder = 'Search for tracks...';
         }
@@ -2430,6 +2416,11 @@ class App {
 
         if (!query) {
             this.displayMessage('Please enter a search query');
+            return;
+        }
+
+        if (searchType === 'trackid' && !/^[0-9]+$/.test(query)) {
+            this.displayMessage('Track ID must be a numeric value');
             return;
         }
 
@@ -3034,7 +3025,9 @@ class App {
         const searchTypeName = searchType === 's' ? 'Tracks' : 
                               searchType === 'a' ? 'Artists' :
                               searchType === 'al' ? 'Albums' :
-                              searchType === 'p' ? 'Playlists' : 'Results';
+                              searchType === 'p' ? 'Playlists' :
+                              searchType === 'trackid' ? 'Track ID' :
+                              'Results';
 
         this.resultsContainer.innerHTML = `
             <div class="results-header">
@@ -3051,7 +3044,7 @@ class App {
             </div>
         `;
 
-        if (searchType === 's') {
+        if (searchType === 's' || searchType === 'trackid') {
             void this.annotateTrackCardsWithPlexStatus(items as Track[]);
         }
     }
@@ -3162,6 +3155,8 @@ class App {
         if (playlist.mediaMetadata?.tags && playlist.mediaMetadata.tags.length > 0) {
             const tags = playlist.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
@@ -3387,7 +3382,7 @@ class App {
         }
     }
 
-    private formatTrackCard(track: Track, showTrackNumber: boolean = false): string {
+    private formatTrackCard(track: Track, showTrackNumber: boolean = false, numberOfVolumes?: number): string {
         // Get artist names and IDs
         const artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(a => a.name).join(', ')
@@ -3407,9 +3402,11 @@ class App {
         // Get quality info - check mediaMetadata.tags for best quality
         let quality = track.audioQuality || track.quality || '';
         if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             const tags = track.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
@@ -3419,10 +3416,22 @@ class App {
         }
         const qualityDisplay = this.formatQuality(quality);
 
-        // Format track title with optional track number
-        const trackTitle = showTrackNumber && track.trackNumber
-            ? `${track.trackNumber}. ${this.escapeHtml(track.title)}`
-            : this.escapeHtml(track.title);
+        // Format track title with optional track number and version
+        // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
+        let trackTitle = this.escapeHtml(track.title);
+        
+        // Append version info if available
+        if (track.version && typeof track.version === 'string' && track.version.trim()) {
+            trackTitle += ` (${this.escapeHtml(track.version)})`;
+        }
+        
+        if (showTrackNumber && track.trackNumber) {
+            const volumeNumber = track.volumeNumber || 1;
+            const displayTrackNumber = numberOfVolumes && numberOfVolumes > 1
+                ? `${volumeNumber}-${String(track.trackNumber).padStart(2, '0')}`
+                : String(track.trackNumber);
+            trackTitle = `${displayTrackNumber}. ${trackTitle}`;
+        }
 
         return `
             <div class="track-card" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
@@ -3448,6 +3457,7 @@ class App {
                     <div class="track-metadata">
                         <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
                         ${qualityDisplay ? `<span>•</span><span>${qualityDisplay}</span>` : ''}
+                        ${track.explicit ? `<span>•</span><span class="explicit-badge" title="Explicit content">E</span>` : ''}
                     </div>
                 </div>
                 <div class="track-actions">
@@ -3566,9 +3576,7 @@ class App {
     }
 
     private async fetchTrackStreamUrl(trackId: number): Promise<string> {
-        const qualities = this.streamQuality === 'high'
-            ? ['HIGH']
-            : ['LOW'];
+        const qualities = ['LOSSLESS'];
 
         for (const quality of qualities) {
             try {
@@ -3627,9 +3635,11 @@ class App {
         // Format audio quality if available - check mediaMetadata.tags for best quality
         let quality = album.audioQuality || '';
         if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > LOSSLESS > LOW
+            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             const tags = album.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('LOSSLESS')) {
                 quality = 'LOSSLESS';
@@ -3664,6 +3674,7 @@ class App {
                         ${trackCount ? `<span>${trackCount}</span>` : ''}
                         ${trackCount && qualityDisplay ? `<span>•</span>` : ''}
                         ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
+                        ${album.explicit ? `<span>•</span><span class="explicit-badge" title="Explicit content">E</span>` : ''}
                     </div>
                 </div>
                 <div class="track-actions">
@@ -3731,9 +3742,11 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
+            'HI_RES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
             'HIRES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
             'LOSSLESS': 'CD • 16-bit/44.1kHz FLAC',
-            'LOW': '320kbps AAC'
+            'HIGH': '320kbps AAC',
+            'LOW': '96kbps AAC'
         };
         return qualityMap[quality] || quality;
     }
@@ -3909,6 +3922,15 @@ class App {
                 return;
             }
 
+            // Calculate numberOfVolumes by finding unique volumeNumbers
+            const volumeNumbers = new Set<number>();
+            tracks.forEach(track => {
+                if (track.volumeNumber !== undefined && track.volumeNumber !== null) {
+                    volumeNumbers.add(track.volumeNumber);
+                }
+            });
+            const numberOfVolumes = volumeNumbers.size > 0 ? volumeNumbers.size : 1;
+
             this.updatePlexPlaylistContainerVisibility(true);
 
             // Get album info for display
@@ -3932,7 +3954,7 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map(track => this.formatTrackCard(track, true)).join('')}
+                    ${tracks.map(track => this.formatTrackCard(track, true, numberOfVolumes)).join('')}
                 </div>
             `;
 
@@ -4190,13 +4212,11 @@ const plexUserId = this.getSelectedPlexUserId();
                             trackId,
                             format: this.downloadSettings.format,
                             downloadType,
-                            fileNaming: downloadType === 'album'
-                                ? this.downloadSettings.fileNamingAlbum
-                                : this.downloadSettings.fileNamingLoose,
+                            fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                            fileNamingLoose: this.downloadSettings.fileNamingLoose,
                             plex_playlist: plexPlaylistName,
-                            plex_user_id: plexUserId
+                            plex_user_id: plexUserId,
+                            ignore_matches: this.downloadSettings.ignoreMatches
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);

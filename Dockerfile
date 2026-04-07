@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Flask application
 COPY app.py .
+COPY squidly ./squidly
 COPY squidurls.json .
 COPY templates ./templates
 COPY static ./static
