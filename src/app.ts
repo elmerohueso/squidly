@@ -1330,7 +1330,7 @@ class App {
             const syncQueueStatus = String(progress.sync_queue_status || 'pending');
             const syncJobId = Number(progress.sync_job_id || 0);
 
-            const progressText = scanCompleted ? 'Library scan completed' : 'Scan in progress...';
+            const progressText = scanCompleted ? 'Library scan completed' : '';
 
 
             return `
