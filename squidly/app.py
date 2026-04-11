@@ -1248,10 +1248,12 @@ def process_download_job(job_id, payload):
     album_id = ''
 
     if isinstance(track_metadata, dict):
-        if 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
+        if 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
+            # Extract all artists and join with semicolon separator (prefer array over singular)
+            artist_names = [str(a.get('name', '')) for a in track_metadata['artists'] if a.get('name')]
+            track_artist_name = '; '.join(artist_names) if artist_names else 'Unknown Artist'
+        elif 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
             track_artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
-        elif 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
-            track_artist_name = track_metadata['artists'][0].get('name', 'Unknown Artist')
         elif 'artistName' in track_metadata:
             track_artist_name = track_metadata['artistName']
 
@@ -3312,7 +3314,7 @@ def youtube_music_playlist():
                 for artist in artists
                 if str(artist.get('name') or '').strip()
             ]
-            artist_name = ', '.join(artist_names).strip()
+            artist_name = '; '.join(artist_names).strip()
 
             if not track_name or not artist_name:
                 continue
@@ -3494,10 +3496,16 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
         # print(f"[PLEX_MATCH] SEARCH INPUT: artist='{artist}' -> normalized='{normalized_artist}'", flush=True)
         # print(f"[PLEX_MATCH] SEARCH INPUT: album='{album}' -> normalized='{normalized_album}'", flush=True)
 
-        # For multi-artist strings like "Evanescence, K.Flay", also try each individual
-        # artist so a Plex track stored under one artist still gets matched.
+        # For multi-artist strings like "Evanescence; K.Flay" or "Evanescence, K.Flay",
+        # also try each individual artist so a Plex track stored under one artist still gets matched.
         artist_candidates = [normalized_artist]
-        split_parts = [normalize_match_text(a.strip()) for a in artist.split(',') if a.strip()]
+        # Split on both semicolons (standard) and commas (legacy) for backward compatibility
+        split_parts = []
+        for sep in [';', ',']:
+            if sep in artist:
+                split_parts = [normalize_match_text(a.strip()) for a in artist.split(sep) if a.strip()]
+                if split_parts:
+                    break
         if len(split_parts) > 1:
             artist_candidates.extend(split_parts)
             # print(f"[PLEX_MATCH] Multi-artist detected, candidates: {artist_candidates}", flush=True)
