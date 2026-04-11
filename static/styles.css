@@ -96,6 +96,10 @@ header {
     letter-spacing: -0.02em;
 }
 
+header a {
+    text-decoration: none;
+}
+
 .tagline {
     font-size: 1.125rem;
     color: var(--text-secondary);
