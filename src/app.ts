@@ -5054,7 +5054,7 @@ class App {
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose' = 'loose'
     ): Promise<void> {
-        const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+        const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
         if (!downloadBtn) {
             console.error('[DOWNLOAD] Download button not found');
             return;
@@ -5102,7 +5102,7 @@ class App {
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose' = 'loose'
     ): Promise<void> {
-        const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+        const addPlaylistBtn = trackCard.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
         if (!addPlaylistBtn) {
             console.error('[PLAYLIST] Add to playlist button not found');
             return;
@@ -5665,7 +5665,7 @@ private async downloadTrackToLibrary(
             downloadAllBtn.disabled = false;
         }
 
-        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let downloadedCount = 0;
 
@@ -5679,7 +5679,7 @@ private async downloadTrackToLibrary(
                 // Restore buttons for incomplete downloads
                 for (let j = i; j < trackCards.length; j++) {
                     const trackCard = trackCards[j];
-                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     if (downloadBtn && !downloadBtn.classList.contains('completed')) {
                         this.restoreDownloadButton(downloadBtn);
                     }
@@ -5693,69 +5693,33 @@ private async downloadTrackToLibrary(
             if (trackId) {
                 try {
                     console.log(`[DOWNLOAD_ALL] Downloading track ${i + 1}/${totalTracks}`);
-                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     
-                    // Directly call handleDownload instead of clicking
                     if (downloadBtn && !downloadBtn.classList.contains('completed')) {
-                        // Create abort controller for this download
                         this.currentDownloadController = new AbortController();
-                        const currentController = this.currentDownloadController;
                         
-                        // Create promise that waits for the download to complete
-                        await new Promise<void>((resolve) => {
-                            // Call handleDownload directly
-                            void this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
-                            
-                            // Set a temporary handler to detect when download completes
-                            const checkCompletion = setInterval(() => {
-                                if (this.downloadAllCancelRequested || currentController.signal.aborted) {
-                                    clearInterval(checkCompletion);
-                                    resolve();
-                                    return;
-                                }
-                                
-                                if (downloadBtn.classList.contains('completed')) {
-                                    clearInterval(checkCompletion);
-                                    downloadedCount++;
-                                    
-                                    // Update progress bar and text
-                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                                    const progressText = document.getElementById('progressText');
-                                    if (progressBar) {
-                                        const progress = (downloadedCount / totalTracks) * 100;
-                                        progressBar.style.width = `${progress}%`;
-                                    }
-                                    if (progressText) {
-                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                                    }
-                                    
-                                    setTimeout(() => resolve(), 500); // Small delay before next
-                                }
-                            }, 100);
-                            
-                            // Set timeout to prevent hanging
-                            setTimeout(() => {
-                                clearInterval(checkCompletion);
-                                if (!downloadBtn.classList.contains('completed') && !this.downloadAllCancelRequested && !currentController.signal.aborted) {
-                                    downloadedCount++;
-                                    
-                                    // Update progress bar and text
-                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                                    const progressText = document.getElementById('progressText');
-                                    if (progressBar) {
-                                        const progress = (downloadedCount / totalTracks) * 100;
-                                        progressBar.style.width = `${progress}%`;
-                                    }
-                                    if (progressText) {
-                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                                    }
-                                }
-                                resolve();
-                            }, 120000); // 2 minutes timeout per track
-                        });
+                        try {
+                            await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        } catch (error) {
+                            console.error(`[DOWNLOAD_ALL] Download error for track ${trackId}:`, error);
+                        }
+                    }
+                    
+                    // Count as queued whether processed or not (including skipped/already completed)
+                    downloadedCount++;
+                    
+                    // Update progress display after each track
+                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                    const progressText = document.getElementById('progressText');
+                    if (progressBar) {
+                        const progress = (downloadedCount / totalTracks) * 100;
+                        progressBar.style.width = `${progress}%`;
+                    }
+                    if (progressText) {
+                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
                     }
                 } catch (error) {
-                    console.error(`[DOWNLOAD_ALL] Error downloading track ${trackId}:`, error);
+                    console.error(`[DOWNLOAD_ALL] Error processing track ${trackId}:`, error);
                 }
             }
         }
@@ -5793,7 +5757,7 @@ private async downloadTrackToLibrary(
             addAllLibraryBtn.disabled = false;
         }
 
-        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let addedCount = 0;
 
@@ -5804,7 +5768,7 @@ private async downloadTrackToLibrary(
                 console.log('[ADD_ALL_LIBRARY] Add all to library cancelled by user');
                 for (let j = i; j < trackCards.length; j++) {
                     const trackCard = trackCards[j];
-                    const libraryBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     if (libraryBtn && !libraryBtn.classList.contains('completed')) {
                         this.restoreDownloadButton(libraryBtn);
                     }
@@ -5818,44 +5782,33 @@ private async downloadTrackToLibrary(
             if (trackId) {
                 try {
                     console.log(`[ADD_ALL_LIBRARY] Adding to library ${i + 1}/${totalTracks}`);
-                    const libraryBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     
                     if (libraryBtn && !libraryBtn.classList.contains('completed')) {
                         this.currentDownloadController = new AbortController();
-                        const currentController = this.currentDownloadController;
-
-                        const downloadPromise = new Promise<void>((resolve, reject) => {
-                            (async () => {
-                                try {
-                                    await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
-                                    addedCount++;
-                                    resolve();
-                                } catch (error) {
-                                    reject(error);
-                                }
-                            })();
-                        });
-
-                        await new Promise((resolve) => {
-                            const timeoutId = setTimeout(() => {
-                                if (currentController === this.currentDownloadController) {
-                                    currentController.abort();
-                                }
-                                const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                                const progressText = document.getElementById('progressText');
-                                if (progressBar) {
-                                    const progress = (addedCount / totalTracks) * 100;
-                                    progressBar.style.width = `${progress}%`;
-                                }
-                                if (progressText) {
-                                    progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                                }
-                                resolve(null);
-                            }, 120000);
-                        });
+                        
+                        try {
+                            await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        } catch (error) {
+                            console.error(`[ADD_ALL_LIBRARY] Download error for track ${trackId}:`, error);
+                        }
+                    }
+                    
+                    // Count as queued whether processed or not (including skipped/already completed)
+                    addedCount++;
+                    
+                    // Update progress display after each track
+                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                    const progressText = document.getElementById('progressText');
+                    if (progressBar) {
+                        const progress = (addedCount / totalTracks) * 100;
+                        progressBar.style.width = `${progress}%`;
+                    }
+                    if (progressText) {
+                        progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
                     }
                 } catch (error) {
-                    console.error(`[ADD_ALL_LIBRARY] Error adding track ${trackId}:`, error);
+                    console.error(`[ADD_ALL_LIBRARY] Error processing track ${trackId}:`, error);
                 }
             }
         }
@@ -5993,7 +5946,7 @@ private async downloadTrackToLibrary(
     }
 
     private async handleAddAllToPlaylist(playlistName: string): Promise<void> {
-        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let addedCount = 0;
         console.log(`[PLAYLIST_ALL] Adding all ${totalTracks} tracks to playlist: ${playlistName}`);
@@ -6003,7 +5956,7 @@ private async downloadTrackToLibrary(
             if (trackId) {
                 try {
                     console.log(`[PLAYLIST_ALL] Adding track ${i + 1}/${totalTracks}`);
-                    const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+                    const addPlaylistBtn = trackCard.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
                     if (addPlaylistBtn && !addPlaylistBtn.classList.contains('completed')) {
                         const originalContent = addPlaylistBtn.innerHTML;
                         const originalDisabled = addPlaylistBtn.disabled;
