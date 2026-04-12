@@ -107,6 +107,10 @@ interface AlbumInfo {
         id: number;
         title: string;
         cover?: string;
+        explicit?: boolean;
+        mediaMetadata?: {
+            tags?: string[];
+        };
         artist?: Artist;
         artists?: Artist[];
         releaseDate?: string;
@@ -753,6 +757,17 @@ class App {
             if (gridArtistName) {
                 const trackRow = gridArtistName.closest('.tracks-grid-row');
                 const artistId = trackRow?.getAttribute('data-artist-id');
+                if (artistId) {
+                    e.stopPropagation();
+                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    return;
+                }
+            }
+
+            // Check for artist name clicks within album hero header
+            const heroArtistName = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
+            if (heroArtistName) {
+                const artistId = heroArtistName.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
                     void this.fetchArtistAlbums(parseInt(artistId, 10));
@@ -2994,12 +3009,6 @@ class App {
                     <div class="results-header-top">
                         <h2>Last.fm Playlist - "${this.escapeHtml(playlistName)}"</h2>
                     </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
-                    </div>
                 </div>
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
@@ -3019,8 +3028,6 @@ class App {
             `;
 
             const resultsList = document.getElementById('lastfmResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
@@ -3039,7 +3046,7 @@ class App {
                         
                         if (items.length > 0) {
                             // Add the first match to results
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
@@ -3065,20 +3072,6 @@ class App {
                     });
                 }
 
-                // Update progress
-                const progress = ((i + 1) / totalTracks) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
-            }
-
-            // Update final message
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
             }
 
             // Create and add Add All buttons after searching is complete
@@ -3090,32 +3083,14 @@ class App {
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
                 addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <g transform="translate(2,1)">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                        <g transform="translate(8,7)" opacity="0.7">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                    </svg>
-                `;
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
                 buttonsContainer.appendChild(addPlaylistBtn);
                 const addLibraryBtn = document.createElement('button');
                 addLibraryBtn.id = 'addAllLibraryBtn';
                 addLibraryBtn.className = 'add-all-btn';
                 addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
-                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
-                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
-                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
-                    </svg>
-                `;
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
                 addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
                 buttonsContainer.appendChild(addLibraryBtn);
                 resultsHeaderTop.appendChild(buttonsContainer);
@@ -3170,12 +3145,6 @@ class App {
                     <div class="results-header-top">
                         <h2>YouTube Music Playlist - "${this.escapeHtml(playlistName)}"</h2>
                     </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
-                    </div>
                 </div>
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
@@ -3195,8 +3164,6 @@ class App {
             `;
 
             const resultsList = document.getElementById('lastfmResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
@@ -3213,7 +3180,7 @@ class App {
                         const items = searchData.data?.items || [];
 
                         if (items.length > 0) {
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
@@ -3239,18 +3206,6 @@ class App {
                     });
                 }
 
-                const progress = ((i + 1) / totalTracks) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
-            }
-
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
             }
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
@@ -3261,32 +3216,14 @@ class App {
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
                 addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <g transform="translate(2,1)">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                        <g transform="translate(8,7)" opacity="0.7">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                    </svg>
-                `;
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
                 buttonsContainer.appendChild(addPlaylistBtn);
                 const addLibraryBtn = document.createElement('button');
                 addLibraryBtn.id = 'addAllLibraryBtn';
                 addLibraryBtn.className = 'add-all-btn';
                 addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
-                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
-                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
-                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
-                    </svg>
-                `;
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
                 addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
                 buttonsContainer.appendChild(addLibraryBtn);
                 resultsHeaderTop.appendChild(buttonsContainer);
@@ -3428,12 +3365,6 @@ class App {
                         <h2>${this.escapeHtml(playlistTitle)}</h2>
                         <p class="playlist-creator-display">by ${this.escapeHtml(playlistCreator)}</p>
                     </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${tracks.length}</p>
-                    </div>
                 </div>
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
@@ -3453,8 +3384,6 @@ class App {
             `;
 
             const resultsList = document.getElementById('listenbrainzResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
@@ -3474,7 +3403,7 @@ class App {
                         
                         if (items.length > 0) {
                             // Add the first match to results
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
@@ -3500,20 +3429,6 @@ class App {
                     });
                 }
 
-                // Update progress
-                const progress = ((i + 1) / tracks.length) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
-            }
-
-            // Update final message
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, tracks.length, notFoundTracks);
             }
 
             // Create and add Add All buttons after searching is complete
@@ -3525,27 +3440,14 @@ class App {
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
                 addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 5v14"></path>
-                        <path d="M5 12h14"></path>
-                    </svg>
-                    <span>Add All to Playlist</span>
-                `;
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
                 buttonsContainer.appendChild(addPlaylistBtn);
                 const addLibraryBtn = document.createElement('button');
                 addLibraryBtn.id = 'addAllLibraryBtn';
                 addLibraryBtn.className = 'add-all-btn';
                 addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="3" width="20" height="5" rx="1"></rect>
-                        <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
-                        <rect x="8" y="12" width="8" height="1"></rect>
-                    </svg>
-                    <span>Add All to Library</span>
-                `;
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
                 addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
                 buttonsContainer.appendChild(addLibraryBtn);
                 resultsHeaderTop.appendChild(buttonsContainer);
@@ -3584,29 +3486,6 @@ class App {
             cover: undefined,
             trackNumber: undefined
         };
-    }
-
-    private updatePlaylistFoundSummary(
-        progressTextEl: HTMLElement,
-        foundCount: number,
-        totalTracks: number,
-        notFoundTracks: Array<{ artist: string; name: string }>
-    ): void {
-        progressTextEl.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-
-        if (!notFoundTracks.length) {
-            progressTextEl.removeAttribute('title');
-            return;
-        }
-
-        const lines = notFoundTracks.map((track, index) => (
-            `${index + 1}. ${track.artist} - ${track.name}`
-        ));
-
-        progressTextEl.setAttribute(
-            'title',
-            `Not found (${notFoundTracks.length}):\n${lines.join('\n')}`
-        );
     }
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {
@@ -3778,6 +3657,14 @@ class App {
             const matches = Array.isArray(data.matches) ? data.matches : [];
             const max = Math.min(gridRows.length, matches.length);
 
+            const allRowsInPlex = gridRows.length > 0
+                && matches.length >= gridRows.length
+                && gridRows.every((_, index) => Boolean(matches[index] && matches[index].exists));
+
+            if (allRowsInPlex) {
+                this.replaceAddAllLibraryWithPlexBadge(matches.slice(0, gridRows.length));
+            }
+
             for (let i = 0; i < max; i += 1) {
                 const match = matches[i];
                 if (!match || !match.exists) {
@@ -3816,6 +3703,33 @@ class App {
         } catch (error) {
             console.warn('Failed to annotate grid rows with Plex status.', error);
         }
+    }
+
+    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[]): void {
+        const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
+        if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
+            return;
+        }
+
+        const allLowQualityMp3 = matches.length > 0 && matches.every((match) =>
+            Array.isArray(match.variants)
+            && match.variants.length > 0
+            && match.variants.every(v =>
+                (v.format === 'mp3' || v.format === 'mpeg')
+                && typeof v.bitrate === 'number' && v.bitrate <= 192
+            )
+        );
+
+        const badge = document.createElement('span');
+        badge.className = allLowQualityMp3
+            ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk plex-existing-chip--low-quality'
+            : 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk';
+        badge.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
+        badge.title = allLowQualityMp3
+            ? 'All listed tracks already exist in Plex (low quality variants detected)'
+            : 'All listed tracks already exist in Plex';
+
+        addAllLibraryBtn.replaceWith(badge);
     }
 
     private buildPlexExistingTooltip(variants: PlexSongVariant[]): string {
@@ -3932,6 +3846,69 @@ class App {
         return 'Unknown';
     }
 
+    private getAddAllPlaylistIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g transform="translate(2,1)">
+                    <path d="M5 0v10"></path>
+                    <path d="M0 5h10"></path>
+                </g>
+                <g transform="translate(8,7)" opacity="0.7">
+                    <path d="M5 0v10"></path>
+                    <path d="M0 5h10"></path>
+                </g>
+            </svg>
+        `;
+    }
+    
+    private getAddAllLibraryIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+            </svg>
+        `;
+    }
+    
+    private setBulkActionButtonState(
+        button: HTMLButtonElement | null,
+        buttonType: 'playlist' | 'library',
+        state: 'idle' | 'loading' | 'success' | 'failed'
+    ): void {
+        if (!button) {
+            return;
+        }
+
+        button.classList.remove('queued', 'in-progress', 'completed', 'failed');
+
+        if (state === 'loading') {
+            button.disabled = true;
+            button.classList.add('in-progress');
+            button.innerHTML = this.getSpinnerIconSvg();
+            return;
+        }
+
+        button.disabled = false;
+
+        if (state === 'success') {
+            button.classList.add('completed');
+            button.innerHTML = this.getCheckmarkIconSvg();
+            return;
+        }
+
+        if (state === 'failed') {
+            button.classList.add('failed');
+            button.innerHTML = this.getExclamationIconSvg();
+            return;
+        }
+
+        button.innerHTML = buttonType === 'playlist'
+            ? this.getAddAllPlaylistIconSvg()
+            : this.getAddAllLibraryIconSvg();
+    }
+
     private getPlaylistCoverUrl(playlist: PlaylistSearchItem): string {
         const rawCover = playlist.customImageUrl || playlist.squareImage || playlist.image || playlist.cover || '';
         if (!rawCover) {
@@ -4039,12 +4016,6 @@ class App {
                         <h2>${this.escapeHtml(playlistTitle)}</h2>
                     </div>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
-                    </div>
                 </div>
                 <div class="results-list">
                     ${this.formatTracksGrid(tracks)}
@@ -4059,39 +4030,15 @@ class App {
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
                 addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <g transform="translate(2,1)">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                        <g transform="translate(8,7)" opacity="0.7">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                    </svg>
-                `;
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
                 buttonsContainer.appendChild(addPlaylistBtn);
                 const addLibraryBtn = document.createElement('button');
                 addLibraryBtn.id = 'addAllLibraryBtn';
                 addLibraryBtn.className = 'add-all-btn';
                 addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
-                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
-                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
-                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
-                    </svg>
-                `;
-                addLibraryBtn.addEventListener('click', () => {
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.addAllToLibrary();
-                });
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
                 buttonsContainer.appendChild(addLibraryBtn);
                 resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
@@ -4219,14 +4166,13 @@ class App {
                 <div class="tracks-grid-wrapper" data-view-mode="single-album">
                     <div class="tracks-grid">
                         <div class="tracks-grid-header">
-                            <div class="grid-cell grid-col-artwork"></div>
                             <div class="grid-cell grid-col-track-number">#</div>
                             <div class="grid-cell grid-col-title">Title</div>
                             <div class="grid-cell grid-col-artist">Artist</div>
                             <div class="grid-cell grid-col-quality">Quality</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
-                        ${tracks.map((track) => this.formatTrackGridRow(track, true, numberOfVolumes, false)).join('')}
+                        ${tracks.map((track) => this.formatTrackGridRow(track, true, numberOfVolumes, false, false)).join('')}
                     </div>
                 </div>
             `;
@@ -4243,14 +4189,14 @@ class App {
                             <div class="grid-cell grid-col-quality">Quality</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
-                        ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true)).join('')}
+                        ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true, true)).join('')}
                     </div>
                 </div>
             `;
         }
     }
 
-    private formatTrackGridRow(track: Track, showTrackNumber: boolean, numberOfVolumes: number | undefined, showAlbumColumn: boolean): string {
+    private formatTrackGridRow(track: Track, showTrackNumber: boolean, numberOfVolumes: number | undefined, showAlbumColumn: boolean, showArtwork: boolean): string {
         // Get artist names and IDs
         const artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(a => a.name).join(', ')
@@ -4295,7 +4241,7 @@ class App {
 
         return `
             <div class="tracks-grid-row" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
-                <div class="grid-cell grid-col-artwork">
+                ${showArtwork ? `<div class="grid-cell grid-col-artwork">
                     ${albumCover 
                         ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
                         : `<div class="grid-artwork-placeholder">
@@ -4305,7 +4251,7 @@ class App {
                             </svg>
                            </div>`
                     }
-                </div>
+                </div>` : ''}
                 ${showTrackNumber ? `<div class="grid-cell grid-col-track-number">${trackNumberDisplay}</div>` : ''}
                 <div class="grid-cell grid-col-title">
                     <div class="track-title-with-badge">
@@ -4835,68 +4781,94 @@ class App {
             const artistNames = albumData.artists && albumData.artists.length > 0
                 ? albumData.artists.map(a => a.name).join(', ')
                 : albumData.artist?.name || 'Unknown Artist';
+            const primaryArtistId = albumData.artists?.[0]?.id || albumData.artist?.id;
 
-            // Display tracks with Download All button
+            // Calculate total duration
+            const totalDurationSeconds = tracks.reduce((sum, track) => {
+                return sum + (track.duration || 0);
+            }, 0);
+            const totalDurationMinutes = Math.floor(totalDurationSeconds / 60);
+            const totalDurationHours = Math.floor(totalDurationMinutes / 60);
+            const remainingMinutes = totalDurationMinutes % 60;
+            const durationStr = totalDurationHours > 0 
+                ? `${totalDurationHours}h ${remainingMinutes}m`
+                : `${totalDurationMinutes}m`;
+
+            const releaseDate = albumData.releaseDate 
+                ? new Date(albumData.releaseDate).getFullYear()
+                : '';
+
+            const albumIsExplicit = Boolean(
+                albumData.explicit ||
+                albumData.mediaMetadata?.tags?.includes('EXPLICIT') ||
+                tracks.some(track => track.explicit)
+            );
+            
+            const coverArt = albumData.cover
+                ? this.formatTidalImageUrl(albumData.cover, 1280)
+                : '';
+
+            // Display tracks with TIDAL-style album header
             this.resultsContainer.innerHTML = `
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>${this.escapeHtml(albumTitle)} - ${this.escapeHtml(artistNames)}</h2>
-                    </div>
-                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                <div class="album-hero-section">
+                    <div class="album-hero-content">
+                        <div class="album-cover-container">
+                            ${coverArt ? `<img src="${coverArt}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">` : '<div class="album-cover-placeholder"></div>'}
                         </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
+                        <div class="album-info">
+                            <h1 class="album-title">
+                                ${this.escapeHtml(albumTitle)}
+                                ${albumIsExplicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
+                            </h1>
+                            <p class="album-artist">
+                                <span class="track-artist-name" ${primaryArtistId ? `data-artist-id="${primaryArtistId}" title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                            </p>
+                            <div class="album-metadata">
+                                ${releaseDate ? `<span class="metadata-item">${releaseDate}</span>` : ''}
+                                <span class="metadata-item">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}</span>
+                                <span class="metadata-item">${durationStr}</span>
+                            </div>
+                            ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                        </div>
+                    </div>
+                    <div class="album-actions">
+                        <button class="album-action-btn primary" id="albumPlayBtn" title="Play album">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+                        </button>
+                        <button class="album-action-btn" id="addAllPlaylistBtn" title="Add all tracks to a playlist">
+                            ${this.getAddAllPlaylistIconSvg()}
+                        </button>
+                        <button class="album-action-btn" id="addAllLibraryBtn" title="Add all tracks to library">
+                            ${this.getAddAllLibraryIconSvg()}
+                        </button>
                     </div>
                 </div>
                 <div class="results-list">
                     ${this.formatTracksGrid(tracks, numberOfVolumes)}
                 </div>
             `;
-
-            // Add Add All buttons
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.className = 'add-all-buttons-container';
-                const addPlaylistBtn = document.createElement('button');
-                addPlaylistBtn.id = 'addAllPlaylistBtn';
-                addPlaylistBtn.className = 'add-all-btn';
-                addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 5v14"></path>
-                        <path d="M5 12h14"></path>
-                    </svg>
-                    <span>Add All to Playlist</span>
-                `;
+            // Attach event listeners to action buttons
+            const addPlaylistBtn = document.getElementById('addAllPlaylistBtn') as HTMLButtonElement;
+            if (addPlaylistBtn) {
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
-                buttonsContainer.appendChild(addPlaylistBtn);
-                const addLibraryBtn = document.createElement('button');
-                addLibraryBtn.id = 'addAllLibraryBtn';
-                addLibraryBtn.className = 'add-all-btn';
-                addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="3" width="20" height="5" rx="1"></rect>
-                        <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
-                        <rect x="8" y="12" width="8" height="1"></rect>
-                    </svg>
-                    <span>Add All to Library</span>
-                `;
-                addLibraryBtn.addEventListener('click', () => {
-                    // Show progress info when adding starts
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.addAllToLibrary();
-                });
-                buttonsContainer.appendChild(addLibraryBtn);
-                resultsHeaderTop.appendChild(buttonsContainer);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
             }
+
+            const addLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
+            if (addLibraryBtn) {
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+            }
+
+            const playBtn = document.getElementById('albumPlayBtn') as HTMLButtonElement;
+            if (playBtn) {
+                playBtn.addEventListener('click', () => {
+                    // Play the first track from the album
+                    if (tracks.length > 0) {
+                        void this.handlePlayToggle(tracks[0].id, undefined as any, playBtn);
+                    }
+                });
+            }
+
+            this.movePlexPlaylistContainerBeneathDownloadAll();
 
             void this.annotateTrackCardsWithPlexStatus(tracks);
         } catch (error) {
@@ -4942,12 +4914,6 @@ class App {
                         <h2>More Like This - Similar Tracks</h2>
                     </div>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
-                    </div>
                 </div>
                 <div class="results-list">
                     ${this.formatTracksGrid(tracks)}
@@ -4962,39 +4928,15 @@ class App {
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
                 addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <g transform="translate(2,1)">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                        <g transform="translate(8,7)" opacity="0.7">
-                            <path d="M5 0v10"></path>
-                            <path d="M0 5h10"></path>
-                        </g>
-                    </svg>
-                `;
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
                 addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
                 buttonsContainer.appendChild(addPlaylistBtn);
                 const addLibraryBtn = document.createElement('button');
                 addLibraryBtn.id = 'addAllLibraryBtn';
                 addLibraryBtn.className = 'add-all-btn';
                 addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
-                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
-                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
-                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
-                    </svg>
-                `;
-                addLibraryBtn.addEventListener('click', () => {
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement | null;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.addAllToLibrary();
-                });
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
                 buttonsContainer.appendChild(addLibraryBtn);
                 resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
@@ -5742,16 +5684,6 @@ private async downloadTrackToLibrary(
                     // Count as queued whether processed or not (including skipped/already completed)
                     downloadedCount++;
                     
-                    // Update progress display after each track
-                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                    const progressText = document.getElementById('progressText');
-                    if (progressBar) {
-                        const progress = (downloadedCount / totalTracks) * 100;
-                        progressBar.style.width = `${progress}%`;
-                    }
-                    if (progressText) {
-                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                    }
                 } catch (error) {
                     console.error(`[DOWNLOAD_ALL] Error processing track ${trackId}:`, error);
                 }
@@ -5774,10 +5706,6 @@ private async downloadTrackToLibrary(
 
     private async addAllToLibrary(): Promise<void> {
         if (this.isDownloadingAll) {
-            this.downloadAllCancelRequested = true;
-            if (this.currentDownloadController) {
-                this.currentDownloadController.abort();
-            }
             return;
         }
 
@@ -5785,31 +5713,16 @@ private async downloadTrackToLibrary(
         this.downloadAllCancelRequested = false;
         
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
-        if (addAllLibraryBtn) {
-            addAllLibraryBtn.textContent = 'Cancel';
-            addAllLibraryBtn.classList.add('cancelling');
-            addAllLibraryBtn.disabled = false;
-        }
+        this.setBulkActionButtonState(addAllLibraryBtn, 'library', 'loading');
 
         const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let addedCount = 0;
+        let failedCount = 0;
 
         console.log(`[ADD_ALL_LIBRARY] Starting batch add to library of ${totalTracks} tracks`);
 
         for (let i = 0; i < trackCards.length; i++) {
-            if (this.downloadAllCancelRequested) {
-                console.log('[ADD_ALL_LIBRARY] Add all to library cancelled by user');
-                for (let j = i; j < trackCards.length; j++) {
-                    const trackCard = trackCards[j];
-                    const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
-                    if (libraryBtn && !libraryBtn.classList.contains('completed')) {
-                        this.restoreDownloadButton(libraryBtn);
-                    }
-                }
-                break;
-            }
-
             const trackCard = trackCards[i];
             const trackId = trackCard.getAttribute('data-track-id');
             
@@ -5819,30 +5732,20 @@ private async downloadTrackToLibrary(
                     const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     
                     if (libraryBtn && !libraryBtn.classList.contains('completed')) {
-                        this.currentDownloadController = new AbortController();
-                        
-                        try {
-                            await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
-                        } catch (error) {
-                            console.error(`[ADD_ALL_LIBRARY] Download error for track ${trackId}:`, error);
+                        const wasQueued = libraryBtn.classList.contains('queued');
+                        await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        const isQueued = libraryBtn.classList.contains('queued');
+
+                        if (!wasQueued && isQueued) {
+                            addedCount++;
+                        } else if (!isQueued && !libraryBtn.classList.contains('completed')) {
+                            failedCount++;
                         }
                     }
                     
-                    // Count as queued whether processed or not (including skipped/already completed)
-                    addedCount++;
-                    
-                    // Update progress display after each track
-                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                    const progressText = document.getElementById('progressText');
-                    if (progressBar) {
-                        const progress = (addedCount / totalTracks) * 100;
-                        progressBar.style.width = `${progress}%`;
-                    }
-                    if (progressText) {
-                        progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                    }
                 } catch (error) {
                     console.error(`[ADD_ALL_LIBRARY] Error processing track ${trackId}:`, error);
+                    failedCount++;
                 }
             }
         }
@@ -5850,24 +5753,17 @@ private async downloadTrackToLibrary(
         this.isDownloadingAll = false;
         this.downloadAllCancelRequested = false;
         this.currentDownloadController = null;
-        
-        if (addAllLibraryBtn) {
-            addAllLibraryBtn.innerHTML = `
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="2" y="3" width="20" height="5" rx="1"></rect>
-                    <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
-                    <rect x="8" y="12" width="8" height="1"></rect>
-                </svg>
-                <span>Add All to Library</span>
-            `;
-            addAllLibraryBtn.classList.remove('cancelling');
-            addAllLibraryBtn.disabled = false;
-        }
+
+        this.setBulkActionButtonState(addAllLibraryBtn, 'library', failedCount > 0 ? 'failed' : 'success');
 
         console.log(`[ADD_ALL_LIBRARY] Queued ${addedCount}/${totalTracks} tracks`);
     }
 
     private async addAllToPlaylist(): Promise<void> {
+        if (this.isDownloadingAll) {
+            return;
+        }
+
         try {
             const playlists = await this.fetchPlaylists();
             if (!playlists || playlists.length === 0) {
@@ -5980,9 +5876,18 @@ private async downloadTrackToLibrary(
     }
 
     private async handleAddAllToPlaylist(playlistName: string): Promise<void> {
+        if (this.isDownloadingAll) {
+            return;
+        }
+
+        this.isDownloadingAll = true;
+        const addAllPlaylistBtn = document.getElementById('addAllPlaylistBtn') as HTMLButtonElement;
+        this.setBulkActionButtonState(addAllPlaylistBtn, 'playlist', 'loading');
+
         const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let addedCount = 0;
+        let failedCount = 0;
         console.log(`[PLAYLIST_ALL] Adding all ${totalTracks} tracks to playlist: ${playlistName}`);
         for (let i = 0; i < trackCards.length; i++) {
             const trackCard = trackCards[i];
@@ -6011,24 +5916,18 @@ private async downloadTrackToLibrary(
                             if (addPlaylistBtn.dataset.originalContent) {
                                 delete addPlaylistBtn.dataset.originalContent;
                             }
+                            failedCount++;
                         }
                     }
                     
-                    // Update progress display after each track
-                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                    const progressText = document.getElementById('progressText');
-                    if (progressBar) {
-                        const progress = ((i + 1) / totalTracks) * 100;
-                        progressBar.style.width = `${progress}%`;
-                    }
-                    if (progressText) {
-                        progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks to playlist: ${this.escapeHtml(playlistName)}`;
-                    }
                 } catch (error) {
                     console.error(`[PLAYLIST_ALL] Error processing track ${trackId}:`, error);
+                    failedCount++;
                 }
             }
         }
+        this.isDownloadingAll = false;
+        this.setBulkActionButtonState(addAllPlaylistBtn, 'playlist', failedCount > 0 ? 'failed' : 'success');
         console.log(`[PLAYLIST_ALL] Queued ${addedCount}/${totalTracks} tracks`);
     }
 }
