@@ -956,6 +956,11 @@ body {
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
+    width: 100%;
+}
+
+.hero-bottom-right {
+    margin-left: auto;
 }
 
 .results-header {

@@ -5077,6 +5077,9 @@ class App {
                         <button class="album-action-btn primary" id="artistPlayBtn" title="Play artist" ${albums.length === 0 ? 'disabled' : ''}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
                         </button>
+                        <button class="album-action-btn hero-bottom-right" id="findSimilarArtistBtn" title="Find similar artists" data-artist-id="${artistId}">
+                            ${this.getMoreLikeIconSvg()}
+                        </button>
                     </div>
                 </div>
                 <div class="results-header">
@@ -5123,6 +5126,13 @@ class App {
                             console.error('Error playing artist:', error);
                         }
                     }
+                });
+            }
+
+            const findSimilarArtistBtn = document.getElementById('findSimilarArtistBtn') as HTMLButtonElement;
+            if (findSimilarArtistBtn) {
+                findSimilarArtistBtn.addEventListener('click', () => {
+                    void this.navigateToRoute({ view: 'similar_artists', artistId }, true);
                 });
             }
 
@@ -5246,6 +5256,9 @@ class App {
                         <button class="album-action-btn primary" id="albumPlayBtn" title="Play album">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
                         </button>
+                        <button class="album-action-btn" id="findSimilarAlbumBtn" title="Find similar albums" data-album-id="${albumId}">
+                            ${this.getMoreLikeIconSvg()}
+                        </button>
                         <button class="album-action-btn" id="addAllPlaylistBtn" title="Add all tracks to a playlist">
                             ${this.getAddAllPlaylistIconSvg()}
                         </button>
@@ -5267,6 +5280,13 @@ class App {
             const addLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
             if (addLibraryBtn) {
                 addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+            }
+
+            const findSimilarBtn = document.getElementById('findSimilarAlbumBtn') as HTMLButtonElement;
+            if (findSimilarBtn) {
+                findSimilarBtn.addEventListener('click', () => {
+                    void this.navigateToRoute({ view: 'similar_albums', albumId }, true);
+                });
             }
 
             const playBtn = document.getElementById('albumPlayBtn') as HTMLButtonElement;
