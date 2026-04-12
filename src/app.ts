@@ -323,6 +323,7 @@ class App {
     private isPlexConfigured: boolean = false;
     private isHandlingPopState: boolean = false;
     private currentPage: string = 'explore';
+    private pendingRequestController: AbortController | null = null;
 
     constructor() {
         // New page navigation elements
@@ -669,7 +670,7 @@ class App {
                     e.stopPropagation();
                     const albumId = albumRow.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.fetchAlbumTracks(parseInt(albumId, 10));
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
                     }
                     return;
                 }
@@ -731,7 +732,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.fetchSimilarTracks(parseInt(trackId, 10));
+                            void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
                             return;
                         }
                     }
@@ -741,7 +742,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.fetchSimilarAlbums(parseInt(albumId, 10));
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
                             return;
                         }
                     }
@@ -794,14 +795,14 @@ class App {
 
                 const trackId = card.getAttribute('data-track-id');
                 if (trackId) {
-                    void this.fetchSimilarTracks(parseInt(trackId, 10));
+                    void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
                     return;
                 }
 
                 if (card.classList.contains('album-card')) {
                     const albumId = card.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.fetchSimilarAlbums(parseInt(albumId, 10));
+                        void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
                     }
                     return;
                 }
@@ -809,7 +810,7 @@ class App {
                 if (card.classList.contains('artist-card')) {
                     const artistId = card.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.fetchSimilarArtists(parseInt(artistId, 10));
+                        void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
                     }
                     return;
                 }
@@ -822,7 +823,7 @@ class App {
                 const artistId = trackRow?.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                     return;
                 }
             }
@@ -833,7 +834,7 @@ class App {
                 const artistId = heroArtistName.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                     return;
                 }
             }
@@ -845,7 +846,7 @@ class App {
                 const albumId = trackRow?.getAttribute('data-album-id');
                 if (albumId) {
                     e.stopPropagation();
-                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
                     return;
                 }
             }
@@ -857,7 +858,7 @@ class App {
                 const artistId = albumRow?.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                     return;
                 }
             }
@@ -869,7 +870,7 @@ class App {
                 const artistId = trackCard?.getAttribute('data-artist-id');
                 if (artistId) {
                     e.stopPropagation();
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                     return;
                 }
             }
@@ -881,7 +882,7 @@ class App {
                 const albumId = trackCard?.getAttribute('data-album-id');
                 if (albumId) {
                     e.stopPropagation();
-                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
                     return;
                 }
             }
@@ -891,7 +892,7 @@ class App {
             if (playlistCard) {
                 const playlistId = playlistCard.getAttribute('data-playlist-id');
                 if (playlistId) {
-                    void this.fetchListenbrainzPlaylistTracks(playlistId);
+                    void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId }, true);
                     return;
                 }
             }
@@ -901,7 +902,7 @@ class App {
             if (searchPlaylistCard) {
                 const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
                 if (playlistId) {
-                    void this.fetchPlaylistTracks(playlistId);
+                    void this.navigateToRoute({ view: 'playlist', playlistId }, true);
                     return;
                 }
             }
@@ -911,7 +912,7 @@ class App {
             if (clickedCard && clickedCard.classList.contains('album-card')) {
                 const albumId = clickedCard.getAttribute('data-album-id');
                 if (albumId) {
-                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
                 }
             }
             
@@ -919,7 +920,7 @@ class App {
             if (clickedCard && clickedCard.classList.contains('artist-card')) {
                 const artistId = clickedCard.getAttribute('data-artist-id');
                 if (artistId) {
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                 }
             }
             });
@@ -927,6 +928,12 @@ class App {
     }
 
     private switchPage(pageName: string): void {
+        // Cancel any pending requests when switching pages
+        if (this.pendingRequestController) {
+            this.pendingRequestController.abort();
+            this.pendingRequestController = null;
+        }
+
         // Hide all pages
         const allPages = document.querySelectorAll('.page');
         allPages.forEach(page => {
@@ -1361,6 +1368,15 @@ class App {
     }
 
     private async navigateToRoute(route: AppRouteState, updateHistory: boolean): Promise<void> {
+        // Abort all pending requests from the previous route
+        if (this.pendingRequestController) {
+            this.pendingRequestController.abort();
+        }
+
+        // Create a new controller for this route's requests
+        this.pendingRequestController = new AbortController();
+        const signal = this.pendingRequestController.signal;
+
         if (route.view === 'home') {
             this.stopPlayback();
             this.updatePlexPlaylistContainerVisibility(false);
@@ -3058,7 +3074,8 @@ class App {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ playlistUrl })
+                body: JSON.stringify({ playlistUrl }),
+                signal: this.pendingRequestController?.signal
             });
 
             if (!scrapeResponse.ok) {
@@ -3113,7 +3130,9 @@ class App {
                 const searchQuery = `${track.name} ${track.artist}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                        signal: this.pendingRequestController?.signal
+                    });
                     
                     if (searchResponse.ok) {
                         const searchData = await searchResponse.json();
@@ -3195,7 +3214,8 @@ class App {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ playlistUrl })
+                body: JSON.stringify({ playlistUrl }),
+                signal: this.pendingRequestController?.signal
             });
 
             if (!scrapeResponse.ok) {
@@ -3248,7 +3268,9 @@ class App {
                 const searchQuery = `${track.name} ${track.artist}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                        signal: this.pendingRequestController?.signal
+                    });
 
                     if (searchResponse.ok) {
                         const searchData = await searchResponse.json();
@@ -3330,7 +3352,9 @@ class App {
         this.displayMessage('Loading ListenBrainz playlists...');
 
         try {
-            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}`);
+            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}`, {
+                signal: this.pendingRequestController?.signal
+            });
             
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
@@ -3404,7 +3428,9 @@ class App {
             }
 
             const playlistMbid = mbidMatch[1];
-            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}`);
+            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlist' }));
@@ -3470,7 +3496,9 @@ class App {
                 const searchQuery = `${lbTrack.title} ${artists}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
+                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                        signal: this.pendingRequestController?.signal
+                    });
                     
                     if (searchResponse.ok) {
                         const searchData = await searchResponse.json();
@@ -3628,10 +3656,13 @@ class App {
             return;
         }
 
+        // Use the route's abort signal
+        const signal = this.pendingRequestController?.signal;
+
         // Try to find grid rows first (new grid layout)
         const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
         if (gridRows.length > 0) {
-            await this.annotateGridRowsWithPlexStatus(tracks, gridRows);
+            await this.annotateGridRowsWithPlexStatus(tracks, gridRows, signal);
             return;
         }
 
@@ -3659,7 +3690,8 @@ class App {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ tracks: payloadTracks })
+                body: JSON.stringify({ tracks: payloadTracks }),
+                signal
             });
 
             if (!response.ok) {
@@ -3702,11 +3734,14 @@ class App {
                 metadataEl.appendChild(chip);
             }
         } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
             console.warn('Failed to annotate Plex inventory matches.', error);
         }
     }
 
-    private async annotateGridRowsWithPlexStatus(tracks: Track[], gridRows: HTMLElement[]): Promise<void> {
+    private async annotateGridRowsWithPlexStatus(tracks: Track[], gridRows: HTMLElement[], signal?: AbortSignal): Promise<void> {
         const payloadTracks = tracks.map((track) => {
             const artist = track.artists && track.artists.length > 0
                 ? track.artists.map(a => a.name).join(', ')
@@ -3725,7 +3760,8 @@ class App {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ tracks: payloadTracks })
+                body: JSON.stringify({ tracks: payloadTracks }),
+                signal
             });
 
             if (!response.ok) {
@@ -3780,6 +3816,9 @@ class App {
                 addLibraryBtn.replaceWith(chip);
             }
         } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
             console.warn('Failed to annotate grid rows with Plex status.', error);
         }
     }
@@ -3789,11 +3828,19 @@ class App {
             return;
         }
 
+        // Use the route's abort signal, or create a local one if not available
+        const signal = this.pendingRequestController?.signal;
+
         try {
             const gridRows = Array.from(this.resultsContainer.querySelectorAll('.albums-grid-row')) as HTMLElement[];
 
             // For each album, fetch its tracks and check if they're all in Plex
             for (let i = 0; i < gridRows.length && i < albums.length; i++) {
+                // Check if aborted before each iteration
+                if (signal?.aborted) {
+                    return;
+                }
+
                 const gridRow = gridRows[i];
                 const albumId = gridRow.getAttribute('data-album-id');
                 if (!albumId) {
@@ -3801,8 +3848,10 @@ class App {
                 }
 
                 try {
-                    // Fetch album tracks
-                    const albumResponse = await fetch(`/album/?id=${albumId}`);
+                    // Fetch album tracks with abort signal
+                    const albumResponse = await fetch(`/album/?id=${albumId}`, {
+                        signal
+                    });
                     if (!albumResponse.ok) {
                         continue;
                     }
@@ -3832,7 +3881,8 @@ class App {
                     const matchResponse = await fetch('/api/plex/songs/match', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tracks: payloadTracks })
+                        body: JSON.stringify({ tracks: payloadTracks }),
+                        signal
                     });
 
                     if (!matchResponse.ok) {
@@ -3881,11 +3931,17 @@ class App {
 
                     addLibraryBtn.replaceWith(chip);
                 } catch (error) {
-                    // Continue with next album if this one fails
+                    // Ignore abort errors and continue with next album
+                    if (error instanceof Error && error.name === 'AbortError') {
+                        return;
+                    }
                     continue;
                 }
             }
         } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
             console.warn('Failed to annotate album grid rows with Plex status.', error);
         }
     }
@@ -4130,7 +4186,9 @@ class App {
 
         try {
             const normalizedPlaylistId = this.normalizePlaylistId(playlistId) || playlistId;
-            const response = await fetch(`/playlist/?id=${encodeURIComponent(normalizedPlaylistId)}`);
+            const response = await fetch(`/playlist/?id=${encodeURIComponent(normalizedPlaylistId)}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch playlist');
@@ -4882,9 +4940,15 @@ class App {
     ): Promise<Response> {
         let lastError: Error | null = null;
         
+        // Ensure abort signal is included if not already provided
+        const finalOptions = {
+            ...options,
+            signal: options?.signal || this.pendingRequestController?.signal
+        };
+        
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                const response = await fetch(url, options);
+                const response = await fetch(url, finalOptions);
                 
                 // Only retry on 5xx errors or connection issues
                 if (response.status < 500) {
@@ -4953,7 +5017,9 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-            const response = await fetch(`/artist/?f=${artistId}`);
+            const response = await fetch(`/artist/?f=${artistId}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch artist');
@@ -5025,7 +5091,9 @@ class App {
                     if (albums.length > 0) {
                         const firstAlbumId = albums[0].id;
                         try {
-                            const response = await fetch(`/album/?id=${firstAlbumId}`);
+                            const response = await fetch(`/album/?id=${firstAlbumId}`, {
+                                signal: this.pendingRequestController?.signal
+                            });
                             if (!response.ok) {
                                 throw new Error('Failed to fetch album');
                             }
@@ -5059,7 +5127,9 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/album/?id=${albumId}`);
+            const response = await fetch(`/album/?id=${albumId}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch album');
@@ -5211,7 +5281,9 @@ class App {
         this.displayMessage('Loading track recommendations...');
 
         try {
-            const response = await fetch(`/recommendations/?id=${encodeURIComponent(String(trackId))}`);
+            const response = await fetch(`/recommendations/?id=${encodeURIComponent(String(trackId))}`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch recommendations');
             }
@@ -5283,7 +5355,9 @@ class App {
         this.displayMessage('Loading similar albums...');
 
         try {
-            const response = await fetch(`/album/similar/?id=${encodeURIComponent(String(albumId))}`);
+            const response = await fetch(`/album/similar/?id=${encodeURIComponent(String(albumId))}`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch similar albums');
             }
@@ -5339,7 +5413,9 @@ class App {
         this.displayMessage('Loading similar artists...');
 
         try {
-            const response = await fetch(`/artist/similar/?id=${encodeURIComponent(String(artistId))}`);
+            const response = await fetch(`/artist/similar/?id=${encodeURIComponent(String(artistId))}`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch similar artists');
             }
