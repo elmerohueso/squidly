@@ -6013,13 +6013,23 @@ private async downloadTrackToLibrary(
                             }
                         }
                     }
+                    
+                    // Update progress display after each track
+                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                    const progressText = document.getElementById('progressText');
+                    if (progressBar) {
+                        const progress = ((i + 1) / totalTracks) * 100;
+                        progressBar.style.width = `${progress}%`;
+                    }
+                    if (progressText) {
+                        progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks to playlist: ${this.escapeHtml(playlistName)}`;
+                    }
                 } catch (error) {
                     console.error(`[PLAYLIST_ALL] Error processing track ${trackId}:`, error);
                 }
             }
         }
         console.log(`[PLAYLIST_ALL] Queued ${addedCount}/${totalTracks} tracks`);
-        this.displayMessage(`Queued ${addedCount} tracks to playlist: ${playlistName}`);
     }
 }
 
