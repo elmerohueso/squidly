@@ -3770,8 +3770,17 @@ class App {
                     continue;
                 }
 
-                const qualityCell = gridRows[i].querySelector('.grid-col-quality') as HTMLElement | null;
-                if (!qualityCell || qualityCell.querySelector('.plex-existing-chip')) {
+                // Mark row as having Plex existence
+                gridRows[i].setAttribute('data-plex-exists', 'true');
+
+                // Replace Add to Library button with Plex badge in the actions area
+                const actionsCell = gridRows[i].querySelector('.grid-col-actions') as HTMLElement | null;
+                if (!actionsCell) {
+                    continue;
+                }
+
+                const addLibraryBtn = actionsCell.querySelector('.grid-add-library-btn') as HTMLElement | null;
+                if (!addLibraryBtn) {
                     continue;
                 }
 
@@ -3780,13 +3789,15 @@ class App {
                         (v.format === 'mp3' || v.format === 'mpeg') &&
                         typeof v.bitrate === 'number' && v.bitrate <= 192
                     );
+
                 const chip = document.createElement('span');
                 chip.className = allLowQualityMp3
-                    ? 'plex-existing-chip plex-existing-chip--low-quality'
-                    : 'plex-existing-chip';
+                    ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--low-quality'
+                    : 'plex-existing-chip plex-existing-chip--in-actions';
                 chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
                 chip.title = this.buildPlexExistingTooltip(match.variants || []);
-                qualityCell.appendChild(chip);
+
+                addLibraryBtn.replaceWith(chip);
             }
         } catch (error) {
             console.warn('Failed to annotate grid rows with Plex status.', error);
@@ -4586,11 +4597,11 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
-            'HI_RES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
-            'HIRES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
-            'LOSSLESS': 'CD • 16-bit/44.1kHz FLAC',
-            'HIGH': '320kbps AAC',
-            'LOW': '96kbps AAC'
+            'HI_RES_LOSSLESS': 'HI-RES FLAC',
+            'HIRES_LOSSLESS': 'HI-RES FLAC',
+            'LOSSLESS': 'LOSSLESS FLAC',
+            'HIGH': 'HIGH AAC',
+            'LOW': 'LOW AAC'
         };
         return qualityMap[quality] || quality;
     }
