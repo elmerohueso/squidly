@@ -3435,7 +3435,21 @@ class App {
                         <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${tracks.length}</p>
                     </div>
                 </div>
-                <div class="results-list" id="listenbrainzResultsList"></div>
+                <div class="results-list">
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            <div class="tracks-grid-header">
+                                <div class="grid-cell grid-col-artwork"></div>
+                                <div class="grid-cell grid-col-title">Title</div>
+                                <div class="grid-cell grid-col-artist">Artist</div>
+                                <div class="grid-cell grid-col-album">Album</div>
+                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-actions">Actions</div>
+                            </div>
+                            <div id="listenbrainzResultsList"></div>
+                        </div>
+                    </div>
+                </div>
             `;
 
             const resultsList = document.getElementById('listenbrainzResultsList');
@@ -3460,9 +3474,9 @@ class App {
                         
                         if (items.length > 0) {
                             // Add the first match to results
-                            const trackCard = this.formatTrackCard(items[0], false);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
                             if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                                resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
