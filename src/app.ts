@@ -293,7 +293,7 @@ class App {
     private activeJobMap = new Map<number, {
         trackCard: HTMLElement;
         downloadBtn: HTMLButtonElement;
-        statusEl: HTMLElement;
+        statusEl: HTMLButtonElement;
     }>();
     private jobsUpdateInterval: number | null = null;
     private currentJobsPage: number = 1;
@@ -4347,6 +4347,34 @@ class App {
         `;
     }
 
+    private getSpinnerIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" opacity="0.2"></circle>
+                <path d="M22 12a10 10 0 0 1-10 10" stroke-linecap="round">
+                    <animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0 12 12;360 12 12" dur="1s" repeatCount="indefinite"></animateTransform>
+                </path>
+            </svg>
+        `;
+    }
+
+    private getCheckmarkIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        `;
+    }
+
+    private getExclamationIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v20"></path>
+                <circle cx="12" cy="20" r="1"></circle>
+            </svg>
+        `;
+    }
+
     private setPlayButtonState(button: HTMLButtonElement, isPlaying: boolean): void {
         button.classList.toggle('is-playing', isPlaying);
         button.classList.remove('is-loading');
@@ -5076,10 +5104,8 @@ class App {
             const jobId = await this.downloadTrackToLibrary(trackId, downloadType);
             console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
 
-            const statusEl = this.ensureJobStatusElement(trackCard);
-            this.setJobStatusChip(statusEl, 'queued');
-            this.setDownloadButtonCompleted(downloadBtn);
-            this.registerActiveJob(jobId, trackCard, downloadBtn, statusEl);
+            this.setDownloadButtonQueued(downloadBtn);
+            this.registerActiveJob(jobId, trackCard, downloadBtn, downloadBtn);
         } catch (error) {
             console.error('[DOWNLOAD] Download error:', error);
             // Check if this was an abort
@@ -5301,10 +5327,8 @@ class App {
             const jobId = await this.downloadTrackWithPlaylist(trackId, downloadType, playlistName);
             console.log(`[PLAYLIST] Job queued successfully: ${jobId}`);
 
-            const statusEl = this.ensureJobStatusElement(trackCard);
-            this.setJobStatusChip(statusEl, 'queued');
-            this.setDownloadButtonCompleted(addPlaylistBtn);
-            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, statusEl);
+            this.setDownloadButtonQueued(addPlaylistBtn);
+            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, addPlaylistBtn);
         } catch (error) {
             console.error('[PLAYLIST] Error downloading with playlist:', error);
             // Restore button on error
@@ -5518,38 +5542,26 @@ private async downloadTrackToLibrary(
         }
     }
 
-    private ensureJobStatusElement(trackCard: HTMLElement): HTMLElement {
-        const metadata = trackCard.querySelector('.track-metadata');
-        if (!metadata) {
-            const fallback = document.createElement('span');
-            fallback.className = 'job-status-chip status-queued';
-            fallback.textContent = 'Queued';
-            trackCard.appendChild(fallback);
-            return fallback;
+    private setJobStatusIcon(downloadBtn: HTMLButtonElement, status: string): void {
+        const effectiveStatus = status.replace('_', '-');
+        downloadBtn.classList.remove('queued', 'in-progress', 'completed', 'failed');
+        downloadBtn.classList.add(effectiveStatus);
+        
+        if (effectiveStatus === 'queued' || effectiveStatus === 'in-progress') {
+            downloadBtn.innerHTML = this.getSpinnerIconSvg();
+        } else if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed-with-errors') {
+            downloadBtn.innerHTML = this.getCheckmarkIconSvg();
+        } else if (effectiveStatus === 'failed') {
+            downloadBtn.innerHTML = this.getExclamationIconSvg();
+            downloadBtn.disabled = false;
         }
-
-        let statusEl = metadata.querySelector('.job-status-chip') as HTMLElement | null;
-        if (!statusEl) {
-            statusEl = document.createElement('span');
-            statusEl.className = 'job-status-chip status-queued';
-            statusEl.textContent = 'Queued';
-            metadata.appendChild(statusEl);
-        }
-
-        return statusEl;
-    }
-
-    private setJobStatusChip(statusEl: HTMLElement, status: string): void {
-        const normalized = status.replace('_', '-');
-        statusEl.className = `job-status-chip status-${normalized}`;
-        statusEl.textContent = this.formatJobStatus(status);
     }
 
     private registerActiveJob(
         jobId: number,
         trackCard: HTMLElement,
         downloadBtn: HTMLButtonElement,
-        statusEl: HTMLElement
+        statusEl: HTMLButtonElement
     ): void {
         this.activeJobMap.set(jobId, { trackCard, downloadBtn, statusEl });
         this.startJobStatusPolling();
@@ -5606,10 +5618,10 @@ private async downloadTrackToLibrary(
 
     private updateJobStatusForCard(
         job: JobItem,
-        context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLElement }
+        context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLButtonElement }
     ): void {
         const effectiveStatus = this.getEffectiveJobStatus(job);
-        this.setJobStatusChip(context.statusEl, effectiveStatus);
+        this.setJobStatusIcon(context.downloadBtn, effectiveStatus);
 
         if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed_with_errors') {
             this.setDownloadButtonCompleted(context.downloadBtn);
@@ -5637,11 +5649,19 @@ private async downloadTrackToLibrary(
     private setDownloadButtonCompleted(downloadBtn: HTMLButtonElement): void {
         downloadBtn.disabled = true;
         downloadBtn.classList.add('completed');
-        downloadBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-        `;
+        downloadBtn.innerHTML = this.getCheckmarkIconSvg();
+    }
+
+    private setDownloadButtonQueued(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add('queued');
+        downloadBtn.innerHTML = this.getSpinnerIconSvg();
+    }
+
+    private setDownloadButtonFailed(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = false;
+        downloadBtn.classList.add('failed');
+        downloadBtn.innerHTML = this.getExclamationIconSvg();
     }
 
     private async downloadAllTracks(): Promise<void> {
@@ -5967,10 +5987,8 @@ private async downloadTrackToLibrary(
                         try {
                             const jobId = await this.downloadTrackWithPlaylist(parseInt(trackId, 10), this.downloadAllScope, playlistName);
                             console.log(`[PLAYLIST_ALL] Job queued successfully: ${jobId}`);
-                            const statusEl = this.ensureJobStatusElement(trackCard);
-                            this.setJobStatusChip(statusEl, 'queued');
-                            this.setDownloadButtonCompleted(addPlaylistBtn);
-                            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, statusEl);
+                            this.setDownloadButtonQueued(addPlaylistBtn);
+                            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, addPlaylistBtn);
                             addedCount++;
                         } catch (error) {
                             console.error('[PLAYLIST_ALL] Error adding track to playlist:', error);
