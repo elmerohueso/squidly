@@ -4704,21 +4704,63 @@ class App {
                 return;
             }
 
-            // Get artist name from the first album's artist data
+            // Get artist name and picture from the first album's artist data
             const artistName = albums[0]?.artist?.name || albums[0]?.artists?.[0]?.name || 'Artist';
+            const artistPictureId = albums[0]?.artist?.picture || albums[0]?.artists?.[0]?.picture || null;
+            const artistPictureUrl = artistPictureId ? this.formatTidalImageUrl(artistPictureId, 750) : null;
 
-            // Display albums
+            // Display albums with hero card (matching album hero structure)
             this.resultsContainer.innerHTML = `
+                <div class="artist-hero-section">
+                    <div class="artist-hero-content">
+                        <div class="artist-cover-container">
+                            ${artistPictureUrl ? `<img src="${artistPictureUrl}" alt="${this.escapeHtml(artistName)}" class="artist-cover">` : '<div class="artist-cover-placeholder"></div>'}
+                        </div>
+                        <div class="artist-info">
+                            <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
+                            ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
+                        </div>
+                    </div>
+                    <div class="artist-actions">
+                        <button class="album-action-btn primary" id="artistPlayBtn" title="Play artist" ${albums.length === 0 ? 'disabled' : ''}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+                        </button>
+                    </div>
+                </div>
                 <div class="results-header">
                     <div class="results-header-top">
-                        <h2>${this.escapeHtml(artistName)} - Albums</h2>
+                        <h2>Albums</h2>
                     </div>
-                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
                 <div class="results-list">
                     ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
                 </div>
             `;
+
+            // Attach event listener to play button
+            const playBtn = document.getElementById('artistPlayBtn') as HTMLButtonElement;
+            if (playBtn) {
+                playBtn.addEventListener('click', async () => {
+                    // Play the first track from the first album
+                    if (albums.length > 0) {
+                        const firstAlbumId = albums[0].id;
+                        try {
+                            const response = await fetch(`/album/?id=${firstAlbumId}`);
+                            if (!response.ok) {
+                                throw new Error('Failed to fetch album');
+                            }
+                            const albumData: AlbumInfo = await response.json();
+                            const trackItems = albumData.data?.items || [];
+                            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+                            if (tracks.length > 0) {
+                                void this.handlePlayToggle(tracks[0].id, undefined as any, playBtn);
+                            }
+                        } catch (error) {
+                            console.error('Error playing artist:', error);
+                        }
+                    }
+                });
+            }
         } catch (error) {
             this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));
             console.error('Artist fetch error:', error);
