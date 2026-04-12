@@ -4611,6 +4611,55 @@ def get_plex_playlists_endpoint():
 
     return jsonify({'playlists': playlists})
 
+@app.route('/api/plex/create-playlist', methods=['POST'])
+def create_plex_playlist_endpoint():
+    """Validate and prepare for creating a Plex playlist (actual creation happens on first track add)."""
+    config = get_plex_config()
+    server_url = config.get('server_url')
+    api_token = config.get('api_token')
+
+    if not server_url or not api_token:
+        return jsonify({'error': 'Plex is not configured'}), 400
+
+    data = request.get_json()
+    playlist_name = data.get('playlist_name', '').strip()
+    user_id = data.get('user_id')
+
+    if not playlist_name:
+        return jsonify({'error': 'Playlist name is required'}), 400
+
+    try:
+        from plexapi.server import PlexServer
+        
+        plex = PlexServer(server_url, api_token)
+        
+        # Switch to the specified user if provided
+        if user_id:
+            try:
+                plex = plex.switchUser(user_id)
+                print(f"[PLEX] Switched to user {user_id} for playlist creation", flush=True)
+            except Exception as e:
+                print(f"[PLEX] Failed to switch user: {str(e)}", flush=True)
+                return jsonify({'error': f'Failed to switch user: {str(e)}'}), 400
+
+        # Check if playlist already exists
+        print(f"[PLEX] Checking if playlist exists: {playlist_name}", flush=True)
+        try:
+            playlists = plex.playlists()
+            for pl in playlists:
+                if pl.title == playlist_name:
+                    print(f"[PLEX] Playlist already exists: {playlist_name}", flush=True)
+                    return jsonify({'success': True, 'playlist_name': playlist_name, 'already_exists': True})
+        except Exception as e:
+            print(f"[PLEX] Error checking playlists: {str(e)}", flush=True)
+
+        # Playlist doesn't exist yet - that's fine, we'll create it on first track add
+        print(f"[PLEX] Playlist will be created on first track add: {playlist_name}", flush=True)
+        return jsonify({'success': True, 'playlist_name': playlist_name})
+    except Exception as e:
+        print(f"[PLEX] Error validating playlist: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to validate playlist: {str(e)}'}), 500
+
 @app.route('/api/plex/libraries', methods=['GET'])
 def get_plex_libraries_endpoint():
     """Get Plex music libraries for current configuration."""

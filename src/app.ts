@@ -263,8 +263,8 @@ class App {
     private plexPinStatus: HTMLElement;
     private plexLibraryConfigContainer: HTMLElement;
     private plexLibraryNameSelect: HTMLSelectElement;
-    private plexPlaylistContainer: HTMLElement;
-    private plexPlaylistContainerHomeParent: HTMLElement;
+    private plexPlaylistContainer: HTMLElement | null;
+    private plexPlaylistContainerHomeParent: HTMLElement | undefined;
     private plexPlaylistContainerHomeNextSibling: ChildNode | null;
     private plexPlaylistNameInput: HTMLInputElement;
     private plexPlaylistOptions: HTMLSelectElement;
@@ -279,6 +279,11 @@ class App {
     private plexUserDropdownContainer: HTMLElement;
     private plexUserSelect: HTMLSelectElement;
     private ignoreMatchesCheckbox: HTMLInputElement;
+    private userButton: HTMLButtonElement;
+    private userDropdownModal: HTMLElement;
+    private userDropdownOverlay: HTMLElement;
+    private userDropdownList: HTMLElement;
+    private userButtonText: HTMLElement;
     private downloadSettings: DownloadSettings;
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
@@ -310,12 +315,27 @@ class App {
     private lastRetryFunction: (() => Promise<void>) | null = null;
     private isPlexConfigured: boolean = false;
     private isHandlingPopState: boolean = false;
+    private currentPage: string = 'explore';
 
     constructor() {
+        // New page navigation elements
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.addEventListener('click', (e: Event) => {
+                e.preventDefault();
+                const page = (item as HTMLElement).getAttribute('data-page');
+                if (page) {
+                    this.switchPage(page);
+                }
+            });
+        });
+
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
         this.searchTypeSelect = document.getElementById('searchType') as HTMLSelectElement;
         this.searchButton = document.getElementById('searchButton') as HTMLButtonElement;
         this.resultsContainer = document.getElementById('results') as HTMLElement;
+        
+        // Old flyout elements (may not exist in new layout)
         this.statusButton = document.getElementById('statusButton') as HTMLButtonElement;
         this.statusFlyout = document.getElementById('statusFlyout') as HTMLElement;
         this.flyoutOverlay = document.getElementById('flyoutOverlay') as HTMLElement;
@@ -349,8 +369,8 @@ class App {
         this.plexLibraryConfigContainer = document.getElementById('plexLibraryConfig') as HTMLElement;
         this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
         this.plexPlaylistContainer = document.getElementById('plexPlaylistContainer') as HTMLElement;
-        this.plexPlaylistContainerHomeParent = this.plexPlaylistContainer.parentElement as HTMLElement;
-        this.plexPlaylistContainerHomeNextSibling = this.plexPlaylistContainer.nextSibling;
+        this.plexPlaylistContainerHomeParent = this.plexPlaylistContainer?.parentElement as HTMLElement | undefined;
+        this.plexPlaylistContainerHomeNextSibling = this.plexPlaylistContainer?.nextSibling || null;
         this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement;
         this.plexPlaylistOptions = document.getElementById('plexPlaylistOptions') as HTMLSelectElement;
         this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement;
@@ -365,14 +385,29 @@ class App {
         this.plexUserSelect = document.getElementById('plexUserSelect') as HTMLSelectElement;
         this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
         
+        // User dropdown for top bar
+        this.userButton = document.getElementById('userButton') as HTMLButtonElement;
+        this.userDropdownModal = document.getElementById('userDropdownModal') as HTMLElement;
+        this.userDropdownOverlay = document.getElementById('userDropdownOverlay') as HTMLElement;
+        this.userDropdownList = document.getElementById('userDropdownList') as HTMLElement;
+        this.userButtonText = document.getElementById('userButtonText') as HTMLElement;
+        
         this.initializeEventListeners();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
+        
+        // Initialize page navigation (start with Explore page)
+        this.switchPage('explore');
+        
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
+        
+        // Initialize user button and sidebar playlists
+        void this.initializeUserButton();
+        
         this.updateEndpointStatus(); // Initial load
         
         // Update status every 30 seconds
@@ -382,54 +417,119 @@ class App {
     }
 
     private initializeEventListeners(): void {
-        this.searchButton.addEventListener('click', () => this.handleSearch());
-        this.searchInput.addEventListener('keypress', (e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
-                this.handleSearch();
-            }
-        });
+        if (this.searchButton) {
+            this.searchButton.addEventListener('click', () => this.handleSearch());
+        }
+        if (this.searchInput) {
+            this.searchInput.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    this.handleSearch();
+                }
+            });
+        }
 
-        this.statusButton.addEventListener('click', () => this.openFlyout());
-        this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
-        this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+        // User dropdown listeners
+        if (this.userButton) {
+            console.log('[DEBUG] Attaching user button listener');
+            this.userButton.addEventListener('click', () => {
+                console.log('[DEBUG] User button clicked');
+                this.openUserDropdown();
+            });
+        } else {
+            console.error('[DEBUG] userButton element not found');
+        }
+        if (this.userDropdownOverlay) {
+            this.userDropdownOverlay.addEventListener('click', () => this.closeUserDropdown());
+        }
+        const userDropdownClose = document.getElementById('userDropdownClose');
+        if (userDropdownClose) {
+            userDropdownClose.addEventListener('click', () => this.closeUserDropdown());
+        }
 
-        this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
-        this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
-        this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
-        this.jobsFilterSelect.addEventListener('change', () => {
-            this.currentJobsPage = 1;
-            this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
-            void this.loadJobs();
-        });
-        this.cancelPendingJobsButton.addEventListener('click', () => {
-            void this.cancelAllPendingJobs();
-        });
-        this.retryAllJobsButton.addEventListener('click', () => {
-            void this.retryAllFilteredJobs();
-        });
-        this.jobsContent.addEventListener('click', (e: MouseEvent) => {
-            void this.handleJobsContentClick(e);
-        });
+        // Old flyout listeners (safe if elements don't exist)
+        if (this.statusButton) {
+            this.statusButton.addEventListener('click', () => this.openFlyout());
+        }
+        if (this.closeFlyoutButton) {
+            this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
+        }
+        if (this.flyoutOverlay) {
+            this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+        }
 
-        this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
-        this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
-        this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+        if (this.jobsButton) {
+            this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
+        }
+        if (this.closeJobsButton) {
+            this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
+        }
+        if (this.jobsOverlay) {
+            this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
+        }
+        if (this.jobsFilterSelect) {
+            this.jobsFilterSelect.addEventListener('change', () => {
+                this.currentJobsPage = 1;
+                this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
+                void this.loadJobs();
+            });
+        }
+        if (this.cancelPendingJobsButton) {
+            this.cancelPendingJobsButton.addEventListener('click', () => {
+                void this.cancelAllPendingJobs();
+            });
+        }
+        if (this.retryAllJobsButton) {
+            this.retryAllJobsButton.addEventListener('click', () => {
+                void this.retryAllFilteredJobs();
+            });
+        }
+        if (this.jobsContent) {
+            this.jobsContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleJobsContentClick(e);
+            });
+        }
 
-        this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
-        this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
-        this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
-        this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
-        this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
-        this.savePlexConfigButton.addEventListener('click', () => {
-            void this.savePlexConfig();
-        });
+        if (this.settingsButton) {
+            this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
+        }
+        if (this.closeSettingsButton) {
+            this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
+        }
+        if (this.settingsOverlay) {
+            this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+        }
+
+        if (this.formatOriginalInput) {
+            this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.formatMp3Input) {
+            this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.fileNamingAlbumInput) {
+            this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
+        }
+        if (this.jobsRefreshIntervalSecondsInput) {
+            this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.ignoreMatchesCheckbox) {
+            this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.saveLbConfigButton) {
+            this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
+        }
+        if (this.savePlexConfigButton) {
+            this.savePlexConfigButton.addEventListener('click', () => {
+                void this.savePlexConfig();
+            });
+        }
         // Remove save/test config listeners, add PIN login logic
-        this.plexLoginButton.addEventListener('click', async () => {
-            await this.startPlexPinLogin();
-            void this.updatePlexClearCredentialsButton();
-            void this.loadPlexLibraries();
-        });
+        if (this.plexLoginButton) {
+            this.plexLoginButton.addEventListener('click', async () => {
+                await this.startPlexPinLogin();
+                void this.updatePlexClearCredentialsButton();
+                void this.loadPlexLibraries();
+            });
+        }
 
         if (this.plexClearCredentialsButton) {
             this.plexClearCredentialsButton.addEventListener('click', async () => {
@@ -467,59 +567,144 @@ class App {
             });
         }
 
-        this.plexPinCopyButton.addEventListener('click', () => {
-            const pin = this.plexPinDisplay.textContent || '';
-            if (pin) {
-                navigator.clipboard.writeText(pin);
-                this.plexPinStatus.textContent = 'PIN copied!';
-                setTimeout(() => { this.plexPinStatus.textContent = ''; }, 1500);
-            }
-        });
-        this.startPlexSyncButton.addEventListener('click', () => this.startPlexSync());
-        this.plexPlaylistOptions.addEventListener('change', () => {
-            const selectedName = this.plexPlaylistOptions.value.trim();
-            if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
-                this.setPlexPlaylistMode('new');
-                this.plexPlaylistNameInput.value = '';
-                this.plexPlaylistNameInput.focus();
-                return;
-            }
+        if (this.plexPinCopyButton) {
+            this.plexPinCopyButton.addEventListener('click', () => {
+                const pin = this.plexPinDisplay?.textContent || '';
+                if (pin) {
+                    navigator.clipboard.writeText(pin);
+                    if (this.plexPinStatus) {
+                        this.plexPinStatus.textContent = 'PIN copied!';
+                        setTimeout(() => { 
+                            if (this.plexPinStatus) {
+                                this.plexPinStatus.textContent = ''; 
+                            }
+                        }, 1500);
+                    }
+                }
+            });
+        }
+        if (this.startPlexSyncButton) {
+            this.startPlexSyncButton.addEventListener('click', () => this.startPlexSync());
+        }
+        if (this.plexPlaylistOptions) {
+            this.plexPlaylistOptions.addEventListener('change', () => {
+                const selectedName = this.plexPlaylistOptions.value.trim();
+                if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
+                    this.setPlexPlaylistMode('new');
+                    if (this.plexPlaylistNameInput) {
+                        this.plexPlaylistNameInput.value = '';
+                        this.plexPlaylistNameInput.focus();
+                    }
+                    return;
+                }
 
-            if (selectedName) {
-                this.plexPlaylistNameInput.value = selectedName;
-            } else {
-                this.plexPlaylistNameInput.value = '';
-            }
+                if (selectedName && this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = selectedName;
+                } else if (this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = '';
+                }
 
-            this.setPlexPlaylistMode('existing');
-        });
-        this.plexPlaylistBackButton.addEventListener('click', () => {
-            this.setPlexPlaylistMode('existing');
-            this.plexPlaylistOptions.value = '';
-            this.plexPlaylistNameInput.value = '';
-        });
+                this.setPlexPlaylistMode('existing');
+            });
+        }
+        if (this.plexPlaylistBackButton) {
+            this.plexPlaylistBackButton.addEventListener('click', () => {
+                this.setPlexPlaylistMode('existing');
+                if (this.plexPlaylistOptions) {
+                    this.plexPlaylistOptions.value = '';
+                }
+                if (this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = '';
+                }
+            });
+        }
 
         // Update placeholder text based on search type
-        this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
+        if (this.searchTypeSelect) {
+            this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
+        }
 
         // Download button and album card click delegation
-        this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
+        if (this.resultsContainer) {
+            this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
 
-            // Check for play button clicks first
-            const playBtn = target.closest('.track-play-btn') as HTMLButtonElement | null;
-            if (playBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const trackCard = playBtn.closest('.track-card') as HTMLElement;
+                // Check for grid play button clicks
+                const gridPlayBtn = target.closest('.grid-play-btn') as HTMLButtonElement | null;
+                if (gridPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackRow = gridPlayBtn.closest('.tracks-grid-row') as HTMLElement;
+                    const trackId = trackRow?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handlePlayToggle(parseInt(trackId, 10), trackRow, gridPlayBtn);
+                    }
+                    return;
+                }
+
+                // Check for grid add to playlist button clicks
+                const gridAddPlaylistBtn = target.closest('.grid-add-playlist-btn');
+                if (gridAddPlaylistBtn) {
+                    const trackRow = gridAddPlaylistBtn.closest('.tracks-grid-row') as HTMLElement;
+                    const trackId = trackRow?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleAddToPlaylist(parseInt(trackId, 10), trackRow, 'loose');
+                    }
+                    return;
+                }
+
+                // Check for grid add to library button clicks
+                const gridAddLibraryBtn = target.closest('.grid-add-library-btn');
+                if (gridAddLibraryBtn) {
+                    const trackRow = gridAddLibraryBtn.closest('.tracks-grid-row') as HTMLElement;
+                    const trackId = trackRow?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleDownload(parseInt(trackId, 10), trackRow, 'loose');
+                    }
+                    return;
+                }
+
+                // Check for grid "More Like This" button clicks
+                const gridMoreBtn = target.closest('.grid-more-btn') as HTMLButtonElement | null;
+                if (gridMoreBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackRow = gridMoreBtn.closest('.tracks-grid-row') as HTMLElement | null;
+                    if (!trackRow) {
+                        return;
+                    }
+                    const trackId = trackRow.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.fetchSimilarTracks(parseInt(trackId, 10));
+                        return;
+                    }
+                }
+
+                // Check for play button clicks first
+                const playBtn = target.closest('.track-play-btn') as HTMLButtonElement | null;
+                if (playBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackCard = playBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
+                    }
+                    return;
+                }
+            
+            // Check for add to playlist button clicks
+            const addPlaylistBtn = target.closest('.track-add-playlist-btn');
+            if (addPlaylistBtn) {
+                const trackCard = addPlaylistBtn.closest('.track-card') as HTMLElement;
                 const trackId = trackCard?.getAttribute('data-track-id');
                 if (trackId) {
-                    void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
+                    void this.handleAddToPlaylist(parseInt(trackId, 10), trackCard, 'loose');
                 }
                 return;
             }
-            
-            // Check for download button clicks first
+
+            // Check for download button clicks
             const downloadBtn = target.closest('.track-download-btn');
             if (downloadBtn) {
                 const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
@@ -563,8 +748,32 @@ class App {
                 }
             }
             
+            // Check for artist name clicks within grid rows
+            const gridArtistName = target.closest('.tracks-grid-row .track-artist-name');
+            if (gridArtistName) {
+                const trackRow = gridArtistName.closest('.tracks-grid-row');
+                const artistId = trackRow?.getAttribute('data-artist-id');
+                if (artistId) {
+                    e.stopPropagation();
+                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    return;
+                }
+            }
+            
+            // Check for album name clicks within grid rows
+            const gridAlbumName = target.closest('.tracks-grid-row .track-album-name');
+            if (gridAlbumName) {
+                const trackRow = gridAlbumName.closest('.tracks-grid-row');
+                const albumId = trackRow?.getAttribute('data-album-id');
+                if (albumId) {
+                    e.stopPropagation();
+                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    return;
+                }
+            }
+            
             // Check for artist name clicks within track cards
-            const artistName = target.closest('.track-artist-name');
+            const artistName = target.closest('.track-card .track-artist-name');
             if (artistName) {
                 const trackCard = artistName.closest('.track-card');
                 const artistId = trackCard?.getAttribute('data-artist-id');
@@ -576,7 +785,7 @@ class App {
             }
             
             // Check for album name clicks within track cards
-            const albumName = target.closest('.track-album-name');
+            const albumName = target.closest('.track-card .track-album-name');
             if (albumName) {
                 const trackCard = albumName.closest('.track-card');
                 const albumId = trackCard?.getAttribute('data-album-id');
@@ -623,6 +832,282 @@ class App {
                     void this.fetchArtistAlbums(parseInt(artistId, 10));
                 }
             }
+            });
+        }
+    }
+
+    private switchPage(pageName: string): void {
+        // Hide all pages
+        const allPages = document.querySelectorAll('.page');
+        allPages.forEach(page => {
+            page.classList.remove('active');
+        });
+
+        // Show the selected page
+        const selectedPage = document.getElementById(`${pageName}Page`);
+        if (selectedPage) {
+            selectedPage.classList.add('active');
+        }
+
+        // Update active nav item
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.classList.remove('active');
+            if ((item as HTMLElement).getAttribute('data-page') === pageName) {
+                item.classList.add('active');
+            }
+        });
+
+        // Update current page
+        this.currentPage = pageName;
+
+        // Update top bar title based on page
+        const topBarLeft = document.querySelector('.top-bar-left');
+        if (topBarLeft) {
+            const pageNames: Record<string, string> = {
+                explore: 'Explore',
+                library: 'Library',
+                settings: 'Settings',
+                mirrors: 'Hi-Fi Mirrors',
+                jobs: 'Jobs'
+            };
+            const h2 = topBarLeft.querySelector('h2') || document.createElement('h2');
+            h2.textContent = pageNames[pageName] || 'Squidly';
+            if (!topBarLeft.querySelector('h2')) {
+                topBarLeft.appendChild(h2);
+            }
+        }
+
+        // Refresh mirrors data when switching to mirrors page
+        if (pageName === 'mirrors') {
+            void this.updateEndpointStatus();
+        }
+
+        // Load jobs when switching to jobs page
+        if (pageName === 'jobs') {
+            this.currentJobsPage = 1;
+            void this.loadJobs();
+        }
+    }
+
+    private async openUserDropdown(): Promise<void> {
+        if (!this.userDropdownModal || !this.userDropdownOverlay) {
+            console.error('User dropdown elements not found');
+            return;
+        }
+        
+        // Show the dropdown
+        this.userDropdownModal.style.display = 'block';
+        this.userDropdownOverlay.style.display = 'block';
+        
+        // Load users
+        await this.loadPlexUsersForDropdown();
+    }
+
+    private closeUserDropdown(): void {
+        if (!this.userDropdownModal || !this.userDropdownOverlay) {
+            return;
+        }
+        
+        this.userDropdownModal.style.display = 'none';
+        this.userDropdownOverlay.style.display = 'none';
+    }
+
+    private async loadPlexUsersForDropdown(): Promise<void> {
+        if (!this.userDropdownList) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/users', { cache: 'no-store' });
+            if (!response.ok) {
+                this.userDropdownList.innerHTML = '<li class="user-dropdown-loading">Failed to load users</li>';
+                return;
+            }
+
+            const data = await response.json();
+            const users = Array.isArray(data.users) ? data.users : [];
+
+            if (users.length === 0) {
+                this.userDropdownList.innerHTML = '<li class="user-dropdown-loading">No users found</li>';
+                return;
+            }
+
+            const savedId = window.localStorage.getItem('plexSelectedUserId') || '';
+            this.userDropdownList.innerHTML = '';
+
+            users.forEach((user: any) => {
+                const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
+                const label = String(user.username || user.title || id);
+                const isSelected = id === savedId;
+
+                const li = document.createElement('li');
+                li.className = `user-dropdown-item ${isSelected ? 'selected' : ''}`;
+                li.addEventListener('click', () => this.selectPlexUser(id, label));
+
+                // User icon
+                const icon = document.createElement('div');
+                icon.className = 'user-dropdown-icon';
+                icon.textContent = label.charAt(0).toUpperCase();
+                li.appendChild(icon);
+
+                // User name
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = label;
+                li.appendChild(nameSpan);
+
+                // Checkmark if selected
+                if (isSelected) {
+                    const checkmark = document.createElement('span');
+                    checkmark.className = 'user-dropdown-checkmark';
+                    checkmark.textContent = '✓';
+                    li.appendChild(checkmark);
+                }
+
+                this.userDropdownList.appendChild(li);
+            });
+        } catch (error) {
+            console.warn('Failed to load users:', error);
+            this.userDropdownList.innerHTML = '<li class="user-dropdown-loading">Error loading users</li>';
+        }
+    }
+
+    private selectPlexUser(userId: string, userName: string): void {
+        // Save user selection (both ID and name for better restoration)
+        window.localStorage.setItem('plexSelectedUserId', userId);
+        window.localStorage.setItem('plexSelectedUserName', userName);
+
+        // Update button text
+        if (this.userButtonText) {
+            this.userButtonText.textContent = userName;
+        }
+
+        // Close dropdown
+        this.closeUserDropdown();
+
+        // Update sidebar playlists
+        void this.updateSidebarPlaylists();
+    }
+
+    private async updateSidebarPlaylists(): Promise<void> {
+        try {
+            const userId = window.localStorage.getItem('plexSelectedUserId');
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+
+            const response = await fetch(`/api/plex/playlists${query}`, { cache: 'no-store' });
+            if (!response.ok) {
+                this.populateSidebarPlaylists([]);
+                return;
+            }
+
+            const data = await response.json();
+            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
+            this.populateSidebarPlaylists(playlists);
+        } catch (error) {
+            console.warn('Failed to load playlists:', error);
+            this.populateSidebarPlaylists([]);
+        }
+    }
+
+    private async initializeUserButton(): Promise<void> {
+        // Load users to get the selected user's name
+        try {
+            console.log('[USER_INIT] Starting user button initialization');
+            const savedId = window.localStorage.getItem('plexSelectedUserId') || '';
+            const savedName = window.localStorage.getItem('plexSelectedUserName') || '';
+            console.log('[USER_INIT] Saved user:', { savedId, savedName });
+
+            const response = await fetch('/api/plex/users', { cache: 'no-store' });
+            if (response.ok) {
+                const data = await response.json();
+                const users = Array.isArray(data.users) ? data.users : [];
+                console.log('[USER_INIT] Fetched users:', users.length, users);
+
+                // Try to find the currently selected user by ID
+                let selectedUser = users.find((u: any) => {
+                    const id = String(u.client_id ?? u.id ?? u.username ?? u.title ?? '');
+                    console.log('[USER_INIT] Checking user ID:', id, 'against saved:', savedId);
+                    return id === savedId;
+                });
+
+                // If not found by ID, try matching by name as fallback
+                if (!selectedUser && savedName) {
+                    console.log('[USER_INIT] ID match failed, trying name match for:', savedName);
+                    selectedUser = users.find((u: any) => {
+                        const name = String(u.username || u.title || '');
+                        return name === savedName;
+                    });
+                }
+
+                if (selectedUser) {
+                    const userName = String(selectedUser.username || selectedUser.title || 'User');
+                    console.log('[USER_INIT] Found selected user:', userName);
+                    if (this.userButtonText) {
+                        this.userButtonText.textContent = userName;
+                        console.log('[USER_INIT] Updated button text to:', userName);
+                    } else {
+                        console.error('[USER_INIT] userButtonText element not found!');
+                    }
+                    // Update saved name in case it was looked up by ID
+                    window.localStorage.setItem('plexSelectedUserName', userName);
+                    // Load playlists for this user
+                    console.log('[USER_INIT] Loading playlists for user');
+                    await this.updateSidebarPlaylists();
+                } else {
+                    console.log('[USER_INIT] No selected user found, checking for owner');
+                    if (users.length > 0) {
+                        // Use the owner if no user is saved
+                        const owner = users.find((u: any) => u.is_owner);
+                        const ownerName = String(owner?.username || owner?.title || 'User');
+                        const ownerId = String(owner?.id ?? owner?.username ?? '');
+                        console.log('[USER_INIT] Using owner:', { ownerId, ownerName });
+                        if (ownerId && this.userButtonText) {
+                            this.userButtonText.textContent = ownerName;
+                            window.localStorage.setItem('plexSelectedUserId', ownerId);
+                            window.localStorage.setItem('plexSelectedUserName', ownerName);
+                            await this.updateSidebarPlaylists();
+                        }
+                    }
+                }
+            } else {
+                console.error('[USER_INIT] Failed to fetch users:', response.status);
+            }
+        } catch (error) {
+            console.error('[USER_INIT] Error during initialization:', error);
+        }
+    }
+
+    private populateSidebarPlaylists(playlists: string[]): void {
+        const playlistNavItems = document.getElementById('playlistNavItems');
+        if (!playlistNavItems) {
+            return;
+        }
+
+        playlistNavItems.innerHTML = '';
+
+        if (playlists.length === 0) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.875rem';
+            li.textContent = 'No playlists';
+            playlistNavItems.appendChild(li);
+            return;
+        }
+
+        playlists.forEach((playlistName: string) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#';
+            a.className = 'nav-item';
+            a.textContent = playlistName;
+            a.style.fontSize = '0.875rem';
+            a.addEventListener('click', (e: Event) => {
+                e.preventDefault();
+                // Playlist click handling could be added here
+            });
+            li.appendChild(a);
+            playlistNavItems.appendChild(li);
         });
     }
 
@@ -2172,6 +2657,7 @@ class App {
     }
 
     private updatePlexPlaylistContainerVisibility(show: boolean): void {
+        if (!this.plexPlaylistContainer) return;
         if (this.isPlexConfigured && show) {
             this.restorePlexPlaylistContainerToHome();
             this.plexPlaylistContainer.style.display = 'flex';
@@ -2183,23 +2669,25 @@ class App {
     }
 
     private movePlexPlaylistContainerBeneathDownloadAll(): void {
-        const downloadAllBtn = this.resultsContainer.querySelector('#downloadAllBtn') as HTMLElement | null;
-        if (!downloadAllBtn || !downloadAllBtn.parentElement) {
+        if (!this.plexPlaylistContainer) return;
+        const buttonsContainer = this.resultsContainer.querySelector('.add-all-buttons-container') as HTMLElement | null;
+        if (!buttonsContainer || !buttonsContainer.parentElement) {
             return;
         }
 
-        const headerTop = downloadAllBtn.parentElement;
+        const headerTop = buttonsContainer.parentElement;
         const header = headerTop.parentElement;
         if (header) {
             header.insertBefore(this.plexPlaylistContainer, headerTop.nextSibling);
         } else {
-            headerTop.insertBefore(this.plexPlaylistContainer, downloadAllBtn.nextSibling);
+            headerTop.insertBefore(this.plexPlaylistContainer, buttonsContainer.nextSibling);
         }
         this.plexPlaylistContainer.style.padding = '0';
         this.plexPlaylistContainer.style.marginTop = '0.75rem';
     }
 
     private restorePlexPlaylistContainerToHome(): void {
+        if (!this.plexPlaylistContainer || !this.plexPlaylistContainerHomeParent) return;
         if (this.plexPlaylistContainer.parentElement !== this.plexPlaylistContainerHomeParent) {
             if (
                 this.plexPlaylistContainerHomeNextSibling &&
@@ -2343,6 +2831,11 @@ class App {
             : 'Unknown';
 
         // Update endpoint list
+        if (!this.flyoutContent) {
+            console.warn('Flyout content element not found');
+            return;
+        }
+
         this.flyoutContent.innerHTML = data.endpoints.map(endpoint => {
             const url = atob(endpoint.encodedUrl);
             const statusClass = endpoint.online ? 'online' : 'offline';
@@ -2495,7 +2988,7 @@ class App {
 
             this.updatePlexPlaylistContainerVisibility(true);
 
-            // Set up progress display
+            // Set up progress display with grid structure
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
@@ -2508,7 +3001,21 @@ class App {
                         <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
                     </div>
                 </div>
-                <div class="results-list" id="lastfmResultsList"></div>
+                <div class="results-list">
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            <div class="tracks-grid-header">
+                                <div class="grid-cell grid-col-artwork"></div>
+                                <div class="grid-cell grid-col-title">Title</div>
+                                <div class="grid-cell grid-col-artist">Artist</div>
+                                <div class="grid-cell grid-col-album">Album</div>
+                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-actions">Actions</div>
+                            </div>
+                            <div id="lastfmResultsList"></div>
+                        </div>
+                    </div>
+                </div>
             `;
 
             const resultsList = document.getElementById('lastfmResultsList');
@@ -2532,9 +3039,9 @@ class App {
                         
                         if (items.length > 0) {
                             // Add the first match to results
-                            const trackCard = this.formatTrackCard(items[0]);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
                             if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                                resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
@@ -2574,16 +3081,44 @@ class App {
                 this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
             }
 
-            // Create and add Download All button after searching is complete
+            // Create and add Add All buttons after searching is complete
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <g transform="translate(2,1)">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                        <g transform="translate(8,7)" opacity="0.7">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                    </svg>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+                    </svg>
+                `;
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -2642,7 +3177,21 @@ class App {
                         <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
                     </div>
                 </div>
-                <div class="results-list" id="lastfmResultsList"></div>
+                <div class="results-list">
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            <div class="tracks-grid-header">
+                                <div class="grid-cell grid-col-artwork"></div>
+                                <div class="grid-cell grid-col-title">Title</div>
+                                <div class="grid-cell grid-col-artist">Artist</div>
+                                <div class="grid-cell grid-col-album">Album</div>
+                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-actions">Actions</div>
+                            </div>
+                            <div id="lastfmResultsList"></div>
+                        </div>
+                    </div>
+                </div>
             `;
 
             const resultsList = document.getElementById('lastfmResultsList');
@@ -2664,9 +3213,9 @@ class App {
                         const items = searchData.data?.items || [];
 
                         if (items.length > 0) {
-                            const trackCard = this.formatTrackCard(items[0]);
+                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true);
                             if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
+                                resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
                             matchedTracks.push(items[0] as Track);
                             foundCount++;
@@ -2706,13 +3255,41 @@ class App {
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <g transform="translate(2,1)">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                        <g transform="translate(8,7)" opacity="0.7">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                    </svg>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+                    </svg>
+                `;
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -2925,16 +3502,39 @@ class App {
                 this.updatePlaylistFoundSummary(progressText, foundCount, tracks.length, notFoundTracks);
             }
 
-            // Create and add Download All button after searching is complete
+            // Create and add Add All buttons after searching is complete
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14"></path>
+                        <path d="M5 12h14"></path>
+                    </svg>
+                    <span>Add All to Playlist</span>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                        <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                        <rect x="8" y="12" width="8" height="1"></rect>
+                    </svg>
+                    <span>Add All to Library</span>
+                `;
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -3035,12 +3635,14 @@ class App {
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
             <div class="results-list">
-                ${items.map(item => {
-                    if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
-                    if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
-                    if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
-                    return this.formatTrackCard(item as Track);
-                }).join('')}
+                ${(searchType === 's' || searchType === 'trackid') 
+                    ? this.formatTracksGrid(items as Track[])
+                    : items.map(item => {
+                        if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
+                        if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
+                        if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
+                        return this.formatTrackCard(item as Track);
+                    }).join('')}
             </div>
         `;
 
@@ -3054,6 +3656,14 @@ class App {
             return;
         }
 
+        // Try to find grid rows first (new grid layout)
+        const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
+        if (gridRows.length > 0) {
+            await this.annotateGridRowsWithPlexStatus(tracks, gridRows);
+            return;
+        }
+
+        // Fall back to old track-card logic
         const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
         if (cards.length === 0) {
             return;
@@ -3121,6 +3731,65 @@ class App {
             }
         } catch (error) {
             console.warn('Failed to annotate Plex inventory matches.', error);
+        }
+    }
+
+    private async annotateGridRowsWithPlexStatus(tracks: Track[], gridRows: HTMLElement[]): Promise<void> {
+        const payloadTracks = tracks.map((track) => {
+            const artist = track.artists && track.artists.length > 0
+                ? track.artists.map(a => a.name).join(', ')
+                : track.artist?.name || '';
+            const album = track.album?.title || '';
+            return {
+                title: track.title || '',
+                artist,
+                album
+            };
+        });
+
+        try {
+            const response = await fetch('/api/plex/songs/match', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ tracks: payloadTracks })
+            });
+
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json() as { matches?: PlexTrackMatch[] };
+            const matches = Array.isArray(data.matches) ? data.matches : [];
+            const max = Math.min(gridRows.length, matches.length);
+
+            for (let i = 0; i < max; i += 1) {
+                const match = matches[i];
+                if (!match || !match.exists) {
+                    continue;
+                }
+
+                const qualityCell = gridRows[i].querySelector('.grid-col-quality') as HTMLElement | null;
+                if (!qualityCell || qualityCell.querySelector('.plex-existing-chip')) {
+                    continue;
+                }
+
+                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
+                    match.variants.every(v =>
+                        (v.format === 'mp3' || v.format === 'mpeg') &&
+                        typeof v.bitrate === 'number' && v.bitrate <= 192
+                    );
+                const chip = document.createElement('span');
+                chip.className = allLowQualityMp3
+                    ? 'plex-existing-chip plex-existing-chip--low-quality'
+                    : 'plex-existing-chip';
+                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
+                chip.title = this.buildPlexExistingTooltip(match.variants || []);
+                qualityCell.appendChild(chip);
+            }
+        } catch (error) {
+            console.warn('Failed to annotate grid rows with Plex status.', error);
         }
     }
 
@@ -3353,25 +4022,53 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map((track: Track) => this.formatTrackCard(track)).join('')}
+                    ${this.formatTracksGrid(tracks)}
                 </div>
             `;
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <g transform="translate(2,1)">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                        <g transform="translate(8,7)" opacity="0.7">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                    </svg>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+                    </svg>
+                `;
+                addLibraryBtn.addEventListener('click', () => {
                     const progressInfo = document.querySelector('.progress-info') as HTMLElement;
                     if (progressInfo) {
                         progressInfo.style.display = 'block';
                     }
-                    void this.downloadAllTracks();
+                    void this.addAllToLibrary();
                 });
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -3464,11 +4161,158 @@ class App {
                     <button class="track-more-btn" title="More Like This" aria-label="More Like This">
                         ${this.getMoreLikeIconSvg()}
                     </button>
-                    <button class="track-download-btn" title="Download" data-track-id="${track.id}">
+                    <button class="track-add-playlist-btn" title="Add to Playlist" data-track-id="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="track-download-btn" title="Download to Library" data-track-id="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    private allTracksFromSameAlbum(tracks: Track[]): boolean {
+        if (tracks.length <= 1) return true;
+        const firstAlbumId = tracks[0].album?.id;
+        return tracks.every(track => track.album?.id === firstAlbumId);
+    }
+
+    private formatTracksGrid(tracks: Track[], numberOfVolumes?: number): string {
+        const isSingleAlbum = this.allTracksFromSameAlbum(tracks);
+        
+        if (isSingleAlbum) {
+            // Single album view - show track number column, hide album column
+            return `
+                <div class="tracks-grid-wrapper" data-view-mode="single-album">
+                    <div class="tracks-grid">
+                        <div class="tracks-grid-header">
+                            <div class="grid-cell grid-col-artwork"></div>
+                            <div class="grid-cell grid-col-track-number">#</div>
+                            <div class="grid-cell grid-col-title">Title</div>
+                            <div class="grid-cell grid-col-artist">Artist</div>
+                            <div class="grid-cell grid-col-quality">Quality</div>
+                            <div class="grid-cell grid-col-actions">Actions</div>
+                        </div>
+                        ${tracks.map((track) => this.formatTrackGridRow(track, true, numberOfVolumes, false)).join('')}
+                    </div>
+                </div>
+            `;
+        } else {
+            // Multi-album view - hide track number column, show album column
+            return `
+                <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                    <div class="tracks-grid">
+                        <div class="tracks-grid-header">
+                            <div class="grid-cell grid-col-artwork"></div>
+                            <div class="grid-cell grid-col-title">Title</div>
+                            <div class="grid-cell grid-col-artist">Artist</div>
+                            <div class="grid-cell grid-col-album">Album</div>
+                            <div class="grid-cell grid-col-quality">Quality</div>
+                            <div class="grid-cell grid-col-actions">Actions</div>
+                        </div>
+                        ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true)).join('')}
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    private formatTrackGridRow(track: Track, showTrackNumber: boolean, numberOfVolumes: number | undefined, showAlbumColumn: boolean): string {
+        // Get artist names and IDs
+        const artistNames = track.artists && track.artists.length > 0
+            ? track.artists.map(a => a.name).join(', ')
+            : track.artist?.name || 'Unknown Artist';
+        const primaryArtistId = track.artists?.[0]?.id || track.artist?.id;
+
+        // Get album info
+        const albumTitle = track.album?.title || 'Unknown Album';
+        const albumCover = track.album?.cover || track.cover;
+        const albumId = track.album?.id;
+
+        // Get quality info
+        let quality = track.audioQuality || track.quality || '';
+        if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
+            const tags = track.mediaMetadata.tags;
+            if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('LOSSLESS')) {
+                quality = 'LOSSLESS';
+            } else if (tags.includes('LOW')) {
+                quality = 'LOW';
+            }
+        }
+        const qualityDisplay = this.formatQuality(quality);
+
+        // Format track title with optional version
+        let trackTitle = this.escapeHtml(track.title);
+        if (track.version && typeof track.version === 'string' && track.version.trim()) {
+            trackTitle += ` (${this.escapeHtml(track.version)})`;
+        }
+
+        // Format track number if needed
+        let trackNumberDisplay = '';
+        if (showTrackNumber && track.trackNumber) {
+            const volumeNumber = track.volumeNumber || 1;
+            trackNumberDisplay = numberOfVolumes && numberOfVolumes > 1
+                ? `${volumeNumber}-${String(track.trackNumber).padStart(2, '0')}`
+                : String(track.trackNumber);
+        }
+
+        return `
+            <div class="tracks-grid-row" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
+                <div class="grid-cell grid-col-artwork">
+                    ${albumCover 
+                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                        : `<div class="grid-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                ${showTrackNumber ? `<div class="grid-cell grid-col-track-number">${trackNumberDisplay}</div>` : ''}
+                <div class="grid-cell grid-col-title">
+                    <div class="track-title-with-badge">
+                        ${trackTitle}
+                        ${track.explicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
+                    </div>
+                </div>
+                <div class="grid-cell grid-col-artist">
+                    <span class="track-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                </div>
+                ${showAlbumColumn ? `<div class="grid-cell grid-col-album">
+                    <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
+                </div>` : ''}
+                <div class="grid-cell grid-col-quality">${qualityDisplay || '—'}</div>
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="Play" aria-label="Play" data-track-id="${track.id}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                    <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" data-track-id="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="grid-add-library-btn" title="Add to Library" data-track-id="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
                         </svg>
                     </button>
                 </div>
@@ -3954,27 +4798,50 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map(track => this.formatTrackCard(track, true, numberOfVolumes)).join('')}
+                    ${this.formatTracksGrid(tracks, numberOfVolumes)}
                 </div>
             `;
 
-            // Add Download All button
+            // Add Add All buttons
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
-                    // Show progress info when download starts
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14"></path>
+                        <path d="M5 12h14"></path>
+                    </svg>
+                    <span>Add All to Playlist</span>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                        <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                        <rect x="8" y="12" width="8" height="1"></rect>
+                    </svg>
+                    <span>Add All to Library</span>
+                `;
+                addLibraryBtn.addEventListener('click', () => {
+                    // Show progress info when adding starts
                     const progressInfo = document.querySelector('.progress-info') as HTMLElement;
                     if (progressInfo) {
                         progressInfo.style.display = 'block';
                     }
-                    void this.downloadAllTracks();
+                    void this.addAllToLibrary();
                 });
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -4030,25 +4897,53 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map((track) => this.formatTrackCard(track)).join('')}
+                    ${this.formatTracksGrid(tracks)}
                 </div>
             `;
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement | null;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <g transform="translate(2,1)">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                        <g transform="translate(8,7)" opacity="0.7">
+                            <path d="M5 0v10"></path>
+                            <path d="M0 5h10"></path>
+                        </g>
+                    </svg>
+                `;
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                        <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                        <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                        <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+                    </svg>
+                `;
+                addLibraryBtn.addEventListener('click', () => {
                     const progressInfo = document.querySelector('.progress-info') as HTMLElement | null;
                     if (progressInfo) {
                         progressInfo.style.display = 'block';
                     }
-                    void this.downloadAllTracks();
+                    void this.addAllToLibrary();
                 });
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -4154,7 +5049,7 @@ class App {
             return;
         }
 
-        console.log(`[DOWNLOAD] Starting download for track ${trackId}`);
+        console.log(`[DOWNLOAD] Starting download to library for track ${trackId}`);
 
         const originalContent = downloadBtn.innerHTML;
         const originalDisabled = downloadBtn.disabled;
@@ -4166,9 +5061,8 @@ class App {
         downloadBtn.disabled = true;
 
         try {
-            console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
-            const playlistName = this.plexPlaylistNameInput.value.trim() || null;
-            const jobId = await this.downloadTrack(trackId, downloadType, playlistName);
+            console.log(`[DOWNLOAD] Calling downloadTrackToLibrary with format: ${this.downloadSettings.format}`);
+            const jobId = await this.downloadTrackToLibrary(trackId, downloadType);
             console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
 
             const statusEl = this.ensureJobStatusElement(trackCard);
@@ -4192,6 +5086,346 @@ class App {
         }
     }
 
+    private async handleAddToPlaylist(
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose' = 'loose'
+    ): Promise<void> {
+        const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        console.log(`[PLAYLIST] Fetching playlists for track ${trackId}`);
+
+        try {
+            const playlists = await this.fetchPlaylists();
+            if (!playlists || playlists.length === 0) {
+                this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                return;
+            }
+
+            await this.showPlaylistSelector(playlists, trackId, trackCard, downloadType);
+        } catch (error) {
+            console.error('[PLAYLIST] Error handling add to playlist:', error);
+            this.displayMessage('Error fetching playlists. Please try again.');
+        }
+    }
+
+    private async fetchPlaylists(): Promise<string[]> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const queryParam = userId ? `?user_id=${userId}` : '';
+            const response = await this.fetchWithRetry(`/api/plex/playlists${queryParam}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }, 3);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[PLAYLIST] Failed to fetch playlists: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+            return data.playlists || [];
+        } catch (error) {
+            console.error('[PLAYLIST] Error fetching playlists:', error);
+            throw error;
+        }
+    }
+
+    private async showPlaylistSelector(
+        playlists: string[],
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose'
+    ): Promise<void> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Select a Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+
+            // Content
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+
+            // Existing playlists
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                        resolve();
+                    });
+                    content.appendChild(button);
+                });
+            }
+
+            // Create new playlist section
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+            
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+            
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+            
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                    resolve();
+                }
+            });
+            
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                        resolve();
+                    }
+                }
+            });
+            
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+            
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+
+            // Footer
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            footer.appendChild(cancelBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve();
+                }
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handlePlaylistSelected(
+        playlistName: string,
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose'
+    ): Promise<void> {
+        const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        console.log(`[PLAYLIST] Selected playlist: ${playlistName} for track ${trackId}`);
+
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        if (!addPlaylistBtn.dataset.originalContent) {
+            addPlaylistBtn.dataset.originalContent = originalContent;
+        }
+
+        addPlaylistBtn.disabled = true;
+
+        try {
+            const jobId = await this.downloadTrackWithPlaylist(trackId, downloadType, playlistName);
+            console.log(`[PLAYLIST] Job queued successfully: ${jobId}`);
+
+            const statusEl = this.ensureJobStatusElement(trackCard);
+            this.setJobStatusChip(statusEl, 'queued');
+            this.setDownloadButtonCompleted(addPlaylistBtn);
+            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, statusEl);
+        } catch (error) {
+            console.error('[PLAYLIST] Error downloading with playlist:', error);
+            // Restore button on error
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            if (addPlaylistBtn.dataset.originalContent) {
+                delete addPlaylistBtn.dataset.originalContent;
+            }
+            this.displayMessage('Error adding track to playlist. Please try again.');
+        }
+    }
+
+    private async downloadTrackWithPlaylist(
+        trackId: number,
+        downloadType: 'album' | 'loose',
+        playlistName: string
+    ): Promise<number> {
+        try {
+            console.log(`[PLAYLIST] Sending download with playlist request for track ${trackId}`);
+            console.log(`[PLAYLIST] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[PLAYLIST] Download type: ${downloadType}, Playlist: ${playlistName}`);
+            
+            const plexUserId = this.getSelectedPlexUserId();
+            const response = await this.fetchWithRetry('/api/download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    format: this.downloadSettings.format,
+                    downloadType,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    plex_playlist: playlistName,
+                    plex_user_id: plexUserId,
+                    ignore_matches: this.downloadSettings.ignoreMatches
+                }),
+                signal: this.currentDownloadController?.signal
+            }, 3);
+
+            console.log(`[PLAYLIST] Response status: ${response.status}`);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[PLAYLIST] Download failed: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+            console.log(`[PLAYLIST] Server response:`, data);
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Download failed');
+            }
+
+            if (!data.job_id) {
+                throw new Error('Download job id missing from response');
+            }
+
+            console.log(`[PLAYLIST] Playlist download job queued: ${data.job_id}`);
+            return data.job_id as number;
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[PLAYLIST] Download was aborted');
+                throw error;
+            }
+            console.error('[PLAYLIST] Error in downloadTrackWithPlaylist:', error);
+            throw error;
+        }
+    }
+
+private async downloadTrackToLibrary(
+        trackId: number,
+        downloadType: 'album' | 'loose'
+    ): Promise<number> {
+        try {
+            console.log(`[DOWNLOAD] Sending download-to-library request for track ${trackId}`);
+            console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[DOWNLOAD] Download type: ${downloadType}`);
+            
+            const response = await this.fetchWithRetry('/api/download', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            trackId,
+                            format: this.downloadSettings.format,
+                            downloadType,
+                            fileNaming: this.downloadSettings.fileNamingAlbum,
+                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                            ignore_matches: this.downloadSettings.ignoreMatches
+                }),
+                signal: this.currentDownloadController?.signal
+            }, 3);
+
+            console.log(`[DOWNLOAD] Response status: ${response.status}`);
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[DOWNLOAD] Download failed: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            // Parse the JSON response
+            const data = await response.json();
+            console.log(`[DOWNLOAD] Server response:`, data);
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Download failed');
+            }
+
+            if (!data.job_id) {
+                throw new Error('Download job id missing from response');
+            }
+
+            console.log(`[DOWNLOAD] Library download job queued: ${data.job_id}`);
+            return data.job_id as number;
+        } catch (error) {
+            // Check if error is due to abort
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[DOWNLOAD] Download was aborted');
+                throw error;
+            }
+            console.error('[DOWNLOAD] Error in downloadTrackToLibrary:', error);
+            throw error;
+        }
+    }
+
     private async downloadTrack(
         trackId: number,
         downloadType: 'album' | 'loose',
@@ -4202,8 +5436,8 @@ class App {
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
-const plexUserId = this.getSelectedPlexUserId();
-                    const response = await this.fetchWithRetry('/api/download', {
+            const plexUserId = this.getSelectedPlexUserId();
+            const response = await this.fetchWithRetry('/api/download', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -4217,7 +5451,7 @@ const plexUserId = this.getSelectedPlexUserId();
                             plex_playlist: plexPlaylistName,
                             plex_user_id: plexUserId,
                             ignore_matches: this.downloadSettings.ignoreMatches
-                }),
+                        }),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
@@ -4262,12 +5496,12 @@ const plexUserId = this.getSelectedPlexUserId();
             downloadBtn.innerHTML = downloadBtn.dataset.originalContent;
             delete downloadBtn.dataset.originalContent;
         } else {
-            // Fallback: recreate the download icon
+            // Fallback: recreate the archive icon
             downloadBtn.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                    <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                    <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                    <rect x="8" y="12" width="8" height="1"></rect>
                 </svg>
             `;
         }
@@ -4527,6 +5761,269 @@ const plexUserId = this.getSelectedPlexUserId();
         }
 
         console.log(`[DOWNLOAD_ALL] Queued ${downloadedCount}/${totalTracks} tracks`);
+    }
+
+    private async addAllToLibrary(): Promise<void> {
+        if (this.isDownloadingAll) {
+            this.downloadAllCancelRequested = true;
+            if (this.currentDownloadController) {
+                this.currentDownloadController.abort();
+            }
+            return;
+        }
+
+        this.isDownloadingAll = true;
+        this.downloadAllCancelRequested = false;
+        
+        const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
+        if (addAllLibraryBtn) {
+            addAllLibraryBtn.textContent = 'Cancel';
+            addAllLibraryBtn.classList.add('cancelling');
+            addAllLibraryBtn.disabled = false;
+        }
+
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const totalTracks = trackCards.length;
+        let addedCount = 0;
+
+        console.log(`[ADD_ALL_LIBRARY] Starting batch add to library of ${totalTracks} tracks`);
+
+        for (let i = 0; i < trackCards.length; i++) {
+            if (this.downloadAllCancelRequested) {
+                console.log('[ADD_ALL_LIBRARY] Add all to library cancelled by user');
+                for (let j = i; j < trackCards.length; j++) {
+                    const trackCard = trackCards[j];
+                    const libraryBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    if (libraryBtn && !libraryBtn.classList.contains('completed')) {
+                        this.restoreDownloadButton(libraryBtn);
+                    }
+                }
+                break;
+            }
+
+            const trackCard = trackCards[i];
+            const trackId = trackCard.getAttribute('data-track-id');
+            
+            if (trackId) {
+                try {
+                    console.log(`[ADD_ALL_LIBRARY] Adding to library ${i + 1}/${totalTracks}`);
+                    const libraryBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    
+                    if (libraryBtn && !libraryBtn.classList.contains('completed')) {
+                        this.currentDownloadController = new AbortController();
+                        const currentController = this.currentDownloadController;
+
+                        const downloadPromise = new Promise<void>((resolve, reject) => {
+                            (async () => {
+                                try {
+                                    await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                                    addedCount++;
+                                    resolve();
+                                } catch (error) {
+                                    reject(error);
+                                }
+                            })();
+                        });
+
+                        await new Promise((resolve) => {
+                            const timeoutId = setTimeout(() => {
+                                if (currentController === this.currentDownloadController) {
+                                    currentController.abort();
+                                }
+                                const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
+                                const progressText = document.getElementById('progressText');
+                                if (progressBar) {
+                                    const progress = (addedCount / totalTracks) * 100;
+                                    progressBar.style.width = `${progress}%`;
+                                }
+                                if (progressText) {
+                                    progressText.innerHTML = `Queued <strong>${addedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
+                                }
+                                resolve(null);
+                            }, 120000);
+                        });
+                    }
+                } catch (error) {
+                    console.error(`[ADD_ALL_LIBRARY] Error adding track ${trackId}:`, error);
+                }
+            }
+        }
+
+        this.isDownloadingAll = false;
+        this.downloadAllCancelRequested = false;
+        this.currentDownloadController = null;
+        
+        if (addAllLibraryBtn) {
+            addAllLibraryBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                    <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                    <rect x="8" y="12" width="8" height="1"></rect>
+                </svg>
+                <span>Add All to Library</span>
+            `;
+            addAllLibraryBtn.classList.remove('cancelling');
+            addAllLibraryBtn.disabled = false;
+        }
+
+        console.log(`[ADD_ALL_LIBRARY] Queued ${addedCount}/${totalTracks} tracks`);
+    }
+
+    private async addAllToPlaylist(): Promise<void> {
+        try {
+            const playlists = await this.fetchPlaylists();
+            if (!playlists || playlists.length === 0) {
+                this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                return;
+            }
+            await this.showPlaylistSelectorForAll(playlists);
+        } catch (error) {
+            console.error('[PLAYLIST_ALL] Error handling add all to playlist:', error);
+            this.displayMessage('Error fetching playlists. Please try again.');
+        }
+    }
+
+    private async showPlaylistSelectorForAll(playlists: string[]): Promise<void> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Add All Tracks to Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handleAddAllToPlaylist(playlistName);
+                        resolve();
+                    });
+                    content.appendChild(button);
+                });
+            }
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handleAddAllToPlaylist(playlistName);
+                    resolve();
+                }
+            });
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handleAddAllToPlaylist(playlistName);
+                        resolve();
+                    }
+                }
+            });
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            footer.appendChild(cancelBtn);
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve();
+                }
+            });
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handleAddAllToPlaylist(playlistName: string): Promise<void> {
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const totalTracks = trackCards.length;
+        let addedCount = 0;
+        console.log(`[PLAYLIST_ALL] Adding all ${totalTracks} tracks to playlist: ${playlistName}`);
+        for (let i = 0; i < trackCards.length; i++) {
+            const trackCard = trackCards[i];
+            const trackId = trackCard.getAttribute('data-track-id');
+            if (trackId) {
+                try {
+                    console.log(`[PLAYLIST_ALL] Adding track ${i + 1}/${totalTracks}`);
+                    const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+                    if (addPlaylistBtn && !addPlaylistBtn.classList.contains('completed')) {
+                        const originalContent = addPlaylistBtn.innerHTML;
+                        const originalDisabled = addPlaylistBtn.disabled;
+                        if (!addPlaylistBtn.dataset.originalContent) {
+                            addPlaylistBtn.dataset.originalContent = originalContent;
+                        }
+                        addPlaylistBtn.disabled = true;
+                        try {
+                            const jobId = await this.downloadTrackWithPlaylist(parseInt(trackId, 10), this.downloadAllScope, playlistName);
+                            console.log(`[PLAYLIST_ALL] Job queued successfully: ${jobId}`);
+                            const statusEl = this.ensureJobStatusElement(trackCard);
+                            this.setJobStatusChip(statusEl, 'queued');
+                            this.setDownloadButtonCompleted(addPlaylistBtn);
+                            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, statusEl);
+                            addedCount++;
+                        } catch (error) {
+                            console.error('[PLAYLIST_ALL] Error adding track to playlist:', error);
+                            addPlaylistBtn.disabled = originalDisabled;
+                            addPlaylistBtn.innerHTML = originalContent;
+                            if (addPlaylistBtn.dataset.originalContent) {
+                                delete addPlaylistBtn.dataset.originalContent;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error(`[PLAYLIST_ALL] Error processing track ${trackId}:`, error);
+                }
+            }
+        }
+        console.log(`[PLAYLIST_ALL] Queued ${addedCount}/${totalTracks} tracks`);
+        this.displayMessage(`Queued ${addedCount} tracks to playlist: ${playlistName}`);
     }
 }
 
