@@ -3604,6 +3604,8 @@ class App {
             </div>
             ${searchType === 'al' 
                 ? this.formatAlbumsGrid(items as AlbumSearchItem[])
+                : searchType === 's' || searchType === 'trackid'
+                ? this.formatTracksGrid(items as Track[])
                 : `<div class="results-list">
                     ${items.map(item => {
                         if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
