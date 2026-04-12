@@ -58,6 +58,7 @@ interface AlbumSearchItem {
     artist?: Artist;
     releaseDate?: string;
     numberOfTracks?: number;
+    numberOfItems?: number;
     numberOfVolumes?: number;
     duration?: number;
     audioQuality?: string;
@@ -65,6 +66,7 @@ interface AlbumSearchItem {
     mediaMetadata?: {
         tags?: string[];
     };
+    mediaTags?: string[];
 }
 
 interface ArtistSearchItem {
@@ -92,6 +94,7 @@ interface PlaylistSearchItem {
     mediaMetadata?: {
         tags?: string[];
     };
+    mediaTags?: string[];
     promotedArtists?: Array<{
         id?: number | string;
         name?: string;
@@ -4649,15 +4652,15 @@ class App {
             : '';
 
         // Format track count
-        const trackCount = album.numberOfTracks 
-            ? `${album.numberOfTracks} track${album.numberOfTracks !== 1 ? 's' : ''}`
+        const trackCount = (album.numberOfTracks ?? album.numberOfItems)
+            ? `${album.numberOfTracks ?? album.numberOfItems} track${(album.numberOfTracks ?? album.numberOfItems) !== 1 ? 's' : ''}`
             : '';
 
         // Format audio quality if available - check mediaMetadata.tags for best quality
         let quality = album.audioQuality || '';
-        if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
+        const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
+        if (tags && tags.length > 0) {
             // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            const tags = album.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('DOLBY_ATMOS')) {
@@ -4720,15 +4723,15 @@ class App {
             : '';
 
         // Format track count - just the number
-        const trackCount = album.numberOfTracks 
-            ? `${album.numberOfTracks}`
+        const trackCount = (album.numberOfTracks ?? album.numberOfItems)
+            ? `${album.numberOfTracks ?? album.numberOfItems}`
             : '';
 
         // Format audio quality if available - check mediaMetadata.tags for best quality
         let quality = album.audioQuality || '';
-        if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
+        const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
+        if (tags && tags.length > 0) {
             // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            const tags = album.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
             } else if (tags.includes('DOLBY_ATMOS')) {
