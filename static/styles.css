@@ -1445,6 +1445,34 @@ body {
     grid-template-columns: 56px 2fr 2fr 1.5fr 0.6fr 160px;
 }
 
+/* Artist albums view grid template */
+.albums-grid-wrapper[data-view-mode="artist-albums"] .albums-grid-header {
+    grid-template-columns: 56px 2fr 0.8fr 1.2fr 0.6fr 160px;
+}
+
+.albums-grid-wrapper[data-view-mode="artist-albums"] .albums-grid-row {
+    grid-template-columns: 56px 2fr 0.8fr 1.2fr 0.6fr 160px;
+}
+
+/* Similar albums view grid template */
+.albums-grid-wrapper[data-view-mode="similar-albums"] .albums-grid-header {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr 160px;
+}
+
+.albums-grid-wrapper[data-view-mode="similar-albums"] .albums-grid-row {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr 160px;
+}
+
+/* Search albums view grid template */
+.albums-grid-wrapper[data-view-mode="search-albums"] .albums-grid-header {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr 160px;
+}
+
+.albums-grid-wrapper[data-view-mode="search-albums"] .albums-grid-row {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr 160px;
+    cursor: pointer;
+}
+
 .tracks-grid-row {
     display: grid;
     gap: 1rem;
@@ -1651,6 +1679,11 @@ body {
     display: none;
 }
 
+/* Hide Add to Library button when album exists in Plex */
+.albums-grid-row[data-plex-exists="true"] .grid-add-library-btn {
+    display: none;
+}
+
 /* Hide Download to Library button on card when track exists in Plex */
 .track-card[data-plex-exists="true"] .track-download-btn {
     display: none;
@@ -1668,6 +1701,102 @@ body {
     font-weight: 700;
     font-size: 0.65rem;
     flex-shrink: 0;
+}
+
+/* === Albums Grid === */
+.albums-grid-wrapper {
+    width: 100%;
+}
+
+.albums-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.albums-grid-header {
+    display: grid;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.albums-grid-row {
+    display: grid;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    align-items: center;
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-bottom: 1px solid var(--border-color);
+    transition: all var(--transition-fast);
+}
+
+.albums-grid-row:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    transform: translateY(-1px);
+}
+
+.albums-grid-row:last-child {
+    border-bottom: none;
+}
+
+.grid-col-year {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    text-align: right;
+}
+
+.grid-col-track-count {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    text-align: right;
+}
+
+.grid-album-play-btn {
+    width: auto;
+    height: auto;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.grid-album-play-btn:hover {
+    color: var(--accent-primary);
+}
+
+.grid-album-play-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.album-artist-name {
+    display: inline-block;
+    cursor: pointer;
+    transition: color var(--transition-fast);
+    color: inherit;
+}
+
+.album-artist-name:hover {
+    color: var(--accent-primary);
 }
 
 /* === Playlist Card === */

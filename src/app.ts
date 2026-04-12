@@ -639,9 +639,34 @@ class App {
                     e.preventDefault();
                     e.stopPropagation();
                     const trackRow = gridPlayBtn.closest('.tracks-grid-row') as HTMLElement;
-                    const trackId = trackRow?.getAttribute('data-track-id');
-                    if (trackId) {
-                        void this.handlePlayToggle(parseInt(trackId, 10), trackRow, gridPlayBtn);
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handlePlayToggle(parseInt(trackId, 10), trackRow, gridPlayBtn);
+                            return;
+                        }
+                    }
+                    
+                    // Check for album grid play button
+                    const albumRow = gridPlayBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handlePlayAlbum(parseInt(albumId, 10), gridPlayBtn);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                // Check for album row clicks (anywhere except actions column)
+                const albumRow = target.closest('.albums-grid-row') as HTMLElement | null;
+                if (albumRow && !target.closest('.grid-cell.grid-col-actions')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const albumId = albumRow.getAttribute('data-album-id');
+                    if (albumId) {
+                        void this.fetchAlbumTracks(parseInt(albumId, 10));
                     }
                     return;
                 }
@@ -650,9 +675,22 @@ class App {
                 const gridAddPlaylistBtn = target.closest('.grid-add-playlist-btn');
                 if (gridAddPlaylistBtn) {
                     const trackRow = gridAddPlaylistBtn.closest('.tracks-grid-row') as HTMLElement;
-                    const trackId = trackRow?.getAttribute('data-track-id');
-                    if (trackId) {
-                        void this.handleAddToPlaylist(parseInt(trackId, 10), trackRow, 'loose');
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleAddToPlaylist(parseInt(trackId, 10), trackRow, 'loose');
+                            return;
+                        }
+                    }
+                    
+                    // Check for album grid
+                    const albumRow = gridAddPlaylistBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleAddAlbumToPlaylist(parseInt(albumId, 10), albumRow);
+                            return;
+                        }
                     }
                     return;
                 }
@@ -661,9 +699,22 @@ class App {
                 const gridAddLibraryBtn = target.closest('.grid-add-library-btn');
                 if (gridAddLibraryBtn) {
                     const trackRow = gridAddLibraryBtn.closest('.tracks-grid-row') as HTMLElement;
-                    const trackId = trackRow?.getAttribute('data-track-id');
-                    if (trackId) {
-                        void this.handleDownload(parseInt(trackId, 10), trackRow, 'loose');
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleDownload(parseInt(trackId, 10), trackRow, 'loose');
+                            return;
+                        }
+                    }
+                    
+                    // Check for album grid
+                    const albumRow = gridAddLibraryBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleDownloadAlbum(parseInt(albumId, 10), albumRow);
+                            return;
+                        }
                     }
                     return;
                 }
@@ -674,13 +725,22 @@ class App {
                     e.preventDefault();
                     e.stopPropagation();
                     const trackRow = gridMoreBtn.closest('.tracks-grid-row') as HTMLElement | null;
-                    if (!trackRow) {
-                        return;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.fetchSimilarTracks(parseInt(trackId, 10));
+                            return;
+                        }
                     }
-                    const trackId = trackRow.getAttribute('data-track-id');
-                    if (trackId) {
-                        void this.fetchSimilarTracks(parseInt(trackId, 10));
-                        return;
+                    
+                    // Check for album grid
+                    const albumRow = gridMoreBtn.closest('.albums-grid-row') as HTMLElement | null;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.fetchSimilarAlbums(parseInt(albumId, 10));
+                            return;
+                        }
                     }
                 }
 
@@ -783,6 +843,18 @@ class App {
                 if (albumId) {
                     e.stopPropagation();
                     void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    return;
+                }
+            }
+
+            // Check for artist name clicks within album grid rows
+            const gridAlbumArtistName = target.closest('.albums-grid-row .album-artist-name');
+            if (gridAlbumArtistName) {
+                const albumRow = gridAlbumArtistName.closest('.albums-grid-row');
+                const artistId = albumRow?.getAttribute('data-artist-id');
+                if (artistId) {
+                    e.stopPropagation();
+                    void this.fetchArtistAlbums(parseInt(artistId, 10));
                     return;
                 }
             }
@@ -3527,20 +3599,22 @@ class App {
                 <h2>${searchTypeName} - "${this.escapeHtml(query)}"</h2>
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
-            <div class="results-list">
-                ${(searchType === 's' || searchType === 'trackid') 
-                    ? this.formatTracksGrid(items as Track[])
-                    : items.map(item => {
-                        if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
+            ${searchType === 'al' 
+                ? this.formatAlbumsGrid(items as AlbumSearchItem[])
+                : `<div class="results-list">
+                    ${items.map(item => {
                         if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
                         if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
                         return this.formatTrackCard(item as Track);
                     }).join('')}
-            </div>
+                </div>`
+            }
         `;
 
         if (searchType === 's' || searchType === 'trackid') {
             void this.annotateTrackCardsWithPlexStatus(items as Track[]);
+        } else if (searchType === 'al') {
+            void this.annotateAlbumGridsWithPlexStatus(items as AlbumSearchItem[]);
         }
     }
 
@@ -3705,6 +3779,112 @@ class App {
         }
     }
 
+    private async annotateAlbumGridsWithPlexStatus(albums: AlbumSearchItem[]): Promise<void> {
+        if (!Array.isArray(albums) || albums.length === 0) {
+            return;
+        }
+
+        try {
+            const gridRows = Array.from(this.resultsContainer.querySelectorAll('.albums-grid-row')) as HTMLElement[];
+
+            // For each album, fetch its tracks and check if they're all in Plex
+            for (let i = 0; i < gridRows.length && i < albums.length; i++) {
+                const gridRow = gridRows[i];
+                const albumId = gridRow.getAttribute('data-album-id');
+                if (!albumId) {
+                    continue;
+                }
+
+                try {
+                    // Fetch album tracks
+                    const albumResponse = await fetch(`/album/?id=${albumId}`);
+                    if (!albumResponse.ok) {
+                        continue;
+                    }
+
+                    const albumData: AlbumInfo = await albumResponse.json();
+                    const trackItems = albumData.data?.items || [];
+                    const tracks = trackItems
+                        .filter(item => item.type === 'track')
+                        .map(item => item.item)
+                        .filter(t => t && t.id);
+
+                    if (tracks.length === 0) {
+                        continue;
+                    }
+
+                    // Check these tracks against Plex
+                    const payloadTracks = tracks.map((track: Track) => {
+                        const artist = track.artists?.[0]?.name || track.artist?.name || '';
+                        const album = track.album?.title || '';
+                        return {
+                            title: track.title || '',
+                            artist,
+                            album
+                        };
+                    });
+
+                    const matchResponse = await fetch('/api/plex/songs/match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tracks: payloadTracks })
+                    });
+
+                    if (!matchResponse.ok) {
+                        continue;
+                    }
+
+                    const matchData = await matchResponse.json();
+                    const matches = Array.isArray(matchData.matches) ? matchData.matches : [];
+
+                    // Check if ALL tracks from this album are in Plex
+                    const allInPlex = matches.length === tracks.length &&
+                        matches.every((m: any) => m && m.exists);
+
+                    if (!allInPlex) {
+                        continue;
+                    }
+
+                    gridRow.setAttribute('data-plex-exists', 'true');
+
+                    // Replace Add to Library button with Plex badge
+                    const actionsCell = gridRow.querySelector('.grid-col-actions') as HTMLElement | null;
+                    if (!actionsCell) {
+                        continue;
+                    }
+
+                    const addLibraryBtn = actionsCell.querySelector('.grid-add-library-btn') as HTMLElement | null;
+                    if (!addLibraryBtn) {
+                        continue;
+                    }
+
+                    // Check if all are low quality MP3s
+                    const allLowQualityMp3 = matches.every((m: any) =>
+                        Array.isArray(m.variants) && m.variants.length > 0 &&
+                        m.variants.every((v: any) =>
+                            (v.format === 'mp3' || v.format === 'mpeg') &&
+                            typeof v.bitrate === 'number' && v.bitrate <= 192
+                        )
+                    );
+
+                    const chip = document.createElement('span');
+                    chip.className = allLowQualityMp3
+                        ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--low-quality'
+                        : 'plex-existing-chip plex-existing-chip--in-actions';
+                    chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
+                    chip.title = this.buildPlexExistingTooltip(matches.flatMap((m: any) => m.variants || []));
+
+                    addLibraryBtn.replaceWith(chip);
+                } catch (error) {
+                    // Continue with next album if this one fails
+                    continue;
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to annotate album grid rows with Plex status.', error);
+        }
+    }
+
     private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[]): void {
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
         if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
@@ -3725,9 +3905,7 @@ class App {
             ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk plex-existing-chip--low-quality'
             : 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk';
         badge.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-        badge.title = allLowQualityMp3
-            ? 'All listed tracks already exist in Plex (low quality variants detected)'
-            : 'All listed tracks already exist in Plex';
+        badge.title = this.buildPlexExistingTooltip(matches.flatMap((m: PlexTrackMatch) => m.variants || []));
 
         addAllLibraryBtn.replaceWith(badge);
     }
@@ -4529,6 +4707,93 @@ class App {
         `;
     }
 
+    private formatAlbumGridRow(album: AlbumSearchItem, hideArtist: boolean = false): string {
+        // Get artist names and IDs
+        const artistNames = album.artists && album.artists.length > 0
+            ? album.artists.map(a => a.name).join(', ')
+            : album.artist?.name || 'Unknown Artist';
+        const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
+
+        // Format release year if available
+        const releaseYear = album.releaseDate 
+            ? new Date(album.releaseDate).getFullYear()
+            : '';
+
+        // Format track count - just the number
+        const trackCount = album.numberOfTracks 
+            ? `${album.numberOfTracks}`
+            : '';
+
+        // Format audio quality if available - check mediaMetadata.tags for best quality
+        let quality = album.audioQuality || '';
+        if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
+            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
+            const tags = album.mediaMetadata.tags;
+            if (tags.includes('HIRES_LOSSLESS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('DOLBY_ATMOS')) {
+                quality = 'HIRES_LOSSLESS';
+            } else if (tags.includes('LOSSLESS')) {
+                quality = 'LOSSLESS';
+            } else if (tags.includes('LOW')) {
+                quality = 'LOW';
+            }
+        }
+        const qualityDisplay = this.formatQuality(quality);
+
+        const albumCover = album.cover;
+
+        return `
+            <div class="albums-grid-row ${hideArtist ? 'hide-artist' : ''}" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''}>
+                <div class="grid-cell grid-col-artwork">
+                    ${albumCover 
+                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
+                        : `<div class="grid-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                <div class="grid-cell grid-col-title">
+                    <div class="track-title-with-badge">
+                        ${this.escapeHtml(album.title)}
+                        ${album.explicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
+                    </div>
+                </div>
+                ${!hideArtist ? `<div class="grid-cell grid-col-artist">
+                    <span class="album-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                </div>` : ''}
+                <div class="grid-cell grid-col-year">${releaseYear || '—'}</div>
+                <div class="grid-cell grid-col-track-count">${trackCount || '—'}</div>
+                <div class="grid-cell grid-col-quality">${qualityDisplay || '—'}</div>
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="View Tracks" aria-label="View Tracks" data-album-id="${album.id}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                    <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" data-album-id="${album.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="grid-add-library-btn" title="Add to Library" data-album-id="${album.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
     private formatArtistCard(artist: ArtistSearchItem): string {
         // Format popularity
         const popularity = artist.popularity ? `Popularity: ${artist.popularity}` : '';
@@ -4732,8 +4997,18 @@ class App {
                         <h2>Albums</h2>
                     </div>
                 </div>
-                <div class="results-list">
-                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
+                <div class="albums-grid-wrapper" data-view-mode="artist-albums">
+                    <div class="albums-grid">
+                        <div class="albums-grid-header hide-artist">
+                            <div class="grid-cell grid-col-artwork"></div>
+                            <div class="grid-cell grid-col-title">ALBUM</div>
+                            <div class="grid-cell grid-col-year">YEAR</div>
+                            <div class="grid-cell grid-col-track-count">TRACKS</div>
+                            <div class="grid-cell grid-col-quality">QUALITY</div>
+                            <div class="grid-cell grid-col-actions">ACTIONS</div>
+                        </div>
+                        ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, true)).join('')}
+                    </div>
                 </div>
             `;
 
@@ -4761,6 +5036,9 @@ class App {
                     }
                 });
             }
+
+            // Annotate with Plex status
+            void this.annotateAlbumGridsWithPlexStatus(albums);
         } catch (error) {
             this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));
             console.error('Artist fetch error:', error);
@@ -5023,10 +5301,24 @@ class App {
                     <h2>More Like This - Similar Albums</h2>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
-                <div class="results-list">
-                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
+                <div class="albums-grid-wrapper" data-view-mode="similar-albums">
+                    <div class="albums-grid">
+                        <div class="albums-grid-header">
+                            <div class="grid-cell grid-col-artwork"></div>
+                            <div class="grid-cell grid-col-title">ALBUM</div>
+                            <div class="grid-cell grid-col-artist">ARTIST</div>
+                            <div class="grid-cell grid-col-year">YEAR</div>
+                            <div class="grid-cell grid-col-track-count">TRACKS</div>
+                            <div class="grid-cell grid-col-quality">QUALITY</div>
+                            <div class="grid-cell grid-col-actions">ACTIONS</div>
+                        </div>
+                        ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
+                    </div>
                 </div>
             `;
+
+            // Annotate with Plex status
+            void this.annotateAlbumGridsWithPlexStatus(albums);
         } catch (error) {
             this.displayMessage('Error loading similar albums. Please try again.', () => this.fetchSimilarAlbums(albumId));
             console.error('Similar albums fetch error:', error);
@@ -5398,6 +5690,346 @@ class App {
             console.error('[PLAYLIST] Error in downloadTrackWithPlaylist:', error);
             throw error;
         }
+    }
+
+    private async handleAddAlbumToPlaylist(albumId: number, albumRow: HTMLElement): Promise<void> {
+        const addPlaylistBtn = albumRow.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[ALBUM_PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        try {
+            const response = await fetch(`/album/?id=${albumId}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch album');
+            }
+            const albumData: AlbumInfo = await response.json();
+            const trackItems = albumData.data?.items || [];
+            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Fetch playlists once
+            try {
+                const playlists = await this.fetchPlaylists();
+                if (!playlists || playlists.length === 0) {
+                    this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                    return;
+                }
+
+                // Show playlist selector and handle selection
+                const selectedPlaylist = await this.showPlaylistSelectorForAlbum(playlists, tracks, albumRow, addPlaylistBtn);
+                if (!selectedPlaylist) {
+                    // User cancelled, restore button
+                    addPlaylistBtn.disabled = originalDisabled;
+                    addPlaylistBtn.innerHTML = originalContent;
+                }
+            } catch (error) {
+                console.error('[ALBUM_PLAYLIST] Error handling add to playlist:', error);
+                addPlaylistBtn.disabled = originalDisabled;
+                addPlaylistBtn.innerHTML = originalContent;
+                this.displayMessage('Error fetching playlists. Please try again.');
+            }
+        } catch (error) {
+            console.error('[ALBUM_PLAYLIST] Error adding album to playlist:', error);
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            this.displayMessage('Error adding album to playlist. Please try again.');
+        }
+    }
+
+    private showPlaylistSelectorForAlbum(
+        playlists: string[],
+        tracks: Track[],
+        albumRow: HTMLElement,
+        addPlaylistBtn: HTMLButtonElement
+    ): Promise<string | null> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Select a Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(null);
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+
+            // Content
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+
+            // Existing playlists
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                        resolve(playlistName);
+                    });
+                    content.appendChild(button);
+                });
+            }
+
+            // Create new playlist section
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+            
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+            
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+            
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+            
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                    resolve(playlistName);
+                }
+            });
+            
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                        resolve(playlistName);
+                    }
+                }
+            });
+            
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+            
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+
+            // Footer
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(null);
+            });
+            footer.appendChild(cancelBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve(null);
+                }
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handlePlaylistSelectedForAlbum(
+        playlistName: string,
+        tracks: Track[],
+        albumRow: HTMLElement,
+        addPlaylistBtn: HTMLButtonElement
+    ): Promise<void> {
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        // Show spinner on button
+        this.setDownloadButtonQueued(addPlaylistBtn);
+
+        try {
+            const jobIds: number[] = [];
+            
+            // Queue all tracks for adding to playlist
+            for (const track of tracks) {
+                try {
+                    const jobId = await this.downloadTrackWithPlaylist(track.id, 'album', playlistName);
+                    jobIds.push(jobId);
+                } catch (error) {
+                    console.error(`[PLAYLIST] Failed to queue track ${track.id}:`, error);
+                    // Continue with next track
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[PLAYLIST] Queued ${jobIds.length} tracks to playlist: ${playlistName}`);
+
+            // Register all jobs for polling, but track them all under the button
+            // We'll monitor the first one for now and mark success when all are done
+            jobIds.forEach((jobId, index) => {
+                if (index === 0) {
+                    // Register first job with the button for visual feedback
+                    this.registerActiveJob(jobId, albumRow, addPlaylistBtn, addPlaylistBtn);
+                } else {
+                    // Register other jobs but don't update button - they're tracked internally
+                    this.activeJobMap.set(jobId, { trackCard: albumRow, downloadBtn: addPlaylistBtn, statusEl: addPlaylistBtn });
+                }
+            }
+            );
+            this.startJobStatusPolling();
+        } catch (error) {
+            console.error('[PLAYLIST] Error adding tracks to playlist:', error);
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            this.setDownloadButtonFailed(addPlaylistBtn);
+            this.displayMessage('Error adding album to playlist. Please try again.');
+        }
+    }
+
+    private async handleDownloadAlbum(albumId: number, albumRow: HTMLElement): Promise<void> {
+        const addLibraryBtn = albumRow.querySelector('.grid-add-library-btn') as HTMLButtonElement;
+        if (!addLibraryBtn) {
+            console.error('[ALBUM_DOWNLOAD] Add to library button not found');
+            return;
+        }
+
+        const originalContent = addLibraryBtn.innerHTML;
+        const originalDisabled = addLibraryBtn.disabled;
+
+        try {
+            const response = await fetch(`/album/?id=${albumId}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch album');
+            }
+            const albumData: AlbumInfo = await response.json();
+            const trackItems = albumData.data?.items || [];
+            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Show spinner on button
+            this.setDownloadButtonQueued(addLibraryBtn);
+
+            const jobIds: number[] = [];
+
+            // Queue all tracks for download to library
+            for (const track of tracks) {
+                try {
+                    const jobId = await this.downloadTrackToLibrary(track.id, 'album');
+                    jobIds.push(jobId);
+                } catch (error) {
+                    console.error(`[ALBUM_DOWNLOAD] Failed to queue track ${track.id}:`, error);
+                    // Continue with next track
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[ALBUM_DOWNLOAD] Queued ${jobIds.length} tracks to library`);
+
+            // Register all jobs for polling, tracking them all under the button
+            jobIds.forEach((jobId, index) => {
+                if (index === 0) {
+                    // Register first job with the button for visual feedback
+                    this.registerActiveJob(jobId, albumRow, addLibraryBtn, addLibraryBtn);
+                } else {
+                    // Register other jobs but don't update button - they're tracked internally
+                    this.activeJobMap.set(jobId, { trackCard: albumRow, downloadBtn: addLibraryBtn, statusEl: addLibraryBtn });
+                }
+            });
+            this.startJobStatusPolling();
+        } catch (error) {
+            console.error('[ALBUM_DOWNLOAD] Error downloading album to library:', error);
+            addLibraryBtn.disabled = originalDisabled;
+            addLibraryBtn.innerHTML = originalContent;
+            this.setDownloadButtonFailed(addLibraryBtn);
+            this.displayMessage('Error adding album to library. Please try again.');
+        }
+    }
+
+    private async handlePlayAlbum(albumId: number, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const response = await fetch(`/album/?id=${albumId}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch album');
+            }
+            const albumData: AlbumInfo = await response.json();
+            const trackItems = albumData.data?.items || [];
+            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Play the first track from the album
+            const albumRow = playButton.closest('.albums-grid-row') as HTMLElement;
+            void this.handlePlayToggle(tracks[0].id, albumRow, playButton);
+        } catch (error) {
+            console.error('[ALBUM_PLAYBACK] Error playing album:', error);
+            this.displayMessage('Error playing album. Please try again.');
+        }
+    }
+
+    private formatAlbumsGrid(albums: AlbumSearchItem[]): string {
+        return `
+            <div class="albums-grid-wrapper" data-view-mode="search-albums">
+                <div class="albums-grid">
+                    <div class="albums-grid-header">
+                        <div class="grid-cell grid-col-artwork"></div>
+                        <div class="grid-cell grid-col-title">ALBUM</div>
+                        <div class="grid-cell grid-col-artist">ARTIST</div>
+                        <div class="grid-cell grid-col-year">YEAR</div>
+                        <div class="grid-cell grid-col-track-count">TRACKS</div>
+                        <div class="grid-cell grid-col-quality">QUALITY</div>
+                        <div class="grid-cell grid-col-actions">ACTIONS</div>
+                    </div>
+                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
+                </div>
+            </div>
+        `;
     }
 
 private async downloadTrackToLibrary(
