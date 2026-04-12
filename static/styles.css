@@ -1399,6 +1399,113 @@ body {
     color: #00d966;
 }
 
+/* === Artist Card Compact === */
+.artist-card-compact {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    cursor: pointer;
+    width: 140px;
+    height: 180px;
+}
+
+.artist-card-compact:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+}
+
+.artist-card-compact.clickable {
+    cursor: pointer;
+}
+
+.artist-card-name {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
+    width: 100%;
+    line-height: 1.3;
+}
+
+.artist-card-image {
+    grid-column: 1 / 3;
+    grid-row: 2;
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.artist-card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.artist-card-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+    color: var(--text-muted);
+}
+
+.artist-card-btn {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: end;
+    justify-self: end;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.artist-card-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.artist-card-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Results list for artist cards */
+.results-list.artist-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 1rem;
+}
+
 /* === Tracks Grid === */
 .tracks-grid-wrapper {
     width: 100%;

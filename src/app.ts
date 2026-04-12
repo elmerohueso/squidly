@@ -815,6 +815,33 @@ class App {
                     return;
                 }
             }
+
+            // Check for artist card compact button clicks (Find Similar)
+            const artistCardBtn = target.closest('.artist-card-btn') as HTMLButtonElement | null;
+            if (artistCardBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const artistCard = artistCardBtn.closest('.artist-card-compact') as HTMLElement | null;
+                if (artistCard) {
+                    const artistId = artistCard.getAttribute('data-artist-id');
+                    if (artistId) {
+                        void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                    }
+                }
+                return;
+            }
+
+            // Check for artist card compact clicks (view artist albums)
+            const artistCardCompact = target.closest('.artist-card-compact.clickable') as HTMLElement | null;
+            if (artistCardCompact && !target.closest('.artist-card-btn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                const artistId = artistCardCompact.getAttribute('data-artist-id');
+                if (artistId) {
+                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                }
+                return;
+            }
             
             // Check for artist name clicks within grid rows
             const gridArtistName = target.closest('.tracks-grid-row .track-artist-name');
@@ -3634,7 +3661,7 @@ class App {
                 ? this.formatAlbumsGrid(items as AlbumSearchItem[])
                 : searchType === 's' || searchType === 'trackid'
                 ? this.formatTracksGrid(items as Track[])
-                : `<div class="results-list">
+                : `<div class="results-list${searchType === 'a' ? ' artist-results' : ''}">
                     ${items.map(item => {
                         if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
                         if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
@@ -4858,15 +4885,13 @@ class App {
     }
 
     private formatArtistCard(artist: ArtistSearchItem): string {
-        // Format popularity
-        const popularity = artist.popularity ? `Popularity: ${artist.popularity}` : '';
-
         return `
-            <div class="track-card artist-card clickable" data-artist-id="${artist.id}" title="Click to view albums">
-                <div class="track-artwork">
+            <div class="artist-card-compact clickable" data-artist-id="${artist.id}" title="Click to view albums">
+                <div class="artist-card-name">${this.escapeHtml(artist.name)}</div>
+                <div class="artist-card-image">
                     ${artist.picture 
-                        ? `<img src="${this.formatTidalImageUrl(artist.picture, 750)}" alt="${artist.name}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                        ? `<img src="${this.formatTidalImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
+                        : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
                                 <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
@@ -4874,18 +4899,9 @@ class App {
                            </div>`
                     }
                 </div>
-                <div class="track-info">
-                    <div class="track-title">${this.escapeHtml(artist.name)}</div>
-                    <div class="track-artist">Artist</div>
-                    <div class="track-metadata">
-                        ${popularity ? `<span>${popularity}</span>` : ''}
-                    </div>
-                </div>
-                <div class="track-actions">
-                    <button class="track-more-btn" title="More Like This" aria-label="More Like This">
-                        ${this.getMoreLikeIconSvg()}
-                    </button>
-                </div>
+                <button class="artist-card-btn" title="Find Similar Artists" aria-label="Find Similar Artists">
+                    ${this.getMoreLikeIconSvg()}
+                </button>
             </div>
         `;
     }
@@ -5438,7 +5454,7 @@ class App {
                     <h2>More Like This - Similar Artists</h2>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
-                <div class="results-list">
+                <div class="results-list artist-results">
                     ${artists.map((artist: ArtistSearchItem) => this.formatArtistCard(artist)).join('')}
                 </div>
             `;
