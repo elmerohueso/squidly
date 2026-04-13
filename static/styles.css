@@ -1546,20 +1546,20 @@ body {
 
 /* Single album view grid template */
 .tracks-grid-wrapper[data-view-mode="single-album"] .tracks-grid-header {
-    grid-template-columns: 40px 2fr 2fr 0.6fr 160px;
+    grid-template-columns: 40px 2fr 2fr 0.7fr 0.7fr 160px;
 }
 
 .tracks-grid-wrapper[data-view-mode="single-album"] .tracks-grid-row {
-    grid-template-columns: 40px 2fr 2fr 0.6fr 160px;
+    grid-template-columns: 40px 2fr 2fr 0.7fr 0.7fr 160px;
 }
 
 /* Multi-album view grid template */
 .tracks-grid-wrapper[data-view-mode="multi-album"] .tracks-grid-header {
-    grid-template-columns: 56px 2fr 2fr 1.5fr 0.6fr 160px;
+    grid-template-columns: 56px 2fr 2fr 1.5fr 0.7fr 0.7fr 160px;
 }
 
 .tracks-grid-wrapper[data-view-mode="multi-album"] .tracks-grid-row {
-    grid-template-columns: 56px 2fr 2fr 1.5fr 0.6fr 160px;
+    grid-template-columns: 56px 2fr 2fr 1.5fr 0.7fr 0.7fr 160px;
 }
 
 /* Artist albums view grid template */
@@ -1606,11 +1606,11 @@ body {
 
 /* Library track view grid template (no actions/status column) */
 .tracks-grid-wrapper[data-view-mode="library-tracks"] .tracks-grid-header {
-    grid-template-columns: 40px 2fr 2fr 0.6fr;
+    grid-template-columns: 40px 2fr 2fr 0.6fr 1.2fr;
 }
 
 .tracks-grid-wrapper[data-view-mode="library-tracks"] .tracks-grid-row {
-    grid-template-columns: 40px 2fr 2fr 0.6fr;
+    grid-template-columns: 40px 2fr 2fr 0.6fr 1.2fr;
 }
 
 .tracks-grid-row {

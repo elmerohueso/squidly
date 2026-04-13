@@ -96,10 +96,13 @@ interface PlexLibraryTrack {
     id: string;
     title: string;
     artist?: string;
+    artist_id?: string;
     album?: string;
     duration?: number;
     track_number?: number;
     disc_number?: number;
+    quality_format?: string;
+    quality_bitrate_kbps?: number;
     cover?: string;
 }
 
@@ -1065,6 +1068,18 @@ class App {
                     return;
                 }
 
+                const trackArtistName = target.closest('.tracks-grid-row .library-track-artist-name') as HTMLElement | null;
+                if (trackArtistName) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistId = trackArtistName.getAttribute('data-library-artist-id') || this.libraryCurrentArtist?.id || '';
+                    const artistName = trackArtistName.getAttribute('data-library-artist-name') || this.libraryCurrentArtist?.name || 'Artist';
+                    if (artistId) {
+                        void this.loadLibraryArtistAlbums(artistId, artistName);
+                    }
+                    return;
+                }
+
                 const albumRow = target.closest('[data-library-album-id]') as HTMLElement | null;
                 if (albumRow) {
                     e.preventDefault();
@@ -1234,6 +1249,7 @@ class App {
     private formatLibraryTrackRow(track: PlexLibraryTrack, showDiscPrefix: boolean): string {
         const title = this.escapeHtml(track.title || 'Unknown Track');
         const artist = this.escapeHtml(track.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
+        const artistId = this.escapeHtml(track.artist_id || this.libraryCurrentArtist?.id || '');
         const trackNumber = typeof track.track_number === 'number' ? track.track_number : null;
         const discNumber = typeof track.disc_number === 'number' ? track.disc_number : 1;
         const numberLabel = trackNumber !== null
@@ -1241,13 +1257,17 @@ class App {
             : '—';
         const durationSeconds = typeof track.duration === 'number' ? Math.max(0, Math.round(track.duration / 1000)) : null;
         const durationLabel = durationSeconds !== null ? this.formatDuration(durationSeconds) : '—';
+        const qualityFormat = (track.quality_format || '').trim().toUpperCase();
+        const qualityBitrate = typeof track.quality_bitrate_kbps === 'number' ? `${track.quality_bitrate_kbps} kbps` : '';
+        const qualityLabel = [qualityFormat, qualityBitrate].filter(Boolean).join(' • ') || '—';
 
         return `
             <div class="tracks-grid-row" data-plex-library-row="true">
                 <div class="grid-cell grid-col-track-number">${numberLabel}</div>
                 <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
-                <div class="grid-cell grid-col-artist"><span class="track-artist-name">${artist}</span></div>
+                <div class="grid-cell grid-col-artist"><span class="track-artist-name library-track-artist-name" data-library-artist-id="${artistId}" data-library-artist-name="${artist}" title="View albums by ${artist}">${artist}</span></div>
                 <div class="grid-cell grid-col-quality">${durationLabel}</div>
+                <div class="grid-cell grid-col-quality">${qualityLabel}</div>
             </div>
         `;
     }
@@ -1375,6 +1395,7 @@ class App {
                         <div class="grid-cell grid-col-title">Title</div>
                         <div class="grid-cell grid-col-artist">Artist</div>
                         <div class="grid-cell grid-col-quality">Duration</div>
+                        <div class="grid-cell grid-col-quality">QUALITY</div>
                     </div>
                     ${tracks.length > 0
                         ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
@@ -4950,6 +4971,7 @@ class App {
                             <div class="grid-cell grid-col-track-number">#</div>
                             <div class="grid-cell grid-col-title">Title</div>
                             <div class="grid-cell grid-col-artist">Artist</div>
+                            <div class="grid-cell grid-col-duration">Duration</div>
                             <div class="grid-cell grid-col-quality">Quality</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
@@ -4967,6 +4989,7 @@ class App {
                             <div class="grid-cell grid-col-title">Title</div>
                             <div class="grid-cell grid-col-artist">Artist</div>
                             <div class="grid-cell grid-col-album">Album</div>
+                            <div class="grid-cell grid-col-duration">Duration</div>
                             <div class="grid-cell grid-col-quality">Quality</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
@@ -5004,6 +5027,7 @@ class App {
             }
         }
         const qualityDisplay = this.formatQuality(quality);
+        const durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
 
         // Format track title with optional version
         let trackTitle = this.escapeHtml(track.title);
@@ -5046,6 +5070,7 @@ class App {
                 ${showAlbumColumn ? `<div class="grid-cell grid-col-album">
                     <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
                 </div>` : ''}
+                <div class="grid-cell grid-col-duration">${durationDisplay}</div>
                 <div class="grid-cell grid-col-quality">${qualityDisplay || '—'}</div>
                 <div class="grid-cell grid-col-actions">
                     <button class="grid-play-btn" title="Play" aria-label="Play" data-track-id="${track.id}">

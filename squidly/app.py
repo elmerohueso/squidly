@@ -5003,14 +5003,38 @@ def get_plex_album_tracks_endpoint(album_id):
             except Exception:
                 duration = None
 
+            quality_format = None
+            quality_bitrate_kbps = None
+            try:
+                media_list = getattr(track, 'media', None) or []
+                if media_list:
+                    media = media_list[0]
+                    bitrate_value = getattr(media, 'bitrate', None)
+                    if bitrate_value is not None:
+                        try:
+                            quality_bitrate_kbps = int(bitrate_value)
+                        except Exception:
+                            quality_bitrate_kbps = None
+
+                    part_list = getattr(media, 'parts', None) or []
+                    if part_list:
+                        part = part_list[0]
+                        quality_format = str(getattr(part, 'container', '') or '').strip().lower() or None
+            except Exception:
+                quality_format = None
+                quality_bitrate_kbps = None
+
             tracks.append({
                 'id': str(getattr(track, 'ratingKey', '') or '').strip(),
                 'title': str(getattr(track, 'title', '') or '').strip(),
                 'artist': str(getattr(track, 'grandparentTitle', '') or '').strip(),
+                'artist_id': str(getattr(track, 'grandparentRatingKey', '') or '').strip() or None,
                 'album': str(getattr(track, 'parentTitle', '') or '').strip(),
                 'track_number': getattr(track, 'trackNumber', None),
                 'disc_number': getattr(track, 'parentIndex', None),
                 'duration': duration,
+                'quality_format': quality_format,
+                'quality_bitrate_kbps': quality_bitrate_kbps,
                 'cover': _build_plex_image_url(server_url, api_token, getattr(track, 'thumb', None)),
             })
 
