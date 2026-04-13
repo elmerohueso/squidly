@@ -292,9 +292,23 @@ interface AppRouteState {
     playlistUrl?: string;
 }
 
+type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'jobs';
+
+interface LibraryRouteState {
+    view: 'artists' | 'artist_albums' | 'album_tracks';
+    offset?: number;
+    artistId?: string;
+    artistName?: string;
+    albumId?: string;
+    albumTitle?: string;
+    albumArtist?: string;
+}
+
 interface AppHistoryState {
     app: 'squidly';
+    tab: AppPage;
     route: AppRouteState;
+    libraryRoute: LibraryRouteState;
 }
 
 class App {
@@ -389,7 +403,7 @@ class App {
     private lastRetryFunction: (() => Promise<void>) | null = null;
     private isPlexConfigured: boolean = false;
     private isHandlingPopState: boolean = false;
-    private currentPage: string = 'explore';
+    private currentPage: AppPage = 'explore';
     private pendingRequestController: AbortController | null = null;
     private readonly libraryArtistsPageSize: number = 50;
     private libraryArtistsOffset: number = 0;
@@ -608,7 +622,7 @@ class App {
         this.applySettingsToForm(this.downloadSettings);
         
         // Initialize page navigation (start with Explore page)
-        this.switchPage('explore');
+        this.switchPage('explore', false);
         
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
@@ -1292,7 +1306,10 @@ class App {
         }
     }
 
-    private switchPage(pageName: string): void {
+    private switchPage(pageName: string, updateHistory: boolean = true): void {
+        const normalizedPage = this.normalizePage(pageName);
+        const previousPage = this.currentPage;
+
         // Cancel any pending requests when switching pages
         if (this.pendingRequestController) {
             this.pendingRequestController.abort();
@@ -1306,7 +1323,7 @@ class App {
         });
 
         // Show the selected page
-        const selectedPage = document.getElementById(`${pageName}Page`);
+        const selectedPage = document.getElementById(`${normalizedPage}Page`);
         if (selectedPage) {
             selectedPage.classList.add('active');
         }
@@ -1315,13 +1332,13 @@ class App {
         const navItems = document.querySelectorAll('.nav-item');
         navItems.forEach(item => {
             item.classList.remove('active');
-            if ((item as HTMLElement).getAttribute('data-page') === pageName) {
+            if ((item as HTMLElement).getAttribute('data-page') === normalizedPage) {
                 item.classList.add('active');
             }
         });
 
         // Update current page
-        this.currentPage = pageName;
+        this.currentPage = normalizedPage;
 
         // Update top bar title based on page
         const pageNames: Record<string, string> = {
@@ -1331,11 +1348,11 @@ class App {
             mirrors: 'Hi-Fi Mirrors',
             jobs: 'Jobs'
         };
-        if (pageName === 'explore') {
+        if (normalizedPage === 'explore') {
             this.renderTopBarTitle('Explore');
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         } else {
-            this.renderTopBarTitle(pageNames[pageName] || 'Squidly');
+            this.renderTopBarTitle(pageNames[normalizedPage] || 'Squidly');
             if (this.exploreBreadcrumbContainer) {
                 this.exploreBreadcrumbContainer.style.display = 'none';
                 this.exploreBreadcrumbContainer.innerHTML = '';
@@ -1343,18 +1360,22 @@ class App {
         }
 
         // Refresh mirrors data when switching to mirrors page
-        if (pageName === 'mirrors') {
+        if (normalizedPage === 'mirrors') {
             void this.updateEndpointStatus();
         }
 
         // Load jobs when switching to jobs page
-        if (pageName === 'jobs') {
+        if (normalizedPage === 'jobs') {
             this.currentJobsPage = 1;
             void this.loadJobs();
         }
 
-        if (pageName === 'library' && !this.libraryLoadedOnce) {
-            void this.loadLibraryArtists(0);
+        if (normalizedPage === 'library' && !this.libraryLoadedOnce && updateHistory) {
+            void this.loadLibraryArtists(0, false);
+        }
+
+        if (updateHistory && !this.isHandlingPopState && previousPage !== normalizedPage) {
+            this.pushHistoryTab(normalizedPage);
         }
     }
 
@@ -1670,7 +1691,7 @@ class App {
         `;
     }
 
-    private async loadLibraryArtists(offset: number = 0): Promise<void> {
+    private async loadLibraryArtists(offset: number = 0, updateHistory: boolean = true): Promise<void> {
         if (!this.libraryResultsContainer) {
             return;
         }
@@ -1680,6 +1701,14 @@ class App {
         this.libraryCurrentArtist = null;
         this.libraryCurrentAlbum = null;
         this.libraryArtistsOffset = Math.max(0, offset);
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'artists',
+                offset: this.libraryArtistsOffset
+            });
+        }
+
         this.setLibraryMessage('Loading Plex artists...');
 
         try {
@@ -1715,13 +1744,22 @@ class App {
         }
     }
 
-    private async loadLibraryArtistAlbums(artistId: string, artistName: string): Promise<void> {
+    private async loadLibraryArtistAlbums(artistId: string, artistName: string, updateHistory: boolean = true): Promise<void> {
         if (!this.libraryResultsContainer) {
             return;
         }
 
         this.libraryCurrentArtist = { id: artistId, name: artistName };
         this.libraryCurrentAlbum = null;
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'artist_albums',
+                artistId,
+                artistName
+            });
+        }
+
         this.setLibraryMessage(`Loading albums for ${artistName}...`);
 
         try {
@@ -1758,12 +1796,24 @@ class App {
         }
     }
 
-    private async loadLibraryAlbumTracks(albumId: string, albumTitle: string, artistName?: string): Promise<void> {
+    private async loadLibraryAlbumTracks(albumId: string, albumTitle: string, artistName?: string, updateHistory: boolean = true): Promise<void> {
         if (!this.libraryResultsContainer) {
             return;
         }
 
         this.libraryCurrentAlbum = { id: albumId, title: albumTitle, artist: artistName };
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'album_tracks',
+                albumId,
+                albumTitle,
+                albumArtist: artistName,
+                artistId: this.libraryCurrentArtist?.id,
+                artistName: this.libraryCurrentArtist?.name
+            });
+        }
+
         this.setLibraryMessage(`Loading tracks for ${albumTitle}...`);
 
         try {
@@ -1908,7 +1958,7 @@ class App {
         void this.updateSidebarPlaylists();
 
         if (this.currentPage === 'library') {
-            void this.loadLibraryArtists(0);
+            void this.loadLibraryArtists(0, false);
         }
     }
 
@@ -2039,26 +2089,65 @@ class App {
             void this.handlePopState(event);
         });
 
-        const historyRoute = this.parseHistoryState(window.history.state);
-        const initialRoute = historyRoute || this.parseRouteFromUrl() || { view: 'home' };
-        this.replaceHistoryRoute(initialRoute);
-
-        if (initialRoute.view !== 'home') {
-            void this.navigateToRoute(initialRoute, false);
-        }
+        const historyState = this.parseHistoryState(window.history.state);
+        const initialState = historyState || this.parseStateFromUrl() || this.buildCurrentHistoryState('explore');
+        this.replaceHistoryState(initialState);
+        void this.applyHistoryState(initialState);
     }
 
     private async handlePopState(event: PopStateEvent): Promise<void> {
-        const route = this.parseHistoryState(event.state) || this.parseRouteFromUrl() || { view: 'home' };
+        const state = this.parseHistoryState(event.state) || this.parseStateFromUrl() || this.buildCurrentHistoryState(this.currentPage);
         this.isHandlingPopState = true;
         try {
-            await this.navigateToRoute(route, false);
+            await this.applyHistoryState(state);
         } finally {
             this.isHandlingPopState = false;
         }
     }
 
-    private parseHistoryState(rawState: unknown): AppRouteState | null {
+    private normalizePage(page: string | null | undefined): AppPage {
+        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'jobs') {
+            return page;
+        }
+        return 'explore';
+    }
+
+    private getCurrentLibraryRoute(): LibraryRouteState {
+        if (this.libraryCurrentAlbum) {
+            return {
+                view: 'album_tracks',
+                albumId: this.libraryCurrentAlbum.id,
+                albumTitle: this.libraryCurrentAlbum.title,
+                albumArtist: this.libraryCurrentAlbum.artist,
+                artistId: this.libraryCurrentArtist?.id,
+                artistName: this.libraryCurrentArtist?.name
+            };
+        }
+
+        if (this.libraryCurrentArtist) {
+            return {
+                view: 'artist_albums',
+                artistId: this.libraryCurrentArtist.id,
+                artistName: this.libraryCurrentArtist.name
+            };
+        }
+
+        return {
+            view: 'artists',
+            offset: this.libraryArtistsOffset
+        };
+    }
+
+    private buildCurrentHistoryState(tab: AppPage): AppHistoryState {
+        return {
+            app: 'squidly',
+            tab,
+            route: { ...this.currentExploreRoute },
+            libraryRoute: { ...this.getCurrentLibraryRoute() }
+        };
+    }
+
+    private parseHistoryState(rawState: unknown): AppHistoryState | null {
         if (!rawState || typeof rawState !== 'object') {
             return null;
         }
@@ -2069,11 +2158,32 @@ class App {
         }
 
         const route = state.route as AppRouteState;
-        return route.view ? route : null;
+        if (!route.view) {
+            return null;
+        }
+
+        const libraryRouteRaw = state.libraryRoute as Partial<LibraryRouteState> | undefined;
+        const libraryRoute: LibraryRouteState = libraryRouteRaw && typeof libraryRouteRaw === 'object' && libraryRouteRaw.view
+            ? {
+                view: libraryRouteRaw.view,
+                offset: libraryRouteRaw.offset,
+                artistId: libraryRouteRaw.artistId,
+                artistName: libraryRouteRaw.artistName,
+                albumId: libraryRouteRaw.albumId,
+                albumTitle: libraryRouteRaw.albumTitle,
+                albumArtist: libraryRouteRaw.albumArtist
+            }
+            : this.getCurrentLibraryRoute();
+
+        return {
+            app: 'squidly',
+            tab: this.normalizePage(state.tab),
+            route,
+            libraryRoute
+        };
     }
 
-    private parseRouteFromUrl(): AppRouteState | null {
-        const params = new URLSearchParams(window.location.search);
+    private parseRouteFromUrl(params: URLSearchParams): AppRouteState | null {
         const view = params.get('view');
         if (!view) {
             return null;
@@ -2134,54 +2244,151 @@ class App {
         return view === 'home' ? { view: 'home' } : null;
     }
 
-    private buildRouteUrl(route: AppRouteState): string {
-        if (route.view === 'home') {
-            return window.location.pathname;
+    private parseLibraryRouteFromUrl(params: URLSearchParams): LibraryRouteState | null {
+        const view = params.get('lib_view');
+        if (!view) {
+            return null;
         }
 
-        const params = new URLSearchParams();
-        params.set('view', route.view);
+        if (view === 'artists') {
+            const offset = Number(params.get('lib_offset') || '0');
+            return {
+                view,
+                offset: Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
+            };
+        }
 
-        if (route.view === 'search') {
-            params.set('type', route.searchType || 's');
-            if (route.query) {
-                params.set('q', route.query);
+        if (view === 'artist_albums') {
+            const artistId = params.get('lib_artist_id') || '';
+            if (!artistId) {
+                return null;
+            }
+            return {
+                view,
+                artistId,
+                artistName: params.get('lib_artist_name') || 'Artist'
+            };
+        }
+
+        if (view === 'album_tracks') {
+            const albumId = params.get('lib_album_id') || '';
+            if (!albumId) {
+                return null;
+            }
+            const artistId = params.get('lib_artist_id') || undefined;
+            const artistName = params.get('lib_artist_name') || undefined;
+            return {
+                view,
+                albumId,
+                albumTitle: params.get('lib_album_title') || 'Album',
+                albumArtist: params.get('lib_album_artist') || undefined,
+                artistId,
+                artistName
+            };
+        }
+
+        return null;
+    }
+
+    private parseStateFromUrl(): AppHistoryState | null {
+        const params = new URLSearchParams(window.location.search);
+        const exploreRoute = this.parseRouteFromUrl(params) || { view: 'home' };
+        const libraryRoute = this.parseLibraryRouteFromUrl(params) || this.getCurrentLibraryRoute();
+        const tab = this.normalizePage(params.get('tab') || 'explore');
+
+        const hasTab = params.has('tab');
+        const hasExplore = params.has('view');
+        const hasLibrary = params.has('lib_view');
+        if (!hasTab && !hasExplore && !hasLibrary) {
+            return null;
+        }
+
+        return {
+            app: 'squidly',
+            tab,
+            route: exploreRoute,
+            libraryRoute
+        };
+    }
+
+    private buildHistoryUrl(state: AppHistoryState): string {
+        const tab = this.normalizePage(state.tab);
+        const route = state.route;
+        const libraryRoute = state.libraryRoute;
+        const params = new URLSearchParams();
+
+        if (tab === 'explore') {
+            if (route.view !== 'home') {
+                params.set('view', route.view);
+            }
+
+            if (route.view === 'search') {
+                params.set('type', route.searchType || 's');
+                if (route.query) {
+                    params.set('q', route.query);
+                }
+            }
+
+            if (route.view === 'artist' && route.artistId) {
+                params.set('id', String(route.artistId));
+            }
+
+            if ((route.view === 'album' || route.view === 'similar_albums') && route.albumId) {
+                params.set('id', String(route.albumId));
+            }
+
+            if (route.view === 'similar_tracks' && route.trackId) {
+                params.set('id', String(route.trackId));
+            }
+
+            if ((route.view === 'playlist' || route.view === 'listenbrainz_playlist_tracks') && route.playlistId) {
+                params.set('id', route.playlistId);
+            }
+
+            if (route.view === 'listenbrainz_playlists' && route.username) {
+                params.set('username', route.username);
+            }
+
+            if (route.view === 'listenbrainz_playlist_tracks' && route.username) {
+                params.set('username', route.username);
+            }
+
+            if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
+                params.set('url', route.playlistUrl);
+            }
+
+            if (route.view === 'similar_artists' && route.artistId) {
+                params.set('id', String(route.artistId));
+            }
+        } else {
+            params.set('tab', tab);
+            if (tab === 'library') {
+                params.set('lib_view', libraryRoute.view);
+
+                if (libraryRoute.view === 'artists') {
+                    params.set('lib_offset', String(Math.max(0, Math.floor(libraryRoute.offset || 0))));
+                }
+
+                if (libraryRoute.artistId) {
+                    params.set('lib_artist_id', libraryRoute.artistId);
+                }
+                if (libraryRoute.artistName) {
+                    params.set('lib_artist_name', libraryRoute.artistName);
+                }
+                if (libraryRoute.albumId) {
+                    params.set('lib_album_id', libraryRoute.albumId);
+                }
+                if (libraryRoute.albumTitle) {
+                    params.set('lib_album_title', libraryRoute.albumTitle);
+                }
+                if (libraryRoute.albumArtist) {
+                    params.set('lib_album_artist', libraryRoute.albumArtist);
+                }
             }
         }
 
-        if (route.view === 'artist' && route.artistId) {
-            params.set('id', String(route.artistId));
-        }
-
-        if ((route.view === 'album' || route.view === 'similar_albums') && route.albumId) {
-            params.set('id', String(route.albumId));
-        }
-
-        if (route.view === 'similar_tracks' && route.trackId) {
-            params.set('id', String(route.trackId));
-        }
-
-        if ((route.view === 'playlist' || route.view === 'listenbrainz_playlist_tracks') && route.playlistId) {
-            params.set('id', route.playlistId);
-        }
-
-        if (route.view === 'listenbrainz_playlists' && route.username) {
-            params.set('username', route.username);
-        }
-
-        if (route.view === 'listenbrainz_playlist_tracks' && route.username) {
-            params.set('username', route.username);
-        }
-
-        if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
-            params.set('url', route.playlistUrl);
-        }
-
-        if (route.view === 'similar_artists' && route.artistId) {
-            params.set('id', String(route.artistId));
-        }
-
-        return `${window.location.pathname}?${params.toString()}`;
+        const query = params.toString();
+        return query ? `${window.location.pathname}?${query}` : window.location.pathname;
     }
 
     private pushHistoryRoute(route: AppRouteState): void {
@@ -2189,13 +2396,77 @@ class App {
             return;
         }
 
-        const state: AppHistoryState = { app: 'squidly', route };
-        window.history.pushState(state, '', this.buildRouteUrl(route));
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('explore'),
+            route: { ...route },
+            tab: 'explore'
+        };
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
     }
 
-    private replaceHistoryRoute(route: AppRouteState): void {
-        const state: AppHistoryState = { app: 'squidly', route };
-        window.history.replaceState(state, '', this.buildRouteUrl(route));
+    private pushHistoryLibraryRoute(route: LibraryRouteState): void {
+        if (this.isHandlingPopState) {
+            return;
+        }
+
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('library'),
+            libraryRoute: { ...route },
+            tab: 'library'
+        };
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private pushHistoryTab(tab: AppPage): void {
+        if (this.isHandlingPopState) {
+            return;
+        }
+
+        const state = this.buildCurrentHistoryState(tab);
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private replaceHistoryState(state: AppHistoryState): void {
+        window.history.replaceState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private async applyHistoryState(state: AppHistoryState): Promise<void> {
+        const tab = this.normalizePage(state.tab);
+        const exploreRoute = state.route?.view ? state.route : { view: 'home' };
+        const libraryRoute = state.libraryRoute?.view ? state.libraryRoute : this.getCurrentLibraryRoute();
+
+        this.currentExploreRoute = { ...exploreRoute };
+        if (tab !== this.currentPage) {
+            this.switchPage(tab, false);
+        }
+
+        if (tab === 'explore') {
+            await this.navigateToRoute(exploreRoute, false);
+            return;
+        }
+
+        if (tab === 'library') {
+            await this.navigateLibraryToRoute(libraryRoute, false);
+        }
+    }
+
+    private async navigateLibraryToRoute(route: LibraryRouteState, updateHistory: boolean): Promise<void> {
+        if (route.view === 'artist_albums' && route.artistId) {
+            await this.loadLibraryArtistAlbums(route.artistId, route.artistName || 'Artist', updateHistory);
+            return;
+        }
+
+        if (route.view === 'album_tracks' && route.albumId) {
+            await this.loadLibraryAlbumTracks(
+                route.albumId,
+                route.albumTitle || 'Album',
+                route.albumArtist,
+                updateHistory
+            );
+            return;
+        }
+
+        await this.loadLibraryArtists(route.offset || 0, updateHistory);
     }
 
     private async navigateToRoute(route: AppRouteState, updateHistory: boolean): Promise<void> {
