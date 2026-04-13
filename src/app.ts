@@ -1328,10 +1328,55 @@ class App {
         `;
     }
 
+    private getLibraryArtistPageWindow(currentPage: number, totalPages: number): number[] {
+        if (totalPages <= 1) {
+            return [1];
+        }
+
+        const pages = new Set<number>([1, totalPages]);
+        const windowRadius = 2;
+
+        for (let page = currentPage - windowRadius; page <= currentPage + windowRadius; page += 1) {
+            if (page >= 1 && page <= totalPages) {
+                pages.add(page);
+            }
+        }
+
+        return Array.from(pages).sort((a, b) => a - b);
+    }
+
+    private formatLibraryArtistPageButtons(currentPage: number, totalPages: number): string {
+        const pages = this.getLibraryArtistPageWindow(currentPage, totalPages);
+        const parts: string[] = [];
+
+        for (let idx = 0; idx < pages.length; idx += 1) {
+            const page = pages[idx];
+            const prev = idx > 0 ? pages[idx - 1] : null;
+
+            if (prev !== null && page - prev > 1) {
+                parts.push('<span class="library-page-gap" aria-hidden="true">...</span>');
+            }
+
+            const offset = (page - 1) * this.libraryArtistsPageSize;
+            const isCurrent = page === currentPage;
+            parts.push(`
+                <button
+                    class="library-page-btn library-page-number${isCurrent ? ' is-active' : ''}"
+                    data-library-offset="${offset}"
+                    ${isCurrent ? 'disabled aria-current="page"' : ''}
+                >${page}</button>
+            `);
+        }
+
+        return parts.join('');
+    }
+
     private renderLibraryArtists(artists: PlexLibraryArtist[]): void {
         this.libraryLoadedOnce = true;
         const currentPage = Math.floor(this.libraryArtistsOffset / this.libraryArtistsPageSize) + 1;
         const totalPages = Math.max(1, Math.ceil(this.libraryArtistsTotal / this.libraryArtistsPageSize));
+        const firstOffset = 0;
+        const lastOffset = Math.max(0, (totalPages - 1) * this.libraryArtistsPageSize);
         const prevOffset = Math.max(0, this.libraryArtistsOffset - this.libraryArtistsPageSize);
         const nextOffset = this.libraryArtistsOffset + this.libraryArtistsPageSize;
         const hasPrev = this.libraryArtistsOffset > 0;
@@ -1350,9 +1395,14 @@ class App {
                     : '<div class="library-placeholder"><p>No artists found in Plex library.</p></div>'}
             </div>
             <div class="library-pagination">
+                <button class="library-page-btn" data-library-offset="${firstOffset}" ${hasPrev ? '' : 'disabled'}>First</button>
                 <button class="library-page-btn" data-library-offset="${prevOffset}" ${hasPrev ? '' : 'disabled'}>Previous</button>
                 <span class="library-page-text">Page ${currentPage} of ${totalPages}</span>
+                <div class="library-page-numbers" aria-label="Library artist page navigation">
+                    ${this.formatLibraryArtistPageButtons(currentPage, totalPages)}
+                </div>
                 <button class="library-page-btn" data-library-offset="${nextOffset}" ${hasNext ? '' : 'disabled'}>Next</button>
+                <button class="library-page-btn" data-library-offset="${lastOffset}" ${hasNext ? '' : 'disabled'}>Last</button>
             </div>
         `;
     }

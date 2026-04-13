@@ -1865,6 +1865,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 1rem;
+    flex-wrap: wrap;
 }
 
 .library-page-btn {
@@ -1886,8 +1887,38 @@ body {
     cursor: default;
 }
 
+.library-page-btn.library-page-number {
+    min-width: 2.25rem;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+}
+
+.library-page-btn.library-page-number.is-active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+    opacity: 1;
+}
+
+.library-page-btn.library-page-number.is-active:disabled {
+    cursor: default;
+}
+
 .library-page-text {
     color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.library-page-numbers {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.library-page-gap {
+    color: var(--text-muted);
     font-size: 0.875rem;
 }
 
