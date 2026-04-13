@@ -302,6 +302,7 @@ class App {
     private searchInput: HTMLInputElement;
     private searchTypeSelect: HTMLSelectElement;
     private searchButton: HTMLButtonElement;
+    private exploreBreadcrumbContainer: HTMLElement | null;
     private resultsContainer: HTMLElement;
     private libraryResultsContainer: HTMLElement;
     private statusButton: HTMLButtonElement;
@@ -396,6 +397,134 @@ class App {
     private libraryCurrentArtist: { id: string; name: string } | null = null;
     private libraryCurrentAlbum: { id: string; title: string; artist?: string } | null = null;
     private libraryLoadedOnce: boolean = false;
+    private currentExploreRoute: AppRouteState = { view: 'home' };
+    private exploreBreadcrumbRoutes: AppRouteState[] = [];
+    private exploreSearchRoute: AppRouteState | null = null;
+    private exploreArtistName: string | null = null;
+    private exploreAlbumTitle: string | null = null;
+    private explorePlaylistTitle: string | null = null;
+    private exploreLastfmPlaylistName: string | null = null;
+    private exploreYoutubePlaylistName: string | null = null;
+    private listenbrainzCurrentUsername: string | null = null;
+    private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
+
+    private getSearchTypeName(searchType?: string): string {
+        const normalized = (searchType || 's').toLowerCase();
+        const labels: Record<string, string> = {
+            s: 'Tracks',
+            a: 'Artists',
+            al: 'Albums',
+            p: 'Playlists',
+            trackid: 'Track ID',
+            lastfm: 'Last.fm',
+            youtube_music: 'YouTube Music',
+            listenbrainz: 'ListenBrainz'
+        };
+        return labels[normalized] || 'Results';
+    }
+
+    private renderExploreTopBarBreadcrumb(route: AppRouteState = this.currentExploreRoute): void {
+        if (!this.exploreBreadcrumbContainer) {
+            return;
+        }
+
+        const crumbs: Array<{ label: string; route?: AppRouteState }> = [];
+        const username = route.username || this.listenbrainzCurrentUsername || '';
+        const playlistTitle = this.listenbrainzCurrentPlaylist?.title || this.explorePlaylistTitle || '';
+
+        if (route.view === 'home') {
+            crumbs.push({ label: 'Explore' });
+        } else if (route.view === 'search') {
+            const query = route.query || this.searchInput?.value?.trim() || '';
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: query ? `${this.getSearchTypeName(route.searchType)} - "${query}"` : this.getSearchTypeName(route.searchType) });
+        } else if (route.view === 'artist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (this.exploreSearchRoute?.view === 'search') {
+                const query = this.exploreSearchRoute.query || '';
+                const label = query ? `${this.getSearchTypeName(this.exploreSearchRoute.searchType)} - "${query}"` : this.getSearchTypeName(this.exploreSearchRoute.searchType);
+                crumbs.push({ label, route: { ...this.exploreSearchRoute } });
+            }
+            crumbs.push({ label: this.exploreArtistName || 'Artist' });
+        } else if (route.view === 'album') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (this.exploreSearchRoute?.view === 'search') {
+                const query = this.exploreSearchRoute.query || '';
+                const label = query ? `${this.getSearchTypeName(this.exploreSearchRoute.searchType)} - "${query}"` : this.getSearchTypeName(this.exploreSearchRoute.searchType);
+                crumbs.push({ label, route: { ...this.exploreSearchRoute } });
+            }
+            crumbs.push({ label: this.exploreAlbumTitle || 'Album' });
+        } else if (route.view === 'playlist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: this.explorePlaylistTitle || 'Playlist' });
+        } else if (route.view === 'listenbrainz_playlists') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'ListenBrainz' });
+            if (username) {
+                crumbs.push({ label: username });
+            }
+        } else if (route.view === 'listenbrainz_playlist_tracks') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (username) {
+                crumbs.push({ label: 'ListenBrainz', route: { view: 'listenbrainz_playlists', username } });
+                crumbs.push({ label: username, route: { view: 'listenbrainz_playlists', username } });
+            } else {
+                crumbs.push({ label: 'ListenBrainz' });
+            }
+            crumbs.push({ label: playlistTitle || 'Playlist' });
+        } else if (route.view === 'lastfm_playlist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Last.fm' });
+            crumbs.push({ label: this.exploreLastfmPlaylistName || 'Playlist' });
+        } else if (route.view === 'youtube_music_playlist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'YouTube Music' });
+            crumbs.push({ label: this.exploreYoutubePlaylistName || 'Playlist' });
+        } else if (route.view === 'similar_tracks') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Tracks' });
+        } else if (route.view === 'similar_albums') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Albums' });
+        } else if (route.view === 'similar_artists') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Artists' });
+        } else {
+            crumbs.push({ label: 'Explore' });
+        }
+
+        this.exploreBreadcrumbRoutes = [];
+        const parts: string[] = [];
+
+        for (let index = 0; index < crumbs.length; index += 1) {
+            const crumb = crumbs[index];
+            const isLast = index === crumbs.length - 1;
+            const safeLabel = this.escapeHtml(crumb.label);
+
+            if (isLast || !crumb.route) {
+                parts.push(`<span class="library-crumb-current">${safeLabel}</span>`);
+            } else {
+                const routeIndex = this.exploreBreadcrumbRoutes.push({ ...crumb.route }) - 1;
+                parts.push(`<button class="library-crumb-btn" data-explore-route-index="${routeIndex}">${safeLabel}</button>`);
+            }
+
+            if (!isLast) {
+                parts.push('<span class="library-crumb-separator">&gt;</span>');
+            }
+        }
+
+        this.exploreBreadcrumbContainer.innerHTML = parts.join('');
+        this.exploreBreadcrumbContainer.style.display = parts.length > 0 ? 'flex' : 'none';
+    }
+
+    private renderTopBarTitle(title: string): void {
+        const topBarLeft = document.querySelector('.top-bar-left');
+        if (!topBarLeft) {
+            return;
+        }
+
+        topBarLeft.innerHTML = `<h2>${this.escapeHtml(title)}</h2>`;
+    }
 
     constructor() {
         // New page navigation elements
@@ -413,6 +542,7 @@ class App {
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
         this.searchTypeSelect = document.getElementById('searchType') as HTMLSelectElement;
         this.searchButton = document.getElementById('searchButton') as HTMLButtonElement;
+        this.exploreBreadcrumbContainer = document.getElementById('exploreBreadcrumb');
         this.resultsContainer = document.getElementById('results') as HTMLElement;
         this.libraryResultsContainer = document.getElementById('libraryResults') as HTMLElement;
         
@@ -505,6 +635,21 @@ class App {
             this.searchInput.addEventListener('keypress', (e: KeyboardEvent) => {
                 if (e.key === 'Enter') {
                     this.handleSearch();
+                }
+            });
+        }
+
+        if (this.exploreBreadcrumbContainer) {
+            this.exploreBreadcrumbContainer.addEventListener('click', (e: Event) => {
+                const target = e.target as HTMLElement;
+                const button = target.closest('[data-explore-route-index]') as HTMLElement | null;
+                if (button) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const routeIndex = Number(button.getAttribute('data-explore-route-index') || '-1');
+                    if (Number.isInteger(routeIndex) && routeIndex >= 0 && routeIndex < this.exploreBreadcrumbRoutes.length) {
+                        void this.navigateToRoute({ ...this.exploreBreadcrumbRoutes[routeIndex] }, true);
+                    }
                 }
             });
         }
@@ -992,7 +1137,7 @@ class App {
             if (playlistCard) {
                 const playlistId = playlistCard.getAttribute('data-playlist-id');
                 if (playlistId) {
-                    void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId }, true);
+                    void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined }, true);
                     return;
                 }
             }
@@ -1179,19 +1324,21 @@ class App {
         this.currentPage = pageName;
 
         // Update top bar title based on page
-        const topBarLeft = document.querySelector('.top-bar-left');
-        if (topBarLeft) {
-            const pageNames: Record<string, string> = {
-                explore: 'Explore',
-                library: 'Library',
-                settings: 'Settings',
-                mirrors: 'Hi-Fi Mirrors',
-                jobs: 'Jobs'
-            };
-            const h2 = topBarLeft.querySelector('h2') || document.createElement('h2');
-            h2.textContent = pageNames[pageName] || 'Squidly';
-            if (!topBarLeft.querySelector('h2')) {
-                topBarLeft.appendChild(h2);
+        const pageNames: Record<string, string> = {
+            explore: 'Explore',
+            library: 'Library',
+            settings: 'Settings',
+            mirrors: 'Hi-Fi Mirrors',
+            jobs: 'Jobs'
+        };
+        if (pageName === 'explore') {
+            this.renderTopBarTitle('Explore');
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+        } else {
+            this.renderTopBarTitle(pageNames[pageName] || 'Squidly');
+            if (this.exploreBreadcrumbContainer) {
+                this.exploreBreadcrumbContainer.style.display = 'none';
+                this.exploreBreadcrumbContainer.innerHTML = '';
             }
         }
 
@@ -1960,7 +2107,8 @@ class App {
 
         if (view === 'listenbrainz_playlist_tracks') {
             const playlistId = params.get('id') || '';
-            return playlistId ? { view, playlistId } : null;
+            const username = params.get('username') || undefined;
+            return playlistId ? { view, playlistId, username } : null;
         }
 
         if (view === 'lastfm_playlist' || view === 'youtube_music_playlist') {
@@ -2021,6 +2169,10 @@ class App {
             params.set('username', route.username);
         }
 
+        if (route.view === 'listenbrainz_playlist_tracks' && route.username) {
+            params.set('username', route.username);
+        }
+
         if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
             params.set('url', route.playlistUrl);
         }
@@ -2051,6 +2203,12 @@ class App {
         if (this.pendingRequestController) {
             this.pendingRequestController.abort();
         }
+
+        this.currentExploreRoute = { ...route };
+        if (route.view === 'search') {
+            this.exploreSearchRoute = { ...route };
+        }
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
         // Create a new controller for this route's requests
         this.pendingRequestController = new AbortController();
@@ -2098,7 +2256,7 @@ class App {
         }
 
         if (route.view === 'listenbrainz_playlist_tracks' && route.playlistId) {
-            await this.fetchListenbrainzPlaylistTracks(route.playlistId, updateHistory);
+            await this.fetchListenbrainzPlaylistTracks(route.playlistId, updateHistory, route.username);
             return;
         }
 
@@ -3722,6 +3880,10 @@ class App {
             });
         }
 
+        this.currentExploreRoute = { view: 'search', searchType, query };
+        this.exploreSearchRoute = { ...this.currentExploreRoute };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+
         this.displayMessage('Searching...');
 
         try {
@@ -3741,6 +3903,9 @@ class App {
 
     private async handleLastfmPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'lastfm_playlist', playlistUrl };
+        this.exploreLastfmPlaylistName = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'lastfm_playlist', playlistUrl });
         }
@@ -3764,6 +3929,8 @@ class App {
 
             const scrapeData = await scrapeResponse.json();
             const playlistName = scrapeData.playlistName || 'Last.fm Playlist';
+            this.exploreLastfmPlaylistName = playlistName;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             const tracks = scrapeData.tracks || [];
             const totalTracks = tracks.length;
 
@@ -3882,6 +4049,9 @@ class App {
 
     private async handleYoutubeMusicPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'youtube_music_playlist', playlistUrl };
+        this.exploreYoutubePlaylistName = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'youtube_music_playlist', playlistUrl });
         }
@@ -3904,6 +4074,8 @@ class App {
 
             const scrapeData = await scrapeResponse.json();
             const playlistName = scrapeData.playlistName || 'YouTube Music Playlist';
+            this.exploreYoutubePlaylistName = playlistName;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             const tracks = scrapeData.tracks || [];
             const totalTracks = tracks.length;
 
@@ -4028,6 +4200,11 @@ class App {
             this.pushHistoryRoute({ view: 'listenbrainz_playlists', username });
         }
 
+        this.currentExploreRoute = { view: 'listenbrainz_playlists', username };
+        this.listenbrainzCurrentUsername = username;
+        this.listenbrainzCurrentPlaylist = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+
         this.displayMessage('Loading ListenBrainz playlists...');
 
         try {
@@ -4052,6 +4229,7 @@ class App {
             const playlists = playlistsData
                 .map((item: any) => item.playlist)
                 .filter((playlist: any) => playlist && playlist.title);
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
@@ -4090,10 +4268,16 @@ class App {
         `;
     }
 
-    private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
+    private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true, usernameOverride?: string): Promise<void> {
         this.downloadAllScope = 'loose';
+        const username = (usernameOverride || this.listenbrainzCurrentUsername || '').trim();
+        if (username) {
+            this.listenbrainzCurrentUsername = username;
+        }
+        this.currentExploreRoute = { view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId });
+            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined });
         }
         this.stopPlayback();
         this.displayMessage('Loading ListenBrainz playlist tracks...');
@@ -4137,6 +4321,9 @@ class App {
             // Get playlist info for display
             const playlistTitle = playlist.title || 'Untitled Playlist';
             const playlistCreator = playlist.creator || 'Unknown';
+            this.listenbrainzCurrentPlaylist = { id: playlistId, title: playlistTitle };
+            this.explorePlaylistTitle = playlistTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             // Set up initial display with progress bar for searching
             this.resultsContainer.innerHTML = `
@@ -4272,6 +4459,9 @@ class App {
 
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'search', searchType, query };
+        this.exploreSearchRoute = { ...this.currentExploreRoute };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         this.stopPlayback();
         this.updatePlexPlaylistContainerVisibility(true);
         if (data.error) {
@@ -4857,6 +5047,9 @@ class App {
 
     private async fetchPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'playlist', playlistId };
+        this.explorePlaylistTitle = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'playlist', playlistId });
         }
@@ -4929,6 +5122,8 @@ class App {
             this.updatePlexPlaylistContainerVisibility(true);
 
             const playlistTitle = playlistMeta.title || playlistMeta.name || 'Playlist';
+            this.explorePlaylistTitle = playlistTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
@@ -5749,6 +5944,9 @@ class App {
 
     private async fetchArtistAlbums(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'artist', artistId };
+        this.exploreArtistName = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'artist', artistId });
         }
@@ -5783,6 +5981,8 @@ class App {
             const artistName = albums[0]?.artist?.name || albums[0]?.artists?.[0]?.name || 'Artist';
             const artistPictureId = albums[0]?.artist?.picture || albums[0]?.artists?.[0]?.picture || null;
             const artistPictureUrl = artistPictureId ? this.formatTidalImageUrl(artistPictureId, 750) : null;
+            this.exploreArtistName = artistName;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             // Display albums with hero card (matching album hero structure)
             this.resultsContainer.innerHTML = `
@@ -5869,6 +6069,9 @@ class App {
 
     private async fetchAlbumTracks(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'album';
+        this.currentExploreRoute = { view: 'album', albumId };
+        this.exploreAlbumTitle = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'album', albumId });
         }
@@ -5922,6 +6125,8 @@ class App {
 
             // Get album info for display
             const albumTitle = albumData.title || 'Album';
+            this.exploreAlbumTitle = albumTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             const artistNames = albumData.artists && albumData.artists.length > 0
                 ? albumData.artists.map(a => a.name).join(', ')
                 : albumData.artist?.name || 'Unknown Artist';
@@ -6033,6 +6238,8 @@ class App {
 
     private async fetchSimilarTracks(trackId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_tracks', trackId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_tracks', trackId });
         }
@@ -6107,6 +6314,8 @@ class App {
 
     private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_albums', albumId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_albums', albumId });
         }
@@ -6165,6 +6374,8 @@ class App {
 
     private async fetchSimilarArtists(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_artists', artistId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_artists', artistId });
         }

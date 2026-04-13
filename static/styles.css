@@ -186,7 +186,7 @@ body {
     padding: 1rem 2rem;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 2rem;
     height: 70px;
 }
@@ -199,6 +199,10 @@ body {
     margin: 0;
     font-size: 1.25rem;
     font-weight: 600;
+}
+
+.top-bar-left .library-breadcrumb {
+    margin-bottom: 0;
 }
 
 .search-container-compact {
