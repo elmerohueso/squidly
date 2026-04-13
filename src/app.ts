@@ -378,7 +378,7 @@ class App {
     private currentDownloadController: AbortController | null = null;
     private downloadAllScope: 'album' | 'loose' = 'loose';
     private currentAudio: HTMLAudioElement | null = null;
-    private currentPlayingTrackId: number | null = null;
+    private currentPlayingTrackId: string | null = null;
     private currentPlayButton: HTMLButtonElement | null = null;
     private currentAudioCleanup: {
         audio: HTMLAudioElement;
@@ -1030,6 +1030,52 @@ class App {
             this.libraryResultsContainer.addEventListener('click', (e: MouseEvent) => {
                 const target = e.target as HTMLElement;
 
+                const artistHeroPlayBtn = target.closest('.library-artist-hero-play-btn') as HTMLButtonElement | null;
+                if (artistHeroPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistId = artistHeroPlayBtn.getAttribute('data-library-artist-id') || this.libraryCurrentArtist?.id || '';
+                    if (artistId) {
+                        void this.handlePlayLibraryArtist(artistId, artistHeroPlayBtn);
+                    }
+                    return;
+                }
+
+                const albumHeroPlayBtn = target.closest('.library-album-hero-play-btn') as HTMLButtonElement | null;
+                if (albumHeroPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const albumId = albumHeroPlayBtn.getAttribute('data-library-album-id') || this.libraryCurrentAlbum?.id || '';
+                    if (albumId) {
+                        void this.handlePlayLibraryAlbum(albumId, albumHeroPlayBtn);
+                    }
+                    return;
+                }
+
+                const gridPlayBtn = target.closest('.grid-play-btn') as HTMLButtonElement | null;
+                if (gridPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const trackRow = gridPlayBtn.closest('[data-library-track-id]') as HTMLElement | null;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-library-track-id') || '';
+                        if (trackId) {
+                            void this.handlePlayLibraryToggle(trackId, gridPlayBtn);
+                        }
+                        return;
+                    }
+
+                    const albumRow = gridPlayBtn.closest('[data-library-album-id]') as HTMLElement | null;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-library-album-id') || '';
+                        if (albumId) {
+                            void this.handlePlayLibraryAlbum(albumId, gridPlayBtn);
+                        }
+                        return;
+                    }
+                }
+
                 const breadcrumbButton = target.closest('[data-library-crumb]') as HTMLButtonElement | null;
                 if (breadcrumbButton) {
                     e.preventDefault();
@@ -1081,7 +1127,7 @@ class App {
                 }
 
                 const albumRow = target.closest('[data-library-album-id]') as HTMLElement | null;
-                if (albumRow) {
+                if (albumRow && !target.closest('.grid-cell.grid-col-actions')) {
                     e.preventDefault();
                     const albumId = albumRow.getAttribute('data-library-album-id') || '';
                     const albumTitle = albumRow.getAttribute('data-library-album-title') || 'Album';
@@ -1242,6 +1288,11 @@ class App {
                 <div class="grid-cell grid-col-artist"><span class="library-album-artist-name">${artist}</span></div>
                 <div class="grid-cell grid-col-year">${year}</div>
                 <div class="grid-cell grid-col-track-count">${trackCount}</div>
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="Play" aria-label="Play" data-library-album-id="${this.escapeHtml(album.id)}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -1262,12 +1313,17 @@ class App {
         const qualityLabel = [qualityFormat, qualityBitrate].filter(Boolean).join(' • ') || '—';
 
         return `
-            <div class="tracks-grid-row" data-plex-library-row="true">
+            <div class="tracks-grid-row" data-plex-library-row="true" data-library-track-id="${this.escapeHtml(track.id)}">
                 <div class="grid-cell grid-col-track-number">${numberLabel}</div>
                 <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
                 <div class="grid-cell grid-col-artist"><span class="track-artist-name library-track-artist-name" data-library-artist-id="${artistId}" data-library-artist-name="${artist}" title="View albums by ${artist}">${artist}</span></div>
                 <div class="grid-cell grid-col-quality">${durationLabel}</div>
                 <div class="grid-cell grid-col-quality">${qualityLabel}</div>
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="Play" aria-label="Play" data-library-track-id="${this.escapeHtml(track.id)}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -1316,6 +1372,11 @@ class App {
                         <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
                     </div>
                 </div>
+                <div class="artist-actions">
+                    <button class="album-action-btn primary library-artist-hero-play-btn" data-library-artist-id="${this.escapeHtml(this.libraryCurrentArtist?.id || '')}" title="Play artist" aria-label="Play artist" ${albums.length === 0 ? 'disabled' : ''}>
+                        ${this.getPlayIconSvg()}
+                    </button>
+                </div>
             </div>
             <div class="results-header">
                 <div class="results-header-top">
@@ -1330,6 +1391,7 @@ class App {
                         <div class="grid-cell grid-col-artist">ARTIST</div>
                         <div class="grid-cell grid-col-year">YEAR</div>
                         <div class="grid-cell grid-col-track-count">TRACKS</div>
+                        <div class="grid-cell grid-col-actions">ACTIONS</div>
                     </div>
                     ${albums.length > 0
                         ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
@@ -1382,6 +1444,11 @@ class App {
                         </div>
                     </div>
                 </div>
+                <div class="album-actions">
+                    <button class="album-action-btn primary library-album-hero-play-btn" data-library-album-id="${this.escapeHtml(this.libraryCurrentAlbum?.id || '')}" title="Play album" aria-label="Play album" ${tracks.length === 0 ? 'disabled' : ''}>
+                        ${this.getPlayIconSvg()}
+                    </button>
+                </div>
             </div>
             <div class="results-header">
                 <div class="results-header-top">
@@ -1396,6 +1463,7 @@ class App {
                         <div class="grid-cell grid-col-artist">Artist</div>
                         <div class="grid-cell grid-col-quality">Duration</div>
                         <div class="grid-cell grid-col-quality">QUALITY</div>
+                        <div class="grid-cell grid-col-actions">Actions</div>
                     </div>
                     ${tracks.length > 0
                         ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
@@ -5182,7 +5250,8 @@ class App {
         trackCard: HTMLElement,
         playButton: HTMLButtonElement
     ): Promise<void> {
-        if (this.currentPlayingTrackId === trackId) {
+        const playbackTrackId = `deezer:${trackId}`;
+        if (this.currentPlayingTrackId === playbackTrackId) {
             this.stopPlayback();
             return;
         }
@@ -5190,7 +5259,7 @@ class App {
         this.stopPlayback();
         this.setPlayButtonState(playButton, true);
         this.setPlayButtonLoading(playButton, true);
-        this.currentPlayingTrackId = trackId;
+        this.currentPlayingTrackId = playbackTrackId;
         this.currentPlayButton = playButton;
 
         const audio = new Audio();
@@ -5251,6 +5320,72 @@ class App {
         }
 
         throw new Error('No playable stream found');
+    }
+
+    private async handlePlayLibraryToggle(trackId: string, playButton: HTMLButtonElement): Promise<void> {
+        const playbackTrackId = `plex:${trackId}`;
+        if (this.currentPlayingTrackId === playbackTrackId) {
+            this.stopPlayback();
+            return;
+        }
+
+        this.stopPlayback();
+        this.setPlayButtonState(playButton, true);
+        this.setPlayButtonLoading(playButton, true);
+        this.currentPlayingTrackId = playbackTrackId;
+        this.currentPlayButton = playButton;
+
+        const audio = new Audio();
+        audio.preload = 'none';
+        audio.crossOrigin = 'anonymous';
+        this.currentAudio = audio;
+
+        const onEnded = () => {
+            if (this.currentAudio === audio) {
+                this.stopPlayback();
+            }
+        };
+        const onError = () => {
+            if (this.currentAudio === audio) {
+                this.stopPlayback();
+            }
+        };
+        audio.addEventListener('ended', onEnded);
+        audio.addEventListener('error', onError);
+        this.currentAudioCleanup = { audio, onEnded, onError };
+
+        try {
+            const streamUrl = await this.fetchLibraryTrackStreamUrl(trackId);
+            audio.src = streamUrl;
+            this.setPlayButtonLoading(playButton, false);
+            await audio.play();
+        } catch (error) {
+            console.warn('[PLAYBACK] Failed to start Plex library playback:', error);
+            this.setPlayButtonLoading(playButton, false);
+            this.stopPlayback();
+        }
+    }
+
+    private async fetchLibraryTrackStreamUrl(trackId: string): Promise<string> {
+        const params = new URLSearchParams();
+        const userId = this.getSelectedPlexUserId();
+        if (userId) {
+            params.set('user_id', userId);
+        }
+
+        const query = params.toString();
+        const response = await fetch(`/api/plex/library/tracks/${encodeURIComponent(trackId)}/stream${query ? `?${query}` : ''}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch Plex library stream URL (HTTP ${response.status})`);
+        }
+
+        const data = await response.json().catch(() => ({} as { stream_url?: string }));
+        const streamUrl = (data as { stream_url?: string }).stream_url;
+        if (typeof streamUrl !== 'string' || !streamUrl) {
+            throw new Error('Plex library stream URL missing from response');
+        }
+
+        return streamUrl;
     }
 
     private decodeManifest(manifestBase64: string): { urls?: string[] } | null {
@@ -6665,6 +6800,60 @@ class App {
         } catch (error) {
             console.error('[ALBUM_PLAYBACK] Error playing album:', error);
             this.displayMessage('Error playing album. Please try again.');
+        }
+    }
+
+    private async handlePlayLibraryAlbum(albumId: string, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/albums/${encodeURIComponent(albumId)}/tracks?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex album tracks');
+            }
+
+            const data = await response.json().catch(() => ({} as PlexLibraryAlbumTracksResponse));
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+            if (tracks.length === 0 || !tracks[0].id) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            void this.handlePlayLibraryToggle(tracks[0].id, playButton);
+        } catch (error) {
+            console.error('[ALBUM_PLAYBACK] Error playing Plex library album:', error);
+            this.displayMessage('Error playing album. Please try again.');
+        }
+    }
+
+    private async handlePlayLibraryArtist(artistId: string, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists/${encodeURIComponent(artistId)}/albums?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex artist albums');
+            }
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistAlbumsResponse));
+            const albums = Array.isArray(data.albums) ? data.albums : [];
+            if (albums.length === 0 || !albums[0].id) {
+                this.displayMessage('No albums found for this artist');
+                return;
+            }
+
+            await this.handlePlayLibraryAlbum(albums[0].id, playButton);
+        } catch (error) {
+            console.error('[ARTIST_PLAYBACK] Error playing Plex library artist:', error);
+            this.displayMessage('Error playing artist. Please try again.');
         }
     }
 

@@ -5054,6 +5054,58 @@ def get_plex_album_tracks_endpoint(album_id):
         print(f"[PLEX_LIBRARY] Failed to fetch album tracks {album_id}: {str(e)}", flush=True)
         return jsonify({'error': f'Failed to fetch Plex album tracks: {str(e)}'}), 500
 
+
+@app.route('/api/plex/library/tracks/<track_id>/stream', methods=['GET'])
+def get_plex_library_track_stream_endpoint(track_id):
+    """Return a direct Plex stream URL for a library track."""
+    config = get_plex_config()
+    server_url = str(config.get('server_url') or '').strip()
+    api_token = str(config.get('api_token') or '').strip()
+    library_name = str(config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'Plex server_url, api_token, and library_name must be configured'}), 400
+
+    user_id = (request.args.get('user_id') or '').strip()
+    track_id = str(track_id or '').strip()
+    if not track_id:
+        return jsonify({'error': 'track_id is required'}), 400
+
+    try:
+        plex, library, _ = _resolve_plex_library_context(server_url, api_token, library_name, user_id=user_id)
+        if not library:
+            return jsonify({'error': f'Plex music library "{library_name}" not found'}), 404
+
+        track_item = library.fetchItem(f'/library/metadata/{track_id}')
+        if not track_item:
+            return jsonify({'error': f'Plex track "{track_id}" not found'}), 404
+
+        media_list = getattr(track_item, 'media', None) or []
+        if not media_list:
+            return jsonify({'error': 'No playable media found for track'}), 404
+
+        part_list = getattr(media_list[0], 'parts', None) or []
+        if not part_list:
+            return jsonify({'error': 'No playable media parts found for track'}), 404
+
+        part_key = str(getattr(part_list[0], 'key', '') or '').strip()
+        if not part_key:
+            return jsonify({'error': 'Playable media URL is missing for track'}), 404
+
+        token = str(getattr(plex, '_token', None) or api_token or '').strip()
+        stream_url = _build_plex_image_url(server_url, token, part_key)
+        if not stream_url:
+            return jsonify({'error': 'Failed to build stream URL for track'}), 500
+
+        return jsonify({
+            'success': True,
+            'track_id': track_id,
+            'stream_url': stream_url,
+        })
+    except Exception as e:
+        print(f"[PLEX_LIBRARY] Failed to fetch track stream {track_id}: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch Plex track stream URL: {str(e)}'}), 500
+
 def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
     text = str(value or '').strip().lower()
     if strip_trailing_parenthetical:
