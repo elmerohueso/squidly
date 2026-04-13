@@ -1592,12 +1592,16 @@ body {
 
 /* Library album view grid template (no actions/status column) */
 .albums-grid-wrapper[data-view-mode="library-albums"] .albums-grid-header {
-    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr;
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr;
 }
 
 .albums-grid-wrapper[data-view-mode="library-albums"] .albums-grid-row {
-    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr;
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr;
     cursor: pointer;
+}
+
+.library-album-artist-name {
+    color: var(--text-secondary);
 }
 
 /* Library track view grid template (no actions/status column) */

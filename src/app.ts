@@ -119,6 +119,7 @@ interface PlexLibraryArtistAlbumsResponse {
     artist?: {
         id: string;
         name: string;
+        picture?: string;
     };
     albums?: PlexLibraryAlbum[];
     error?: string;
@@ -130,6 +131,9 @@ interface PlexLibraryAlbumTracksResponse {
         id: string;
         title: string;
         artist?: string;
+        year?: number;
+        track_count?: number;
+        cover?: string;
     };
     tracks?: PlexLibraryTrack[];
     error?: string;
@@ -1070,6 +1074,13 @@ class App {
                     if (albumId) {
                         void this.loadLibraryAlbumTracks(albumId, albumTitle, artistName || undefined);
                     }
+                    return;
+                }
+
+                const albumHeroArtist = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
+                if (albumHeroArtist && this.libraryCurrentArtist) {
+                    e.preventDefault();
+                    void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
                 }
             });
         }
@@ -1213,10 +1224,9 @@ class App {
                     }
                 </div>
                 <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
-                <div class="grid-cell grid-col-artist"><span class="album-artist-name">${artist}</span></div>
+                <div class="grid-cell grid-col-artist"><span class="library-album-artist-name">${artist}</span></div>
                 <div class="grid-cell grid-col-year">${year}</div>
                 <div class="grid-cell grid-col-track-count">${trackCount}</div>
-                <div class="grid-cell grid-col-quality">Plex</div>
             </div>
         `;
     }
@@ -1271,13 +1281,25 @@ class App {
         `;
     }
 
-    private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[]): void {
+    private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[], artistPicture?: string): void {
         this.libraryLoadedOnce = true;
         this.libraryResultsContainer.innerHTML = `
             ${this.formatLibraryBreadcrumb()}
+            <div class="artist-hero-section">
+                <div class="artist-hero-content">
+                    <div class="artist-cover-container">
+                        ${artistPicture
+                            ? `<img src="${artistPicture}" alt="${this.escapeHtml(artistName)}" class="artist-cover">`
+                            : '<div class="artist-cover-placeholder"></div>'}
+                    </div>
+                    <div class="artist-info">
+                        <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
+                    </div>
+                </div>
+            </div>
             <div class="results-header">
                 <div class="results-header-top">
-                    <h2>${this.escapeHtml(artistName)} Albums</h2>
+                    <h2>Albums</h2>
                 </div>
             </div>
             <div class="albums-grid-wrapper" data-view-mode="library-albums">
@@ -1288,7 +1310,6 @@ class App {
                         <div class="grid-cell grid-col-artist">ARTIST</div>
                         <div class="grid-cell grid-col-year">YEAR</div>
                         <div class="grid-cell grid-col-track-count">TRACKS</div>
-                        <div class="grid-cell grid-col-quality">SOURCE</div>
                     </div>
                     ${albums.length > 0
                         ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
@@ -1298,18 +1319,53 @@ class App {
         `;
     }
 
-    private renderLibraryAlbumTracks(albumTitle: string, tracks: PlexLibraryTrack[]): void {
+    private renderLibraryAlbumTracks(
+        albumTitle: string,
+        tracks: PlexLibraryTrack[],
+        albumArtist?: string,
+        albumYear?: number,
+        albumCover?: string
+    ): void {
         this.libraryLoadedOnce = true;
         const maxDisc = tracks.reduce((maxValue, track) => {
             const disc = typeof track.disc_number === 'number' ? track.disc_number : 1;
             return Math.max(maxValue, disc);
         }, 1);
 
+        const totalDurationSeconds = tracks.reduce((sum, track) => {
+            const millis = typeof track.duration === 'number' ? track.duration : 0;
+            return sum + Math.max(0, Math.round(millis / 1000));
+        }, 0);
+        const totalDurationMinutes = Math.floor(totalDurationSeconds / 60);
+        const totalDurationHours = Math.floor(totalDurationMinutes / 60);
+        const remainingMinutes = totalDurationMinutes % 60;
+        const durationStr = totalDurationHours > 0
+            ? `${totalDurationHours}h ${remainingMinutes}m`
+            : `${totalDurationMinutes}m`;
+
         this.libraryResultsContainer.innerHTML = `
             ${this.formatLibraryBreadcrumb()}
+            <div class="album-hero-section">
+                <div class="album-hero-content">
+                    <div class="album-cover-container">
+                        ${albumCover
+                            ? `<img src="${albumCover}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">`
+                            : '<div class="album-cover-placeholder"></div>'}
+                    </div>
+                    <div class="album-info">
+                        <h1 class="album-title">${this.escapeHtml(albumTitle)}</h1>
+                        <p class="album-artist"><span class="track-artist-name" title="View albums by ${this.escapeHtml(albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist')}">${this.escapeHtml(albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist')}</span></p>
+                        <div class="album-metadata">
+                            ${albumYear ? `<span class="metadata-item">${albumYear}</span>` : ''}
+                            <span class="metadata-item">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}</span>
+                            <span class="metadata-item">${durationStr}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="results-header">
                 <div class="results-header-top">
-                    <h2>${this.escapeHtml(albumTitle)} Tracks</h2>
+                    <h2>Tracks</h2>
                 </div>
             </div>
             <div class="tracks-grid-wrapper" data-view-mode="library-tracks">
@@ -1402,7 +1458,11 @@ class App {
 
             const resolvedArtistName = data.artist?.name || artistName;
             this.libraryCurrentArtist = { id: artistId, name: resolvedArtistName };
-            this.renderLibraryArtistAlbums(resolvedArtistName, Array.isArray(data.albums) ? data.albums : []);
+            this.renderLibraryArtistAlbums(
+                resolvedArtistName,
+                Array.isArray(data.albums) ? data.albums : [],
+                data.artist?.picture
+            );
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
                 return;
@@ -1447,7 +1507,13 @@ class App {
             }
             const resolvedAlbumTitle = data.album?.title || albumTitle;
             this.libraryCurrentAlbum = { id: albumId, title: resolvedAlbumTitle, artist: resolvedArtist };
-            this.renderLibraryAlbumTracks(resolvedAlbumTitle, Array.isArray(data.tracks) ? data.tracks : []);
+            this.renderLibraryAlbumTracks(
+                resolvedAlbumTitle,
+                Array.isArray(data.tracks) ? data.tracks : [],
+                resolvedArtist,
+                data.album?.year,
+                data.album?.cover
+            );
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
                 return;

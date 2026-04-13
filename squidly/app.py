@@ -4951,6 +4951,7 @@ def get_plex_artist_albums_endpoint(artist_id):
             'artist': {
                 'id': artist_id,
                 'name': str(getattr(artist_item, 'title', '') or '').strip(),
+                'picture': _build_plex_image_url(server_url, api_token, getattr(artist_item, 'thumb', None)),
             },
             'albums': albums,
         })
@@ -5019,6 +5020,9 @@ def get_plex_album_tracks_endpoint(album_id):
                 'id': album_id,
                 'title': str(getattr(album_item, 'title', '') or '').strip(),
                 'artist': str(getattr(album_item, 'parentTitle', '') or '').strip(),
+                'year': getattr(album_item, 'year', None),
+                'track_count': getattr(album_item, 'leafCount', None),
+                'cover': _build_plex_image_url(server_url, api_token, getattr(album_item, 'thumb', None)),
             },
             'tracks': tracks,
         })
