@@ -2670,7 +2670,7 @@ def index():
     """Serve the main page"""
     return render_template('index.html', plex_credentials_valid=get_plex_credentials_valid())
 
-@app.route('/search/', methods=['GET'])
+@app.route('/api/hifi/search', methods=['GET'])
 def search():
     """
     Unified search endpoint for tracks, albums, artists, playlists, and track-by-ID.
@@ -2806,14 +2806,14 @@ def search():
             'query': query
         }), 502
 
-@app.route('/info/', methods=['GET'])
-def track_info():
+@app.route('/api/hifi/tracks/<track_id>', methods=['GET'])
+def track_info(track_id=None):
     """
     Get detailed track metadata.
     Query parameter:
     - id={trackId} : Tidal track ID
     """
-    track_id = (request.args.get('id') or '').strip()
+    track_id = str(track_id or request.args.get('id') or '').strip()
 
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
@@ -2849,14 +2849,14 @@ def track_info():
             'details': str(e)
         }), 502
 
-@app.route('/album/', methods=['GET'])
-def album_info():
+@app.route('/api/hifi/albums/<album_id>', methods=['GET'])
+def album_info(album_id=None):
     """
     Get album with all tracks.
     Query parameter:
     - id={albumId} : Tidal album ID
     """
-    album_id = request.args.get('id', '').strip()
+    album_id = str(album_id or request.args.get('id', '')).strip()
 
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
@@ -2898,14 +2898,14 @@ def album_info():
             'details': str(e)
         }), 502
 
-@app.route('/artist/', methods=['GET'])
-def artist_info():
+@app.route('/api/hifi/artists/<artist_id>', methods=['GET'])
+def artist_info(artist_id=None):
     """
     Get artist with all albums.
     Query parameter:
     - f={artistId} : Tidal artist ID
     """
-    artist_id = request.args.get('f', '').strip()
+    artist_id = str(artist_id or request.args.get('f', '')).strip()
 
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter (f) is required'}), 400
@@ -2953,14 +2953,14 @@ def artist_info():
             'details': str(e)
         }), 502
 
-@app.route('/playlist/', methods=['GET'])
-def playlist_info():
+@app.route('/api/hifi/playlists/<playlist_id>', methods=['GET'])
+def playlist_info(playlist_id=None):
     """
     Get playlist with all tracks.
     Query parameter:
     - id={playlistId} : Tidal playlist UUID
     """
-    playlist_id = request.args.get('id', '').strip()
+    playlist_id = str(playlist_id or request.args.get('id', '')).strip()
 
     if not playlist_id:
         return jsonify({'error': 'Playlist ID parameter is required'}), 400
@@ -2999,15 +2999,15 @@ def playlist_info():
             'details': str(e)
         }), 502
 
-@app.route('/track/', methods=['GET'])
-def track_download():
+@app.route('/api/hifi/tracks/<track_id>/manifest', methods=['GET'])
+def track_download(track_id=None):
     """
     Get track download/streaming manifest.
     Query parameters:
     - id={trackId} : Tidal track ID
     - quality={quality} : Quality level (HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW)
     """
-    track_id = request.args.get('id', '').strip()
+    track_id = str(track_id or request.args.get('id', '')).strip()
     quality = request.args.get('quality', 'LOSSLESS')
 
     if not track_id:
@@ -3051,14 +3051,14 @@ def track_download():
             'details': str(e)
         }), 502
 
-@app.route('/recommendations/', methods=['GET'])
-def track_recommendations():
+@app.route('/api/hifi/tracks/<track_id>/similar', methods=['GET'])
+def track_similar(track_id=None):
     """
-    Get recommendations for a track.
+    Get similar tracks for a track.
     Query parameter:
     - id={trackId} : Tidal track ID
     """
-    track_id = (request.args.get('id') or '').strip()
+    track_id = str(track_id or request.args.get('id') or '').strip()
 
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
@@ -3094,15 +3094,15 @@ def track_recommendations():
             'details': str(e)
         }), 502
 
-@app.route('/artist/similar/', methods=['GET'])
-def artist_similar():
+@app.route('/api/hifi/artists/<artist_id>/similar', methods=['GET'])
+def artist_similar(artist_id=None):
     """
     Get similar artists.
     Query parameters:
     - id={artistId} : Tidal artist ID
     - cursor={cursor} : Optional cursor for paginated results
     """
-    artist_id = (request.args.get('id') or '').strip()
+    artist_id = str(artist_id or request.args.get('id') or '').strip()
 
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter is required'}), 400
@@ -3141,15 +3141,15 @@ def artist_similar():
             'details': str(e)
         }), 502
 
-@app.route('/album/similar/', methods=['GET'])
-def album_similar():
+@app.route('/api/hifi/albums/<album_id>/similar', methods=['GET'])
+def album_similar(album_id=None):
     """
     Get similar albums.
     Query parameters:
     - id={albumId} : Tidal album ID
     - cursor={cursor} : Optional cursor for paginated results
     """
-    album_id = (request.args.get('id') or '').strip()
+    album_id = str(album_id or request.args.get('id') or '').strip()
 
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
@@ -3822,7 +3822,7 @@ def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio'
         print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
         return False
 
-@app.route('/api/download', methods=['POST'])
+@app.route('/api/downloads', methods=['POST'])
 def download_track():
     """
     Enqueue a download job with specified settings.
@@ -4171,7 +4171,6 @@ def cancel_job(job_id):
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
 
-@app.route('/api/jobs/cancel-incomplete', methods=['POST'])
 @app.route('/api/jobs/cancel-pending', methods=['POST'])
 def cancel_all_pending_jobs():
     """Delete user-visible incomplete jobs from the queue/table."""
@@ -4547,7 +4546,7 @@ def save_plex_config_endpoint():
     save_plex_config(server_url, api_token, library_name, sync_interval_hours)
     return jsonify({'success': True})
 
-@app.route('/api/plex/sync', methods=['POST'])
+@app.route('/api/plex/syncs', methods=['POST'])
 def start_plex_sync_endpoint():
     """Queue a manual Plex library sync job."""
     result = start_plex_sync_job(trigger='manual')
@@ -4556,7 +4555,7 @@ def start_plex_sync_endpoint():
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
-@app.route('/api/plex/library-update', methods=['POST'])
+@app.route('/api/plex/library-updates', methods=['POST'])
 def start_plex_library_update_endpoint():
     """Queue a manual Plex library update job."""
     result = start_plex_library_update_job(trigger='manual')
@@ -4565,7 +4564,7 @@ def start_plex_library_update_endpoint():
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
-@app.route('/api/plex/test', methods=['POST'])
+@app.route('/api/plex/connection-tests', methods=['POST'])
 def test_plex_connection_endpoint():
     """Test Plex server connection"""
     payload = request.get_json()
@@ -4611,7 +4610,7 @@ def get_plex_playlists_endpoint():
 
     return jsonify({'playlists': playlists})
 
-@app.route('/api/plex/create-playlist', methods=['POST'])
+@app.route('/api/plex/playlists', methods=['POST'])
 def create_plex_playlist_endpoint():
     """Validate and prepare for creating a Plex playlist (actual creation happens on first track add)."""
     config = get_plex_config()
@@ -4752,7 +4751,7 @@ def _resolve_plex_library_context(server_url, api_token, library_name, user_id=N
     return plex, library, effective_user
 
 
-@app.route('/api/plex/library/overview', methods=['GET'])
+@app.route('/api/plex/library', methods=['GET'])
 def get_plex_library_overview_endpoint():
     """Return a lightweight overview of the configured Plex music library."""
     config = get_plex_config()

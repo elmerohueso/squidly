@@ -2679,7 +2679,7 @@ class App {
         this.cancelPendingJobsButton.textContent = 'Cancelling...';
 
         try {
-            const response = await fetch('/api/jobs/cancel-incomplete', { method: 'POST' });
+            const response = await fetch('/api/jobs/cancel-pending', { method: 'POST' });
             if (!response.ok) {
                 let message = 'Failed to cancel incomplete jobs';
                 try {
@@ -3708,7 +3708,7 @@ class App {
 
         try {
             // First, trigger the library update
-            const libUpdateResponse = await fetch('/api/plex/library-update', {
+            const libUpdateResponse = await fetch('/api/plex/library-updates', {
                 method: 'POST'
             });
 
@@ -3722,7 +3722,7 @@ class App {
             // Then, trigger the sync
             this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
 
-            const syncResponse = await fetch('/api/plex/sync', {
+            const syncResponse = await fetch('/api/plex/syncs', {
                 method: 'POST'
             });
 
@@ -4158,7 +4158,7 @@ class App {
         this.displayMessage('Searching...');
 
         try {
-            const response = await this.fetchWithRetry(`/search/?${searchType}=${encodeURIComponent(query)}`);
+            const response = await this.fetchWithRetry(`/api/hifi/search?${searchType}=${encodeURIComponent(query)}`);
 
             if (!response.ok) {
                 throw new Error('Search failed');
@@ -4247,7 +4247,7 @@ class App {
                 const searchQuery = `${track.name} ${track.artist}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
                         signal: this.pendingRequestController?.signal
                     });
                     
@@ -4390,7 +4390,7 @@ class App {
                 const searchQuery = `${track.name} ${track.artist}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
                         signal: this.pendingRequestController?.signal
                     });
 
@@ -4633,7 +4633,7 @@ class App {
                 const searchQuery = `${lbTrack.title} ${artists}`;
 
                 try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`, {
+                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
                         signal: this.pendingRequestController?.signal
                     });
                     
@@ -4989,7 +4989,7 @@ class App {
 
                 try {
                     // Fetch album tracks with abort signal
-                    const albumResponse = await fetch(`/album/?id=${albumId}`, {
+                    const albumResponse = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
                         signal
                     });
                     if (!albumResponse.ok) {
@@ -5329,7 +5329,7 @@ class App {
 
         try {
             const normalizedPlaylistId = this.normalizePlaylistId(playlistId) || playlistId;
-            const response = await fetch(`/playlist/?id=${encodeURIComponent(normalizedPlaylistId)}`, {
+            const response = await fetch(`/api/hifi/playlists/${encodeURIComponent(normalizedPlaylistId)}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -5814,7 +5814,7 @@ class App {
 
         for (const quality of qualities) {
             try {
-                const response = await fetch(`/track/?id=${trackId}&quality=${quality}`);
+                const response = await fetch(`/api/hifi/tracks/${encodeURIComponent(String(trackId))}/manifest?quality=${encodeURIComponent(quality)}`);
                 if (!response.ok) {
                     continue;
                 }
@@ -6225,7 +6225,7 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-            const response = await fetch(`/artist/?f=${artistId}`, {
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -6304,7 +6304,7 @@ class App {
                     if (albums.length > 0) {
                         const firstAlbumId = albums[0].id;
                         try {
-                            const response = await fetch(`/album/?id=${firstAlbumId}`, {
+                            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(firstAlbumId))}`, {
                                 signal: this.pendingRequestController?.signal
                             });
                             if (!response.ok) {
@@ -6350,7 +6350,7 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/album/?id=${albumId}`, {
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -6518,7 +6518,7 @@ class App {
         this.displayMessage('Loading track recommendations...');
 
         try {
-            const response = await fetch(`/recommendations/?id=${encodeURIComponent(String(trackId))}`, {
+            const response = await fetch(`/api/hifi/tracks/${encodeURIComponent(String(trackId))}/similar`, {
                 signal: this.pendingRequestController?.signal
             });
             if (!response.ok) {
@@ -6594,7 +6594,7 @@ class App {
         this.displayMessage('Loading similar albums...');
 
         try {
-            const response = await fetch(`/album/similar/?id=${encodeURIComponent(String(albumId))}`, {
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/similar`, {
                 signal: this.pendingRequestController?.signal
             });
             if (!response.ok) {
@@ -6654,7 +6654,7 @@ class App {
         this.displayMessage('Loading similar artists...');
 
         try {
-            const response = await fetch(`/artist/similar/?id=${encodeURIComponent(String(artistId))}`, {
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}/similar`, {
                 signal: this.pendingRequestController?.signal
             });
             if (!response.ok) {
@@ -6964,7 +6964,7 @@ class App {
             console.log(`[PLAYLIST] Download type: ${downloadType}, Playlist: ${playlistName}`);
             
             const plexUserId = this.getSelectedPlexUserId();
-            const response = await this.fetchWithRetry('/api/download', {
+            const response = await this.fetchWithRetry('/api/downloads', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -7025,7 +7025,7 @@ class App {
         const originalDisabled = addPlaylistBtn.disabled;
 
         try {
-            const response = await fetch(`/album/?id=${albumId}`);
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch album');
             }
@@ -7256,7 +7256,7 @@ class App {
         const originalDisabled = addLibraryBtn.disabled;
 
         try {
-            const response = await fetch(`/album/?id=${albumId}`);
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch album');
             }
@@ -7313,7 +7313,7 @@ class App {
 
     private async handlePlayAlbum(albumId: number, playButton: HTMLButtonElement): Promise<void> {
         try {
-            const response = await fetch(`/album/?id=${albumId}`);
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
             if (!response.ok) {
                 throw new Error('Failed to fetch album');
             }
@@ -7417,7 +7417,7 @@ private async downloadTrackToLibrary(
             console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
-            const response = await this.fetchWithRetry('/api/download', {
+            const response = await this.fetchWithRetry('/api/downloads', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -7478,7 +7478,7 @@ private async downloadTrackToLibrary(
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
             const plexUserId = this.getSelectedPlexUserId();
-            const response = await this.fetchWithRetry('/api/download', {
+            const response = await this.fetchWithRetry('/api/downloads', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
