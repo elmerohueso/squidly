@@ -77,6 +77,64 @@ interface ArtistSearchItem {
     artistTypes?: string[];
 }
 
+interface PlexLibraryArtist {
+    id: string;
+    name: string;
+    picture?: string;
+}
+
+interface PlexLibraryAlbum {
+    id: string;
+    title: string;
+    artist?: string;
+    year?: number;
+    track_count?: number;
+    cover?: string;
+}
+
+interface PlexLibraryTrack {
+    id: string;
+    title: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+    track_number?: number;
+    disc_number?: number;
+    cover?: string;
+}
+
+interface PlexLibraryArtistsResponse {
+    success?: boolean;
+    server_name?: string;
+    library_name?: string;
+    artists?: PlexLibraryArtist[];
+    total?: number;
+    offset?: number;
+    limit?: number;
+    error?: string;
+}
+
+interface PlexLibraryArtistAlbumsResponse {
+    success?: boolean;
+    artist?: {
+        id: string;
+        name: string;
+    };
+    albums?: PlexLibraryAlbum[];
+    error?: string;
+}
+
+interface PlexLibraryAlbumTracksResponse {
+    success?: boolean;
+    album?: {
+        id: string;
+        title: string;
+        artist?: string;
+    };
+    tracks?: PlexLibraryTrack[];
+    error?: string;
+}
+
 interface PlaylistSearchItem {
     id?: number | string;
     uuid?: string;
@@ -238,6 +296,7 @@ class App {
     private searchTypeSelect: HTMLSelectElement;
     private searchButton: HTMLButtonElement;
     private resultsContainer: HTMLElement;
+    private libraryResultsContainer: HTMLElement;
     private statusButton: HTMLButtonElement;
     private statusFlyout: HTMLElement;
     private flyoutOverlay: HTMLElement;
@@ -324,6 +383,12 @@ class App {
     private isHandlingPopState: boolean = false;
     private currentPage: string = 'explore';
     private pendingRequestController: AbortController | null = null;
+    private readonly libraryArtistsPageSize: number = 50;
+    private libraryArtistsOffset: number = 0;
+    private libraryArtistsTotal: number = 0;
+    private libraryCurrentArtist: { id: string; name: string } | null = null;
+    private libraryCurrentAlbum: { id: string; title: string; artist?: string } | null = null;
+    private libraryLoadedOnce: boolean = false;
 
     constructor() {
         // New page navigation elements
@@ -342,6 +407,7 @@ class App {
         this.searchTypeSelect = document.getElementById('searchType') as HTMLSelectElement;
         this.searchButton = document.getElementById('searchButton') as HTMLButtonElement;
         this.resultsContainer = document.getElementById('results') as HTMLElement;
+        this.libraryResultsContainer = document.getElementById('libraryResults') as HTMLElement;
         
         // Old flyout elements (may not exist in new layout)
         this.statusButton = document.getElementById('statusButton') as HTMLButtonElement;
@@ -952,6 +1018,61 @@ class App {
             }
             });
         }
+
+        if (this.libraryResultsContainer) {
+            this.libraryResultsContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+
+                const breadcrumbButton = target.closest('[data-library-crumb]') as HTMLButtonElement | null;
+                if (breadcrumbButton) {
+                    e.preventDefault();
+                    const crumb = breadcrumbButton.getAttribute('data-library-crumb');
+                    if (crumb === 'library') {
+                        void this.loadLibraryArtists(0);
+                        return;
+                    }
+                    if (crumb === 'artist' && this.libraryCurrentArtist) {
+                        void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
+                        return;
+                    }
+                }
+
+                const paginationButton = target.closest('[data-library-offset]') as HTMLButtonElement | null;
+                if (paginationButton) {
+                    e.preventDefault();
+                    if (paginationButton.disabled) {
+                        return;
+                    }
+                    const offset = Number(paginationButton.getAttribute('data-library-offset') || '0');
+                    if (Number.isFinite(offset) && offset >= 0) {
+                        void this.loadLibraryArtists(offset);
+                    }
+                    return;
+                }
+
+                const artistCard = target.closest('[data-library-artist-id]') as HTMLElement | null;
+                if (artistCard) {
+                    e.preventDefault();
+                    const artistId = artistCard.getAttribute('data-library-artist-id') || '';
+                    const artistName = artistCard.getAttribute('data-library-artist-name') || 'Artist';
+                    if (artistId) {
+                        void this.loadLibraryArtistAlbums(artistId, artistName);
+                    }
+                    return;
+                }
+
+                const albumRow = target.closest('[data-library-album-id]') as HTMLElement | null;
+                if (albumRow) {
+                    e.preventDefault();
+                    const albumId = albumRow.getAttribute('data-library-album-id') || '';
+                    const albumTitle = albumRow.getAttribute('data-library-album-title') || 'Album';
+                    const artistName = albumRow.getAttribute('data-library-artist-name') || this.libraryCurrentArtist?.name || '';
+                    if (albumId) {
+                        void this.loadLibraryAlbumTracks(albumId, albumTitle, artistName || undefined);
+                    }
+                }
+            });
+        }
     }
 
     private switchPage(pageName: string): void {
@@ -1011,6 +1132,328 @@ class App {
         if (pageName === 'jobs') {
             this.currentJobsPage = 1;
             void this.loadJobs();
+        }
+
+        if (pageName === 'library' && !this.libraryLoadedOnce) {
+            void this.loadLibraryArtists(0);
+        }
+    }
+
+    private setLibraryMessage(message: string): void {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryResultsContainer.innerHTML = `
+            <div class="library-placeholder">
+                <p>${this.escapeHtml(message)}</p>
+            </div>
+        `;
+    }
+
+    private formatLibraryBreadcrumb(): string {
+        const artist = this.libraryCurrentArtist;
+        const album = this.libraryCurrentAlbum;
+
+        let trail = '<button class="library-crumb-btn" data-library-crumb="library">Library</button>';
+
+        if (artist) {
+            if (album) {
+                trail += `<span class="library-crumb-separator">&gt;</span><button class="library-crumb-btn" data-library-crumb="artist">${this.escapeHtml(artist.name)}</button>`;
+            } else {
+                trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(artist.name)}</span>`;
+            }
+        }
+
+        if (album) {
+            trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(album.title)}</span>`;
+        }
+
+        return `<div class="library-breadcrumb">${trail}</div>`;
+    }
+
+    private formatLibraryArtistCard(artist: PlexLibraryArtist): string {
+        const artistName = this.escapeHtml(artist.name || 'Unknown Artist');
+        return `
+            <div class="artist-card-compact clickable" data-library-artist-id="${this.escapeHtml(artist.id)}" data-library-artist-name="${artistName}" title="View albums by ${artistName}">
+                <div class="artist-card-name">${artistName}</div>
+                <div class="artist-card-image">
+                    ${artist.picture
+                        ? `<img src="${artist.picture}" alt="${artistName}" loading="lazy">`
+                        : `<div class="artist-card-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="8" r="4"></circle>
+                                <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+            </div>
+        `;
+    }
+
+    private formatLibraryAlbumRow(album: PlexLibraryAlbum): string {
+        const title = this.escapeHtml(album.title || 'Unknown Album');
+        const artist = this.escapeHtml(album.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
+        const year = album.year ? String(album.year) : '—';
+        const trackCount = typeof album.track_count === 'number' ? String(album.track_count) : '—';
+
+        return `
+            <div class="albums-grid-row library-clickable-row" data-library-album-id="${this.escapeHtml(album.id)}" data-library-album-title="${title}" data-library-artist-name="${artist}">
+                <div class="grid-cell grid-col-artwork">
+                    ${album.cover
+                        ? `<img src="${album.cover}" alt="${title}" loading="lazy">`
+                        : `<div class="grid-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                           </div>`
+                    }
+                </div>
+                <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
+                <div class="grid-cell grid-col-artist"><span class="album-artist-name">${artist}</span></div>
+                <div class="grid-cell grid-col-year">${year}</div>
+                <div class="grid-cell grid-col-track-count">${trackCount}</div>
+                <div class="grid-cell grid-col-quality">Plex</div>
+            </div>
+        `;
+    }
+
+    private formatLibraryTrackRow(track: PlexLibraryTrack, showDiscPrefix: boolean): string {
+        const title = this.escapeHtml(track.title || 'Unknown Track');
+        const artist = this.escapeHtml(track.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
+        const trackNumber = typeof track.track_number === 'number' ? track.track_number : null;
+        const discNumber = typeof track.disc_number === 'number' ? track.disc_number : 1;
+        const numberLabel = trackNumber !== null
+            ? (showDiscPrefix ? `${discNumber}-${String(trackNumber).padStart(2, '0')}` : String(trackNumber))
+            : '—';
+        const durationSeconds = typeof track.duration === 'number' ? Math.max(0, Math.round(track.duration / 1000)) : null;
+        const durationLabel = durationSeconds !== null ? this.formatDuration(durationSeconds) : '—';
+
+        return `
+            <div class="tracks-grid-row" data-plex-library-row="true">
+                <div class="grid-cell grid-col-track-number">${numberLabel}</div>
+                <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
+                <div class="grid-cell grid-col-artist"><span class="track-artist-name">${artist}</span></div>
+                <div class="grid-cell grid-col-quality">${durationLabel}</div>
+            </div>
+        `;
+    }
+
+    private renderLibraryArtists(artists: PlexLibraryArtist[]): void {
+        this.libraryLoadedOnce = true;
+        const currentPage = Math.floor(this.libraryArtistsOffset / this.libraryArtistsPageSize) + 1;
+        const totalPages = Math.max(1, Math.ceil(this.libraryArtistsTotal / this.libraryArtistsPageSize));
+        const prevOffset = Math.max(0, this.libraryArtistsOffset - this.libraryArtistsPageSize);
+        const nextOffset = this.libraryArtistsOffset + this.libraryArtistsPageSize;
+        const hasPrev = this.libraryArtistsOffset > 0;
+        const hasNext = nextOffset < this.libraryArtistsTotal;
+
+        this.libraryResultsContainer.innerHTML = `
+            ${this.formatLibraryBreadcrumb()}
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Artists</h2>
+                </div>
+            </div>
+            <div class="results-list artist-results">
+                ${artists.length > 0
+                    ? artists.map((artist) => this.formatLibraryArtistCard(artist)).join('')
+                    : '<div class="library-placeholder"><p>No artists found in Plex library.</p></div>'}
+            </div>
+            <div class="library-pagination">
+                <button class="library-page-btn" data-library-offset="${prevOffset}" ${hasPrev ? '' : 'disabled'}>Previous</button>
+                <span class="library-page-text">Page ${currentPage} of ${totalPages}</span>
+                <button class="library-page-btn" data-library-offset="${nextOffset}" ${hasNext ? '' : 'disabled'}>Next</button>
+            </div>
+        `;
+    }
+
+    private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[]): void {
+        this.libraryLoadedOnce = true;
+        this.libraryResultsContainer.innerHTML = `
+            ${this.formatLibraryBreadcrumb()}
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>${this.escapeHtml(artistName)} Albums</h2>
+                </div>
+            </div>
+            <div class="albums-grid-wrapper" data-view-mode="library-albums">
+                <div class="albums-grid">
+                    <div class="albums-grid-header">
+                        <div class="grid-cell grid-col-artwork"></div>
+                        <div class="grid-cell grid-col-title">ALBUM</div>
+                        <div class="grid-cell grid-col-artist">ARTIST</div>
+                        <div class="grid-cell grid-col-year">YEAR</div>
+                        <div class="grid-cell grid-col-track-count">TRACKS</div>
+                        <div class="grid-cell grid-col-quality">SOURCE</div>
+                    </div>
+                    ${albums.length > 0
+                        ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
+                        : '<div class="library-placeholder"><p>No albums found for this artist.</p></div>'}
+                </div>
+            </div>
+        `;
+    }
+
+    private renderLibraryAlbumTracks(albumTitle: string, tracks: PlexLibraryTrack[]): void {
+        this.libraryLoadedOnce = true;
+        const maxDisc = tracks.reduce((maxValue, track) => {
+            const disc = typeof track.disc_number === 'number' ? track.disc_number : 1;
+            return Math.max(maxValue, disc);
+        }, 1);
+
+        this.libraryResultsContainer.innerHTML = `
+            ${this.formatLibraryBreadcrumb()}
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>${this.escapeHtml(albumTitle)} Tracks</h2>
+                </div>
+            </div>
+            <div class="tracks-grid-wrapper" data-view-mode="library-tracks">
+                <div class="tracks-grid">
+                    <div class="tracks-grid-header">
+                        <div class="grid-cell grid-col-track-number">#</div>
+                        <div class="grid-cell grid-col-title">Title</div>
+                        <div class="grid-cell grid-col-artist">Artist</div>
+                        <div class="grid-cell grid-col-quality">Duration</div>
+                    </div>
+                    ${tracks.length > 0
+                        ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
+                        : '<div class="library-placeholder"><p>No tracks found for this album.</p></div>'}
+                </div>
+            </div>
+        `;
+    }
+
+    private async loadLibraryArtists(offset: number = 0): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(false);
+        this.libraryCurrentArtist = null;
+        this.libraryCurrentAlbum = null;
+        this.libraryArtistsOffset = Math.max(0, offset);
+        this.setLibraryMessage('Loading Plex artists...');
+
+        try {
+            const params = new URLSearchParams();
+            params.set('offset', String(this.libraryArtistsOffset));
+            params.set('limit', String(this.libraryArtistsPageSize));
+
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistsResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load Plex artists.');
+                return;
+            }
+
+            this.libraryArtistsTotal = typeof data.total === 'number' ? data.total : 0;
+            this.libraryArtistsOffset = typeof data.offset === 'number' ? data.offset : this.libraryArtistsOffset;
+            this.renderLibraryArtists(Array.isArray(data.artists) ? data.artists : []);
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load artists:', error);
+            this.setLibraryMessage('Failed to load Plex artists.');
+        }
+    }
+
+    private async loadLibraryArtistAlbums(artistId: string, artistName: string): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentArtist = { id: artistId, name: artistName };
+        this.libraryCurrentAlbum = null;
+        this.setLibraryMessage(`Loading albums for ${artistName}...`);
+
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists/${encodeURIComponent(artistId)}/albums?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistAlbumsResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load artist albums.');
+                return;
+            }
+
+            const resolvedArtistName = data.artist?.name || artistName;
+            this.libraryCurrentArtist = { id: artistId, name: resolvedArtistName };
+            this.renderLibraryArtistAlbums(resolvedArtistName, Array.isArray(data.albums) ? data.albums : []);
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load artist albums:', error);
+            this.setLibraryMessage('Failed to load artist albums.');
+        }
+    }
+
+    private async loadLibraryAlbumTracks(albumId: string, albumTitle: string, artistName?: string): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentAlbum = { id: albumId, title: albumTitle, artist: artistName };
+        this.setLibraryMessage(`Loading tracks for ${albumTitle}...`);
+
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/albums/${encodeURIComponent(albumId)}/tracks?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryAlbumTracksResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load album tracks.');
+                return;
+            }
+
+            const resolvedArtist = data.album?.artist || artistName || this.libraryCurrentArtist?.name || '';
+            if (this.libraryCurrentArtist && resolvedArtist) {
+                this.libraryCurrentArtist = {
+                    ...this.libraryCurrentArtist,
+                    name: resolvedArtist
+                };
+            }
+            const resolvedAlbumTitle = data.album?.title || albumTitle;
+            this.libraryCurrentAlbum = { id: albumId, title: resolvedAlbumTitle, artist: resolvedArtist };
+            this.renderLibraryAlbumTracks(resolvedAlbumTitle, Array.isArray(data.tracks) ? data.tracks : []);
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load album tracks:', error);
+            this.setLibraryMessage('Failed to load album tracks.');
         }
     }
 
@@ -1111,6 +1554,10 @@ class App {
 
         // Update sidebar playlists
         void this.updateSidebarPlaylists();
+
+        if (this.currentPage === 'library') {
+            void this.loadLibraryArtists(0);
+        }
     }
 
     private async updateSidebarPlaylists(): Promise<void> {

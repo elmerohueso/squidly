@@ -1504,6 +1504,11 @@ body {
     height: 16px;
 }
 
+.artist-card-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+}
+
 /* Results list for artist cards */
 .results-list.artist-results {
     display: grid;
@@ -1583,6 +1588,25 @@ body {
 .albums-grid-wrapper[data-view-mode="search-albums"] .albums-grid-row {
     grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr 160px;
     cursor: pointer;
+}
+
+/* Library album view grid template (no actions/status column) */
+.albums-grid-wrapper[data-view-mode="library-albums"] .albums-grid-header {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr;
+}
+
+.albums-grid-wrapper[data-view-mode="library-albums"] .albums-grid-row {
+    grid-template-columns: 56px 2fr 1.5fr 0.8fr 1.2fr 0.6fr;
+    cursor: pointer;
+}
+
+/* Library track view grid template (no actions/status column) */
+.tracks-grid-wrapper[data-view-mode="library-tracks"] .tracks-grid-header {
+    grid-template-columns: 40px 2fr 2fr 0.6fr;
+}
+
+.tracks-grid-wrapper[data-view-mode="library-tracks"] .tracks-grid-row {
+    grid-template-columns: 40px 2fr 2fr 0.6fr;
 }
 
 .tracks-grid-row {
@@ -1784,6 +1808,87 @@ body {
 .grid-add-library-btn svg {
     width: 18px;
     height: 18px;
+}
+
+.library-grid-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    line-height: 1;
+    white-space: nowrap;
+    background: var(--bg-tertiary);
+}
+
+.library-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.library-crumb-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    font-size: inherit;
+}
+
+.library-crumb-btn:hover {
+    color: var(--accent-primary);
+}
+
+.library-crumb-separator {
+    color: var(--text-muted);
+}
+
+.library-crumb-current {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.library-pagination {
+    margin-top: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+}
+
+.library-page-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.75rem;
+    cursor: pointer;
+}
+
+.library-page-btn:hover:not(:disabled) {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.library-page-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.library-page-text {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.library-clickable-row {
+    cursor: pointer;
 }
 
 /* Hide Add to Library button when track exists in Plex */

@@ -4676,6 +4676,356 @@ def get_plex_libraries_endpoint():
 
     return jsonify({'libraries': libraries or []})
 
+
+def _build_plex_image_url(server_url, api_token, image_path):
+    raw_path = str(image_path or '').strip()
+    if not raw_path:
+        return None
+
+    base = server_url.rstrip('/')
+    if raw_path.startswith('http://') or raw_path.startswith('https://'):
+        return raw_path
+
+    token = quote_plus(str(api_token or '').strip())
+    if not token:
+        return f'{base}{raw_path}'
+
+    joiner = '&' if '?' in raw_path else '?'
+    return f'{base}{raw_path}{joiner}X-Plex-Token={token}'
+
+
+def _resolve_plex_user_context(plex, user_id):
+    """Best-effort managed user switch for Plex context."""
+    requested_user_id = str(user_id or '').strip()
+    if not requested_user_id:
+        return plex, None
+
+    selected_user = None
+    for user in get_all_plex_users():
+        candidate_ids = {
+            str(user.get('client_id') or '').strip(),
+            str(user.get('id') or '').strip(),
+            str(user.get('username') or '').strip(),
+            str(user.get('title') or '').strip(),
+        }
+        candidate_ids = {value for value in candidate_ids if value}
+        if requested_user_id in candidate_ids:
+            selected_user = user
+            break
+
+    if selected_user and not bool(selected_user.get('is_owner')):
+        switch_target = (
+            str(selected_user.get('username') or '').strip()
+            or str(selected_user.get('title') or '').strip()
+            or str(selected_user.get('id') or '').strip()
+            or requested_user_id
+        )
+        try:
+            switched = plex.switchUser(switch_target)
+            print(f"[PLEX_LIBRARY] Switched to user {switch_target} (requested {requested_user_id})", flush=True)
+            return switched, switch_target
+        except Exception as e:
+            print(
+                f"[PLEX_LIBRARY] Failed to switch user {requested_user_id} via '{switch_target}': {str(e)}. Using owner context.",
+                flush=True
+            )
+            return plex, None
+
+    if selected_user and bool(selected_user.get('is_owner')):
+        print(f"[PLEX_LIBRARY] Requested owner user {requested_user_id}; using owner context", flush=True)
+    else:
+        print(f"[PLEX_LIBRARY] User {requested_user_id} not found in current account; using owner context", flush=True)
+
+    return plex, None
+
+
+def _resolve_plex_library_context(server_url, api_token, library_name, user_id=None):
+    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+    plex, effective_user = _resolve_plex_user_context(plex, user_id)
+
+    library = None
+    for section in plex.library.sections():
+        if section.title == library_name and section.type == 'artist':
+            library = section
+            break
+
+    return plex, library, effective_user
+
+
+@app.route('/api/plex/library/overview', methods=['GET'])
+def get_plex_library_overview_endpoint():
+    """Return a lightweight overview of the configured Plex music library."""
+    config = get_plex_config()
+    server_url = str(config.get('server_url') or '').strip()
+    api_token = str(config.get('api_token') or '').strip()
+    library_name = str(config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'Plex server_url, api_token, and library_name must be configured'}), 400
+
+    user_id = (request.args.get('user_id') or '').strip()
+
+    try:
+        limit = int(request.args.get('limit') or 24)
+    except Exception:
+        limit = 24
+    limit = max(1, min(limit, 100))
+
+    try:
+        plex, library, _ = _resolve_plex_library_context(server_url, api_token, library_name, user_id=user_id)
+
+        if not library:
+            return jsonify({'error': f'Plex music library "{library_name}" not found'}), 404
+
+        try:
+            artists_raw = library.search(libtype='artist', maxresults=limit)
+        except Exception:
+            artists_raw = library.search(libtype='artist')[:limit]
+
+        try:
+            albums_raw = library.search(libtype='album', maxresults=limit)
+        except Exception:
+            albums_raw = library.search(libtype='album')[:limit]
+
+        try:
+            tracks_raw = library.search(libtype='track', maxresults=limit)
+        except Exception:
+            tracks_raw = library.search(libtype='track')[:limit]
+
+        artists = []
+        for artist in artists_raw or []:
+            artists.append({
+                'name': str(getattr(artist, 'title', '') or '').strip(),
+                'picture': _build_plex_image_url(server_url, api_token, getattr(artist, 'thumb', None)),
+                'summary': str(getattr(artist, 'summary', '') or '').strip(),
+            })
+
+        albums = []
+        for album in albums_raw or []:
+            albums.append({
+                'title': str(getattr(album, 'title', '') or '').strip(),
+                'artist': str(getattr(album, 'parentTitle', '') or '').strip(),
+                'year': getattr(album, 'year', None),
+                'track_count': getattr(album, 'leafCount', None),
+                'cover': _build_plex_image_url(server_url, api_token, getattr(album, 'thumb', None)),
+            })
+
+        tracks = []
+        for track in tracks_raw or []:
+            duration = getattr(track, 'duration', None)
+            try:
+                duration = int(duration) if duration is not None else None
+            except Exception:
+                duration = None
+
+            tracks.append({
+                'title': str(getattr(track, 'title', '') or '').strip(),
+                'artist': str(getattr(track, 'grandparentTitle', '') or '').strip(),
+                'album': str(getattr(track, 'parentTitle', '') or '').strip(),
+                'duration': duration,
+                'year': getattr(track, 'year', None),
+                'cover': _build_plex_image_url(server_url, api_token, getattr(track, 'thumb', None)),
+            })
+
+        return jsonify({
+            'success': True,
+            'server_name': str(getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'),
+            'library_name': library_name,
+            'artists': artists,
+            'albums': albums,
+            'tracks': tracks,
+        })
+    except Exception as e:
+        print(f"[PLEX_LIBRARY] Failed to fetch overview: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch Plex library overview: {str(e)}'}), 500
+
+
+@app.route('/api/plex/library/artists', methods=['GET'])
+def get_plex_library_artists_endpoint():
+    """Return paginated artists from the configured Plex music library."""
+    config = get_plex_config()
+    server_url = str(config.get('server_url') or '').strip()
+    api_token = str(config.get('api_token') or '').strip()
+    library_name = str(config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'Plex server_url, api_token, and library_name must be configured'}), 400
+
+    user_id = (request.args.get('user_id') or '').strip()
+    try:
+        offset = int(request.args.get('offset') or 0)
+    except Exception:
+        offset = 0
+    try:
+        limit = int(request.args.get('limit') or 50)
+    except Exception:
+        limit = 50
+
+    offset = max(0, offset)
+    limit = max(1, min(limit, 100))
+
+    try:
+        plex, library, _ = _resolve_plex_library_context(server_url, api_token, library_name, user_id=user_id)
+        if not library:
+            return jsonify({'error': f'Plex music library "{library_name}" not found'}), 404
+
+        artists_raw = library.search(libtype='artist') or []
+        artists_raw = sorted(
+            artists_raw,
+            key=lambda item: str(getattr(item, 'title', '') or '').lower()
+        )
+
+        total = len(artists_raw)
+        page_items = artists_raw[offset: offset + limit]
+
+        artists = []
+        for artist in page_items:
+            artist_id = str(getattr(artist, 'ratingKey', '') or '').strip()
+            artists.append({
+                'id': artist_id,
+                'name': str(getattr(artist, 'title', '') or '').strip(),
+                'picture': _build_plex_image_url(server_url, api_token, getattr(artist, 'thumb', None)),
+            })
+
+        return jsonify({
+            'success': True,
+            'server_name': str(getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'),
+            'library_name': library_name,
+            'total': total,
+            'offset': offset,
+            'limit': limit,
+            'artists': artists,
+        })
+    except Exception as e:
+        print(f"[PLEX_LIBRARY] Failed to fetch artists: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch Plex artists: {str(e)}'}), 500
+
+
+@app.route('/api/plex/library/artists/<artist_id>/albums', methods=['GET'])
+def get_plex_artist_albums_endpoint(artist_id):
+    """Return albums for a specific Plex artist."""
+    config = get_plex_config()
+    server_url = str(config.get('server_url') or '').strip()
+    api_token = str(config.get('api_token') or '').strip()
+    library_name = str(config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'Plex server_url, api_token, and library_name must be configured'}), 400
+
+    user_id = (request.args.get('user_id') or '').strip()
+    artist_id = str(artist_id or '').strip()
+    if not artist_id:
+        return jsonify({'error': 'artist_id is required'}), 400
+
+    try:
+        _, library, _ = _resolve_plex_library_context(server_url, api_token, library_name, user_id=user_id)
+        if not library:
+            return jsonify({'error': f'Plex music library "{library_name}" not found'}), 404
+
+        artist_item = library.fetchItem(f'/library/metadata/{artist_id}')
+        if not artist_item:
+            return jsonify({'error': f'Plex artist "{artist_id}" not found'}), 404
+
+        albums_raw = artist_item.albums() or []
+        albums_raw = sorted(
+            albums_raw,
+            key=lambda item: (
+                -int(getattr(item, 'year', 0) or 0),
+                str(getattr(item, 'title', '') or '').lower()
+            )
+        )
+
+        albums = []
+        for album in albums_raw:
+            albums.append({
+                'id': str(getattr(album, 'ratingKey', '') or '').strip(),
+                'title': str(getattr(album, 'title', '') or '').strip(),
+                'artist': str(getattr(album, 'parentTitle', '') or '').strip() or str(getattr(artist_item, 'title', '') or '').strip(),
+                'year': getattr(album, 'year', None),
+                'track_count': getattr(album, 'leafCount', None),
+                'cover': _build_plex_image_url(server_url, api_token, getattr(album, 'thumb', None)),
+            })
+
+        return jsonify({
+            'success': True,
+            'artist': {
+                'id': artist_id,
+                'name': str(getattr(artist_item, 'title', '') or '').strip(),
+            },
+            'albums': albums,
+        })
+    except Exception as e:
+        print(f"[PLEX_LIBRARY] Failed to fetch artist albums {artist_id}: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch Plex artist albums: {str(e)}'}), 500
+
+
+@app.route('/api/plex/library/albums/<album_id>/tracks', methods=['GET'])
+def get_plex_album_tracks_endpoint(album_id):
+    """Return tracks for a specific Plex album."""
+    config = get_plex_config()
+    server_url = str(config.get('server_url') or '').strip()
+    api_token = str(config.get('api_token') or '').strip()
+    library_name = str(config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        return jsonify({'error': 'Plex server_url, api_token, and library_name must be configured'}), 400
+
+    user_id = (request.args.get('user_id') or '').strip()
+    album_id = str(album_id or '').strip()
+    if not album_id:
+        return jsonify({'error': 'album_id is required'}), 400
+
+    try:
+        _, library, _ = _resolve_plex_library_context(server_url, api_token, library_name, user_id=user_id)
+        if not library:
+            return jsonify({'error': f'Plex music library "{library_name}" not found'}), 404
+
+        album_item = library.fetchItem(f'/library/metadata/{album_id}')
+        if not album_item:
+            return jsonify({'error': f'Plex album "{album_id}" not found'}), 404
+
+        tracks_raw = album_item.tracks() or []
+        tracks_raw = sorted(
+            tracks_raw,
+            key=lambda item: (
+                int(getattr(item, 'parentIndex', 1) or 1),
+                int(getattr(item, 'trackNumber', 0) or 0),
+                str(getattr(item, 'title', '') or '').lower()
+            )
+        )
+
+        tracks = []
+        for track in tracks_raw:
+            duration = getattr(track, 'duration', None)
+            try:
+                duration = int(duration) if duration is not None else None
+            except Exception:
+                duration = None
+
+            tracks.append({
+                'id': str(getattr(track, 'ratingKey', '') or '').strip(),
+                'title': str(getattr(track, 'title', '') or '').strip(),
+                'artist': str(getattr(track, 'grandparentTitle', '') or '').strip(),
+                'album': str(getattr(track, 'parentTitle', '') or '').strip(),
+                'track_number': getattr(track, 'trackNumber', None),
+                'disc_number': getattr(track, 'parentIndex', None),
+                'duration': duration,
+                'cover': _build_plex_image_url(server_url, api_token, getattr(track, 'thumb', None)),
+            })
+
+        return jsonify({
+            'success': True,
+            'album': {
+                'id': album_id,
+                'title': str(getattr(album_item, 'title', '') or '').strip(),
+                'artist': str(getattr(album_item, 'parentTitle', '') or '').strip(),
+            },
+            'tracks': tracks,
+        })
+    except Exception as e:
+        print(f"[PLEX_LIBRARY] Failed to fetch album tracks {album_id}: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch Plex album tracks: {str(e)}'}), 500
+
 def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
     text = str(value or '').strip().lower()
     if strip_trailing_parenthetical:
