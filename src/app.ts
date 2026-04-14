@@ -4910,7 +4910,6 @@ class App {
         this.startPlexSyncButton.disabled = true;
 
         try {
-            // First, trigger the library update
             const libUpdateResponse = await fetch('/api/plex/library-updates', {
                 method: 'POST'
             });
@@ -4922,27 +4921,15 @@ class App {
                 return;
             }
 
-            // Then, trigger the sync
-            this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+            this.plexSyncStatusEl.textContent = '✓ Plex library update queued; sync will follow automatically';
+            this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
 
-            const syncResponse = await fetch('/api/plex/syncs', {
-                method: 'POST'
-            });
-
-            if (syncResponse.status === 202) {
-                this.plexSyncStatusEl.textContent = '✓ Plex library update and sync jobs queued';
-                this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
-                if (this.jobsFlyout.classList.contains('active')) {
-                    await this.loadJobs();
-                }
-            } else {
-                const data = await syncResponse.json().catch(() => ({}));
-                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start sync'}`;
-                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+            if (this.jobsFlyout && this.jobsFlyout.classList.contains('active')) {
+                await this.loadJobs();
             }
         } catch (error) {
             console.error('Error starting Plex sync:', error);
-            this.plexSyncStatusEl.textContent = '✗ Error starting update/sync';
+            this.plexSyncStatusEl.textContent = '✗ Error starting library update';
             this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
         } finally {
             this.startPlexSyncButton.disabled = false;

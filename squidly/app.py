@@ -973,10 +973,11 @@ def _normalize_library_track_path(file_path):
     downloads_root = DOWNLOADS_ROOT.rstrip('/').replace('\\', '/')
     if downloads_root and normalized.startswith(downloads_root + '/'):
         normalized = normalized[len(downloads_root) + 1:]
-    else:
-        normalized = normalized.lstrip('/')
-
     parts = [part for part in normalized.split('/') if part and part != '.']
+
+    if downloads_root and not normalized.startswith(downloads_root + '/') and len(parts) >= 3:
+        parts = parts[-3:]
+
     if parts and parts[0] in ('full_albums', 'loose_tracks'):
         parts = parts[1:]
 
@@ -992,23 +993,38 @@ def _extract_plex_library_id(value):
     return raw
 
 
+def _resolve_library_file_path(file_path):
+    raw_path = str(file_path or '').strip()
+    if not raw_path:
+        return ''
+
+    normalized_raw = raw_path.replace('\\', '/').strip()
+    if os.path.exists(normalized_raw):
+        return normalized_raw
+
+    canonical_relative = _normalize_library_track_path(raw_path)
+    if canonical_relative:
+        downloads_root = DOWNLOADS_ROOT.rstrip('/').replace('\\', '/')
+        candidates = [
+            f"{downloads_root}/{canonical_relative}",
+            f"{downloads_root}/full_albums/{canonical_relative}",
+            f"{downloads_root}/loose_tracks/{canonical_relative}",
+        ]
+        for candidate in candidates:
+            normalized_candidate = os.path.normpath(candidate.replace('\\', '/'))
+            if os.path.exists(normalized_candidate):
+                return normalized_candidate
+
+    return ''
+
+
 def _read_embedded_hifi_ids(file_path):
     track_id = None
     album_id = None
-    raw_path = str(file_path or '').strip()
-    
-    # If path doesn't exist, try translating Windows path to Linux container path
-    # Windows format: "E:/Music/Artist/Album/Track.mp3" → "/downloads/Artist/Album/Track.mp3"
-    if raw_path and not os.path.exists(raw_path):
-        match = re.match(r'^[A-Za-z]:[/\\](?:Music[/\\])?(.*)$', raw_path)  # Windows drive + optional Music prefix
-        if match:
-            relative = match.group(1)
-            candidate = os.path.join('/downloads', relative)
-            if os.path.exists(candidate):
-                raw_path = candidate
-                print(f"[MATCH] Translated Windows path: {file_path} → {raw_path}", flush=True)
-    
+    raw_path = _resolve_library_file_path(file_path)
+
     if not raw_path or not os.path.exists(raw_path):
+        print(f"[MATCH] Path does not exist after resolution: {file_path}", flush=True)
         return {'track_id': None, 'album_id': None}
 
     try:
@@ -1039,7 +1055,9 @@ def _read_embedded_hifi_ids(file_path):
                 album_id = str(album_frame.text[0]).strip()
         
         if track_id or album_id:
-            print(f"[MATCH] Read embedded IDs from {raw_path}: track={track_id}, album={album_id}", flush=True)
+            print(f"[MATCH] Found embedded IDs: track={track_id}, album={album_id}", flush=True)
+        else:
+            print(f"[MATCH] No embedded Tidal IDs found in file", flush=True)
     except Exception as e:
         print(f"[MATCH] Failed to read embedded hifi IDs from {raw_path}: {str(e)}", flush=True)
 
@@ -1047,6 +1065,90 @@ def _read_embedded_hifi_ids(file_path):
         'track_id': track_id or None,
         'album_id': album_id or None,
     }
+
+
+def _seed_embedded_hifi_ids_for_hifi_match(cur, now_dt):
+    cur.execute(
+        """
+        SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
+               tracks.confidence, tracks.hifi_id, tracks.path, tracks.format, tracks.bitrate,
+               tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
+               tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at,
+               albums.artist_id AS album_artist_id, albums.title AS album_title,
+               albums.library_id AS album_library_id, albums.hifi_id AS album_hifi_id,
+               albums.confidence AS album_confidence, albums.complete AS album_complete,
+               albums.matched_track_count, albums.expected_track_count,
+               albums.match_status AS album_match_status, albums.match_source AS album_match_source,
+               albums.matched_at AS album_matched_at, albums.confirmed_at AS album_confirmed_at,
+               albums.last_seen_at AS album_last_seen_at
+        FROM tracks
+        JOIN albums ON albums.album_id = tracks.album_id
+        WHERE tracks.library_id IS NOT NULL
+          AND COALESCE(tracks.path, '') <> ''
+          AND (
+                tracks.hifi_id IS NULL
+             OR albums.hifi_id IS NULL
+          )
+        ORDER BY tracks.track_id ASC
+        """
+    )
+    track_rows = cur.fetchall() or []
+
+    stats = {
+        'tracks_processed': 0,
+        'tracks_seeded': 0,
+        'albums_seeded': 0,
+    }
+
+    for track_row in track_rows:
+        tag_match = _read_embedded_hifi_ids(track_row.get('path'))
+        track_hifi_id = str(tag_match.get('track_id') or '').strip() or None
+        album_hifi_id = str(tag_match.get('album_id') or '').strip() or None
+
+        if album_hifi_id and not track_row.get('album_hifi_id'):
+            _upsert_album_row(
+                cur,
+                artist_id=track_row.get('album_artist_id') or track_row.get('artist_id'),
+                title=track_row.get('album_title') or 'Unknown Album',
+                library_id=track_row.get('album_library_id'),
+                hifi_id=album_hifi_id,
+                confidence=0.99,
+                complete=bool(track_row.get('album_complete')),
+                match_status='confirmed',
+                match_source='tags',
+                matched_at=now_dt,
+                confirmed_at=now_dt,
+                last_seen_at=track_row.get('album_last_seen_at') or now_dt,
+                matched_track_count=_safe_int(track_row.get('matched_track_count')) or 0,
+                expected_track_count=_safe_int(track_row.get('expected_track_count')) or 0,
+            )
+            stats['albums_seeded'] += 1
+
+        if track_hifi_id and not track_row.get('hifi_id'):
+            _upsert_track_row(
+                cur,
+                album_id=track_row.get('album_id'),
+                artist_id=track_row.get('artist_id'),
+                title=track_row.get('title') or 'Unknown Track',
+                path=track_row.get('path') or '',
+                library_id=track_row.get('library_id'),
+                hifi_id=track_hifi_id,
+                confidence=0.99,
+                match_status='confirmed',
+                match_source='tags',
+                matched_at=now_dt,
+                confirmed_at=now_dt,
+                last_seen_at=track_row.get('last_seen_at') or now_dt,
+                audio_format=track_row.get('format'),
+                bitrate=_safe_int(track_row.get('bitrate')),
+                disc_number=_safe_int(track_row.get('disc_number')),
+                track_number=_safe_int(track_row.get('track_number')),
+            )
+            stats['tracks_seeded'] += 1
+
+        stats['tracks_processed'] += 1
+
+    return stats
 
 
 def _is_manual_match(row):
@@ -2421,6 +2523,7 @@ def start_hifi_match_job(trigger='manual'):
 def process_hifi_match_job(job_id, payload):
     stages = {
         'matching_artists': 'pending',
+        'reading_embedded_ids': 'pending',
         'matching_albums': 'pending',
         'matching_tracks': 'pending',
         'updating_album_completeness': 'pending',
@@ -2428,6 +2531,9 @@ def process_hifi_match_job(job_id, payload):
     progress = {
         'artists_processed': 0,
         'artists_matched': 0,
+        'embedded_tracks_processed': 0,
+        'embedded_tracks_seeded': 0,
+        'embedded_albums_seeded': 0,
         'albums_processed': 0,
         'albums_matched': 0,
         'tracks_processed': 0,
@@ -2481,8 +2587,35 @@ def process_hifi_match_job(job_id, payload):
         stages['matching_artists'] = 'done'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
+        stages['reading_embedded_ids'] = 'in_progress'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+        embedded_stats = _seed_embedded_hifi_ids_for_hifi_match(cur, now_dt)
+        progress['embedded_tracks_processed'] = embedded_stats['tracks_processed']
+        progress['embedded_tracks_seeded'] = embedded_stats['tracks_seeded']
+        progress['embedded_albums_seeded'] = embedded_stats['albums_seeded']
+
+        conn.commit()
+        _raise_if_job_cancelled(job_id)
+        stages['reading_embedded_ids'] = 'done'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
         stages['matching_albums'] = 'in_progress'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+        # Log albums with embedded Tidal IDs vs without
+        cur.execute(
+            """
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN albums.match_source = 'tags' THEN 1 ELSE 0 END) as with_embedded_ids,
+                   SUM(CASE WHEN albums.match_source != 'tags' THEN 1 ELSE 0 END) as without_embedded_ids
+            FROM albums
+            WHERE albums.library_id IS NOT NULL
+              AND (albums.hifi_id IS NULL OR albums.match_status = 'unmatched')
+            """
+        )
+        stats = cur.fetchone() or {}
+        print(f"[HIFI_MATCH] Job {job_id}: Processing {stats.get('total', 0)} unmatched albums ({stats.get('with_embedded_ids', 0)} with embedded IDs, {stats.get('without_embedded_ids', 0)} without)", flush=True)
 
         cur.execute(
             """
@@ -2517,6 +2650,8 @@ def process_hifi_match_job(job_id, payload):
                 source_track_titles=source_track_titles,
             )
             if candidate and candidate.get('hifi_id'):
+                embedded_source = 'yes' if album_row.get('match_source') == 'tags' else 'no'
+                print(f"[HIFI_MATCH] Job {job_id}: Matched album '{album_row.get('title')}' (id={album_row.get('album_id')}) → hifi_id={candidate['hifi_id']} confidence={candidate['confidence']:.2f} embedded_ids={embedded_source}", flush=True)
                 _upsert_album_row(
                     cur,
                     artist_id=album_row.get('artist_id'),
@@ -2541,6 +2676,7 @@ def process_hifi_match_job(job_id, payload):
         conn.commit()
         _raise_if_job_cancelled(job_id)
         stages['matching_albums'] = 'done'
+        print(f"[HIFI_MATCH] Job {job_id}: Albums matching complete - {progress['albums_matched']}/{progress['albums_processed']} matched", flush=True)
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         stages['matching_tracks'] = 'in_progress'
@@ -2630,6 +2766,7 @@ def process_hifi_match_job(job_id, payload):
     finally:
         conn.close()
 
+    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: artists_matched={progress['artists_matched']}/{progress['artists_processed']}, albums_matched={progress['albums_matched']}/{progress['albums_processed']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     return {
         'trigger': trigger or 'unknown',
@@ -2769,7 +2906,6 @@ def process_plex_sync_job(job_id, payload):
                 upserted += 1
 
                 relative_path = _normalize_library_track_path(file_path)
-                tag_match = _read_embedded_hifi_ids(file_path)
                 existing_track_row = _get_track_row_by_path(cur, relative_path) if relative_path else None
 
                 album_artist_row = None
@@ -2834,13 +2970,13 @@ def process_plex_sync_job(job_id, payload):
                     artist_id=album_artist_row_id,
                     title=album or 'Unknown Album',
                     library_id=album_key,
-                    hifi_id=existing_album_hifi_id or tag_match.get('album_id'),
-                    confidence=existing_album_confidence if existing_album_hifi_id else (0.99 if tag_match.get('album_id') else 0.0),
+                    hifi_id=existing_album_hifi_id,
+                    confidence=existing_album_confidence,
                     complete=existing_album_complete,
-                    match_status=existing_album_status if existing_album_hifi_id else ('confirmed' if tag_match.get('album_id') else 'unmatched'),
-                    match_source=existing_album_source if existing_album_hifi_id else ('tags' if tag_match.get('album_id') else None),
-                    matched_at=existing_album_matched_at if existing_album_hifi_id else (now_dt if tag_match.get('album_id') else None),
-                    confirmed_at=existing_album_confirmed_at if existing_album_hifi_id else (now_dt if tag_match.get('album_id') else None),
+                    match_status=existing_album_status,
+                    match_source=existing_album_source,
+                    matched_at=existing_album_matched_at,
+                    confirmed_at=existing_album_confirmed_at,
                     last_seen_at=now_dt,
                     matched_track_count=existing_album_matched_track_count,
                     expected_track_count=existing_album_expected_track_count,
@@ -2860,12 +2996,12 @@ def process_plex_sync_job(job_id, payload):
                     title=title,
                     path=relative_path or file_path.replace('\\', '/').lstrip('/'),
                     library_id=rating_key,
-                    hifi_id=existing_track_hifi_id or tag_match.get('track_id'),
-                    confidence=existing_track_confidence if existing_track_hifi_id else (0.99 if tag_match.get('track_id') else 0.0),
-                    match_status=existing_track_status if existing_track_hifi_id else ('confirmed' if tag_match.get('track_id') else 'unmatched'),
-                    match_source=existing_track_source if existing_track_hifi_id else ('tags' if tag_match.get('track_id') else None),
-                    matched_at=existing_track_matched_at if existing_track_hifi_id else (now_dt if tag_match.get('track_id') else None),
-                    confirmed_at=existing_track_confirmed_at if existing_track_hifi_id else (now_dt if tag_match.get('track_id') else None),
+                    hifi_id=existing_track_hifi_id,
+                    confidence=existing_track_confidence,
+                    match_status=existing_track_status,
+                    match_source=existing_track_source,
+                    matched_at=existing_track_matched_at,
+                    confirmed_at=existing_track_confirmed_at,
                     last_seen_at=now_dt,
                     audio_format=media_format,
                     bitrate=bitrate,
