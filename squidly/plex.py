@@ -199,7 +199,7 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
 
 
 def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, full_path, user_id=None):
-    """Add a track to a Plex playlist, resolving it via local plex_songs table."""
+    """Add a track to a Plex playlist, resolving it via local tracks table."""
     try:
         server_url = server_url.rstrip('/')
         plex = _get_plex_server_for_user(server_url, api_token, user_id)
@@ -231,12 +231,12 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT "ratingKey", title, artist
-            FROM plex_songs
-            WHERE lower(right(replace(file_path, '\\', '/'), length(%s))) = lower(%s)
-              AND "ratingKey" IS NOT NULL
-              AND btrim("ratingKey") <> ''
-            ORDER BY updated_at DESC
+            SELECT library_id, title, artist_id
+            FROM tracks
+            WHERE lower(right(replace(path, '\\', '/'), length(%s))) = lower(%s)
+              AND library_id IS NOT NULL
+              AND library_id <> ''
+            ORDER BY last_seen_at DESC
             """,
             (trailing_suffix, trailing_suffix)
         )
@@ -244,14 +244,14 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         conn.close()
 
         rating_keys = [
-            str(row.get('ratingKey') or '').strip()
+            str(row.get('library_id') or '').strip()
             for row in rating_rows
-            if str(row.get('ratingKey') or '').strip()
+            if str(row.get('library_id') or '').strip()
         ]
 
         if not rating_keys:
             return False, (
-                f'file_path "{normalized_file_path}" was not found in plex_songs with a ratingKey. '
+                f'file_path "{normalized_file_path}" was not found in tracks with a library_id. '
                 'Run a Plex library sync first.'
             )
 
@@ -268,8 +268,8 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
         if track is None:
             return False, (
-                f'Could not resolve Plex track for file_path "{normalized_file_path}" using stored ratingKeys. '
-                'Run a Plex library sync to refresh plex_songs.'
+                f'Could not resolve Plex track for file_path "{normalized_file_path}" using stored library IDs. '
+                'Run a Plex library sync to refresh the tracks table.'
             )
 
         playlist = None

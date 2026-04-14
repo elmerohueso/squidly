@@ -661,6 +661,10 @@ from squidly.db import get_db_connection
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    # Drop plex_songs table (no longer used, all data comes from tracks/albums/artists)
+    cur.execute("DROP TABLE IF EXISTS plex_songs")
+    
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS download_settings (
@@ -743,35 +747,6 @@ def init_db():
     plex_columns = {row['column_name'] for row in cur.fetchall()}
     if 'sync_interval_hours' not in plex_columns:
         cur.execute("ALTER TABLE plex_config ADD COLUMN sync_interval_hours INTEGER NOT NULL DEFAULT 24")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS plex_songs (
-            id SERIAL PRIMARY KEY,
-            title TEXT NOT NULL,
-            artist TEXT,
-            album TEXT,
-            file_path TEXT NOT NULL UNIQUE,
-            "ratingKey" TEXT,
-            format TEXT,
-            bitrate INTEGER,
-            updated_at TIMESTAMP NOT NULL,
-            last_seen_at TIMESTAMP NOT NULL
-        )
-        """
-    )
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'plex_songs'
-        """
-    )
-    plex_songs_columns = {row['column_name'] for row in cur.fetchall()}
-    if 'ratingKey' not in plex_songs_columns:
-        cur.execute('ALTER TABLE plex_songs ADD COLUMN "ratingKey" TEXT')
-    if 'album_key' not in plex_songs_columns:
-        cur.execute('ALTER TABLE plex_songs ADD COLUMN album_key TEXT')
 
     cur.execute(
         """
@@ -2743,6 +2718,7 @@ def process_plex_sync_job(job_id, payload):
     now_dt = _now_utc()
     now = now_dt.isoformat() + 'Z'
     seen_paths = set()
+    explicit_album_keys = set()
     upserted = 0
 
     for idx, track in enumerate(tracks, start=1):
@@ -2754,6 +2730,10 @@ def process_plex_sync_job(job_id, payload):
         artist_key = _extract_plex_library_id(getattr(track, 'grandparentRatingKey', None) or getattr(track, 'grandparentKey', None))
         disc_number = _safe_int(getattr(track, 'parentIndex', None))
         track_number = _safe_int(getattr(track, 'trackNumber', None))
+
+        # Track albums with [Explicit] in the name for later labeling
+        if album_key and album and '[Explicit]' in album:
+            explicit_album_keys.add(album_key)
 
         media_list = getattr(track, 'media', None) or []
         for media in media_list:
@@ -2770,23 +2750,6 @@ def process_plex_sync_job(job_id, payload):
                     _, ext = os.path.splitext(file_path)
                     media_format = ext.replace('.', '').lower() if ext else None
 
-                cur.execute(
-                    """
-                    INSERT INTO plex_songs (title, artist, album, file_path, "ratingKey", album_key, format, bitrate, updated_at, last_seen_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(file_path) DO UPDATE SET
-                        title = excluded.title,
-                        artist = excluded.artist,
-                        album = excluded.album,
-                        "ratingKey" = excluded."ratingKey",
-                        album_key = excluded.album_key,
-                        format = excluded.format,
-                        bitrate = excluded.bitrate,
-                        updated_at = excluded.updated_at,
-                        last_seen_at = excluded.last_seen_at
-                    """,
-                    (title, artist, album, file_path, rating_key, album_key, media_format, bitrate, now, now)
-                )
                 seen_paths.add(file_path)
                 upserted += 1
 
@@ -2907,21 +2870,13 @@ def process_plex_sync_job(job_id, payload):
     if seen_paths:
         cur.execute(
             """
-            DELETE FROM plex_songs
-            WHERE last_seen_at < %s
-            """,
-            (now,)
-        )
-        deleted = cur.rowcount or 0
-
-        cur.execute(
-            """
             DELETE FROM tracks
             WHERE library_id IS NOT NULL
               AND last_seen_at < %s
             """,
             (now_dt,)
         )
+        deleted = cur.rowcount or 0
         cur.execute(
             """
             DELETE FROM albums AS albums_to_delete
@@ -2956,23 +2911,8 @@ def process_plex_sync_job(job_id, payload):
 
     conn.commit()
 
-    # Add "Explicit" label to albums that contain [Explicit] in their name (before closing connection)
-    explicit_album_keys = set()
-    cur.execute(
-        """
-        SELECT DISTINCT album_key
-        FROM plex_songs
-        WHERE album_key IS NOT NULL
-          AND album IS NOT NULL
-          AND album LIKE '%[Explicit]%'
-        """
-    )
-    for row in (cur.fetchall() or []):
-        album_key = row.get('album_key')
-        if album_key:
-            explicit_album_keys.add(album_key)
-
-    conn.close()
+    # Add "Explicit" label to albums that contain [Explicit] in their name
+    # (explicit_album_keys was populated during the track processing loop above)
 
     progress['deleted_songs'] = deleted
     stages['updating_local_index'] = 'done'
@@ -3462,7 +3402,7 @@ def process_download_job(job_id, payload):
 
     conn = get_db_connection()
     cur = conn.cursor()
-    metadata_rows = _lookup_plex_songs(cur, track_title, artist_name, album_name)
+    metadata_rows = _lookup_track_metadata(cur, track_title, artist_name, album_name)
     conn.close()
 
     ignore_matches = bool(payload.get('ignore_matches', False))
@@ -4270,7 +4210,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
             print(f"[PLEX] Library not found. Available sections: {available}", flush=True)
             return False, f'Library "{library_name}" not found or is not a music library'
 
-        # Resolve track by ratingKey from local plex_songs inventory using only the last 3 path parts
+        # Resolve track by library_id from local tracks table using only the last 3 path parts
         raw_full_path = str(full_path or '').strip()
         if not raw_full_path:
             return False, 'file_path is required to resolve Plex ratingKey'
@@ -4282,18 +4222,18 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
         normalized_file_path = '\\'.join(tail_parts)
         trailing_suffix = '/'.join(tail_parts)
-        print(f"[PLEX] Resolving ratingKey via plex_songs for file_path={normalized_file_path}", flush=True)
+        print(f"[PLEX] Resolving ratingKey via tracks for file_path={normalized_file_path}", flush=True)
 
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT "ratingKey", title, artist
-            FROM plex_songs
-            WHERE lower(right(replace(file_path, '\\', '/'), length(%s))) = lower(%s)
-              AND "ratingKey" IS NOT NULL
-              AND btrim("ratingKey") <> ''
-            ORDER BY updated_at DESC
+            SELECT library_id, title, artist_id
+            FROM tracks
+            WHERE lower(right(replace(path, '\\', '/'), length(%s))) = lower(%s)
+              AND library_id IS NOT NULL
+              AND library_id <> ''
+            ORDER BY last_seen_at DESC
             """,
             (trailing_suffix, trailing_suffix)
         )
@@ -4302,18 +4242,25 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
         first_row = rating_rows[0] if rating_rows else {}
         resolved_title = str(first_row.get('title') or 'Unknown').strip() or 'Unknown'
-        resolved_artist = str(first_row.get('artist') or 'Unknown').strip() or 'Unknown'
+        resolved_artist = 'Unknown'
+        if first_row.get('artist_id'):
+            try:
+                artist_row = _get_artist_row(cur, first_row['artist_id']) if cur else None
+                if artist_row:
+                    resolved_artist = str(artist_row.get('name') or 'Unknown').strip() or 'Unknown'
+            except Exception:
+                pass
 
         rating_keys = [
-            str(row.get('ratingKey') or '').strip()
+            str(row.get('library_id') or '').strip()
             for row in rating_rows
-            if str(row.get('ratingKey') or '').strip()
+            if str(row.get('library_id') or '').strip()
         ]
 
         if not rating_keys:
-            print(f"[PLEX] No ratingKey found in plex_songs for file_path={normalized_file_path}", flush=True)
+            print(f"[PLEX] No library_id found in tracks for file_path={normalized_file_path}", flush=True)
             return False, (
-                f'file_path "{normalized_file_path}" was not found in plex_songs with a ratingKey. '
+                f'file_path "{normalized_file_path}" was not found in tracks with a library_id. '
                 'Run a Plex library sync first.'
             )
 
@@ -4331,8 +4278,8 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
         if track is None:
             return False, (
-                f'Could not resolve Plex track for file_path "{normalized_file_path}" using stored ratingKeys. '
-                'Run a Plex library sync to refresh plex_songs.'
+                f'Could not resolve Plex track for file_path "{normalized_file_path}" using stored library IDs. '
+                'Run a Plex library sync to refresh the tracks table.'
             )
         
         # Get or create the playlist
@@ -5510,8 +5457,8 @@ def _matches_requested_format(file_format, candidate_format):
 
     return normalized_candidate not in ('', 'mp3', 'mpeg')
 
-def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
-    """Query plex_songs for rows matching title+artist+album, falling back to title+artist.
+def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):
+    """Query local tracks table for rows matching title+artist+album, falling back to title+artist.
     If fuzzy=True, falls back further to normalized text matching when exact matches fail."""
     rows = []
     # print(f"[PLEX_MATCH] Looking up: title='{title}', artist='{artist}', album='{album}', fuzzy={fuzzy}", flush=True)
@@ -5519,12 +5466,14 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
     if album:
         cur.execute(
             """
-            SELECT title, artist, album, format, bitrate, file_path
-            FROM plex_songs
-            WHERE lower(COALESCE(title, '')) = lower(%s)
-              AND lower(COALESCE(artist, '')) = lower(%s)
-              AND lower(COALESCE(album, '')) = lower(%s)
-            ORDER BY updated_at DESC
+            SELECT tracks.title, artists.name AS artist, albums.title AS album, tracks.format, tracks.bitrate, tracks.path
+            FROM tracks
+            JOIN albums ON albums.album_id = tracks.album_id
+            LEFT JOIN artists ON artists.artist_id = tracks.artist_id
+            WHERE lower(COALESCE(tracks.title, '')) = lower(%s)
+              AND lower(COALESCE(artists.name, '')) = lower(%s)
+              AND lower(COALESCE(albums.title, '')) = lower(%s)
+            ORDER BY tracks.last_seen_at DESC
             """,
             (title, artist, album)
         )
@@ -5534,11 +5483,13 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
     if not rows:
         cur.execute(
             """
-            SELECT title, artist, album, format, bitrate, file_path
-            FROM plex_songs
-            WHERE lower(COALESCE(title, '')) = lower(%s)
-              AND lower(COALESCE(artist, '')) = lower(%s)
-            ORDER BY updated_at DESC
+            SELECT tracks.title, artists.name AS artist, albums.title AS album, tracks.format, tracks.bitrate, tracks.path
+            FROM tracks
+            LEFT JOIN albums ON albums.album_id = tracks.album_id
+            LEFT JOIN artists ON artists.artist_id = tracks.artist_id
+            WHERE lower(COALESCE(tracks.title, '')) = lower(%s)
+              AND lower(COALESCE(artists.name, '')) = lower(%s)
+            ORDER BY tracks.last_seen_at DESC
             """,
             (title, artist)
         )
@@ -5556,7 +5507,7 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
         # print(f"[PLEX_MATCH] SEARCH INPUT: album='{album}' -> normalized='{normalized_album}'", flush=True)
 
         # For multi-artist strings like "Evanescence; K.Flay" or "Evanescence, K.Flay",
-        # also try each individual artist so a Plex track stored under one artist still gets matched.
+        # also try each individual artist so a track stored under one artist still gets matched.
         artist_candidates = [normalized_artist]
         # Split on both semicolons (standard) and commas (legacy) for backward compatibility
         split_parts = []
@@ -5573,9 +5524,11 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
         for candidate_artist in artist_candidates:
             cur.execute(
                 """
-                SELECT title, artist, album, format, bitrate, file_path
-                FROM plex_songs
-                WHERE trim(regexp_replace(regexp_replace(lower(COALESCE(artist, '')), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g')) = %s
+                SELECT tracks.title, artists.name AS artist, albums.title AS album, tracks.format, tracks.bitrate, tracks.path
+                FROM tracks
+                LEFT JOIN albums ON albums.album_id = tracks.album_id
+                LEFT JOIN artists ON artists.artist_id = tracks.artist_id
+                WHERE trim(regexp_replace(regexp_replace(lower(COALESCE(artists.name, '')), '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g')) = %s
                 """,
                 (candidate_artist,)
             )
@@ -5583,7 +5536,7 @@ def _lookup_plex_songs(cur, title, artist, album, fuzzy=False):
             # print(f"[PLEX_MATCH] Fuzzy artist '{candidate_artist}': found {len(candidates_found)} candidates", flush=True)
             
             for candidate in candidates_found:
-                fp = candidate.get('file_path')
+                fp = candidate.get('path')
                 if fp in seen_file_paths:
                     continue
                 candidate_title = normalize_match_text(candidate.get('title'), strip_trailing_parenthetical=True)
@@ -5624,7 +5577,7 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
     )
 
     # print(f"[PLEX_EXISTS_CHECK] Checking: '{title}' by '{artist}' in format {requested_format}", flush=True)
-    rows = _lookup_plex_songs(cur, title, artist, album)
+    rows = _lookup_track_metadata(cur, title, artist, album)
     exists = any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
     # print(f"[PLEX_EXISTS_CHECK] Result: exists={exists}, found {len(rows)} rows with matching format={requested_format}", flush=True)
     return exists
@@ -7514,7 +7467,7 @@ def match_plex_songs_endpoint():
 
         # print(f"[PLEX_MATCH_ENDPOINT] Track {idx}: '{title}' by '{artist}' from '{album}'", flush=True)
         
-        rows = _lookup_plex_songs(cur, title, artist, album, fuzzy=True)
+        rows = _lookup_track_metadata(cur, title, artist, album, fuzzy=True)
 
         variants = []
         seen = set()

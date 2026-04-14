@@ -16,6 +16,9 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
 
+    # Drop plex_songs table (no longer used, all data comes from tracks/albums/artists)
+    cur.execute("DROP TABLE IF EXISTS plex_songs")
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS download_settings (
@@ -99,33 +102,6 @@ def init_db():
     plex_columns = {row['column_name'] for row in cur.fetchall()}
     if 'sync_interval_hours' not in plex_columns:
         cur.execute("ALTER TABLE plex_config ADD COLUMN sync_interval_hours INTEGER NOT NULL DEFAULT 24")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS plex_songs (
-            id SERIAL PRIMARY KEY,
-            title TEXT NOT NULL,
-            artist TEXT,
-            album TEXT,
-            file_path TEXT NOT NULL UNIQUE,
-            "ratingKey" TEXT,
-            format TEXT,
-            bitrate INTEGER,
-            updated_at TIMESTAMP NOT NULL,
-            last_seen_at TIMESTAMP NOT NULL
-        )
-        """
-    )
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'plex_songs'
-        """
-    )
-    plex_songs_columns = {row['column_name'] for row in cur.fetchall()}
-    if 'ratingKey' not in plex_songs_columns:
-        cur.execute('ALTER TABLE plex_songs ADD COLUMN "ratingKey" TEXT')
 
     cur.execute(
         """
