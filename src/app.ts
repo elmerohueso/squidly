@@ -284,6 +284,7 @@ interface HifiReviewArtist {
     name: string;
     library_id?: string;
     hifi_id?: string;
+    picture?: string;
     confidence?: number;
     match_status?: string;
     match_source?: string;
@@ -298,6 +299,8 @@ interface HifiReviewAlbum {
     artist_name?: string;
     library_id?: string;
     hifi_id?: string;
+    cover?: string;
+    track_titles?: string[];
     confidence?: number;
     complete?: boolean;
     matched_track_count?: number;
@@ -333,6 +336,11 @@ interface HifiReviewTrack {
 
 interface HifiMatchReviewResponse {
     success?: boolean;
+    summary?: {
+        artists?: number;
+        albums?: number;
+        tracks?: number;
+    };
     artists?: HifiReviewArtist[];
     albums?: HifiReviewAlbum[];
     tracks?: HifiReviewTrack[];
@@ -344,6 +352,9 @@ interface HifiMatchCandidate {
     title: string;
     subtitle?: string;
     confidence?: number;
+    image_url?: string;
+    explicit?: boolean;
+    track_titles?: string[];
 }
 
 interface HifiMatchCandidatesResponse {
@@ -414,6 +425,7 @@ class App {
     private searchTypeSelect: HTMLSelectElement;
     private searchButton: HTMLButtonElement;
     private exploreBreadcrumbContainer: HTMLElement | null;
+    private libraryBreadcrumbContainer: HTMLElement | null;
     private resultsContainer: HTMLElement;
     private libraryResultsContainer: HTMLElement;
     private statusButton: HTMLButtonElement;
@@ -519,6 +531,7 @@ class App {
     private matchReviewPollingInterval: number | null = null;
     private lastMatchActivityJobId: number | null = null;
     private lastMatchActivityStatus: string | null = null;
+    private activeMatchActivityJobId: number | null = null;
     private matchCandidateCache = new Map<string, HifiMatchCandidate[]>();
     private matchCandidateRequestsInFlight = new Set<string>();
     private currentExploreRoute: AppRouteState = { view: 'home' };
@@ -667,6 +680,7 @@ class App {
         this.searchTypeSelect = document.getElementById('searchType') as HTMLSelectElement;
         this.searchButton = document.getElementById('searchButton') as HTMLButtonElement;
         this.exploreBreadcrumbContainer = document.getElementById('exploreBreadcrumb');
+        this.libraryBreadcrumbContainer = document.getElementById('libraryBreadcrumb');
         this.resultsContainer = document.getElementById('results') as HTMLElement;
         this.libraryResultsContainer = document.getElementById('libraryResults') as HTMLElement;
         
@@ -786,6 +800,26 @@ class App {
             });
         }
 
+        if (this.libraryBreadcrumbContainer) {
+            this.libraryBreadcrumbContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+                const breadcrumbButton = target.closest('[data-library-crumb]') as HTMLButtonElement | null;
+                if (!breadcrumbButton) {
+                    return;
+                }
+
+                e.preventDefault();
+                const crumb = breadcrumbButton.getAttribute('data-library-crumb');
+                if (crumb === 'library') {
+                    void this.loadLibraryArtists(0);
+                    return;
+                }
+                if (crumb === 'artist' && this.libraryCurrentArtist) {
+                    void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
+                }
+            });
+        }
+
         // User dropdown listeners
         if (this.userButton) {
             console.log('[DEBUG] Attaching user button listener');
@@ -848,6 +882,11 @@ class App {
         }
         if (this.matchReviewRunScanButton) {
             this.matchReviewRunScanButton.addEventListener('click', () => {
+                if (this.activeMatchActivityJobId) {
+                    void this.cancelHifiMatchScan(this.activeMatchActivityJobId);
+                    return;
+                }
+
                 void this.startHifiMatchScan();
             });
         }
@@ -1381,20 +1420,6 @@ class App {
                     }
                 }
 
-                const breadcrumbButton = target.closest('[data-library-crumb]') as HTMLButtonElement | null;
-                if (breadcrumbButton) {
-                    e.preventDefault();
-                    const crumb = breadcrumbButton.getAttribute('data-library-crumb');
-                    if (crumb === 'library') {
-                        void this.loadLibraryArtists(0);
-                        return;
-                    }
-                    if (crumb === 'artist' && this.libraryCurrentArtist) {
-                        void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
-                        return;
-                    }
-                }
-
                 const paginationButton = target.closest('[data-library-offset]') as HTMLButtonElement | null;
                 if (paginationButton) {
                     e.preventDefault();
@@ -1498,12 +1523,21 @@ class App {
         if (normalizedPage === 'explore') {
             this.renderTopBarTitle('Explore');
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+            this.hideLibraryBreadcrumb();
+        } else if (normalizedPage === 'library') {
+            this.renderTopBarTitle('Library');
+            if (this.exploreBreadcrumbContainer) {
+                this.exploreBreadcrumbContainer.style.display = 'none';
+                this.exploreBreadcrumbContainer.innerHTML = '';
+            }
+            this.renderLibraryBreadcrumb();
         } else {
             this.renderTopBarTitle(pageNames[normalizedPage] || 'Squidly');
             if (this.exploreBreadcrumbContainer) {
                 this.exploreBreadcrumbContainer.style.display = 'none';
                 this.exploreBreadcrumbContainer.innerHTML = '';
             }
+            this.hideLibraryBreadcrumb();
         }
 
         // Refresh mirrors data when switching to mirrors page
@@ -1539,6 +1573,8 @@ class App {
             return;
         }
 
+        this.renderLibraryBreadcrumb();
+
         this.libraryResultsContainer.innerHTML = `
             <div class="library-placeholder">
                 <p>${this.escapeHtml(message)}</p>
@@ -1564,7 +1600,26 @@ class App {
             trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(album.title)}</span>`;
         }
 
-        return `<div class="library-breadcrumb">${trail}</div>`;
+        return trail;
+    }
+
+    private renderLibraryBreadcrumb(): void {
+        if (!this.libraryBreadcrumbContainer) {
+            return;
+        }
+
+        const trail = this.formatLibraryBreadcrumb();
+        this.libraryBreadcrumbContainer.innerHTML = trail;
+        this.libraryBreadcrumbContainer.style.display = trail ? 'flex' : 'none';
+    }
+
+    private hideLibraryBreadcrumb(): void {
+        if (!this.libraryBreadcrumbContainer) {
+            return;
+        }
+
+        this.libraryBreadcrumbContainer.innerHTML = '';
+        this.libraryBreadcrumbContainer.style.display = 'none';
     }
 
     private formatLibraryArtistCard(artist: PlexLibraryArtist): string {
@@ -1696,6 +1751,7 @@ class App {
 
     private renderLibraryArtists(artists: PlexLibraryArtist[]): void {
         this.libraryLoadedOnce = true;
+        this.renderLibraryBreadcrumb();
         const currentPage = Math.floor(this.libraryArtistsOffset / this.libraryArtistsPageSize) + 1;
         const totalPages = Math.max(1, Math.ceil(this.libraryArtistsTotal / this.libraryArtistsPageSize));
         const firstOffset = 0;
@@ -1706,7 +1762,6 @@ class App {
         const hasNext = nextOffset < this.libraryArtistsTotal;
 
         this.libraryResultsContainer.innerHTML = `
-            ${this.formatLibraryBreadcrumb()}
             <div class="results-header">
                 <div class="results-header-top">
                     <h2>Artists</h2>
@@ -1732,8 +1787,8 @@ class App {
 
     private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[], artistPicture?: string): void {
         this.libraryLoadedOnce = true;
+        this.renderLibraryBreadcrumb();
         this.libraryResultsContainer.innerHTML = `
-            ${this.formatLibraryBreadcrumb()}
             <div class="artist-hero-section">
                 <div class="artist-hero-content">
                     <div class="artist-cover-container">
@@ -1798,8 +1853,8 @@ class App {
             ? `${totalDurationHours}h ${remainingMinutes}m`
             : `${totalDurationMinutes}m`;
 
+        this.renderLibraryBreadcrumb();
         this.libraryResultsContainer.innerHTML = `
-            ${this.formatLibraryBreadcrumb()}
             <div class="album-hero-section">
                 <div class="album-hero-content">
                     <div class="album-cover-container">
@@ -3043,6 +3098,18 @@ class App {
         this.matchReviewStatusEl.style.color = isError ? '#ff9ab0' : 'var(--text-secondary)';
     }
 
+    private updateMatchReviewRunScanButton(isActive: boolean): void {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        this.matchReviewRunScanButton.disabled = false;
+        this.matchReviewRunScanButton.classList.toggle('is-cancel', isActive);
+        this.matchReviewRunScanButton.textContent = isActive
+            ? 'Cancel Automatic Matching'
+            : 'Start Automatic Matching';
+    }
+
     private startMatchReviewPollingInterval(): void {
         if (this.matchReviewPollingInterval) {
             window.clearInterval(this.matchReviewPollingInterval);
@@ -3137,7 +3204,8 @@ class App {
 
             if (!latestJob) {
                 this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No match scans have been run yet.</div>';
-                this.matchReviewRunScanButton.disabled = false;
+                this.activeMatchActivityJobId = null;
+                this.updateMatchReviewRunScanButton(false);
                 this.lastMatchActivityJobId = null;
                 this.lastMatchActivityStatus = null;
                 return;
@@ -3149,7 +3217,8 @@ class App {
             const isActive = currentStatus === 'queued' || currentStatus === 'in_progress';
 
             this.matchReviewActivity.innerHTML = this.renderMatchActivityCard(latestJob);
-            this.matchReviewRunScanButton.disabled = isActive;
+            this.activeMatchActivityJobId = isActive ? latestJob.id : null;
+            this.updateMatchReviewRunScanButton(isActive);
             if (isActive) {
                 this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
             }
@@ -3206,6 +3275,80 @@ class App {
         `;
     }
 
+    private escapeAttribute(text: string): string {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '&#10;');
+    }
+
+    private renderMatchTrackList(trackTitles?: string[], emptyLabel: string = 'Track list unavailable.'): string {
+        const normalizedTitles = (trackTitles || [])
+            .map(title => String(title || '').trim())
+            .filter(Boolean);
+
+        if (normalizedTitles.length === 0) {
+            return `<div class="match-review-track-list is-empty">${this.escapeHtml(emptyLabel)}</div>`;
+        }
+
+        return `
+            <div class="match-review-track-list">
+                <div class="match-review-track-list-label">Track List</div>
+                <ol class="match-review-track-list-items">
+                    ${normalizedTitles.map(title => `<li>${this.escapeHtml(title)}</li>`).join('')}
+                </ol>
+            </div>
+        `;
+    }
+
+    private renderMatchReviewArtwork(imageUrl: string | undefined, altText: string, kind: 'artist' | 'album' | 'track' = 'album'): string {
+        if (imageUrl) {
+            return `
+                <div class="match-review-artwork match-review-artwork--${kind}">
+                    <img src="${this.escapeAttribute(imageUrl)}" alt="${this.escapeAttribute(altText)}" loading="lazy" width="350" height="350">
+                </div>
+            `;
+        }
+
+        const placeholderSvg = kind === 'artist'
+            ? `
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="8" r="4"></circle>
+                    <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
+                </svg>
+            `
+            : `
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+            `;
+
+        return `
+            <div class="match-review-artwork match-review-artwork--${kind} is-placeholder" aria-hidden="true">
+                ${placeholderSvg}
+            </div>
+        `;
+    }
+
+    private renderMatchReviewTitle(title: string, options: { explicit?: boolean; className?: string; href?: string | null } = {}): string {
+        const className = options.className || 'match-review-pane-title';
+        const titleContent = options.href
+            ? `<a class="match-review-title-link" href="${this.escapeAttribute(options.href)}">${this.escapeHtml(title)}</a>`
+            : `<span class="match-review-title-text">${this.escapeHtml(title)}</span>`;
+
+        return `
+            <div class="${className}">
+                ${titleContent}
+                ${options.explicit ? '<span class="explicit-badge" title="Explicit content">E</span>' : ''}
+            </div>
+        `;
+    }
+
     private renderMatchCandidateList(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
         const cacheKey = `${entityType}:${reviewId}`;
         const candidates = this.matchCandidateCache.get(cacheKey);
@@ -3221,13 +3364,8 @@ class App {
             <div class="match-review-candidate-list">
                 ${candidates.map(candidate => `
                     <div class="match-review-candidate">
-                        <div>
-                            <div class="match-review-candidate-title">${this.escapeHtml(candidate.title)}</div>
-                            ${candidate.subtitle ? `<div class="match-review-candidate-subtitle">${this.escapeHtml(candidate.subtitle)}</div>` : ''}
-                        </div>
                         <div class="match-review-candidate-meta">
                             <span class="match-review-confidence">${this.formatMatchConfidence(candidate.confidence)}</span>
-                            ${this.renderMatchExploreLink(entityType, candidate.hifi_id, 'Open in Explore')}
                             <button
                                 type="button"
                                 class="match-review-button primary"
@@ -3236,6 +3374,34 @@ class App {
                                 data-review-id="${reviewId}"
                                 data-hifi-id="${this.escapeHtml(candidate.hifi_id)}"
                             >Use This Match</button>
+                        </div>
+                        <div class="match-review-candidate-main">
+                            ${entityType === 'album'
+                                ? `
+                                    <div class="match-review-album-header">
+                                        ${this.renderMatchReviewTitle(candidate.title, {
+                                            explicit: candidate.explicit,
+                                            className: 'match-review-candidate-title',
+                                            href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                                        })}
+                                        <div class="match-review-album-artist">${this.escapeHtml(candidate.subtitle || 'Unknown Artist')}</div>
+                                    </div>
+                                    <div class="match-review-album-body">
+                                        ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, 'album')}
+                                        ${this.renderMatchTrackList(candidate.track_titles, 'Track list unavailable for this candidate.')}
+                                    </div>
+                                `
+                                : `
+                                    ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, entityType === 'artist' ? 'artist' : 'album')}
+                                    <div class="match-review-candidate-copy">
+                                        ${this.renderMatchReviewTitle(candidate.title, {
+                                            explicit: false,
+                                            className: 'match-review-candidate-title',
+                                            href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                                        })}
+                                        ${candidate.subtitle ? `<div class="match-review-candidate-subtitle">${this.escapeHtml(candidate.subtitle)}</div>` : ''}
+                                    </div>
+                                `}
                         </div>
                     </div>
                 `).join('')}
@@ -3302,7 +3468,7 @@ class App {
                 artistId: artist.library_id,
                 artistName: artist.name || 'Artist'
             });
-        }
+            }
 
         if (entityType === 'album') {
             const album = item as HifiReviewAlbum;
@@ -3363,18 +3529,6 @@ class App {
         });
     }
 
-    private renderMatchLink(label: string, href: string | null): string {
-        if (!href) {
-            return `<span class="match-review-link disabled">${this.escapeHtml(label)}</span>`;
-        }
-
-        return `<a class="match-review-link" href="${this.escapeHtml(href)}">${this.escapeHtml(label)}</a>`;
-    }
-
-    private renderMatchExploreLink(entityType: 'artist' | 'album' | 'track', hifiId?: string, label: string = 'Open in Explore'): string {
-        return this.renderMatchLink(label, this.getMatchExploreHref(entityType, hifiId));
-    }
-
     private getManualMatchIdHint(entityType: 'artist' | 'album' | 'track'): string {
         if (entityType === 'artist') {
             return 'Paste the Explore artist ID if search found nothing useful.';
@@ -3412,15 +3566,13 @@ class App {
     }
 
     private renderMatchCurrentCandidate(entityType: 'artist' | 'album' | 'track', hifiId?: string, extraLabel?: string): string {
-        const href = this.getMatchExploreHref(entityType, hifiId);
-        if (!href) {
+        if (!this.getMatchExploreHref(entityType, hifiId)) {
             return '';
         }
 
         return `
             <div class="match-review-current">
-                <span>Current candidate${extraLabel ? ` • ${this.escapeHtml(extraLabel)}` : ''}</span>
-                ${this.renderMatchLink('Open in Explore', href)}
+                <span>Current candidate selected${extraLabel ? ` • ${this.escapeHtml(extraLabel)}` : ''}</span>
             </div>
         `;
     }
@@ -3428,7 +3580,7 @@ class App {
     private renderArtistReviewCard(item: HifiReviewArtist): string {
         const reviewId = item.artist_id;
         const currentMatch = this.renderMatchCurrentCandidate('artist', item.hifi_id);
-        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'artist'));
+        const sourceHref = this.getMatchSourceHref(item, 'artist');
 
         return this.renderMatchWorkflowCard(
             'artist',
@@ -3444,15 +3596,19 @@ class App {
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
-                    <div class="match-review-pane-title">${this.escapeHtml(item.name || 'Unknown Artist')}</div>
-                    <div class="match-review-pane-copy">This is the artist currently indexed from your Plex library.</div>
-                    <div class="match-review-pane-links">${sourceLink}</div>
+                    <div class="match-review-pane-header">
+                        ${this.renderMatchReviewArtwork(item.picture, item.name || 'Unknown Artist', 'artist')}
+                        <div class="match-review-pane-stack">
+                            ${this.renderMatchReviewTitle(item.name || 'Unknown Artist', { href: sourceHref })}
+                            <div class="match-review-pane-copy">This is the artist currently indexed from your Plex library.</div>
+                        </div>
+                    </div>
                 </section>
             `,
             `
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
-                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    ${currentMatch}
                     <div class="match-review-candidates" data-match-candidates-key="artist:${reviewId}">
                         ${this.renderMatchCandidateList('artist', reviewId)}
                     </div>
@@ -3469,7 +3625,7 @@ class App {
     private renderAlbumReviewCard(item: HifiReviewAlbum): string {
         const reviewId = item.album_id;
         const currentMatch = this.renderMatchCurrentCandidate('album', item.hifi_id, item.complete ? 'complete in library' : undefined);
-        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'album'));
+        const sourceHref = this.getMatchSourceHref(item, 'album');
 
         return this.renderMatchWorkflowCard(
             'album',
@@ -3486,16 +3642,22 @@ class App {
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
-                    <div class="match-review-pane-title">${this.escapeHtml(item.title || 'Unknown Album')}</div>
-                    <div class="match-review-pane-copy">${this.escapeHtml(item.artist_name || 'Unknown Artist')}</div>
-                    <div class="match-review-pane-copy">Matched tracks in library: ${item.matched_track_count || 0}/${item.expected_track_count || 0}</div>
-                    <div class="match-review-pane-links">${sourceLink}</div>
+                    <div class="match-review-pane-header">
+                        <div class="match-review-album-header">
+                            ${this.renderMatchReviewTitle(item.title || 'Unknown Album', { href: sourceHref })}
+                            <div class="match-review-album-artist">${this.escapeHtml(item.artist_name || 'Unknown Artist')}</div>
+                        </div>
+                        <div class="match-review-album-body">
+                            ${this.renderMatchReviewArtwork(item.cover, item.title || 'Unknown Album', 'album')}
+                            ${this.renderMatchTrackList(item.track_titles, 'Track list unavailable for this library album.')}
+                        </div>
+                    </div>
                 </section>
             `,
             `
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
-                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    ${currentMatch}
                     <div class="match-review-candidates" data-match-candidates-key="album:${reviewId}">
                         ${this.renderMatchCandidateList('album', reviewId)}
                     </div>
@@ -3513,7 +3675,7 @@ class App {
         const reviewId = item.track_id;
         const subtitleParts = [item.artist_name, item.album_title].filter(Boolean);
         const currentMatch = this.renderMatchCurrentCandidate('track', item.hifi_id);
-        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'track'));
+        const sourceHref = this.getMatchSourceHref(item, 'track');
 
         return this.renderMatchWorkflowCard(
             'track',
@@ -3530,16 +3692,15 @@ class App {
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
-                    <div class="match-review-pane-title">${this.escapeHtml(item.title || 'Unknown Track')}</div>
+                    ${this.renderMatchReviewTitle(item.title || 'Unknown Track', { href: sourceHref })}
                     <div class="match-review-pane-copy">${this.escapeHtml(subtitleParts.join(' • ') || 'Unknown')}</div>
                     <div class="match-review-pane-copy">Path: ${this.escapeHtml(item.path || '—')}</div>
-                    <div class="match-review-pane-links">${sourceLink}</div>
                 </section>
             `,
             `
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
-                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    ${currentMatch}
                     <div class="match-review-candidates" data-match-candidates-key="track:${reviewId}">
                         ${this.renderMatchCandidateList('track', reviewId)}
                     </div>
@@ -3595,11 +3756,14 @@ class App {
             const artists = Array.isArray(data.artists) ? data.artists : [];
             const albums = Array.isArray(data.albums) ? data.albums : [];
             const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+            const artistTotal = typeof data.summary?.artists === 'number' ? data.summary.artists : artists.length;
+            const albumTotal = typeof data.summary?.albums === 'number' ? data.summary.albums : albums.length;
+            const trackTotal = typeof data.summary?.tracks === 'number' ? data.summary.tracks : tracks.length;
 
             this.matchReviewSummary.innerHTML = [
-                this.renderMatchSummaryCard('Artists to review', artists.length),
-                this.renderMatchSummaryCard('Albums to review', albums.length),
-                this.renderMatchSummaryCard('Tracks to review', tracks.length)
+                this.renderMatchSummaryCard('Artists to review', artistTotal),
+                this.renderMatchSummaryCard('Albums to review', albumTotal),
+                this.renderMatchSummaryCard('Tracks to review', trackTotal)
             ].join('');
 
             const content = [
@@ -3622,16 +3786,25 @@ class App {
             return;
         }
 
-        const originalText = this.matchReviewRunScanButton.textContent || 'Run Manual Scan';
+        const originalText = this.matchReviewRunScanButton.textContent || 'Start Automatic Matching';
         this.matchReviewRunScanButton.disabled = true;
         this.matchReviewRunScanButton.textContent = 'Queueing...';
         this.setMatchReviewStatus('');
+        let queuedJobIsActive = false;
 
         try {
             const response = await fetch('/api/hifi/matches', { method: 'POST' });
-            const data = await response.json().catch(() => ({} as { error?: string; job_id?: number }));
+            const data = await response.json().catch(() => ({} as { error?: string; job_id?: number | string; status?: string }));
             if (!response.ok) {
                 throw new Error(data.error || 'Failed to queue manual scan');
+            }
+
+            const queuedJobId = Number(data.job_id);
+            const queuedStatus = String(data.status || '').trim().toLowerCase();
+            queuedJobIsActive = !queuedStatus || queuedStatus === 'queued' || queuedStatus === 'in_progress';
+            if (queuedJobIsActive && Number.isFinite(queuedJobId) && queuedJobId > 0) {
+                this.activeMatchActivityJobId = queuedJobId;
+                this.updateMatchReviewRunScanButton(true);
             }
 
             this.setMatchReviewStatus(`Manual scan queued as job ${data.job_id || 'unknown'}. Check Jobs for progress.`);
@@ -3641,8 +3814,49 @@ class App {
             console.error('Failed to queue hifi match scan:', error);
             this.setMatchReviewStatus((error as Error).message || 'Failed to queue manual scan', true);
         } finally {
+            if (queuedJobIsActive || this.activeMatchActivityJobId) {
+                this.updateMatchReviewRunScanButton(true);
+            } else {
+                this.matchReviewRunScanButton.disabled = false;
+                this.matchReviewRunScanButton.textContent = originalText;
+            }
+        }
+    }
+
+    private async cancelHifiMatchScan(jobId: number): Promise<void> {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        const originalText = this.matchReviewRunScanButton.textContent || 'Cancel Automatic Matching';
+        this.matchReviewRunScanButton.disabled = true;
+        this.matchReviewRunScanButton.textContent = 'Cancelling...';
+
+        try {
+            const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to cancel automatic matching';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            this.activeMatchActivityJobId = null;
+            this.updateMatchReviewRunScanButton(false);
+            this.setMatchReviewStatus(`Automatic matching cancelled for job ${jobId}.`);
+            await this.loadMatchActivity();
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Failed to cancel hifi match scan:', error);
             this.matchReviewRunScanButton.disabled = false;
             this.matchReviewRunScanButton.textContent = originalText;
+            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel automatic matching', true);
         }
     }
 

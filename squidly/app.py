@@ -1542,6 +1542,199 @@ def _fetch_hifi_album_payload(album_id):
     return response.json() or {}
 
 
+def _format_hifi_image_value(image_id_or_url, size=640):
+    raw_value = str(image_id_or_url or '').strip()
+    if not raw_value:
+        return None
+    if raw_value.startswith('http://') or raw_value.startswith('https://'):
+        return raw_value
+    try:
+        return format_tidal_image_url(raw_value, size)
+    except Exception:
+        return None
+
+
+MATCH_REVIEW_ARTWORK_SIZE = 350
+MATCH_REVIEW_HIFI_ARTWORK_SIZE = 640
+
+
+def _is_hifi_explicit(item):
+    if not isinstance(item, dict):
+        return False
+    if bool(item.get('explicit')):
+        return True
+
+    metadata = item.get('mediaMetadata') if isinstance(item.get('mediaMetadata'), dict) else {}
+    tags = []
+    metadata_tags = metadata.get('tags')
+    if isinstance(metadata_tags, list):
+        tags.extend(metadata_tags)
+    media_tags = item.get('mediaTags')
+    if isinstance(media_tags, list):
+        tags.extend(media_tags)
+
+    normalized_tags = {str(tag or '').strip().upper() for tag in tags if str(tag or '').strip()}
+    return 'EXPLICIT' in normalized_tags
+
+
+def _format_hifi_track_title(item):
+    if not isinstance(item, dict):
+        return ''
+
+    title = str(item.get('title') or '').strip()
+    if not title:
+        return ''
+
+    version = str(item.get('version') or '').strip()
+    if version and normalize_match_text(version) not in normalize_match_text(title):
+        return f"{title} ({version})"
+
+    return title
+
+
+def _extract_hifi_album_track_titles(album_payload, limit=30):
+    album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
+    items = album_data.get('items', []) if isinstance(album_data, dict) else []
+    track_titles = []
+
+    for entry in items:
+        if not isinstance(entry, dict) or entry.get('type') != 'track':
+            continue
+        item = entry.get('item') if isinstance(entry.get('item'), dict) else None
+        if not item:
+            continue
+        title = _format_hifi_track_title(item)
+        if not title:
+            continue
+        track_titles.append(title)
+        if len(track_titles) >= limit:
+            break
+
+    return track_titles
+
+
+def _fetch_source_album_track_titles_map(cur, album_ids):
+    normalized_ids = []
+    for album_id in album_ids or []:
+        try:
+            value = int(album_id)
+        except Exception:
+            continue
+        if value > 0:
+            normalized_ids.append(value)
+
+    if not normalized_ids:
+        return {}
+
+    cur.execute(
+        """
+        SELECT album_id,
+               ARRAY_AGG(title ORDER BY COALESCE(disc_number, 1), COALESCE(track_number, 0), LOWER(title)) AS track_titles
+        FROM tracks
+        WHERE album_id = ANY(%s)
+        GROUP BY album_id
+        """,
+        (normalized_ids,)
+    )
+
+    results = {}
+    for row in cur.fetchall() or []:
+        try:
+            album_id = int(row.get('album_id'))
+        except Exception:
+            continue
+        results[album_id] = [
+            str(title or '').strip()
+            for title in (row.get('track_titles') or [])
+            if str(title or '').strip()
+        ]
+    return results
+
+
+def _has_explicit_marker(value):
+    text = str(value or '').strip().lower()
+    return '[explicit]' in text or '(explicit)' in text
+
+
+def _score_explicit_alignment(source_is_explicit, candidate_is_explicit):
+    if source_is_explicit and candidate_is_explicit:
+        return 0.02
+    if source_is_explicit != candidate_is_explicit:
+        return -0.02
+    return 0.0
+
+
+def _score_album_track_title_alignment(source_track_titles, candidate_track_titles):
+    normalized_source = [
+        normalize_match_text(title, strip_trailing_parenthetical=True)
+        for title in (source_track_titles or [])
+        if normalize_match_text(title, strip_trailing_parenthetical=True)
+    ]
+    normalized_candidate = [
+        normalize_match_text(title, strip_trailing_parenthetical=True)
+        for title in (candidate_track_titles or [])
+        if normalize_match_text(title, strip_trailing_parenthetical=True)
+    ]
+
+    if len(normalized_source) < 2 or len(normalized_candidate) < 2:
+        return 0.0
+
+    compare_count = min(len(normalized_source), len(normalized_candidate), 12)
+    if compare_count < 2:
+        return 0.0
+
+    matches = sum(1 for idx in range(compare_count) if normalized_source[idx] == normalized_candidate[idx])
+    ratio = matches / compare_count
+    if ratio >= 0.85:
+        return 0.03
+    if ratio >= 0.65:
+        return 0.015
+    return 0.0
+
+
+def _get_match_review_plex_context():
+    try:
+        config = get_plex_config()
+        server_url = str(config.get('server_url') or '').strip()
+        api_token = str(config.get('api_token') or '').strip()
+        library_name = str(config.get('library_name') or '').strip()
+        if not server_url or not api_token or not library_name:
+            return None, None, None
+
+        _, library, _ = _resolve_plex_library_context(server_url, api_token, library_name)
+        if not library:
+            return None, None, None
+
+        return server_url, api_token, library
+    except Exception as e:
+        print(f"[MATCH_REVIEW] Unable to resolve Plex context for artwork: {str(e)}", flush=True)
+        return None, None, None
+
+
+def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, image_size=None):
+    if not library or not server_url or not api_token:
+        return {}
+
+    image_map = {}
+    for library_id in library_ids or []:
+        normalized_id = str(library_id or '').strip()
+        if not normalized_id or normalized_id in image_map:
+            continue
+        try:
+            item = library.fetchItem(f'/library/metadata/{normalized_id}')
+            image_map[normalized_id] = _build_plex_image_url(
+                server_url,
+                api_token,
+                getattr(item, 'thumb', None),
+                image_size=image_size,
+            ) if item else None
+        except Exception as e:
+            print(f"[MATCH_REVIEW] Failed to fetch Plex artwork for {normalized_id}: {str(e)}", flush=True)
+            image_map[normalized_id] = None
+
+    return image_map
+
+
 def _choose_artist_candidate(artist_name):
     normalized_artist = normalize_match_text(artist_name)
     if not normalized_artist:
@@ -1567,7 +1760,7 @@ def _choose_artist_candidate(artist_name):
     return best
 
 
-def _choose_album_candidate(album_row, track_count):
+def _choose_album_candidate(album_row, track_count, source_track_titles=None):
     artist_hifi_id = str(album_row.get('artist_hifi_id') or '').strip()
     album_title = str(album_row.get('title') or '').strip()
     if not artist_hifi_id or not album_title:
@@ -1576,6 +1769,7 @@ def _choose_album_candidate(album_row, track_count):
     payload = _fetch_hifi_artist_payload(artist_hifi_id)
     albums = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
     normalized_title = normalize_match_text(album_title, strip_trailing_parenthetical=True)
+    source_is_explicit = _has_explicit_marker(album_title)
     best = None
     for candidate in albums:
         candidate_title = str(candidate.get('title') or '').strip()
@@ -1591,6 +1785,12 @@ def _choose_album_candidate(album_row, track_count):
         candidate_track_count = _safe_int(candidate.get('numberOfTracks') or candidate.get('numberOfItems'))
         if track_count and candidate_track_count and track_count == candidate_track_count:
             confidence += 0.03
+
+        confidence += _score_explicit_alignment(source_is_explicit, _is_hifi_explicit(candidate))
+
+        if hifi_id := str(candidate.get('id') or '').strip():
+            candidate_track_titles = _extract_hifi_album_track_titles(_fetch_hifi_album_payload(hifi_id))
+            confidence += _score_album_track_title_alignment(source_track_titles, candidate_track_titles)
 
         if not best or confidence > best['confidence']:
             best = {
@@ -1834,7 +2034,7 @@ def _score_artist_candidate_name(artist_name, candidate_name):
     return 0.0
 
 
-def _score_album_candidate_title(album_title, candidate_title, library_track_count=None, candidate_track_count=None):
+def _score_album_candidate_title(album_title, candidate_title, library_track_count=None, candidate_track_count=None, source_is_explicit=False, candidate_is_explicit=False):
     normalized_title = normalize_match_text(album_title, strip_trailing_parenthetical=True)
     normalized_candidate = normalize_match_text(candidate_title, strip_trailing_parenthetical=True)
     if not normalized_title or not normalized_candidate:
@@ -1851,6 +2051,8 @@ def _score_album_candidate_title(album_title, candidate_title, library_track_cou
 
     if library_track_count and candidate_track_count and library_track_count == candidate_track_count:
         confidence += 0.03
+
+    confidence += _score_explicit_alignment(source_is_explicit, candidate_is_explicit)
 
     return min(confidence, 0.99)
 
@@ -1884,6 +2086,8 @@ def _score_track_candidate_payload(track_row, candidate):
     candidate_album_title = str(candidate_album.get('title') or '').strip()
     if candidate_album_title and normalize_match_text(candidate_album_title, strip_trailing_parenthetical=True) == normalize_match_text(track_row.get('album_title'), strip_trailing_parenthetical=True):
         confidence += 0.02
+
+    confidence += _score_explicit_alignment(_has_explicit_marker(track_row.get('title')), _is_hifi_explicit(candidate))
 
     return min(confidence, 0.99)
 
@@ -1965,13 +2169,14 @@ def _build_artist_match_candidates(row, limit=10, query_override=None):
             'title': candidate_name,
             'subtitle': 'Artist',
             'confidence': confidence,
+            'image_url': _format_hifi_image_value(candidate.get('picture'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
         })
 
     scored.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
     return scored[:limit]
 
 
-def _build_album_match_candidates(row, limit=10, query_override=None):
+def _build_album_match_candidates(row, limit=10, query_override=None, source_track_titles=None):
     candidates = []
     seen = set()
     library_track_count = _safe_int(row.get('library_track_count'))
@@ -1984,6 +2189,8 @@ def _build_album_match_candidates(row, limit=10, query_override=None):
     else:
         source_candidates = _fetch_hifi_search_results('al', search_query, limit=limit)
 
+    source_is_explicit = _has_explicit_marker(row.get('title'))
+
     for candidate in source_candidates:
         hifi_id = str(candidate.get('id') or '').strip()
         title = str(candidate.get('title') or '').strip()
@@ -1992,7 +2199,14 @@ def _build_album_match_candidates(row, limit=10, query_override=None):
         seen.add(hifi_id)
 
         candidate_track_count = _safe_int(candidate.get('numberOfTracks') or candidate.get('numberOfItems'))
-        confidence = _score_album_candidate_title(row.get('title'), title, library_track_count, candidate_track_count)
+        confidence = _score_album_candidate_title(
+            row.get('title'),
+            title,
+            library_track_count,
+            candidate_track_count,
+            source_is_explicit=source_is_explicit,
+            candidate_is_explicit=_is_hifi_explicit(candidate),
+        )
         if confidence <= 0:
             continue
 
@@ -2009,14 +2223,20 @@ def _build_album_match_candidates(row, limit=10, query_override=None):
             subtitle_parts.append(', '.join(artist_names))
         elif row.get('artist_name'):
             subtitle_parts.append(str(row.get('artist_name')).strip())
-        if candidate_track_count:
-            subtitle_parts.append(f"{candidate_track_count} tracks")
+
+        album_track_titles = []
+        if hifi_id:
+            album_track_titles = _extract_hifi_album_track_titles(_fetch_hifi_album_payload(hifi_id))
+            confidence += _score_album_track_title_alignment(source_track_titles, album_track_titles)
 
         candidates.append({
             'hifi_id': hifi_id,
             'title': title,
             'subtitle': ' • '.join(part for part in subtitle_parts if part),
             'confidence': confidence,
+            'image_url': _format_hifi_image_value(candidate.get('cover'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
+            'explicit': _is_hifi_explicit(candidate),
+            'track_titles': album_track_titles,
         })
 
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
@@ -2077,11 +2297,14 @@ def _build_track_match_candidates(row, limit=10, query_override=None):
         if track_number:
             subtitle_parts.append(f"Track {track_number}")
 
+        album_data = candidate.get('album') if isinstance(candidate.get('album'), dict) else {}
+
         candidates.append({
             'hifi_id': hifi_id,
             'title': title,
             'subtitle': ' • '.join(part for part in subtitle_parts if part),
             'confidence': confidence,
+            'image_url': _format_hifi_image_value(album_data.get('cover') or candidate.get('cover'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
         })
 
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
@@ -2232,9 +2455,18 @@ def process_hifi_match_job(job_id, payload):
             """
         )
         album_rows = cur.fetchall() or []
+        source_album_track_titles_map = _fetch_source_album_track_titles_map(cur, [row.get('album_id') for row in album_rows])
         for album_row in album_rows:
             _raise_if_job_cancelled(job_id)
-            candidate = _choose_album_candidate(album_row, _safe_int(album_row.get('library_track_count')))
+            try:
+                source_track_titles = source_album_track_titles_map.get(int(album_row.get('album_id')), [])
+            except Exception:
+                source_track_titles = []
+            candidate = _choose_album_candidate(
+                album_row,
+                _safe_int(album_row.get('library_track_count')),
+                source_track_titles=source_track_titles,
+            )
             if candidate and candidate.get('hifi_id'):
                 _upsert_album_row(
                     cur,
@@ -6375,9 +6607,28 @@ def get_hifi_match_review_endpoint():
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        response = {'success': True}
+        response = {
+            'success': True,
+            'summary': {
+                'artists': 0,
+                'albums': 0,
+                'tracks': 0,
+            }
+        }
+        server_url, api_token, library = _get_match_review_plex_context()
 
         if include_artists:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM artists
+                WHERE (match_status = 'proposed' AND confidence <= %s)
+                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                """,
+                (max_confidence,)
+            )
+            response['summary']['artists'] = _safe_int((cur.fetchone() or {}).get('count')) or 0
+
             cur.execute(
                 """
                 SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at
@@ -6389,9 +6640,30 @@ def get_hifi_match_review_endpoint():
                 """,
                 (max_confidence, limit)
             )
-            response['artists'] = cur.fetchall() or []
+            artists = cur.fetchall() or []
+            artist_image_map = _fetch_plex_item_image_map(
+                library,
+                server_url,
+                api_token,
+                [item.get('library_id') for item in artists],
+                image_size=MATCH_REVIEW_ARTWORK_SIZE,
+            )
+            for item in artists:
+                item['picture'] = artist_image_map.get(str(item.get('library_id') or '').strip())
+            response['artists'] = artists
 
         if include_albums:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM albums
+                WHERE (match_status = 'proposed' AND confidence <= %s)
+                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                """,
+                (max_confidence,)
+            )
+            response['summary']['albums'] = _safe_int((cur.fetchone() or {}).get('count')) or 0
+
             cur.execute(
                 """
                 SELECT albums.album_id, albums.artist_id, albums.title, albums.library_id, albums.hifi_id,
@@ -6408,9 +6680,32 @@ def get_hifi_match_review_endpoint():
                 """,
                 (max_confidence, limit)
             )
-            response['albums'] = cur.fetchall() or []
+            albums = cur.fetchall() or []
+            album_track_titles_map = _fetch_source_album_track_titles_map(cur, [item.get('album_id') for item in albums])
+            album_image_map = _fetch_plex_item_image_map(
+                library,
+                server_url,
+                api_token,
+                [item.get('library_id') for item in albums],
+                image_size=MATCH_REVIEW_ARTWORK_SIZE,
+            )
+            for item in albums:
+                item['track_titles'] = album_track_titles_map.get(int(item.get('album_id')), []) if item.get('album_id') is not None else []
+                item['cover'] = album_image_map.get(str(item.get('library_id') or '').strip())
+            response['albums'] = albums
 
         if include_tracks:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM tracks
+                WHERE (match_status = 'proposed' AND confidence <= %s)
+                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                """,
+                (max_confidence,)
+            )
+            response['summary']['tracks'] = _safe_int((cur.fetchone() or {}).get('count')) or 0
+
             cur.execute(
                 """
                 SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
@@ -6461,7 +6756,9 @@ def get_hifi_match_candidates_endpoint():
         if entity_type == 'artist':
             candidates = _build_artist_match_candidates(row, limit=limit, query_override=query_override)
         elif entity_type == 'album':
-            candidates = _build_album_match_candidates(row, limit=limit, query_override=query_override)
+            source_track_titles_map = _fetch_source_album_track_titles_map(cur, [row.get('album_id')])
+            source_track_titles = source_track_titles_map.get(int(row.get('album_id')), []) if row.get('album_id') is not None else []
+            candidates = _build_album_match_candidates(row, limit=limit, query_override=query_override, source_track_titles=source_track_titles)
         else:
             candidates = _build_track_match_candidates(row, limit=limit, query_override=query_override)
 
@@ -6688,7 +6985,7 @@ def get_plex_libraries_endpoint():
     return jsonify({'libraries': libraries or []})
 
 
-def _build_plex_image_url(server_url, api_token, image_path):
+def _build_plex_image_url(server_url, api_token, image_path, image_size=None):
     raw_path = str(image_path or '').strip()
     if not raw_path:
         return None
@@ -6697,12 +6994,17 @@ def _build_plex_image_url(server_url, api_token, image_path):
     if raw_path.startswith('http://') or raw_path.startswith('https://'):
         return raw_path
 
+    sized_path = raw_path
+    if image_size:
+        joiner = '&' if '?' in sized_path else '?'
+        sized_path = f'{sized_path}{joiner}width={int(image_size)}&height={int(image_size)}&minSize=1&upscale=1'
+
     token = quote_plus(str(api_token or '').strip())
     if not token:
-        return f'{base}{raw_path}'
+        return f'{base}{sized_path}'
 
-    joiner = '&' if '?' in raw_path else '?'
-    return f'{base}{raw_path}{joiner}X-Plex-Token={token}'
+    joiner = '&' if '?' in sized_path else '?'
+    return f'{base}{sized_path}{joiner}X-Plex-Token={token}'
 
 
 def _resolve_plex_user_context(plex, user_id):
@@ -6967,7 +7269,6 @@ def get_plex_artist_albums_endpoint(artist_id):
             'albums': albums,
         })
     except Exception as e:
-        print(f"[PLEX_LIBRARY] Failed to fetch artist albums {artist_id}: {str(e)}", flush=True)
         return jsonify({'error': f'Failed to fetch Plex artist albums: {str(e)}'}), 500
 
 
@@ -7062,7 +7363,6 @@ def get_plex_album_tracks_endpoint(album_id):
             'tracks': tracks,
         })
     except Exception as e:
-        print(f"[PLEX_LIBRARY] Failed to fetch album tracks {album_id}: {str(e)}", flush=True)
         return jsonify({'error': f'Failed to fetch Plex album tracks: {str(e)}'}), 500
 
 

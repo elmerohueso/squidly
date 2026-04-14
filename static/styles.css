@@ -2234,6 +2234,15 @@ body {
     transform: translateY(-1px);
 }
 
+.save-button.is-cancel {
+    background: linear-gradient(135deg, #7f1d1d, #b91c1c);
+    color: #fff;
+}
+
+.save-button.is-cancel:hover {
+    box-shadow: 0 8px 18px rgba(185, 28, 28, 0.28);
+}
+
 /* === Jobs Page === */
 .jobs-filter {
     margin-bottom: 1.5rem;
@@ -2633,13 +2642,31 @@ body {
 
 .match-review-candidate {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
     gap: 1rem;
     padding: 0.85rem 1rem;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: var(--bg-secondary);
+}
+
+.match-review-candidate-main {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.85rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.match-review-candidate-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
 }
 
 .match-review-candidate-title {
@@ -2657,6 +2684,8 @@ body {
     align-items: center;
     flex-wrap: wrap;
     gap: 0.75rem;
+    align-self: flex-end;
+    justify-content: flex-end;
 }
 
 .match-review-confidence {
@@ -2780,6 +2809,10 @@ body {
     .match-review-candidate {
         flex-direction: column;
         align-items: stretch;
+    }
+
+    .match-review-album-body {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .match-review-candidate-meta {
@@ -2946,31 +2979,160 @@ body {
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
-.match-review-pane-links {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
 .job-main-actions.cancel-on-hover .job-cancel-button {
     display: none;
+}
+
+.match-review-pane-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.9rem;
+    min-width: 0;
+}
+
+.match-review-pane-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.match-review-album-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.match-review-album-artist {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    overflow-wrap: anywhere;
+}
+
+.match-review-album-body {
+    display: grid;
+    grid-template-columns: minmax(220px, 350px) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+    width: 100%;
+}
+
+.match-review-artwork {
+    width: min(350px, 100%);
+    aspect-ratio: 1 / 1;
+    height: auto;
+    flex-shrink: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
+
+.match-review-artwork--artist {
+    border-radius: 999px;
+}
+
+.match-review-artwork img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.match-review-artwork.is-placeholder {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
 }
 
 .job-main-actions.cancel-on-hover:hover .job-status {
     display: none;
 }
 
+.match-review-pane-title,
+.match-review-candidate-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.match-review-title-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.match-review-title-link {
+    color: inherit;
+    text-decoration: none;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.match-review-title-link:hover {
+    text-decoration: underline;
+}
+
+.match-review-track-list {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 0.85rem 1rem;
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.match-review-track-list.is-empty {
+    display: flex;
+    align-items: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.match-review-track-list-label {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 0.65rem;
+}
+
+.match-review-track-list-items {
+    margin: 0;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.match-review-track-list-items li {
+    overflow-wrap: anywhere;
+}
+
 .job-main-actions.cancel-on-hover:hover .job-cancel-button {
     display: inline-flex;
 }
 
-.job-title {
 .candidate-pane .match-review-current {
     background: rgba(255, 255, 255, 0.04);
     border-radius: var(--radius-sm);
     padding: 0.75rem;
     border-left-width: 2px;
 }
+
+.job-title {
     font-size: 0.95rem;
     font-weight: 600;
     color: var(--text-primary);
