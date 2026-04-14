@@ -1766,37 +1766,35 @@ def _choose_album_candidate(album_row, track_count, source_track_titles=None):
     if not artist_hifi_id or not album_title:
         return None
 
-    payload = _fetch_hifi_artist_payload(artist_hifi_id)
-    albums = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
-    normalized_title = normalize_match_text(album_title, strip_trailing_parenthetical=True)
-    source_is_explicit = _has_explicit_marker(album_title)
     best = None
-    for candidate in albums:
-        candidate_title = str(candidate.get('title') or '').strip()
-        candidate_norm = normalize_match_text(candidate_title, strip_trailing_parenthetical=True)
-        confidence = 0.0
-        if candidate_norm == normalized_title:
-            confidence = 0.93
-        elif candidate_norm and (candidate_norm in normalized_title or normalized_title in candidate_norm):
-            confidence = 0.78
-        if confidence <= 0:
-            continue
+    seen = set()
 
-        candidate_track_count = _safe_int(candidate.get('numberOfTracks') or candidate.get('numberOfItems'))
-        if track_count and candidate_track_count and track_count == candidate_track_count:
-            confidence += 0.03
+    def consider_candidates(source_candidates):
+        nonlocal best
+        matched_any = False
+        for candidate in source_candidates:
+            evaluated = _evaluate_album_candidate(album_row, candidate, source_track_titles=source_track_titles)
+            if not evaluated:
+                continue
+            hifi_id = evaluated.get('hifi_id')
+            if not hifi_id or hifi_id in seen:
+                continue
+            seen.add(hifi_id)
+            matched_any = True
+            if not best or evaluated['confidence'] > best['confidence']:
+                best = {
+                    'hifi_id': hifi_id,
+                    'confidence': evaluated['confidence'],
+                }
+        return matched_any
 
-        confidence += _score_explicit_alignment(source_is_explicit, _is_hifi_explicit(candidate))
+    payload = _fetch_hifi_artist_payload(artist_hifi_id)
+    artist_albums = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
+    found_from_artist = consider_candidates(artist_albums)
+    if not found_from_artist:
+        fallback_candidates = _fetch_hifi_search_results('al', album_title, limit=25)
+        consider_candidates(fallback_candidates)
 
-        if hifi_id := str(candidate.get('id') or '').strip():
-            candidate_track_titles = _extract_hifi_album_track_titles(_fetch_hifi_album_payload(hifi_id))
-            confidence += _score_album_track_title_alignment(source_track_titles, candidate_track_titles)
-
-        if not best or confidence > best['confidence']:
-            best = {
-                'hifi_id': str(candidate.get('id') or '').strip() or None,
-                'confidence': min(confidence, 0.99),
-            }
     return best
 
 
@@ -2034,6 +2032,47 @@ def _score_artist_candidate_name(artist_name, candidate_name):
     return 0.0
 
 
+def _extract_album_candidate_artist_names(candidate):
+    names = []
+    if isinstance(candidate.get('primaryArtist'), dict):
+        name = str(candidate.get('primaryArtist', {}).get('name') or '').strip()
+        if name:
+            names.append(name)
+    if isinstance(candidate.get('artists'), list):
+        names.extend(
+            str(item.get('name') or '').strip()
+            for item in candidate.get('artists')
+            if isinstance(item, dict) and str(item.get('name') or '').strip()
+        )
+    elif isinstance(candidate.get('artist'), dict):
+        name = str(candidate.get('artist', {}).get('name') or '').strip()
+        if name:
+            names.append(name)
+
+    deduped_names = []
+    seen = set()
+    for name in names:
+        normalized = normalize_match_text(name)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped_names.append(name)
+    return deduped_names
+
+
+def _score_album_candidate_artist_alignment(source_artist_name, candidate_artist_names):
+    source_name = str(source_artist_name or '').strip()
+    if not source_name or not candidate_artist_names:
+        return 0.0
+
+    best_score = max((_score_artist_candidate_name(source_name, candidate_name) for candidate_name in candidate_artist_names), default=0.0)
+    if best_score >= 0.96:
+        return 0.04
+    if best_score >= 0.78:
+        return 0.02
+    return 0.0
+
+
 def _score_album_candidate_title(album_title, candidate_title, library_track_count=None, candidate_track_count=None, source_is_explicit=False, candidate_is_explicit=False):
     normalized_title = normalize_match_text(album_title, strip_trailing_parenthetical=True)
     normalized_candidate = normalize_match_text(candidate_title, strip_trailing_parenthetical=True)
@@ -2090,6 +2129,59 @@ def _score_track_candidate_payload(track_row, candidate):
     confidence += _score_explicit_alignment(_has_explicit_marker(track_row.get('title')), _is_hifi_explicit(candidate))
 
     return min(confidence, 0.99)
+
+
+def _evaluate_album_candidate(row, candidate, source_track_titles=None):
+    hifi_id = str(candidate.get('id') or '').strip()
+    title = str(candidate.get('title') or '').strip()
+    if not hifi_id or not title:
+        return None
+
+    library_track_count = _safe_int(row.get('library_track_count'))
+    candidate_track_count = _safe_int(candidate.get('numberOfTracks') or candidate.get('numberOfItems'))
+    candidate_is_explicit = _is_hifi_explicit(candidate)
+    source_is_explicit = _has_explicit_marker(row.get('title'))
+
+    base_confidence = _score_album_candidate_title(
+        row.get('title'),
+        title,
+        library_track_count,
+        candidate_track_count,
+        source_is_explicit=source_is_explicit,
+        candidate_is_explicit=candidate_is_explicit,
+    )
+
+    artist_names = _extract_album_candidate_artist_names(candidate)
+    artist_bonus = _score_album_candidate_artist_alignment(row.get('artist_name'), artist_names)
+
+    album_track_titles = _extract_hifi_album_track_titles(_fetch_hifi_album_payload(hifi_id))
+    track_bonus = _score_album_track_title_alignment(source_track_titles, album_track_titles)
+
+    confidence = base_confidence + artist_bonus + track_bonus
+    if base_confidence <= 0:
+        explicit_bonus = _score_explicit_alignment(source_is_explicit, candidate_is_explicit)
+        if track_bonus >= 0.03 and artist_bonus >= 0.02:
+            confidence = 0.72 + artist_bonus + track_bonus + explicit_bonus
+        elif track_bonus >= 0.015 and artist_bonus >= 0.04:
+            confidence = 0.68 + artist_bonus + track_bonus + explicit_bonus
+        else:
+            return None
+
+    subtitle_parts = []
+    if artist_names:
+        subtitle_parts.append(', '.join(artist_names))
+    elif row.get('artist_name'):
+        subtitle_parts.append(str(row.get('artist_name')).strip())
+
+    return {
+        'hifi_id': hifi_id,
+        'title': title,
+        'subtitle': ' • '.join(part for part in subtitle_parts if part),
+        'confidence': min(confidence, 0.99),
+        'image_url': _format_hifi_image_value(candidate.get('cover'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
+        'explicit': candidate_is_explicit,
+        'track_titles': album_track_titles,
+    }
 
 
 def _fetch_match_review_row(cur, entity_type, entity_id):
@@ -2179,65 +2271,31 @@ def _build_artist_match_candidates(row, limit=10, query_override=None):
 def _build_album_match_candidates(row, limit=10, query_override=None, source_track_titles=None):
     candidates = []
     seen = set()
-    library_track_count = _safe_int(row.get('library_track_count'))
     search_query = str(query_override or row.get('title') or '').strip()
     artist_hifi_id = str(row.get('artist_hifi_id') or '').strip()
 
+    def collect_candidates(source_candidates):
+        added_any = False
+        for candidate in source_candidates:
+            evaluated = _evaluate_album_candidate(row, candidate, source_track_titles=source_track_titles)
+            if not evaluated:
+                continue
+            hifi_id = evaluated.get('hifi_id')
+            if not hifi_id or hifi_id in seen:
+                continue
+            seen.add(hifi_id)
+            candidates.append(evaluated)
+            added_any = True
+        return added_any
+
     if artist_hifi_id and not query_override:
         payload = _fetch_hifi_artist_payload(artist_hifi_id)
-        source_candidates = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
+        artist_albums = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
+        found_from_artist = collect_candidates(artist_albums)
+        if not found_from_artist:
+            collect_candidates(_fetch_hifi_search_results('al', search_query, limit=max(limit * 2, 20)))
     else:
-        source_candidates = _fetch_hifi_search_results('al', search_query, limit=limit)
-
-    source_is_explicit = _has_explicit_marker(row.get('title'))
-
-    for candidate in source_candidates:
-        hifi_id = str(candidate.get('id') or '').strip()
-        title = str(candidate.get('title') or '').strip()
-        if not hifi_id or not title or hifi_id in seen:
-            continue
-        seen.add(hifi_id)
-
-        candidate_track_count = _safe_int(candidate.get('numberOfTracks') or candidate.get('numberOfItems'))
-        confidence = _score_album_candidate_title(
-            row.get('title'),
-            title,
-            library_track_count,
-            candidate_track_count,
-            source_is_explicit=source_is_explicit,
-            candidate_is_explicit=_is_hifi_explicit(candidate),
-        )
-        if confidence <= 0:
-            continue
-
-        artist_names = []
-        if isinstance(candidate.get('artists'), list):
-            artist_names = [str(item.get('name') or '').strip() for item in candidate.get('artists') if isinstance(item, dict) and str(item.get('name') or '').strip()]
-        elif isinstance(candidate.get('artist'), dict):
-            name = str(candidate.get('artist', {}).get('name') or '').strip()
-            if name:
-                artist_names = [name]
-
-        subtitle_parts = []
-        if artist_names:
-            subtitle_parts.append(', '.join(artist_names))
-        elif row.get('artist_name'):
-            subtitle_parts.append(str(row.get('artist_name')).strip())
-
-        album_track_titles = []
-        if hifi_id:
-            album_track_titles = _extract_hifi_album_track_titles(_fetch_hifi_album_payload(hifi_id))
-            confidence += _score_album_track_title_alignment(source_track_titles, album_track_titles)
-
-        candidates.append({
-            'hifi_id': hifi_id,
-            'title': title,
-            'subtitle': ' • '.join(part for part in subtitle_parts if part),
-            'confidence': confidence,
-            'image_url': _format_hifi_image_value(candidate.get('cover'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
-            'explicit': _is_hifi_explicit(candidate),
-            'track_titles': album_track_titles,
-        })
+        collect_candidates(_fetch_hifi_search_results('al', search_query, limit=max(limit * 2, 20)))
 
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
     return candidates[:limit]
@@ -2442,7 +2500,8 @@ def process_hifi_match_job(job_id, payload):
                    albums.confidence, albums.complete, albums.matched_track_count,
                    albums.expected_track_count, albums.match_status, albums.match_source,
                    albums.matched_at, albums.confirmed_at, albums.last_seen_at,
-                   artists.hifi_id AS artist_hifi_id,
+                                     artists.hifi_id AS artist_hifi_id,
+                                     artists.name AS artist_name,
                    COUNT(tracks.track_id) AS library_track_count
             FROM albums
             JOIN artists ON artists.artist_id = albums.artist_id
@@ -2450,7 +2509,7 @@ def process_hifi_match_job(job_id, payload):
             WHERE albums.library_id IS NOT NULL
               AND artists.hifi_id IS NOT NULL
               AND (albums.hifi_id IS NULL OR albums.match_status = 'unmatched')
-            GROUP BY albums.album_id, artists.hifi_id
+                        GROUP BY albums.album_id, artists.hifi_id, artists.name
             ORDER BY albums.album_id ASC
             """
         )

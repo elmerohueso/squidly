@@ -2381,6 +2381,20 @@ body {
     gap: 0.5rem;
 }
 
+.match-activity-stages .job-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.match-activity-stages .job-stage > span:first-child {
+    min-width: 0;
+}
+
+.match-activity-stages .job-stage + .job-stage {
+    margin-top: 0;
+}
+
 .match-activity-empty {
     background: var(--bg-primary);
     border: 1px dashed var(--border-color);

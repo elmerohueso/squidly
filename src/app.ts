@@ -1554,7 +1554,6 @@ class App {
         if (normalizedPage === 'matches') {
             void this.loadMatchActivity();
             void this.loadMatchReview();
-            this.startMatchReviewPollingInterval();
         } else {
             this.stopMatchReviewPollingInterval();
         }
@@ -3112,8 +3111,7 @@ class App {
 
     private startMatchReviewPollingInterval(): void {
         if (this.matchReviewPollingInterval) {
-            window.clearInterval(this.matchReviewPollingInterval);
-            this.matchReviewPollingInterval = null;
+            return;
         }
 
         this.matchReviewPollingInterval = window.setInterval(() => {
@@ -3208,6 +3206,7 @@ class App {
                 this.updateMatchReviewRunScanButton(false);
                 this.lastMatchActivityJobId = null;
                 this.lastMatchActivityStatus = null;
+                this.stopMatchReviewPollingInterval();
                 return;
             }
 
@@ -3220,7 +3219,10 @@ class App {
             this.activeMatchActivityJobId = isActive ? latestJob.id : null;
             this.updateMatchReviewRunScanButton(isActive);
             if (isActive) {
+                this.startMatchReviewPollingInterval();
                 this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+            } else {
+                this.stopMatchReviewPollingInterval();
             }
 
             this.lastMatchActivityJobId = latestJob.id;
@@ -3242,6 +3244,7 @@ class App {
         } catch (error) {
             console.error('Failed to load match activity:', error);
             this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load match scan activity.</div>';
+            this.stopMatchReviewPollingInterval();
         }
     }
 
