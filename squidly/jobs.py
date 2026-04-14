@@ -569,6 +569,25 @@ def mark_job_succeeded(job_id, result):
         set_last_job_finished_at(datetime.utcnow())
 
 
+def _finalize_job_stages(result_json, final_stage_status):
+    """Mark all incomplete stages as final_stage_status ('failed' or 'cancelled')."""
+    try:
+        result = json.loads(result_json) if result_json else {}
+    except (TypeError, ValueError):
+        result = {}
+    
+    stages = result.get('stages', {}) if isinstance(result.get('stages'), dict) else {}
+    if not stages:
+        return result_json
+    
+    for stage_name, stage_status in stages.items():
+        if stage_status in ('pending', 'in_progress'):
+            stages[stage_name] = final_stage_status
+    
+    result['stages'] = stages
+    return serialize_job_payload(result)
+
+
 def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
     now = datetime.utcnow()
     now_iso = now.isoformat() + 'Z'
@@ -583,12 +602,26 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
 
     conn = get_db_connection()
     cur = conn.cursor()
+    
+    # Fetch current result_json to finalize stages
+    cur.execute(
+        """
+        SELECT result_json
+        FROM jobs
+        WHERE id = %s
+        """,
+        (job_id,)
+    )
+    row = cur.fetchone() or {}
+    finalized_result_json = _finalize_job_stages(row.get('result_json'), 'failed')
+    
     cur.execute(
         """
         UPDATE jobs
         SET status = 'failed',
             attempt_count = %s,
             error_message = COALESCE(%s, error_message),
+            result_json = %s,
             updated_at = %s,
             run_after = %s,
             finished_at = %s,
@@ -597,7 +630,7 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
         WHERE id = %s
                     AND status <> 'cancelled'
         """,
-        (new_attempt_count, error_message, now_iso, run_after, finished_at, job_id)
+        (new_attempt_count, error_message, finalized_result_json, now_iso, run_after, finished_at, job_id)
     )
     conn.commit()
     conn.close()
@@ -628,6 +661,43 @@ def mark_job_retrying(job_id, attempt_count, error_message):
     )
     conn.commit()
     conn.close()
+
+
+def mark_job_cancelled(job_id):
+    """Mark a job as cancelled and finalize its stages."""
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Fetch current result_json to finalize stages
+    cur.execute(
+        """
+        SELECT result_json
+        FROM jobs
+        WHERE id = %s
+        """,
+        (job_id,)
+    )
+    row = cur.fetchone() or {}
+    finalized_result_json = _finalize_job_stages(row.get('result_json'), 'cancelled')
+    
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'cancelled',
+            result_json = %s,
+            updated_at = %s,
+            finished_at = %s,
+            locked_at = NULL,
+            locked_by = NULL
+        WHERE id = %s
+        """,
+        (finalized_result_json, now_iso, now_iso, job_id)
+    )
+    conn.commit()
+    conn.close()
+
 
 
 def _download_track_all_stages_done(stages):

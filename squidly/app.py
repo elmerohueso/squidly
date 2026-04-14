@@ -2678,6 +2678,7 @@ def hifi_match_job_worker():
                 mark_job_succeeded(job['id'], result)
                 print(f"[HIFI_MATCH_WORKER] Job {job['id']} completed", flush=True)
             except JobCancelledError:
+                jobs.mark_job_cancelled(job['id'])
                 print(f"[HIFI_MATCH_WORKER] Job {job['id']} cancelled", flush=True)
                 time.sleep(1)
             except Exception as e:
@@ -2715,6 +2716,7 @@ def process_plex_sync_job(job_id, payload):
 
     library = None
     for section in plex.library.sections():
+        _raise_if_job_cancelled(job_id)
         if section.title == library_name and section.type == 'artist':
             library = section
             break
@@ -2725,8 +2727,10 @@ def process_plex_sync_job(job_id, payload):
     print(f"[PLEX_SYNC] Job {job_id} fetching tracks from library '{library_name}'", flush=True)
     tracks = []
     try:
+        _raise_if_job_cancelled(job_id)
         tracks = library.all(libtype='track')
     except Exception:
+        _raise_if_job_cancelled(job_id)
         tracks = library.search(libtype='track')
 
     progress['total_tracks'] = len(tracks)
@@ -2800,7 +2804,7 @@ def process_plex_sync_job(job_id, payload):
                 if album_artist_row:
                     album_artist_row_id = _upsert_artist_row(
                         cur,
-                        name=artist or album_artist_row.get('name') or 'Unknown Artist',
+                        name=artist or 'Unknown Artist',
                         library_id=artist_key,
                         hifi_id=album_artist_row.get('hifi_id'),
                         confidence=_safe_float(album_artist_row.get('confidence')),
@@ -2826,7 +2830,7 @@ def process_plex_sync_job(job_id, payload):
                     if track_artist_row:
                         track_artist_row_id = _upsert_artist_row(
                             cur,
-                            name=track_artist_row.get('name') or artist or 'Unknown Artist',
+                            name=artist or 'Unknown Artist',
                             library_id=track_artist_row.get('library_id'),
                             hifi_id=track_artist_row.get('hifi_id'),
                             confidence=_safe_float(track_artist_row.get('confidence')),
@@ -2979,6 +2983,8 @@ def process_plex_sync_job(job_id, payload):
         print(f"[PLEX_SYNC] Job {job_id}: Adding 'Explicit' label to {len(explicit_album_keys)} albums", flush=True)
         for album_key in explicit_album_keys:
             try:
+                # Use a shorter timeout for label operations to prevent hanging
+                plex._session.timeout = 5
                 # album_key format is /library/metadata/ID, extract the ID
                 album_id = int(album_key.split('/')[-1])
                 album = plex.fetchItem(album_id)
@@ -2988,7 +2994,12 @@ def process_plex_sync_job(job_id, payload):
                     print(f"[PLEX_SYNC] Job {job_id}: Added 'Explicit' label to album {album_key}", flush=True)
             except Exception as e:
                 print(f"[PLEX_SYNC] Job {job_id}: Failed to add 'Explicit' label to album {album_key}: {str(e)}", flush=True)
+                # Continue to next album instead of failing the entire job
+                continue
         
+        # Reset timeout back to default
+        if hasattr(plex, '_session'):
+            plex._session.timeout = 20
         print(f"[PLEX_SYNC] Job {job_id}: Successfully labeled {labeled_count} albums as Explicit", flush=True)
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
@@ -6182,7 +6193,6 @@ def get_job(job_id):
 @app.route('/api/jobs/<int:job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     """Cancel a queued or in-progress job."""
-    now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -6195,30 +6205,15 @@ def cancel_job(job_id):
         (job_id,)
     )
     row = cur.fetchone()
+    conn.close()
 
     if row is None:
-        conn.close()
         return jsonify({'error': 'Job not found'}), 404
 
     if row['status'] not in ('queued', 'in_progress'):
-        conn.close()
         return jsonify({'error': f"Job is not cancellable (status={row['status']})"}), 400
 
-    cur.execute(
-        """
-        UPDATE jobs
-        SET status = 'cancelled',
-            updated_at = %s,
-            finished_at = %s,
-            locked_at = NULL,
-            locked_by = NULL
-        WHERE id = %s
-        """,
-        (now, now, job_id)
-    )
-    conn.commit()
-    conn.close()
-
+    jobs.mark_job_cancelled(job_id)
     return jsonify({'success': True, 'job_id': job_id, 'status': 'cancelled'})
 
 @app.route('/api/jobs/cancel-pending', methods=['POST'])
