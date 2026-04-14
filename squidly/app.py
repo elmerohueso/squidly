@@ -996,6 +996,18 @@ def _read_embedded_hifi_ids(file_path):
     track_id = None
     album_id = None
     raw_path = str(file_path or '').strip()
+    
+    # If path doesn't exist, try translating Windows path to Linux container path
+    # Windows format: "E:/Music/Artist/Album/Track.mp3" → "/downloads/Artist/Album/Track.mp3"
+    if raw_path and not os.path.exists(raw_path):
+        match = re.match(r'^[A-Za-z]:[/\\](?:Music[/\\])?(.*)$', raw_path)  # Windows drive + optional Music prefix
+        if match:
+            relative = match.group(1)
+            candidate = os.path.join('/downloads', relative)
+            if os.path.exists(candidate):
+                raw_path = candidate
+                print(f"[MATCH] Translated Windows path: {file_path} → {raw_path}", flush=True)
+    
     if not raw_path or not os.path.exists(raw_path):
         return {'track_id': None, 'album_id': None}
 
@@ -1025,6 +1037,9 @@ def _read_embedded_hifi_ids(file_path):
                 track_id = str(track_frame.text[0]).strip()
             if album_frame and getattr(album_frame, 'text', None):
                 album_id = str(album_frame.text[0]).strip()
+        
+        if track_id or album_id:
+            print(f"[MATCH] Read embedded IDs from {raw_path}: track={track_id}, album={album_id}", flush=True)
     except Exception as e:
         print(f"[MATCH] Failed to read embedded hifi IDs from {raw_path}: {str(e)}", flush=True)
 
@@ -2482,8 +2497,8 @@ def process_hifi_match_job(job_id, payload):
             JOIN artists ON artists.artist_id = albums.artist_id
             LEFT JOIN tracks ON tracks.album_id = albums.album_id
             WHERE albums.library_id IS NOT NULL
-              AND artists.hifi_id IS NOT NULL
               AND (albums.hifi_id IS NULL OR albums.match_status = 'unmatched')
+              AND (artists.hifi_id IS NOT NULL OR albums.match_source != 'tags')
                         GROUP BY albums.album_id, artists.hifi_id, artists.name
             ORDER BY albums.album_id ASC
             """
@@ -6549,7 +6564,8 @@ def start_plex_sync_endpoint():
     """Queue a manual Plex library sync job."""
     result = start_plex_sync_job(trigger='manual')
     if not result.get('ok'):
-        return jsonify({'error': result.get('error')}), result.get('status_code', 500)
+        status_code = result.get('status_code', 500)
+        return jsonify({'error': result.get('error')}), int(status_code)
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
@@ -6558,7 +6574,8 @@ def start_plex_library_update_endpoint():
     """Queue a manual Plex library update job."""
     result = start_plex_library_update_job(trigger='manual')
     if not result.get('ok'):
-        return jsonify({'error': result.get('error')}), result.get('status_code', 500)
+        status_code = result.get('status_code', 500)
+        return jsonify({'error': result.get('error')}), int(status_code)
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
@@ -6568,7 +6585,8 @@ def start_hifi_match_endpoint():
     """Queue a manual hifi matching job for unmatched Plex library rows."""
     result = start_hifi_match_job(trigger='manual')
     if not result.get('ok'):
-        return jsonify({'error': result.get('error')}), result.get('status_code', 500)
+        status_code = result.get('status_code', 500)
+        return jsonify({'error': result.get('error')}), int(status_code)
 
     return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
