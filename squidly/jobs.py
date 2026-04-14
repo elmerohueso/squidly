@@ -510,6 +510,22 @@ def claim_next_job(job_type):
     }
 
 
+def is_job_cancelled(job_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT status
+        FROM jobs
+        WHERE id = %s
+        """,
+        (job_id,)
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return str(row.get('status') or '').strip() == 'cancelled'
+
+
 def mark_job_succeeded(job_id, result):
     now = datetime.utcnow().isoformat() + 'Z'
     result_json = serialize_job_payload(result) if result is not None else None
@@ -538,14 +554,16 @@ def mark_job_succeeded(job_id, result):
             locked_at = NULL,
             locked_by = NULL
         WHERE id = %s
+          AND status <> 'cancelled'
         """,
         (result_json, now, now, job_id)
     )
+    transitioned = (cur.rowcount or 0) > 0
 
     conn.commit()
     conn.close()
 
-    if type_row and type_row.get('job_type') == 'download_track':
+    if transitioned and type_row and type_row.get('job_type') == 'download_track':
         # Set library_update_needed True and update last_job_finished_at
         set_library_update_needed(True)
         set_last_job_finished_at(datetime.utcnow())
@@ -577,6 +595,7 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
             locked_at = NULL,
             locked_by = NULL
         WHERE id = %s
+                    AND status <> 'cancelled'
         """,
         (new_attempt_count, error_message, now_iso, run_after, finished_at, job_id)
     )
@@ -676,6 +695,7 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(minutes=max(1, int(stale_after_minutes)))
     now_iso = now.isoformat() + 'Z'
+    immediate_recovery_job_types = {'hifi_match', 'plex_library_sync'}
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -691,6 +711,7 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     recovered = 0
     exhausted = 0
     skipped_waiting_playlist = 0
+    recovered_immediately = 0
 
     for row in rows:
         job_id = row.get('id')
@@ -712,7 +733,9 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
         updated_at = normalize_db_timestamp(row.get('updated_at'))
         reference_ts = lock_time or started_at or updated_at
 
-        if reference_ts and reference_ts > stale_cutoff:
+        should_recover_immediately = job_type in immediate_recovery_job_types
+
+        if not should_recover_immediately and reference_ts and reference_ts > stale_cutoff:
             continue
 
         attempt_count = int(row.get('attempt_count') or 0)
@@ -746,9 +769,16 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
                 locked_by = NULL
             WHERE id = %s
             """,
-            ('Recovered stale in_progress job on startup', now_iso, now_iso, job_id)
+            (
+                'Recovered interrupted in_progress job on startup' if should_recover_immediately else 'Recovered stale in_progress job on startup',
+                now_iso,
+                now_iso,
+                job_id
+            )
         )
         recovered += 1
+        if should_recover_immediately:
+            recovered_immediately += 1
 
     conn.commit()
     conn.close()
@@ -756,7 +786,7 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     print(
         (
             f"[JOB_RECOVERY] stale_cutoff_minutes={max(1, int(stale_after_minutes))} "
-            f"recovered={recovered} exhausted={exhausted} "
+            f"recovered={recovered} immediate={recovered_immediately} exhausted={exhausted} "
             f"skipped_waiting_playlist={skipped_waiting_playlist}"
         ),
         flush=True
@@ -794,6 +824,7 @@ def update_job_progress(job_id, updates):
         SET result_json = %s,
             updated_at = %s
         WHERE id = %s
+          AND status <> 'cancelled'
         """,
         (result_json, now, job_id)
     )

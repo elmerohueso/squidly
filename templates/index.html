@@ -52,6 +52,10 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                             <span>Hi-Fi Mirrors</span>
                         </a></li>
+                        <li><a href="#" class="nav-item" data-page="matches">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                            <span>Match Review</span>
+                        </a></li>
                         <li><a href="#" class="nav-item" data-page="jobs">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>
                             <span>Jobs</span>
@@ -226,6 +230,33 @@
                         <div id="flyoutContent" class="flyout-content">
                             <p class="loading-text">Loading status...</p>
                         </div>
+                    </div>
+                </div>
+
+                <div class="page" id="matchesPage" data-page="matches">
+                    <h2>Match Review</h2>
+                    <div class="matches-actions">
+                        <button type="button" id="startHifiMatchScan" class="save-button">Run Manual Scan</button>
+                        <button type="button" id="refreshHifiMatchReview" class="jobs-bulk-button">Refresh Results</button>
+                    </div>
+                    <div class="matches-filters">
+                        <label for="matchReviewEntityFilter">Show</label>
+                        <select id="matchReviewEntityFilter" class="jobs-filter-select">
+                            <option value="all">Artists, albums, and tracks</option>
+                            <option value="artists">Artists only</option>
+                            <option value="albums">Albums only</option>
+                            <option value="tracks">Tracks only</option>
+                        </select>
+                        <label for="matchReviewMaxConfidence">Max confidence</label>
+                        <input type="number" id="matchReviewMaxConfidence" class="settings-input matches-confidence-input" min="0" max="1" step="0.01" value="0.94">
+                    </div>
+                    <p id="matchReviewStatus" class="settings-note"></p>
+                    <div id="matchReviewActivity" class="matches-activity">
+                        <p class="loading-text">Loading scan activity...</p>
+                    </div>
+                    <div id="matchReviewSummary" class="matches-summary"></div>
+                    <div id="matchReviewContent" class="matches-content">
+                        <p class="loading-text">Loading match review items...</p>
                     </div>
                 </div>
                 

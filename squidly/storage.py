@@ -129,6 +129,86 @@ def init_db():
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS artists (
+            artist_id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            library_id TEXT UNIQUE,
+            hifi_id TEXT,
+            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
+            match_status TEXT NOT NULL DEFAULT 'unmatched',
+            match_source TEXT,
+            matched_at TIMESTAMP,
+            confirmed_at TIMESTAMP,
+            last_seen_at TIMESTAMP NOT NULL,
+            CONSTRAINT artists_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
+            CONSTRAINT artists_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
+            CONSTRAINT artists_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_artists_hifi_id ON artists (hifi_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_artists_match_status ON artists (match_status)")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS albums (
+            album_id SERIAL PRIMARY KEY,
+            artist_id INTEGER REFERENCES artists(artist_id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            library_id TEXT UNIQUE,
+            hifi_id TEXT,
+            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
+            complete BOOLEAN NOT NULL DEFAULT FALSE,
+            matched_track_count INTEGER NOT NULL DEFAULT 0,
+            expected_track_count INTEGER NOT NULL DEFAULT 0,
+            match_status TEXT NOT NULL DEFAULT 'unmatched',
+            match_source TEXT,
+            matched_at TIMESTAMP,
+            confirmed_at TIMESTAMP,
+            last_seen_at TIMESTAMP NOT NULL,
+            CONSTRAINT albums_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
+            CONSTRAINT albums_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
+            CONSTRAINT albums_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_hifi_id ON albums (hifi_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_match_status ON albums (match_status)")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tracks (
+            track_id SERIAL PRIMARY KEY,
+            album_id INTEGER REFERENCES albums(album_id) ON DELETE SET NULL,
+            artist_id INTEGER REFERENCES artists(artist_id) ON DELETE SET NULL,
+            title TEXT NOT NULL,
+            library_id TEXT UNIQUE,
+            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
+            hifi_id TEXT,
+            path TEXT NOT NULL UNIQUE,
+            format TEXT,
+            bitrate INTEGER,
+            disc_number INTEGER,
+            track_number INTEGER,
+            match_status TEXT NOT NULL DEFAULT 'unmatched',
+            match_source TEXT,
+            matched_at TIMESTAMP,
+            confirmed_at TIMESTAMP,
+            last_seen_at TIMESTAMP NOT NULL,
+            CONSTRAINT tracks_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
+            CONSTRAINT tracks_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
+            CONSTRAINT tracks_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_hifi_id ON tracks (hifi_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_match_status ON tracks (match_status)")
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS jobs (
             id SERIAL PRIMARY KEY,
             job_type TEXT NOT NULL,

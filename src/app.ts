@@ -253,6 +253,103 @@ interface PlexSongVariant {
 interface PlexTrackMatch {
     exists: boolean;
     variants?: PlexSongVariant[];
+    match_status?: string;
+    confidence?: number | null;
+}
+
+interface HifiTrackLookupMatch extends PlexTrackMatch {
+    track_id: string;
+}
+
+interface HifiAlbumLookupMatch {
+    album_id: string;
+    exists: boolean;
+    complete: boolean;
+    match_status?: string;
+    confidence?: number | null;
+    matched_track_count?: number;
+    expected_track_count?: number;
+    variants?: PlexSongVariant[];
+}
+
+interface HifiMatchLookupResponse {
+    success?: boolean;
+    tracks?: HifiTrackLookupMatch[];
+    albums?: HifiAlbumLookupMatch[];
+    error?: string;
+}
+
+interface HifiReviewArtist {
+    artist_id: number;
+    name: string;
+    library_id?: string;
+    hifi_id?: string;
+    confidence?: number;
+    match_status?: string;
+    match_source?: string;
+    matched_at?: string;
+    confirmed_at?: string;
+}
+
+interface HifiReviewAlbum {
+    album_id: number;
+    artist_id?: number;
+    title: string;
+    artist_name?: string;
+    library_id?: string;
+    hifi_id?: string;
+    confidence?: number;
+    complete?: boolean;
+    matched_track_count?: number;
+    expected_track_count?: number;
+    match_status?: string;
+    match_source?: string;
+    matched_at?: string;
+    confirmed_at?: string;
+}
+
+interface HifiReviewTrack {
+    track_id: number;
+    album_id?: number;
+    artist_id?: number;
+    title: string;
+    artist_name?: string;
+    album_title?: string;
+    album_library_id?: string;
+    artist_library_id?: string;
+    library_id?: string;
+    hifi_id?: string;
+    confidence?: number;
+    path?: string;
+    format?: string;
+    bitrate?: number;
+    disc_number?: number;
+    track_number?: number;
+    match_status?: string;
+    match_source?: string;
+    matched_at?: string;
+    confirmed_at?: string;
+}
+
+interface HifiMatchReviewResponse {
+    success?: boolean;
+    artists?: HifiReviewArtist[];
+    albums?: HifiReviewAlbum[];
+    tracks?: HifiReviewTrack[];
+    error?: string;
+}
+
+interface HifiMatchCandidate {
+    hifi_id: string;
+    title: string;
+    subtitle?: string;
+    confidence?: number;
+}
+
+interface HifiMatchCandidatesResponse {
+    success?: boolean;
+    candidates?: HifiMatchCandidate[];
+    error?: string;
 }
 
 interface JobItem {
@@ -292,7 +389,7 @@ interface AppRouteState {
     playlistUrl?: string;
 }
 
-type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'jobs';
+type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs';
 
 interface LibraryRouteState {
     view: 'artists' | 'artist_albums' | 'album_tracks';
@@ -333,6 +430,14 @@ class App {
     private retryAllJobsButton: HTMLButtonElement;
     private jobsContent: HTMLElement;
     private jobsPagination: HTMLElement;
+    private matchReviewRunScanButton: HTMLButtonElement;
+    private matchReviewRefreshButton: HTMLButtonElement;
+    private matchReviewEntityFilter: HTMLSelectElement;
+    private matchReviewMaxConfidenceInput: HTMLInputElement;
+    private matchReviewStatusEl: HTMLElement;
+    private matchReviewActivity: HTMLElement;
+    private matchReviewSummary: HTMLElement;
+    private matchReviewContent: HTMLElement;
     private settingsButton: HTMLButtonElement;
     private settingsFlyout: HTMLElement;
     private settingsOverlay: HTMLElement;
@@ -411,6 +516,11 @@ class App {
     private libraryCurrentArtist: { id: string; name: string } | null = null;
     private libraryCurrentAlbum: { id: string; title: string; artist?: string } | null = null;
     private libraryLoadedOnce: boolean = false;
+    private matchReviewPollingInterval: number | null = null;
+    private lastMatchActivityJobId: number | null = null;
+    private lastMatchActivityStatus: string | null = null;
+    private matchCandidateCache = new Map<string, HifiMatchCandidate[]>();
+    private matchCandidateRequestsInFlight = new Set<string>();
     private currentExploreRoute: AppRouteState = { view: 'home' };
     private exploreBreadcrumbRoutes: AppRouteState[] = [];
     private exploreSearchRoute: AppRouteState | null = null;
@@ -575,6 +685,14 @@ class App {
         this.retryAllJobsButton = document.getElementById('retryAllJobs') as HTMLButtonElement;
         this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
         this.jobsPagination = document.getElementById('jobsPagination') as HTMLElement;
+        this.matchReviewRunScanButton = document.getElementById('startHifiMatchScan') as HTMLButtonElement;
+        this.matchReviewRefreshButton = document.getElementById('refreshHifiMatchReview') as HTMLButtonElement;
+        this.matchReviewEntityFilter = document.getElementById('matchReviewEntityFilter') as HTMLSelectElement;
+        this.matchReviewMaxConfidenceInput = document.getElementById('matchReviewMaxConfidence') as HTMLInputElement;
+        this.matchReviewStatusEl = document.getElementById('matchReviewStatus') as HTMLElement;
+        this.matchReviewActivity = document.getElementById('matchReviewActivity') as HTMLElement;
+        this.matchReviewSummary = document.getElementById('matchReviewSummary') as HTMLElement;
+        this.matchReviewContent = document.getElementById('matchReviewContent') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
@@ -726,6 +844,34 @@ class App {
         if (this.jobsContent) {
             this.jobsContent.addEventListener('click', (e: MouseEvent) => {
                 void this.handleJobsContentClick(e);
+            });
+        }
+        if (this.matchReviewRunScanButton) {
+            this.matchReviewRunScanButton.addEventListener('click', () => {
+                void this.startHifiMatchScan();
+            });
+        }
+        if (this.matchReviewRefreshButton) {
+            this.matchReviewRefreshButton.addEventListener('click', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewEntityFilter) {
+            this.matchReviewEntityFilter.addEventListener('change', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewMaxConfidenceInput) {
+            this.matchReviewMaxConfidenceInput.addEventListener('change', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewContent) {
+            this.matchReviewContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleMatchReviewClick(e);
             });
         }
 
@@ -1346,6 +1492,7 @@ class App {
             library: 'Library',
             settings: 'Settings',
             mirrors: 'Hi-Fi Mirrors',
+            matches: 'Match Review',
             jobs: 'Jobs'
         };
         if (normalizedPage === 'explore') {
@@ -1368,6 +1515,14 @@ class App {
         if (normalizedPage === 'jobs') {
             this.currentJobsPage = 1;
             void this.loadJobs();
+        }
+
+        if (normalizedPage === 'matches') {
+            void this.loadMatchActivity();
+            void this.loadMatchReview();
+            this.startMatchReviewPollingInterval();
+        } else {
+            this.stopMatchReviewPollingInterval();
         }
 
         if (normalizedPage === 'library' && !this.libraryLoadedOnce && updateHistory) {
@@ -2106,7 +2261,7 @@ class App {
     }
 
     private normalizePage(page: string | null | undefined): AppPage {
-        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'jobs') {
+        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'matches' || page === 'jobs') {
             return page;
         }
         return 'explore';
@@ -2424,6 +2579,24 @@ class App {
 
         const state = this.buildCurrentHistoryState(tab);
         window.history.pushState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private buildExploreHref(route: AppRouteState): string {
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('explore'),
+            route: { ...route },
+            tab: 'explore'
+        };
+        return this.buildHistoryUrl(state);
+    }
+
+    private buildLibraryHref(route: LibraryRouteState): string {
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('library'),
+            libraryRoute: { ...route },
+            tab: 'library'
+        };
+        return this.buildHistoryUrl(state);
     }
 
     private replaceHistoryState(state: AppHistoryState): void {
@@ -2861,6 +3034,768 @@ class App {
         this.jobsPagination.innerHTML = '';
     }
 
+    private setMatchReviewStatus(message: string, isError: boolean = false): void {
+        if (!this.matchReviewStatusEl) {
+            return;
+        }
+
+        this.matchReviewStatusEl.textContent = message;
+        this.matchReviewStatusEl.style.color = isError ? '#ff9ab0' : 'var(--text-secondary)';
+    }
+
+    private startMatchReviewPollingInterval(): void {
+        if (this.matchReviewPollingInterval) {
+            window.clearInterval(this.matchReviewPollingInterval);
+            this.matchReviewPollingInterval = null;
+        }
+
+        this.matchReviewPollingInterval = window.setInterval(() => {
+            if (this.currentPage !== 'matches') {
+                this.stopMatchReviewPollingInterval();
+                return;
+            }
+
+            void this.loadMatchActivity();
+        }, 5000);
+    }
+
+    private stopMatchReviewPollingInterval(): void {
+        if (this.matchReviewPollingInterval) {
+            window.clearInterval(this.matchReviewPollingInterval);
+            this.matchReviewPollingInterval = null;
+        }
+    }
+
+    private renderMatchActivityCard(job: JobItem): string {
+        const effectiveStatus = this.getEffectiveJobStatus(job);
+        const statusLabel = this.formatJobStatus(effectiveStatus);
+        const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
+        const stages = (job.result?.stages || {}) as Record<string, string>;
+        const progress = (job.result?.progress || {}) as Record<string, unknown>;
+        const stageRows = [
+            { key: 'matching_artists', label: 'Matching Artists' },
+            { key: 'matching_albums', label: 'Matching Albums' },
+            { key: 'matching_tracks', label: 'Matching Tracks' },
+            { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+        ];
+
+        const artistsProcessed = Number(progress.artists_processed || 0);
+        const artistsMatched = Number(progress.artists_matched || 0);
+        const albumsProcessed = Number(progress.albums_processed || 0);
+        const albumsMatched = Number(progress.albums_matched || 0);
+        const tracksProcessed = Number(progress.tracks_processed || 0);
+        const tracksMatched = Number(progress.tracks_matched || 0);
+
+        return `
+            <div class="match-activity-card">
+                <div class="match-activity-header">
+                    <div>
+                        <h3 class="match-activity-title">Latest Match Scan</h3>
+                    </div>
+                    <span class="match-review-status ${statusClass}">${statusLabel}</span>
+                </div>
+                <div class="match-activity-meta">
+                    <span class="match-activity-meta-item">Job ${job.id}</span>
+                    <span class="match-activity-meta-item">Artists ${artistsMatched}/${artistsProcessed}</span>
+                    <span class="match-activity-meta-item">Albums ${albumsMatched}/${albumsProcessed}</span>
+                    <span class="match-activity-meta-item">Tracks ${tracksMatched}/${tracksProcessed}</span>
+                </div>
+                <div class="match-activity-stages">
+                    ${stageRows.map(stage => {
+                        const stageStatus = this.resolvePlexSyncStageStatus(job, stage.key, stages);
+                        return `
+                            <div class="job-stage">
+                                <span>${stage.label}</span>
+                                <span class="job-stage-status status-${stageStatus}">${this.formatStageStatus(stageStatus)}</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    private async loadMatchActivity(): Promise<void> {
+        if (!this.matchReviewActivity || !this.matchReviewRunScanButton) {
+            return;
+        }
+
+        try {
+            const params = new URLSearchParams({
+                job_type: 'hifi_match',
+                exclude_plex_playlist_add: '1',
+                limit: '1'
+            });
+            const response = await fetch(`/api/jobs?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to load match scan activity');
+            }
+
+            const data = await response.json() as { jobs?: JobItem[] };
+            const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+            const latestJob = jobs[0] || null;
+
+            if (!latestJob) {
+                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No match scans have been run yet.</div>';
+                this.matchReviewRunScanButton.disabled = false;
+                this.lastMatchActivityJobId = null;
+                this.lastMatchActivityStatus = null;
+                return;
+            }
+
+            const previousJobId = this.lastMatchActivityJobId;
+            const previousStatus = this.lastMatchActivityStatus;
+            const currentStatus = this.getEffectiveJobStatus(latestJob);
+            const isActive = currentStatus === 'queued' || currentStatus === 'in_progress';
+
+            this.matchReviewActivity.innerHTML = this.renderMatchActivityCard(latestJob);
+            this.matchReviewRunScanButton.disabled = isActive;
+            if (isActive) {
+                this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+            }
+
+            this.lastMatchActivityJobId = latestJob.id;
+            this.lastMatchActivityStatus = currentStatus;
+
+            const completedNow = previousJobId === latestJob.id
+                && (previousStatus === 'queued' || previousStatus === 'in_progress')
+                && currentStatus !== 'queued'
+                && currentStatus !== 'in_progress';
+
+            if (completedNow) {
+                if (currentStatus === 'succeeded') {
+                    this.setMatchReviewStatus(`Manual scan completed for job ${latestJob.id}. Review results updated.`);
+                } else {
+                    this.setMatchReviewStatus(`Manual scan finished with status ${currentStatus}.`, currentStatus === 'failed');
+                }
+                await this.loadMatchReview();
+            }
+        } catch (error) {
+            console.error('Failed to load match activity:', error);
+            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load match scan activity.</div>';
+        }
+    }
+
+    private formatMatchConfidence(confidence?: number | null): string {
+        if (typeof confidence !== 'number' || !Number.isFinite(confidence)) {
+            return '—';
+        }
+        return `${Math.round(confidence * 100)}%`;
+    }
+
+    private formatMatchStatusLabel(status?: string | null): string {
+        const normalized = String(status || 'unmatched').trim().toLowerCase();
+        if (normalized === 'confirmed') {
+            return 'Confirmed';
+        }
+        if (normalized === 'proposed') {
+            return 'Needs Review';
+        }
+        if (normalized === 'rejected') {
+            return 'Rejected';
+        }
+        return 'Unmatched';
+    }
+
+    private renderMatchSummaryCard(label: string, value: number): string {
+        return `
+            <div class="matches-summary-card">
+                <span class="matches-summary-value">${value}</span>
+                <span class="matches-summary-label">${this.escapeHtml(label)}</span>
+            </div>
+        `;
+    }
+
+    private renderMatchCandidateList(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        const cacheKey = `${entityType}:${reviewId}`;
+        const candidates = this.matchCandidateCache.get(cacheKey);
+        if (!candidates) {
+            return '<div class="match-review-inline-status">Candidates load automatically when you open this card.</div>';
+        }
+
+        if (candidates.length === 0) {
+            return '<div class="match-review-empty">No candidates found for this item.</div>';
+        }
+
+        return `
+            <div class="match-review-candidate-list">
+                ${candidates.map(candidate => `
+                    <div class="match-review-candidate">
+                        <div>
+                            <div class="match-review-candidate-title">${this.escapeHtml(candidate.title)}</div>
+                            ${candidate.subtitle ? `<div class="match-review-candidate-subtitle">${this.escapeHtml(candidate.subtitle)}</div>` : ''}
+                        </div>
+                        <div class="match-review-candidate-meta">
+                            <span class="match-review-confidence">${this.formatMatchConfidence(candidate.confidence)}</span>
+                            ${this.renderMatchExploreLink(entityType, candidate.hifi_id, 'Open in Explore')}
+                            <button
+                                type="button"
+                                class="match-review-button primary"
+                                data-match-action="confirm-candidate"
+                                data-entity-type="${entityType}"
+                                data-review-id="${reviewId}"
+                                data-hifi-id="${this.escapeHtml(candidate.hifi_id)}"
+                            >Use This Match</button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    private renderMatchWorkflowCard(
+        entityType: 'artist' | 'album' | 'track',
+        reviewId: number,
+        entityLabel: string,
+        title: string,
+        subtitle: string,
+        status: string | undefined,
+        summaryHtml: string,
+        sourcePaneHtml: string,
+        candidatePaneHtml: string,
+        actionsHtml: string,
+    ): string {
+        const normalizedStatus = String(status || 'unmatched');
+
+        return `
+            <div class="match-review-card" data-entity-type="${entityType}" data-review-id="${reviewId}">
+                <div class="match-review-card-header">
+                    <div class="match-review-card-summary">
+                        <div class="match-review-title-wrap">
+                            <span class="match-review-entity">${this.escapeHtml(entityLabel)}</span>
+                            <h4 class="match-review-title">${this.escapeHtml(title)}</h4>
+                            <div class="match-review-subtitle">${this.escapeHtml(subtitle)}</div>
+                        </div>
+                        <div class="match-review-meta">${summaryHtml}</div>
+                    </div>
+                    <div class="match-review-card-controls">
+                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.formatMatchStatusLabel(status)}</span>
+                        <button
+                            type="button"
+                            class="match-review-toggle"
+                            data-match-toggle="true"
+                            aria-expanded="false"
+                        >Review</button>
+                    </div>
+                </div>
+                <div class="match-review-card-body">
+                    <div class="match-review-workflow">
+                        ${sourcePaneHtml}
+                        ${candidatePaneHtml}
+                    </div>
+                    <div class="match-review-actions">
+                        ${actionsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    private getMatchSourceHref(item: HifiReviewArtist | HifiReviewAlbum | HifiReviewTrack, entityType: 'artist' | 'album' | 'track'): string | null {
+        if (entityType === 'artist') {
+            const artist = item as HifiReviewArtist;
+            if (!artist.library_id) {
+                return null;
+            }
+            return this.buildLibraryHref({
+                view: 'artist_albums',
+                artistId: artist.library_id,
+                artistName: artist.name || 'Artist'
+            });
+        }
+
+        if (entityType === 'album') {
+            const album = item as HifiReviewAlbum;
+            if (!album.library_id) {
+                return null;
+            }
+            return this.buildLibraryHref({
+                view: 'album_tracks',
+                albumId: album.library_id,
+                albumTitle: album.title || 'Album',
+                albumArtist: album.artist_name || 'Artist'
+            });
+        }
+
+        const track = item as HifiReviewTrack;
+        if (track.album_library_id) {
+            return this.buildLibraryHref({
+                view: 'album_tracks',
+                albumId: track.album_library_id,
+                albumTitle: track.album_title || 'Album',
+                albumArtist: track.artist_name || 'Artist'
+            });
+        }
+
+        if (track.artist_library_id) {
+            return this.buildLibraryHref({
+                view: 'artist_albums',
+                artistId: track.artist_library_id,
+                artistName: track.artist_name || 'Artist'
+            });
+        }
+
+        return null;
+    }
+
+    private getMatchExploreHref(entityType: 'artist' | 'album' | 'track', hifiId?: string): string | null {
+        const normalizedHifiId = String(hifiId || '').trim();
+        if (!normalizedHifiId) {
+            return null;
+        }
+
+        if (entityType === 'track') {
+            return this.buildExploreHref({
+                view: 'search',
+                searchType: 'trackid',
+                query: normalizedHifiId
+            });
+        }
+
+        const parsedId = Number.parseInt(normalizedHifiId, 10);
+        if (!Number.isFinite(parsedId) || parsedId <= 0) {
+            return null;
+        }
+
+        return this.buildExploreHref({
+            view: entityType,
+            ...(entityType === 'artist' ? { artistId: parsedId } : { albumId: parsedId })
+        });
+    }
+
+    private renderMatchLink(label: string, href: string | null): string {
+        if (!href) {
+            return `<span class="match-review-link disabled">${this.escapeHtml(label)}</span>`;
+        }
+
+        return `<a class="match-review-link" href="${this.escapeHtml(href)}">${this.escapeHtml(label)}</a>`;
+    }
+
+    private renderMatchExploreLink(entityType: 'artist' | 'album' | 'track', hifiId?: string, label: string = 'Open in Explore'): string {
+        return this.renderMatchLink(label, this.getMatchExploreHref(entityType, hifiId));
+    }
+
+    private getManualMatchIdHint(entityType: 'artist' | 'album' | 'track'): string {
+        if (entityType === 'artist') {
+            return 'Paste the Explore artist ID if search found nothing useful.';
+        }
+        if (entityType === 'album') {
+            return 'Paste the Explore album ID to confirm this library album manually.';
+        }
+        return 'Paste the Explore track ID to confirm this library track manually.';
+    }
+
+    private renderManualMatchEntry(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        return `
+            <div class="match-review-manual-entry">
+                <label class="match-review-manual-label" for="manualMatchId-${entityType}-${reviewId}">Manual HiFi ID</label>
+                <div class="match-review-manual-controls">
+                    <input
+                        id="manualMatchId-${entityType}-${reviewId}"
+                        type="text"
+                        class="settings-input match-review-manual-input"
+                        data-match-manual-id="${entityType}:${reviewId}"
+                        placeholder="Enter ${entityType} ID"
+                        spellcheck="false"
+                    >
+                    <button
+                        type="button"
+                        class="match-review-button"
+                        data-match-action="confirm-manual"
+                        data-entity-type="${entityType}"
+                        data-review-id="${reviewId}"
+                    >Use ID</button>
+                </div>
+                <div class="match-review-manual-hint">${this.escapeHtml(this.getManualMatchIdHint(entityType))}</div>
+            </div>
+        `;
+    }
+
+    private renderMatchCurrentCandidate(entityType: 'artist' | 'album' | 'track', hifiId?: string, extraLabel?: string): string {
+        const href = this.getMatchExploreHref(entityType, hifiId);
+        if (!href) {
+            return '';
+        }
+
+        return `
+            <div class="match-review-current">
+                <span>Current candidate${extraLabel ? ` • ${this.escapeHtml(extraLabel)}` : ''}</span>
+                ${this.renderMatchLink('Open in Explore', href)}
+            </div>
+        `;
+    }
+
+    private renderArtistReviewCard(item: HifiReviewArtist): string {
+        const reviewId = item.artist_id;
+        const currentMatch = this.renderMatchCurrentCandidate('artist', item.hifi_id);
+        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'artist'));
+
+        return this.renderMatchWorkflowCard(
+            'artist',
+            reviewId,
+            'Artist',
+            item.name || 'Unknown Artist',
+            'Compare the Plex library artist against Explore artist candidates.',
+            item.match_status,
+            [
+                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
+            ].join(''),
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-title">${this.escapeHtml(item.name || 'Unknown Artist')}</div>
+                    <div class="match-review-pane-copy">This is the artist currently indexed from your Plex library.</div>
+                    <div class="match-review-pane-links">${sourceLink}</div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    <div class="match-review-candidates" data-match-candidates-key="artist:${reviewId}">
+                        ${this.renderMatchCandidateList('artist', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('artist', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="artist" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="artist" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderAlbumReviewCard(item: HifiReviewAlbum): string {
+        const reviewId = item.album_id;
+        const currentMatch = this.renderMatchCurrentCandidate('album', item.hifi_id, item.complete ? 'complete in library' : undefined);
+        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'album'));
+
+        return this.renderMatchWorkflowCard(
+            'album',
+            reviewId,
+            'Album',
+            item.title || 'Unknown Album',
+            `${item.artist_name || 'Unknown Artist'} • Review the library album against Explore releases.`,
+            item.match_status,
+            [
+                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`,
+                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
+            ].join(''),
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-title">${this.escapeHtml(item.title || 'Unknown Album')}</div>
+                    <div class="match-review-pane-copy">${this.escapeHtml(item.artist_name || 'Unknown Artist')}</div>
+                    <div class="match-review-pane-copy">Matched tracks in library: ${item.matched_track_count || 0}/${item.expected_track_count || 0}</div>
+                    <div class="match-review-pane-links">${sourceLink}</div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    <div class="match-review-candidates" data-match-candidates-key="album:${reviewId}">
+                        ${this.renderMatchCandidateList('album', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('album', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="album" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="album" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderTrackReviewCard(item: HifiReviewTrack): string {
+        const reviewId = item.track_id;
+        const subtitleParts = [item.artist_name, item.album_title].filter(Boolean);
+        const currentMatch = this.renderMatchCurrentCandidate('track', item.hifi_id);
+        const sourceLink = this.renderMatchLink('Open in Library', this.getMatchSourceHref(item, 'track'));
+
+        return this.renderMatchWorkflowCard(
+            'track',
+            reviewId,
+            'Track',
+            item.title || 'Unknown Track',
+            `${subtitleParts.join(' • ') || 'Unknown'} • Compare the library file against Explore tracks.`,
+            item.match_status,
+            [
+                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+                `<span class="match-review-meta-item">Format ${this.escapeHtml((item.format || '—').toUpperCase())}</span>`,
+                `<span class="match-review-meta-item">Bitrate ${typeof item.bitrate === 'number' ? `${item.bitrate} kbps` : '—'}</span>`
+            ].join(''),
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-title">${this.escapeHtml(item.title || 'Unknown Track')}</div>
+                    <div class="match-review-pane-copy">${this.escapeHtml(subtitleParts.join(' • ') || 'Unknown')}</div>
+                    <div class="match-review-pane-copy">Path: ${this.escapeHtml(item.path || '—')}</div>
+                    <div class="match-review-pane-links">${sourceLink}</div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch || '<div class="match-review-current">No current candidate yet.</div>'}
+                    <div class="match-review-candidates" data-match-candidates-key="track:${reviewId}">
+                        ${this.renderMatchCandidateList('track', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('track', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="track" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="track" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderMatchReviewSection(title: string, count: number, itemsHtml: string): string {
+        if (count === 0) {
+            return '';
+        }
+
+        return `
+            <section class="match-review-section">
+                <div class="match-review-section-header">
+                    <h3>${this.escapeHtml(title)}</h3>
+                    <span class="match-review-count">${count} item${count === 1 ? '' : 's'}</span>
+                </div>
+                <div class="match-review-list">${itemsHtml}</div>
+            </section>
+        `;
+    }
+
+    private async loadMatchReview(): Promise<void> {
+        if (!this.matchReviewContent || !this.matchReviewSummary) {
+            return;
+        }
+
+        const entityType = this.matchReviewEntityFilter?.value || 'all';
+        const maxConfidence = this.matchReviewMaxConfidenceInput?.value || '0.94';
+        this.matchReviewContent.innerHTML = '<p class="loading-text">Loading match review items...</p>';
+        this.matchReviewSummary.innerHTML = '';
+        this.setMatchReviewStatus('');
+
+        try {
+            const params = new URLSearchParams({
+                entity_type: entityType,
+                max_confidence: maxConfidence,
+                limit: '100'
+            });
+            const response = await fetch(`/api/hifi/matches/review?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch match review items');
+            }
+
+            const data = await response.json() as HifiMatchReviewResponse;
+            const artists = Array.isArray(data.artists) ? data.artists : [];
+            const albums = Array.isArray(data.albums) ? data.albums : [];
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+            this.matchReviewSummary.innerHTML = [
+                this.renderMatchSummaryCard('Artists to review', artists.length),
+                this.renderMatchSummaryCard('Albums to review', albums.length),
+                this.renderMatchSummaryCard('Tracks to review', tracks.length)
+            ].join('');
+
+            const content = [
+                this.renderMatchReviewSection('Artists', artists.length, artists.map(item => this.renderArtistReviewCard(item)).join('')),
+                this.renderMatchReviewSection('Albums', albums.length, albums.map(item => this.renderAlbumReviewCard(item)).join('')),
+                this.renderMatchReviewSection('Tracks', tracks.length, tracks.map(item => this.renderTrackReviewCard(item)).join(''))
+            ].filter(Boolean).join('');
+
+            this.matchReviewContent.innerHTML = content || '<div class="match-review-empty">No review items found for the current filters.</div>';
+            this.openInitialMatchReviewCards();
+        } catch (error) {
+            console.error('Failed to load match review items:', error);
+            this.matchReviewContent.innerHTML = '<div class="match-review-empty">Failed to load match review items.</div>';
+            this.setMatchReviewStatus((error as Error).message || 'Failed to load match review items', true);
+        }
+    }
+
+    private async startHifiMatchScan(): Promise<void> {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        const originalText = this.matchReviewRunScanButton.textContent || 'Run Manual Scan';
+        this.matchReviewRunScanButton.disabled = true;
+        this.matchReviewRunScanButton.textContent = 'Queueing...';
+        this.setMatchReviewStatus('');
+
+        try {
+            const response = await fetch('/api/hifi/matches', { method: 'POST' });
+            const data = await response.json().catch(() => ({} as { error?: string; job_id?: number }));
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to queue manual scan');
+            }
+
+            this.setMatchReviewStatus(`Manual scan queued as job ${data.job_id || 'unknown'}. Check Jobs for progress.`);
+            await this.loadMatchActivity();
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Failed to queue hifi match scan:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to queue manual scan', true);
+        } finally {
+            this.matchReviewRunScanButton.disabled = false;
+            this.matchReviewRunScanButton.textContent = originalText;
+        }
+    }
+
+    private async loadMatchCandidates(entityType: 'artist' | 'album' | 'track', reviewId: number, container: HTMLElement): Promise<void> {
+        const cacheKey = `${entityType}:${reviewId}`;
+
+        if (this.matchCandidateCache.has(cacheKey)) {
+            container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
+            return;
+        }
+
+        if (this.matchCandidateRequestsInFlight.has(cacheKey)) {
+            return;
+        }
+
+        this.matchCandidateRequestsInFlight.add(cacheKey);
+        container.innerHTML = '<div class="match-review-inline-status">Searching candidates...</div>';
+
+        try {
+            const params = new URLSearchParams({
+                entity_type: entityType,
+                id: String(reviewId),
+                limit: '10'
+            });
+            const response = await fetch(`/api/hifi/matches/candidates?${params.toString()}`);
+            const data = await response.json() as HifiMatchCandidatesResponse;
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to search candidates');
+            }
+
+            this.matchCandidateCache.set(cacheKey, Array.isArray(data.candidates) ? data.candidates : []);
+            container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
+        } catch (error) {
+            console.error('Failed to load match candidates:', error);
+            container.innerHTML = `<div class="match-review-empty">${this.escapeHtml((error as Error).message || 'Failed to search candidates')}</div>`;
+        } finally {
+            this.matchCandidateRequestsInFlight.delete(cacheKey);
+        }
+    }
+
+    private async toggleMatchReviewCard(card: HTMLElement, forceOpen?: boolean): Promise<void> {
+        const isOpen = card.classList.contains('is-open');
+        const nextOpen = typeof forceOpen === 'boolean' ? forceOpen : !isOpen;
+        const toggleButton = card.querySelector('[data-match-toggle]') as HTMLButtonElement | null;
+        const entityType = String(card.getAttribute('data-entity-type') || '').trim() as 'artist' | 'album' | 'track';
+        const reviewId = Number(card.getAttribute('data-review-id') || '0');
+        const candidatesContainer = card.querySelector(`[data-match-candidates-key="${entityType}:${reviewId}"]`) as HTMLElement | null;
+
+        card.classList.toggle('is-open', nextOpen);
+        if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', String(nextOpen));
+            toggleButton.textContent = nextOpen ? 'Hide' : 'Review';
+        }
+
+        if (nextOpen && candidatesContainer && entityType && Number.isFinite(reviewId) && reviewId > 0) {
+            await this.loadMatchCandidates(entityType, reviewId, candidatesContainer);
+        }
+    }
+
+    private openInitialMatchReviewCards(): void {
+        if (!this.matchReviewContent) {
+            return;
+        }
+
+        const firstCards = Array.from(this.matchReviewContent.querySelectorAll('.match-review-section .match-review-card:first-child')) as HTMLElement[];
+        firstCards.slice(0, 3).forEach(card => {
+            void this.toggleMatchReviewCard(card, true);
+        });
+    }
+
+    private async submitMatchReviewAction(entityType: 'artist' | 'album' | 'track', reviewId: number, action: 'confirm' | 'reject', hifiId?: string): Promise<void> {
+        const response = await fetch('/api/hifi/matches/review', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                entity_type: entityType,
+                id: reviewId,
+                action,
+                hifi_id: hifiId
+            })
+        });
+
+        const data = await response.json().catch(() => ({} as { error?: string }));
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update review item');
+        }
+    }
+
+    private async handleMatchReviewClick(e: MouseEvent): Promise<void> {
+        const target = e.target as HTMLElement;
+        const toggleButton = target.closest('[data-match-toggle]') as HTMLButtonElement | null;
+        if (toggleButton) {
+            const card = toggleButton.closest('.match-review-card') as HTMLElement | null;
+            if (card) {
+                await this.toggleMatchReviewCard(card);
+            }
+            return;
+        }
+
+        const actionButton = target.closest('[data-match-action]') as HTMLButtonElement | null;
+        if (!actionButton) {
+            return;
+        }
+
+        const action = String(actionButton.getAttribute('data-match-action') || '').trim();
+        const entityType = String(actionButton.getAttribute('data-entity-type') || '').trim() as 'artist' | 'album' | 'track';
+        const reviewId = Number(actionButton.getAttribute('data-review-id') || '0');
+        const hifiId = String(actionButton.getAttribute('data-hifi-id') || '').trim() || undefined;
+        if (!entityType || !Number.isFinite(reviewId) || reviewId <= 0) {
+            return;
+        }
+
+        const card = actionButton.closest('.match-review-card') as HTMLElement | null;
+        const candidatesContainer = card?.querySelector(`[data-match-candidates-key="${entityType}:${reviewId}"]`) as HTMLElement | null;
+        const manualIdInput = card?.querySelector(`[data-match-manual-id="${entityType}:${reviewId}"]`) as HTMLInputElement | null;
+
+        try {
+            actionButton.disabled = true;
+
+            if (action === 'reject') {
+                const confirmed = window.confirm('Reject this match candidate?');
+                if (!confirmed) {
+                    actionButton.disabled = false;
+                    return;
+                }
+                await this.submitMatchReviewAction(entityType, reviewId, 'reject');
+                this.setMatchReviewStatus('Match rejected.');
+            } else if (action === 'confirm-current') {
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm');
+                this.setMatchReviewStatus('Match confirmed.');
+            } else if (action === 'confirm-manual') {
+                const manualId = String(manualIdInput?.value || '').trim();
+                if (!manualId) {
+                    throw new Error('Enter a HiFi ID before confirming manually.');
+                }
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm', manualId);
+                this.setMatchReviewStatus(`Manual ${entityType} ID confirmed.`);
+            } else if (action === 'confirm-candidate') {
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm', hifiId);
+                this.setMatchReviewStatus('Candidate selected and confirmed.');
+            }
+
+            this.matchCandidateCache.delete(`${entityType}:${reviewId}`);
+            await this.loadMatchReview();
+        } catch (error) {
+            console.error('Failed to update match review item:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to update match review item', true);
+            actionButton.disabled = false;
+        }
+    }
+
     private async handleJobsContentClick(e: MouseEvent): Promise<void> {
         const target = e.target as HTMLElement;
         const cancelButton = target.closest('.job-cancel-button') as HTMLButtonElement | null;
@@ -3050,6 +3985,49 @@ class App {
             `;
         }
 
+        if (job.job_type === 'hifi_match') {
+            const stageRows = [
+                { key: 'matching_artists', label: 'Matching Artists' },
+                { key: 'matching_albums', label: 'Matching Albums' },
+                { key: 'matching_tracks', label: 'Matching Tracks' },
+                { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const artistsMatched = Number(progress.artists_matched || 0);
+            const albumsMatched = Number(progress.albums_matched || 0);
+            const tracksMatched = Number(progress.tracks_matched || 0);
+            const progressText = `${artistsMatched} artists matched • ${albumsMatched} albums matched • ${tracksMatched} tracks matched`;
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="${actionsClass}">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
+                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'id3_tagged', label: 'ID3 Tag Created' },
@@ -3120,6 +4098,14 @@ class App {
                 return 'Plex Library Sync (Manual)';
             }
             return 'Plex Library Sync';
+        }
+
+        if (job.job_type === 'hifi_match') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'manual') {
+                return 'Hifi Match (Manual)';
+            }
+            return 'Hifi Match';
         }
 
         const artist = job.result?.artist;
@@ -4791,64 +5777,132 @@ class App {
         }
     }
 
+    private async lookupStoredMatches(trackIds: Array<number | string>, albumIds: Array<number | string>, signal?: AbortSignal): Promise<HifiMatchLookupResponse> {
+        const normalizedTrackIds = trackIds
+            .map(trackId => String(trackId).trim())
+            .filter(Boolean);
+        const normalizedAlbumIds = albumIds
+            .map(albumId => String(albumId).trim())
+            .filter(Boolean);
+
+        if (normalizedTrackIds.length === 0 && normalizedAlbumIds.length === 0) {
+            return { tracks: [], albums: [] };
+        }
+
+        const response = await fetch('/api/hifi/matches/lookup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                track_ids: normalizedTrackIds,
+                album_ids: normalizedAlbumIds
+            }),
+            signal
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to look up stored matches');
+        }
+
+        return await response.json() as HifiMatchLookupResponse;
+    }
+
+    private isLowQualityPlexMatch(variants: PlexSongVariant[] = []): boolean {
+        return Array.isArray(variants)
+            && variants.length > 0
+            && variants.every(variant =>
+                (variant.format === 'mp3' || variant.format === 'mpeg')
+                && typeof variant.bitrate === 'number'
+                && variant.bitrate <= 192
+            );
+    }
+
+    private buildStoredMatchTooltip(matchStatus?: string | null, confidence?: number | null, variants: PlexSongVariant[] = [], partial: boolean = false): string {
+        const headingBase = partial
+            ? 'Partial Plex match'
+            : (String(matchStatus || '').toLowerCase() === 'proposed' ? 'Likely in Plex' : 'Exists in Plex');
+        const heading = typeof confidence === 'number' && Number.isFinite(confidence)
+            ? `${headingBase} (${Math.round(confidence * 100)}%)`
+            : headingBase;
+
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return heading;
+        }
+
+        const details = variants.map((variant) => {
+            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            return variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+        });
+
+        return `${heading}\n${details.join('\n')}`;
+    }
+
+    private createPlexMatchChip(match: { match_status?: string | null; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; partial?: boolean }): HTMLSpanElement {
+        const chip = document.createElement('span');
+        const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
+        const proposed = String(match.match_status || '').toLowerCase() === 'proposed';
+        const partial = options?.partial === true;
+
+        const classNames = ['plex-existing-chip'];
+        if (options?.inActions) {
+            classNames.push('plex-existing-chip--in-actions');
+        }
+        if (options?.bulk) {
+            classNames.push('plex-existing-chip--bulk');
+        }
+        if (lowQuality) {
+            classNames.push('plex-existing-chip--low-quality');
+        }
+        if (proposed) {
+            classNames.push('plex-existing-chip--proposed');
+        }
+        chip.className = classNames.join(' ');
+
+        let label = partial ? 'Partially in Plex' : (proposed ? 'Likely in Plex' : 'In Plex');
+        if (lowQuality) {
+            label += ' · low quality';
+        }
+        chip.textContent = label;
+        chip.title = this.buildStoredMatchTooltip(match.match_status, match.confidence, match.variants || [], partial);
+        return chip;
+    }
+
     private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {
         if (!Array.isArray(tracks) || tracks.length === 0) {
             return;
         }
 
-        // Use the route's abort signal
         const signal = this.pendingRequestController?.signal;
-
-        // Try to find grid rows first (new grid layout)
-        const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
-        if (gridRows.length > 0) {
-            await this.annotateGridRowsWithPlexStatus(tracks, gridRows, signal);
+        const trackIds = tracks.map(track => track.id).filter(trackId => Number.isFinite(trackId));
+        if (trackIds.length === 0) {
             return;
         }
-
-        // Fall back to old track-card logic
-        const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
-        if (cards.length === 0) {
-            return;
-        }
-
-        const payloadTracks = tracks.map((track) => {
-            const artist = track.artists && track.artists.length > 0
-                ? track.artists.map(a => a.name).join(', ')
-                : track.artist?.name || '';
-            const album = track.album?.title || '';
-            return {
-                title: track.title || '',
-                artist,
-                album
-            };
-        });
 
         try {
-            const response = await fetch('/api/plex/songs/match', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ tracks: payloadTracks }),
-                signal
-            });
+            const lookup = await this.lookupStoredMatches(trackIds, [], signal);
+            const trackMatches = Array.isArray(lookup.tracks) ? lookup.tracks : [];
+            const matchById = new Map(trackMatches.map(match => [String(match.track_id), match]));
 
-            if (!response.ok) {
+            const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
+            if (gridRows.length > 0) {
+                await this.annotateGridRowsWithPlexStatus(gridRows, matchById);
                 return;
             }
 
-            const data = await response.json() as { matches?: PlexTrackMatch[] };
-            const matches = Array.isArray(data.matches) ? data.matches : [];
-            const max = Math.min(cards.length, matches.length);
-
-            for (let i = 0; i < max; i += 1) {
-                const match = matches[i];
+            const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
+            for (const card of cards) {
+                const trackId = String(card.getAttribute('data-track-id') || '').trim();
+                const match = matchById.get(trackId);
                 if (!match || !match.exists) {
                     continue;
                 }
 
-                const metadataEl = cards[i].querySelector('.track-metadata') as HTMLElement | null;
+                const metadataEl = card.querySelector('.track-metadata') as HTMLElement | null;
                 if (!metadataEl || metadataEl.querySelector('.plex-existing-chip')) {
                     continue;
                 }
@@ -4860,18 +5914,7 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
-                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
-                    match.variants.every(v =>
-                        (v.format === 'mp3' || v.format === 'mpeg') &&
-                        typeof v.bitrate === 'number' && v.bitrate <= 192
-                    );
-                const chip = document.createElement('span');
-                chip.className = allLowQualityMp3
-                    ? 'plex-existing-chip plex-existing-chip--low-quality'
-                    : 'plex-existing-chip';
-                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-                chip.title = this.buildPlexExistingTooltip(match.variants || []);
-                metadataEl.appendChild(chip);
+                metadataEl.appendChild(this.createPlexMatchChip(match));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -4881,85 +5924,31 @@ class App {
         }
     }
 
-    private async annotateGridRowsWithPlexStatus(tracks: Track[], gridRows: HTMLElement[], signal?: AbortSignal): Promise<void> {
-        const payloadTracks = tracks.map((track) => {
-            const artist = track.artists && track.artists.length > 0
-                ? track.artists.map(a => a.name).join(', ')
-                : track.artist?.name || '';
-            const album = track.album?.title || '';
-            return {
-                title: track.title || '',
-                artist,
-                album
-            };
-        });
+    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>): Promise<void> {
+        const resolvedMatches: HifiTrackLookupMatch[] = [];
 
-        try {
-            const response = await fetch('/api/plex/songs/match', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ tracks: payloadTracks }),
-                signal
-            });
-
-            if (!response.ok) {
-                return;
+        for (const row of gridRows) {
+            const trackId = String(row.getAttribute('data-track-id') || '').trim();
+            const match = matchById.get(trackId);
+            if (!match || !match.exists) {
+                continue;
             }
 
-            const data = await response.json() as { matches?: PlexTrackMatch[] };
-            const matches = Array.isArray(data.matches) ? data.matches : [];
-            const max = Math.min(gridRows.length, matches.length);
+            resolvedMatches.push(match);
+            row.setAttribute('data-plex-exists', 'true');
 
-            const allRowsInPlex = gridRows.length > 0
-                && matches.length >= gridRows.length
-                && gridRows.every((_, index) => Boolean(matches[index] && matches[index].exists));
-
-            if (allRowsInPlex) {
-                this.replaceAddAllLibraryWithPlexBadge(matches.slice(0, gridRows.length));
+            const actionsCell = row.querySelector('.grid-col-actions') as HTMLElement | null;
+            const addLibraryBtn = actionsCell?.querySelector('.grid-add-library-btn') as HTMLElement | null;
+            if (!actionsCell || !addLibraryBtn) {
+                continue;
             }
 
-            for (let i = 0; i < max; i += 1) {
-                const match = matches[i];
-                if (!match || !match.exists) {
-                    continue;
-                }
+            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true }));
+        }
 
-                // Mark row as having Plex existence
-                gridRows[i].setAttribute('data-plex-exists', 'true');
-
-                // Replace Add to Library button with Plex badge in the actions area
-                const actionsCell = gridRows[i].querySelector('.grid-col-actions') as HTMLElement | null;
-                if (!actionsCell) {
-                    continue;
-                }
-
-                const addLibraryBtn = actionsCell.querySelector('.grid-add-library-btn') as HTMLElement | null;
-                if (!addLibraryBtn) {
-                    continue;
-                }
-
-                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
-                    match.variants.every(v =>
-                        (v.format === 'mp3' || v.format === 'mpeg') &&
-                        typeof v.bitrate === 'number' && v.bitrate <= 192
-                    );
-
-                const chip = document.createElement('span');
-                chip.className = allLowQualityMp3
-                    ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--low-quality'
-                    : 'plex-existing-chip plex-existing-chip--in-actions';
-                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-                chip.title = this.buildPlexExistingTooltip(match.variants || []);
-
-                addLibraryBtn.replaceWith(chip);
-            }
-        } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
-                return;
-            }
-            console.warn('Failed to annotate grid rows with Plex status.', error);
+        const allRowsInPlex = gridRows.length > 0 && resolvedMatches.length === gridRows.length;
+        if (allRowsInPlex) {
+            this.replaceAddAllLibraryWithPlexBadge(resolvedMatches);
         }
     }
 
@@ -4968,115 +5957,34 @@ class App {
             return;
         }
 
-        // Use the route's abort signal, or create a local one if not available
         const signal = this.pendingRequestController?.signal;
+        const albumIds = albums.map(album => album.id).filter(albumId => Number.isFinite(albumId));
+        if (albumIds.length === 0) {
+            return;
+        }
 
         try {
+            const lookup = await this.lookupStoredMatches([], albumIds, signal);
+            const albumMatches = Array.isArray(lookup.albums) ? lookup.albums : [];
+            const matchById = new Map(albumMatches.map(match => [String(match.album_id), match]));
             const gridRows = Array.from(this.resultsContainer.querySelectorAll('.albums-grid-row')) as HTMLElement[];
 
-            // For each album, fetch its tracks and check if they're all in Plex
-            for (let i = 0; i < gridRows.length && i < albums.length; i++) {
-                // Check if aborted before each iteration
-                if (signal?.aborted) {
-                    return;
-                }
-
-                const gridRow = gridRows[i];
-                const albumId = gridRow.getAttribute('data-album-id');
-                if (!albumId) {
+            for (const row of gridRows) {
+                const albumId = String(row.getAttribute('data-album-id') || '').trim();
+                const match = matchById.get(albumId);
+                if (!match || !match.exists || !match.complete) {
                     continue;
                 }
 
-                try {
-                    // Fetch album tracks with abort signal
-                    const albumResponse = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
-                        signal
-                    });
-                    if (!albumResponse.ok) {
-                        continue;
-                    }
+                row.setAttribute('data-plex-exists', 'true');
 
-                    const albumData: AlbumInfo = await albumResponse.json();
-                    const trackItems = albumData.data?.items || [];
-                    const tracks = trackItems
-                        .filter(item => item.type === 'track')
-                        .map(item => item.item)
-                        .filter(t => t && t.id);
-
-                    if (tracks.length === 0) {
-                        continue;
-                    }
-
-                    // Check these tracks against Plex
-                    const payloadTracks = tracks.map((track: Track) => {
-                        const artist = track.artists?.[0]?.name || track.artist?.name || '';
-                        const album = track.album?.title || '';
-                        return {
-                            title: track.title || '',
-                            artist,
-                            album
-                        };
-                    });
-
-                    const matchResponse = await fetch('/api/plex/songs/match', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tracks: payloadTracks }),
-                        signal
-                    });
-
-                    if (!matchResponse.ok) {
-                        continue;
-                    }
-
-                    const matchData = await matchResponse.json();
-                    const matches = Array.isArray(matchData.matches) ? matchData.matches : [];
-
-                    // Check if ALL tracks from this album are in Plex
-                    const allInPlex = matches.length === tracks.length &&
-                        matches.every((m: any) => m && m.exists);
-
-                    if (!allInPlex) {
-                        continue;
-                    }
-
-                    gridRow.setAttribute('data-plex-exists', 'true');
-
-                    // Replace Add to Library button with Plex badge
-                    const actionsCell = gridRow.querySelector('.grid-col-actions') as HTMLElement | null;
-                    if (!actionsCell) {
-                        continue;
-                    }
-
-                    const addLibraryBtn = actionsCell.querySelector('.grid-add-library-btn') as HTMLElement | null;
-                    if (!addLibraryBtn) {
-                        continue;
-                    }
-
-                    // Check if all are low quality MP3s
-                    const allLowQualityMp3 = matches.every((m: any) =>
-                        Array.isArray(m.variants) && m.variants.length > 0 &&
-                        m.variants.every((v: any) =>
-                            (v.format === 'mp3' || v.format === 'mpeg') &&
-                            typeof v.bitrate === 'number' && v.bitrate <= 192
-                        )
-                    );
-
-                    const chip = document.createElement('span');
-                    chip.className = allLowQualityMp3
-                        ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--low-quality'
-                        : 'plex-existing-chip plex-existing-chip--in-actions';
-                    chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-                    chip.title = this.buildPlexExistingTooltip(matches.flatMap((m: any) => m.variants || []));
-
-                    addLibraryBtn.replaceWith(chip);
-                } catch (error) {
-                    // Ignore abort errors and continue with next album
-                    if (error instanceof Error && error.name === 'AbortError') {
-                        return;
-                    }
+                const actionsCell = row.querySelector('.grid-col-actions') as HTMLElement | null;
+                const addLibraryBtn = actionsCell?.querySelector('.grid-add-library-btn') as HTMLElement | null;
+                if (!actionsCell || !addLibraryBtn) {
                     continue;
                 }
+
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -5092,41 +6000,14 @@ class App {
             return;
         }
 
-        const allLowQualityMp3 = matches.length > 0 && matches.every((match) =>
-            Array.isArray(match.variants)
-            && match.variants.length > 0
-            && match.variants.every(v =>
-                (v.format === 'mp3' || v.format === 'mpeg')
-                && typeof v.bitrate === 'number' && v.bitrate <= 192
-            )
-        );
+        const aggregateMatch: PlexTrackMatch = {
+            exists: true,
+            match_status: matches.every(match => String(match.match_status || '').toLowerCase() === 'confirmed') ? 'confirmed' : 'proposed',
+            confidence: matches.reduce((highest, match) => Math.max(highest, typeof match.confidence === 'number' ? match.confidence : 0), 0),
+            variants: matches.flatMap(match => match.variants || [])
+        };
 
-        const badge = document.createElement('span');
-        badge.className = allLowQualityMp3
-            ? 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk plex-existing-chip--low-quality'
-            : 'plex-existing-chip plex-existing-chip--in-actions plex-existing-chip--bulk';
-        badge.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-        badge.title = this.buildPlexExistingTooltip(matches.flatMap((m: PlexTrackMatch) => m.variants || []));
-
-        addAllLibraryBtn.replaceWith(badge);
-    }
-
-    private buildPlexExistingTooltip(variants: PlexSongVariant[]): string {
-        if (!Array.isArray(variants) || variants.length === 0) {
-            return 'Exists in Plex';
-        }
-
-        const details = variants.map((variant) => {
-            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? ` (${variant.bitrate} kbps)`
-                : '';
-            const path = variant.file_path
-                ? `  ${variant.file_path}${bitrate}`
-                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
-            return path;
-        });
-
-        return `Exists in Plex\n${details.join('\n')}`;
+        addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
     }
 
     private formatSearchPlaylistCard(playlist: PlaylistSearchItem): string {
