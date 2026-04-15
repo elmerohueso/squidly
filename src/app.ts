@@ -5233,6 +5233,19 @@ class App {
         const safeRateLabel = rateLimit
             ? `${rateLimit.safe_rpm.toFixed(2)} RPM (${rateLimit.safe_rps.toFixed(2)} RPS)`
             : 'Unknown';
+        const rateLimitState = !rateLimit
+            ? 'Unknown'
+            : rateLimit.safe_interval >= 30 || rateLimit.error_rate_429 > 0.05
+                ? 'Backoff active'
+                : rateLimit.safe_interval > 0.5 || rateLimit.error_rate_429 > 0
+                    ? 'Recovering'
+                    : 'Normal';
+        const rateLimit429Percent = rateLimit
+            ? `${(rateLimit.error_rate_429 * 100).toFixed(2)}%`
+            : 'Unknown';
+        const currentIntervalLabel = rateLimit
+            ? `${rateLimit.safe_interval.toFixed(2)}s`
+            : 'Unknown';
 
         // Update endpoint list
         if (!this.flyoutContent) {
@@ -5240,7 +5253,39 @@ class App {
             return;
         }
 
-        this.flyoutContent.innerHTML = data.endpoints.map(endpoint => {
+        const rateLimitSummary = rateLimit
+            ? `
+                <div class="endpoint-item">
+                    <div class="endpoint-header">
+                        <span class="endpoint-name">Mirror Rate Limiter</span>
+                        <div class="endpoint-status ${rateLimitState === 'Normal' ? 'online' : 'offline'}">
+                            <span class="status-indicator ${rateLimitState === 'Normal' ? 'online' : 'offline'}"></span>
+                            ${rateLimitState}
+                        </div>
+                    </div>
+                    <div class="endpoint-details">
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Current Interval</span>
+                            <span class="detail-value">${currentIntervalLabel}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Current Safe Rate</span>
+                            <span class="detail-value">${safeRateLabel}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">429 Rate</span>
+                            <span class="detail-value">${rateLimit429Percent}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Sample Size</span>
+                            <span class="detail-value">${rateLimit.sample_size}</span>
+                        </div>
+                    </div>
+                </div>
+            `
+            : '';
+
+        const endpointMarkup = data.endpoints.map(endpoint => {
             const url = atob(endpoint.encodedUrl);
             const statusClass = endpoint.online ? 'online' : 'offline';
             const statusText = endpoint.online ? 'Online' : 'Offline';
@@ -5278,6 +5323,8 @@ class App {
                 </div>
             `;
         }).join('');
+
+        this.flyoutContent.innerHTML = `${rateLimitSummary}${endpointMarkup}`;
     }
 
     private updateSearchPlaceholder(): void {
