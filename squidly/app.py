@@ -1206,6 +1206,15 @@ def _match_source_track_to_album_payload(track_row, album_payload, preferred_hif
     return None, 0.0, None
 
 
+def _track_needs_hifi_match(track_row):
+    if not isinstance(track_row, dict):
+        return False
+
+    hifi_id = str(track_row.get('hifi_id') or '').strip()
+    match_status = str(track_row.get('match_status') or '').strip() or 'unmatched'
+    return not hifi_id or match_status == 'unmatched'
+
+
 def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_payload, now_dt, match_source, album_confidence, tagged_track_ids_by_path=None):
     album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
     album_hifi_id = str(album_data.get('id') or '').strip() or None
@@ -1251,7 +1260,8 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
 
     tracks_matched = 0
     tagged_track_ids_by_path = tagged_track_ids_by_path or {}
-    for track_row in source_track_rows or []:
+    pending_track_rows = [track_row for track_row in (source_track_rows or []) if _track_needs_hifi_match(track_row)]
+    for track_row in pending_track_rows:
         preferred_hifi_id = tagged_track_ids_by_path.get(str(track_row.get('path') or '').strip())
         candidate, track_confidence, track_source = _match_source_track_to_album_payload(track_row, album_payload, preferred_hifi_id=preferred_hifi_id)
         if not candidate:
@@ -2770,7 +2780,8 @@ def process_hifi_match_job(job_id, payload):
         for album_row in album_rows:
             _raise_if_job_cancelled(job_id)
             source_track_rows = source_album_track_rows_map.get(int(album_row.get('album_id')), []) if album_row.get('album_id') is not None else []
-            progress['tracks_processed'] += len(source_track_rows)
+            pending_track_rows = [track_row for track_row in source_track_rows if _track_needs_hifi_match(track_row)]
+            progress['tracks_processed'] += len(pending_track_rows)
 
             album_payload, match_source, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_rows)
             if album_payload:

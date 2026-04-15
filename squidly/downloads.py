@@ -90,9 +90,11 @@ RATE_LIMIT_HISTORY_SECONDS = 300
 RATE_LIMIT_TARGET_429_RATE = 0.05
 RATE_LIMIT_MIN_INTERVAL = 0.5  # seconds
 RATE_LIMIT_MAX_INTERVAL = 60.0  # seconds
-RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE = 5
-RATE_LIMIT_DECREASE_FACTOR = 0.9
+RATE_LIMIT_429_WINDOW_SECONDS = 120
+RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE = 3
+RATE_LIMIT_DECREASE_FACTOR = 0.85
 RATE_LIMIT_INCREASE_FACTOR = 2.0
+RATE_LIMIT_429_STEP_INTERVALS = [1.0, 2.0, 5.0, 15.0, 30.0, 60.0]
 
 _mirror_rate_limit_state = {
     'current_interval': RATE_LIMIT_MIN_INTERVAL,
@@ -109,30 +111,61 @@ def _prune_rate_limit_history():
     ]
 
 
+def _get_rate_limit_recovery_factor(current_interval):
+    if current_interval >= 30.0:
+        return 0.5
+    if current_interval >= 10.0:
+        return 0.65
+    if current_interval >= 2.0:
+        return 0.8
+    return RATE_LIMIT_DECREASE_FACTOR
+
+
+def _count_recent_429s(now):
+    cutoff = now - RATE_LIMIT_429_WINDOW_SECONDS
+    return sum(
+        1
+        for (timestamp, status_code) in _mirror_rate_limit_state['request_history']
+        if timestamp >= cutoff and status_code == 429
+    )
+
+
+def _get_rate_limit_429_interval(current_interval, recent_429_count, consecutive_successes):
+    forgiveness_steps = min(2, consecutive_successes // RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE)
+    effective_429_count = max(0, recent_429_count - forgiveness_steps)
+    target_index = min(effective_429_count, len(RATE_LIMIT_429_STEP_INTERVALS) - 1)
+    target_interval = RATE_LIMIT_429_STEP_INTERVALS[target_index]
+
+    if current_interval >= 30.0:
+        return min(RATE_LIMIT_MAX_INTERVAL, current_interval * RATE_LIMIT_INCREASE_FACTOR)
+
+    return min(RATE_LIMIT_MAX_INTERVAL, max(current_interval, target_interval))
+
+
 def _record_rate_limit_event(status_code):
     now = time.time()
+    previous_successes = _mirror_rate_limit_state['consecutive_successes']
     _mirror_rate_limit_state['request_history'].append((now, status_code))
     _mirror_rate_limit_state['last_request_timestamp'] = now
 
     if status_code == 429:
+        recent_429_count = _count_recent_429s(now)
         _mirror_rate_limit_state['consecutive_successes'] = 0
-        current = _mirror_rate_limit_state['current_interval']
-        if current < 30.0:
-            _mirror_rate_limit_state['current_interval'] = min(RATE_LIMIT_MAX_INTERVAL, 30.0)
-        else:
-            _mirror_rate_limit_state['current_interval'] = min(
-                RATE_LIMIT_MAX_INTERVAL,
-                current * RATE_LIMIT_INCREASE_FACTOR
-            )
+        _mirror_rate_limit_state['current_interval'] = _get_rate_limit_429_interval(
+            _mirror_rate_limit_state['current_interval'],
+            recent_429_count,
+            previous_successes,
+        )
     elif status_code >= 500 or status_code == 0:
         # transient failure, do not decay the interval quickly
         _mirror_rate_limit_state['consecutive_successes'] = 0
     else:
         _mirror_rate_limit_state['consecutive_successes'] += 1
         if _mirror_rate_limit_state['consecutive_successes'] >= RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE:
+            recovery_factor = _get_rate_limit_recovery_factor(_mirror_rate_limit_state['current_interval'])
             _mirror_rate_limit_state['current_interval'] = max(
                 RATE_LIMIT_MIN_INTERVAL,
-                _mirror_rate_limit_state['current_interval'] * RATE_LIMIT_DECREASE_FACTOR
+                _mirror_rate_limit_state['current_interval'] * recovery_factor
             )
             _mirror_rate_limit_state['consecutive_successes'] = 0
 
