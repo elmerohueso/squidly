@@ -1730,6 +1730,7 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
     now = _now_utc()
     conn = get_db_connection()
     cur = conn.cursor()
+    updated_track_album_id = None
     try:
         album_artist_row_id = _upsert_artist_row(
             cur,
@@ -1833,20 +1834,210 @@ def _fetch_hifi_album_payload(album_id):
     return response.json() or {}
 
 
-def _format_hifi_image_value(image_id_or_url, size=640):
-    raw_value = str(image_id_or_url or '').strip()
+def _fetch_hifi_track_payload(track_id, quality='LOW'):
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/track/?{urlencode({'id': str(track_id), 'quality': str(quality)})}",
+        SQUID_URLS,
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_source='manual', match_status='confirmed', confidence=1.0):
+    if not isinstance(track_row, dict):
+        return track_row.get('album_id') if isinstance(track_row, dict) else None
+
+    track_payload = _fetch_hifi_track_payload(track_hifi_id)
+    track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
+    if not isinstance(track_data, dict):
+        track_data = {}
+
+    existing_track_artist_row = _get_artist_row(cur, track_row.get('artist_id')) if track_row.get('artist_id') else None
+    track_artist_info = _extract_primary_hifi_artist(track_data)
+    track_artist_row_id = track_row.get('artist_id')
+    if track_artist_info or existing_track_artist_row:
+        track_artist_row_id = _upsert_artist_row(
+            cur,
+            name=(track_artist_info or {}).get('name') or (existing_track_artist_row or {}).get('name') or 'Unknown Artist',
+            library_id=(existing_track_artist_row or {}).get('library_id'),
+            hifi_id=(track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id'),
+            confidence=confidence,
+            match_status=match_status,
+            match_source=match_source,
+            matched_at=now_dt,
+            confirmed_at=now_dt,
+            last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
+        )
+
+    album_hifi_id = None
+    album_title = None
+    album_item = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+    if isinstance(album_item, dict):
+        album_hifi_id = str(album_item.get('id') or '').strip() or None
+        album_title = str(album_item.get('title') or '').strip() or None
+
+    existing_album_row = _get_album_row(cur, track_row.get('album_id')) if track_row.get('album_id') else None
+    existing_album_artist_row = _get_artist_row(cur, existing_album_row.get('artist_id')) if existing_album_row and existing_album_row.get('artist_id') else None
+
+    album_artist_info = None
+    if album_hifi_id:
+        album_payload = _fetch_hifi_album_payload(album_hifi_id)
+        album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
+        if isinstance(album_data, dict):
+            album_artist_info = _extract_primary_hifi_artist(album_data)
+
+    album_artist_row_id = existing_album_row.get('artist_id') if existing_album_row else track_artist_row_id
+    if album_artist_info or existing_album_artist_row:
+        album_artist_row_id = _upsert_artist_row(
+            cur,
+            name=(album_artist_info or {}).get('name') or (existing_album_artist_row or {}).get('name') or (track_artist_info or {}).get('name') or 'Unknown Artist',
+            library_id=(existing_album_artist_row or {}).get('library_id'),
+            hifi_id=(album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id'),
+            confidence=confidence,
+            match_status=match_status,
+            match_source=match_source,
+            matched_at=now_dt,
+            confirmed_at=now_dt,
+            last_seen_at=(existing_album_artist_row or {}).get('last_seen_at') or now_dt,
+        )
+
+    album_row_id = track_row.get('album_id')
+    if existing_album_row or album_hifi_id:
+        album_row_id = _upsert_album_row(
+            cur,
+            artist_id=album_artist_row_id,
+            title=album_title or (existing_album_row or {}).get('title') or 'Unknown Album',
+            library_id=(existing_album_row or {}).get('library_id'),
+            hifi_id=album_hifi_id or (existing_album_row or {}).get('hifi_id'),
+            confidence=confidence,
+            complete=bool((existing_album_row or {}).get('complete')),
+            match_status=match_status,
+            match_source=match_source,
+            matched_at=now_dt,
+            confirmed_at=now_dt,
+            last_seen_at=(existing_album_row or {}).get('last_seen_at') or now_dt,
+            matched_track_count=_safe_int((existing_album_row or {}).get('matched_track_count')) or 0,
+            expected_track_count=_safe_int((existing_album_row or {}).get('expected_track_count')) or 0,
+        )
+
+    _upsert_track_row(
+        cur,
+        album_id=album_row_id,
+        artist_id=track_artist_row_id,
+        title=track_row.get('title') or 'Unknown Track',
+        path=track_row.get('path') or '',
+        library_id=track_row.get('library_id'),
+        hifi_id=track_hifi_id,
+        confidence=confidence,
+        match_status=match_status,
+        match_source=match_source,
+        matched_at=now_dt,
+        confirmed_at=now_dt,
+        last_seen_at=track_row.get('last_seen_at') or now_dt,
+        audio_format=track_row.get('format'),
+        bitrate=_safe_int(track_row.get('bitrate')),
+        disc_number=_safe_int(track_row.get('disc_number')),
+        track_number=_safe_int(track_row.get('track_number')),
+    )
+
+    return album_row_id
+
+
+def _extract_hifi_image_string(value):
+    if isinstance(value, str):
+        return value.strip()
+
+    if isinstance(value, dict):
+        for key in ('url', 'image', 'cover', 'picture', 'id', 'path'):
+            nested = value.get(key)
+            extracted = _extract_hifi_image_string(nested)
+            if extracted:
+                return extracted
+        return ''
+
+    if isinstance(value, list):
+        for entry in value:
+            extracted = _extract_hifi_image_string(entry)
+            if extracted:
+                return extracted
+        return ''
+
+    return ''
+
+
+def _normalize_tidal_image_url(image_value, size):
+    raw_value = str(image_value or '').strip()
     if not raw_value:
         return None
-    if raw_value.startswith('http://') or raw_value.startswith('https://'):
-        return raw_value
+
+    # Candidate payloads sometimes include punctuation next to URLs.
+    while raw_value and raw_value[-1] in ('.', ',', ';', ':', ')', ']', '}'):
+        raw_value = raw_value[:-1].rstrip()
+
+    normalized = raw_value
+    if normalized.startswith('//'):
+        normalized = f"https:{normalized}"
+    elif normalized.startswith('resources.tidal.com/'):
+        normalized = f"https://{normalized}"
+    elif normalized.startswith('/images/'):
+        normalized = f"https://resources.tidal.com{normalized}"
+
+    parsed = urlparse(normalized)
+    if parsed.scheme not in ('http', 'https') or parsed.netloc.lower() != 'resources.tidal.com':
+        return None
+
+    path_parts = [part for part in parsed.path.split('/') if part]
+    if not path_parts or path_parts[0] != 'images':
+        return None
+
+    image_parts = path_parts[1:]
+    if image_parts and re.match(r'^\d+x\d+\.(jpg|jpeg|png)$', image_parts[-1], re.IGNORECASE):
+        image_parts = image_parts[:-1]
+    if not image_parts:
+        return None
+
+    image_path = '/'.join(image_parts)
+    return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
+
+
+def _format_hifi_image_value(image_id_or_url, size=640):
+    raw_value = _extract_hifi_image_string(image_id_or_url)
+    if not raw_value:
+        return None
+
+    normalized_value = raw_value.strip()
+    lowered = normalized_value.lower()
+    if lowered in ('none', 'null') or '{' in normalized_value or '}' in normalized_value:
+        return None
+
+    normalized_tidal_url = _normalize_tidal_image_url(normalized_value, size)
+    if normalized_tidal_url:
+        return normalized_tidal_url
+
+    if normalized_value.startswith('http://') or normalized_value.startswith('https://'):
+        return normalized_value
+    if normalized_value.startswith('//'):
+        return f"https:{normalized_value}"
+    if normalized_value.startswith('resources.tidal.com/'):
+        return f"https://{normalized_value}"
+    if normalized_value.startswith('/images/'):
+        if normalized_value.endswith('.jpg') or normalized_value.endswith('.jpeg') or normalized_value.endswith('.png'):
+            return f"https://resources.tidal.com{normalized_value}"
+        normalized_value = normalized_value.strip('/')
+
     try:
-        return format_tidal_image_url(raw_value, size)
+        return format_tidal_image_url(normalized_value, size)
     except Exception:
         return None
 
 
 MATCH_REVIEW_ARTWORK_SIZE = 350
 MATCH_REVIEW_HIFI_ARTWORK_SIZE = 640
+MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE = 750
 
 
 def _is_hifi_explicit(item):
@@ -2552,7 +2743,7 @@ def _build_artist_match_candidates(row, limit=10, query_override=None):
             'title': candidate_name,
             'subtitle': 'Artist',
             'confidence': confidence,
-            'image_url': _format_hifi_image_value(candidate.get('picture'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
+            'image_url': _format_hifi_image_value(candidate.get('picture'), size=MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE),
         })
 
     scored.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
@@ -2564,6 +2755,23 @@ def _build_album_match_candidates(row, limit=10, query_override=None, source_tra
     seen = set()
     search_query = str(query_override or row.get('title') or '').strip()
     artist_hifi_id = str(row.get('artist_hifi_id') or '').strip()
+    artist_name = str(row.get('artist_name') or '').strip()
+
+    def build_search_queries():
+        base_title = search_query
+        stripped_title = re.sub(r'\s*\([^)]*\)', '', base_title).strip()
+
+        ordered = []
+        for query in (
+            base_title,
+            f"{artist_name} {base_title}".strip() if artist_name else '',
+            stripped_title,
+            f"{artist_name} {stripped_title}".strip() if artist_name and stripped_title else '',
+        ):
+            query = str(query or '').strip()
+            if query and query not in ordered:
+                ordered.append(query)
+        return ordered
 
     def collect_candidates(source_candidates):
         added_any = False
@@ -2584,9 +2792,11 @@ def _build_album_match_candidates(row, limit=10, query_override=None, source_tra
         artist_albums = payload.get('albums', {}).get('items', []) if isinstance(payload.get('albums'), dict) else []
         found_from_artist = collect_candidates(artist_albums)
         if not found_from_artist:
-            collect_candidates(_fetch_hifi_search_results('al', search_query, limit=max(limit * 2, 20)))
+            for candidate_query in build_search_queries():
+                collect_candidates(_fetch_hifi_search_results('al', candidate_query, limit=max(limit * 2, 20)))
     else:
-        collect_candidates(_fetch_hifi_search_results('al', search_query, limit=max(limit * 2, 20)))
+        for candidate_query in build_search_queries():
+            collect_candidates(_fetch_hifi_search_results('al', candidate_query, limit=max(limit * 2, 20)))
 
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
     return candidates[:limit]
@@ -2596,7 +2806,9 @@ def _build_track_match_candidates(row, limit=10, query_override=None):
     candidates = []
     seen = set()
     album_hifi_id = str(row.get('album_hifi_id') or '').strip()
-    search_query = str(query_override or row.get('title') or '').strip()
+    artist_name = str(row.get('artist_name') or '').strip()
+    track_title = str(row.get('title') or '').strip()
+    search_query = str(query_override or f"{artist_name} {track_title}".strip() or track_title).strip()
 
     if album_hifi_id and not query_override:
         payload = _fetch_hifi_album_payload(album_hifi_id)
@@ -2721,10 +2933,13 @@ def start_hifi_match_job(trigger='manual'):
 
 def process_hifi_match_job(job_id, payload):
     stages = {
+        'backfilling_track_seed_ids': 'pending',
         'matching_albums': 'pending',
         'updating_album_completeness': 'pending',
     }
     progress = {
+        'track_seed_rows_processed': 0,
+        'track_seed_rows_updated': 0,
         'albums_processed': 0,
         'albums_matched': 0,
         'albums_matched_from_tags': 0,
@@ -2741,6 +2956,60 @@ def process_hifi_match_job(job_id, payload):
 
     try:
         _raise_if_job_cancelled(job_id)
+        stages['backfilling_track_seed_ids'] = 'in_progress'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+        cur.execute(
+            """
+            SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
+                   tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
+                   tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
+                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at,
+                   albums.hifi_id AS album_hifi_id,
+                   track_artist.hifi_id AS track_artist_hifi_id,
+                   album_artist.hifi_id AS album_artist_hifi_id
+            FROM tracks
+            LEFT JOIN albums ON albums.album_id = tracks.album_id
+            LEFT JOIN artists AS track_artist ON track_artist.artist_id = tracks.artist_id
+            LEFT JOIN artists AS album_artist ON album_artist.artist_id = albums.artist_id
+            WHERE tracks.library_id IS NOT NULL
+              AND COALESCE(tracks.hifi_id, '') <> ''
+              AND (
+                    COALESCE(albums.hifi_id, '') = ''
+                 OR COALESCE(track_artist.hifi_id, '') = ''
+                 OR COALESCE(album_artist.hifi_id, '') = ''
+              )
+            ORDER BY tracks.track_id ASC
+            """
+        )
+        track_seed_rows = cur.fetchall() or []
+        for track_row in track_seed_rows:
+            _raise_if_job_cancelled(job_id)
+            track_hifi_id = str(track_row.get('hifi_id') or '').strip()
+            if not track_hifi_id:
+                continue
+
+            _cascade_track_confirm_ids(
+                cur,
+                track_row,
+                track_hifi_id,
+                now_dt,
+                match_source='auto_track',
+                match_status='confirmed',
+                confidence=0.99,
+            )
+            progress['track_seed_rows_processed'] += 1
+            progress['track_seed_rows_updated'] += 1
+
+            if progress['track_seed_rows_processed'] % 25 == 0 or progress['track_seed_rows_processed'] == len(track_seed_rows):
+                conn.commit()
+                update_job_progress(job_id, {'progress': progress})
+
+        conn.commit()
+        _raise_if_job_cancelled(job_id)
+        stages['backfilling_track_seed_ids'] = 'done'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
         stages['matching_albums'] = 'in_progress'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
@@ -2846,7 +3115,7 @@ def process_hifi_match_job(job_id, payload):
     finally:
         conn.close()
 
-    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: albums_matched={progress['albums_matched']}/{progress['albums_processed']}, tag_albums={progress['albums_matched_from_tags']}, search_albums={progress['albums_matched_from_search']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
+    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: track_seeded={progress['track_seed_rows_updated']}/{progress['track_seed_rows_processed']}, albums_matched={progress['albums_matched']}/{progress['albums_processed']}, tag_albums={progress['albums_matched_from_tags']}, search_albums={progress['albums_matched_from_search']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     return {
         'trigger': trigger or 'unknown',
@@ -6967,7 +7236,26 @@ def get_hifi_match_review_endpoint():
                 """,
                 (max_confidence, limit)
             )
-            response['tracks'] = cur.fetchall() or []
+            tracks = cur.fetchall() or []
+            track_album_image_map = _fetch_plex_item_image_map(
+                library,
+                server_url,
+                api_token,
+                [item.get('album_library_id') for item in tracks],
+                image_size=MATCH_REVIEW_ARTWORK_SIZE,
+            )
+            track_image_map = _fetch_plex_item_image_map(
+                library,
+                server_url,
+                api_token,
+                [item.get('library_id') for item in tracks],
+                image_size=MATCH_REVIEW_ARTWORK_SIZE,
+            )
+            for item in tracks:
+                album_library_id = str(item.get('album_library_id') or '').strip()
+                track_library_id = str(item.get('library_id') or '').strip()
+                item['cover'] = track_album_image_map.get(album_library_id) or track_image_map.get(track_library_id)
+            response['tracks'] = tracks
 
         return jsonify(response)
     finally:
@@ -6978,7 +7266,7 @@ def get_hifi_match_review_endpoint():
 def get_hifi_match_candidates_endpoint():
     entity_type = str(request.args.get('entity_type') or '').strip().lower()
     entity_id = _safe_int(request.args.get('id'))
-    limit = _safe_int(request.args.get('limit')) or 10
+    limit = _safe_int(request.args.get('limit')) or 3
     limit = max(1, min(limit, 20))
     query_override = str(request.args.get('query') or '').strip() or None
 
@@ -7000,6 +7288,43 @@ def get_hifi_match_candidates_endpoint():
             source_track_titles_map = _fetch_source_album_track_titles_map(cur, [row.get('album_id')])
             source_track_titles = source_track_titles_map.get(int(row.get('album_id')), []) if row.get('album_id') is not None else []
             candidates = _build_album_match_candidates(row, limit=limit, query_override=query_override, source_track_titles=source_track_titles)
+            if not candidates and not query_override:
+                album_title = str(row.get('title') or '').strip()
+                artist_name = str(row.get('artist_name') or '').strip()
+                stripped_title = re.sub(r'\s*\([^)]*\)', '', album_title).strip()
+
+                fallback_queries = []
+                for value in (
+                    artist_name,
+                    stripped_title,
+                    f"{artist_name} {stripped_title}".strip() if artist_name and stripped_title else '',
+                    f"{artist_name} {album_title}".strip() if artist_name and album_title else '',
+                ):
+                    query = str(value or '').strip()
+                    if query and query not in fallback_queries:
+                        fallback_queries.append(query)
+
+                merged = []
+                seen_hifi_ids = set()
+                for fallback_query in fallback_queries:
+                    fallback_candidates = _build_album_match_candidates(
+                        row,
+                        limit=limit,
+                        query_override=fallback_query,
+                        source_track_titles=source_track_titles,
+                    )
+                    for candidate in fallback_candidates:
+                        hifi_id = str(candidate.get('hifi_id') or '').strip()
+                        if not hifi_id or hifi_id in seen_hifi_ids:
+                            continue
+                        seen_hifi_ids.add(hifi_id)
+                        merged.append(candidate)
+                    if len(merged) >= limit:
+                        break
+
+                if merged:
+                    merged.sort(key=lambda candidate: (-_safe_float(candidate.get('confidence')), str(candidate.get('title') or '').lower()))
+                    candidates = merged[:limit]
         else:
             candidates = _build_track_match_candidates(row, limit=limit, query_override=query_override)
 
@@ -7042,19 +7367,22 @@ def update_hifi_match_review_endpoint():
             effective_hifi_id = raw_hifi_id or (str(row.get('hifi_id') or '').strip() or None)
             if not effective_hifi_id:
                 return jsonify({'error': 'hifi_id is required to confirm an unmatched row'}), 400
-            cur.execute(
-                f"""
-                UPDATE {table_name}
-                SET hifi_id = %s,
-                    confidence = 1.0,
-                    match_status = 'confirmed',
-                    match_source = 'manual',
-                    matched_at = %s,
-                    confirmed_at = %s
-                WHERE {id_column} = %s
-                """,
-                (effective_hifi_id, now_dt, now_dt, entity_id)
-            )
+            if entity_type == 'track':
+                updated_track_album_id = _cascade_track_confirm_ids(cur, row, effective_hifi_id, now_dt)
+            else:
+                cur.execute(
+                    f"""
+                    UPDATE {table_name}
+                    SET hifi_id = %s,
+                        confidence = 1.0,
+                        match_status = 'confirmed',
+                        match_source = 'manual',
+                        matched_at = %s,
+                        confirmed_at = %s
+                    WHERE {id_column} = %s
+                    """,
+                    (effective_hifi_id, now_dt, now_dt, entity_id)
+                )
         else:
             if entity_type == 'album':
                 cur.execute(
@@ -7103,7 +7431,7 @@ def update_hifi_match_review_endpoint():
             if album_row:
                 _refresh_album_completeness(cur, album_row)
         elif entity_type == 'track':
-            album_id = row.get('album_id')
+            album_id = updated_track_album_id or row.get('album_id')
             if album_id:
                 album_row = _get_album_row(cur, album_id)
                 if album_row:

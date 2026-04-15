@@ -2716,6 +2716,35 @@ body {
     text-align: center;
 }
 
+.match-review-empty-state {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.match-review-candidate-search {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.match-review-candidate-search-label {
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.match-review-candidate-search-controls {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+}
+
+.match-review-candidate-search-input {
+    flex: 1;
+    min-width: 0;
+}
+
 .match-review-inline-status {
     color: var(--text-secondary);
     font-size: 0.875rem;

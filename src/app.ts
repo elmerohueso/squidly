@@ -318,6 +318,7 @@ interface HifiReviewTrack {
     title: string;
     artist_name?: string;
     album_title?: string;
+    cover?: string;
     album_library_id?: string;
     artist_library_id?: string;
     library_id?: string;
@@ -533,6 +534,7 @@ class App {
     private lastMatchActivityStatus: string | null = null;
     private activeMatchActivityJobId: number | null = null;
     private matchCandidateCache = new Map<string, HifiMatchCandidate[]>();
+    private matchCandidateSearchTerms = new Map<string, string>();
     private matchCandidateRequestsInFlight = new Set<string>();
     private currentExploreRoute: AppRouteState = { view: 'home' };
     private exploreBreadcrumbRoutes: AppRouteState[] = [];
@@ -911,6 +913,9 @@ class App {
         if (this.matchReviewContent) {
             this.matchReviewContent.addEventListener('click', (e: MouseEvent) => {
                 void this.handleMatchReviewClick(e);
+            });
+            this.matchReviewContent.addEventListener('keydown', (e: KeyboardEvent) => {
+                void this.handleMatchReviewKeydown(e);
             });
         }
 
@@ -3352,6 +3357,45 @@ class App {
         `;
     }
 
+    private getMatchCandidateSearchPlaceholder(entityType: 'artist' | 'album' | 'track'): string {
+        if (entityType === 'artist') {
+            return 'Search artists in Explore';
+        }
+        if (entityType === 'album') {
+            return 'Search albums in Explore';
+        }
+        return 'Search tracks in Explore';
+    }
+
+    private renderMatchCandidateSearchControls(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        const cacheKey = `${entityType}:${reviewId}`;
+        const previousSearch = this.matchCandidateSearchTerms.get(cacheKey) || '';
+
+        return `
+            <div class="match-review-candidate-search">
+                <label class="match-review-candidate-search-label" for="matchCandidateSearch-${entityType}-${reviewId}">Search candidates</label>
+                <div class="match-review-candidate-search-controls">
+                    <input
+                        id="matchCandidateSearch-${entityType}-${reviewId}"
+                        type="text"
+                        class="settings-input match-review-candidate-search-input"
+                        data-match-search-input="${entityType}:${reviewId}"
+                        placeholder="${this.escapeAttribute(this.getMatchCandidateSearchPlaceholder(entityType))}"
+                        value="${this.escapeAttribute(previousSearch)}"
+                        spellcheck="false"
+                    >
+                    <button
+                        type="button"
+                        class="match-review-button"
+                        data-match-action="search-candidates"
+                        data-entity-type="${entityType}"
+                        data-review-id="${reviewId}"
+                    >Search</button>
+                </div>
+            </div>
+        `;
+    }
+
     private renderMatchCandidateList(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
         const cacheKey = `${entityType}:${reviewId}`;
         const candidates = this.matchCandidateCache.get(cacheKey);
@@ -3612,6 +3656,7 @@ class App {
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
                     ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('artist', reviewId)}
                     <div class="match-review-candidates" data-match-candidates-key="artist:${reviewId}">
                         ${this.renderMatchCandidateList('artist', reviewId)}
                     </div>
@@ -3661,6 +3706,7 @@ class App {
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
                     ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('album', reviewId)}
                     <div class="match-review-candidates" data-match-candidates-key="album:${reviewId}">
                         ${this.renderMatchCandidateList('album', reviewId)}
                     </div>
@@ -3695,15 +3741,21 @@ class App {
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
-                    ${this.renderMatchReviewTitle(item.title || 'Unknown Track', { href: sourceHref })}
-                    <div class="match-review-pane-copy">${this.escapeHtml(subtitleParts.join(' • ') || 'Unknown')}</div>
-                    <div class="match-review-pane-copy">Path: ${this.escapeHtml(item.path || '—')}</div>
+                    <div class="match-review-pane-header">
+                        ${this.renderMatchReviewArtwork(item.cover, item.album_title || item.title || 'Unknown Track', 'album')}
+                        <div class="match-review-pane-stack">
+                            ${this.renderMatchReviewTitle(item.title || 'Unknown Track', { href: sourceHref })}
+                            <div class="match-review-pane-copy">${this.escapeHtml(subtitleParts.join(' • ') || 'Unknown')}</div>
+                            <div class="match-review-pane-copy">Path: ${this.escapeHtml(item.path || '—')}</div>
+                        </div>
+                    </div>
                 </section>
             `,
             `
                 <section class="match-review-pane candidate-pane">
                     <div class="match-review-pane-label">Explore Candidates</div>
                     ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('track', reviewId)}
                     <div class="match-review-candidates" data-match-candidates-key="track:${reviewId}">
                         ${this.renderMatchCandidateList('track', reviewId)}
                     </div>
@@ -3863,33 +3915,43 @@ class App {
         }
     }
 
-    private async loadMatchCandidates(entityType: 'artist' | 'album' | 'track', reviewId: number, container: HTMLElement): Promise<void> {
+    private async loadMatchCandidates(entityType: 'artist' | 'album' | 'track', reviewId: number, container: HTMLElement, queryOverride?: string): Promise<void> {
         const cacheKey = `${entityType}:${reviewId}`;
+        const normalizedQuery = String(queryOverride || '').trim();
+        const isManualSearch = normalizedQuery.length > 0;
 
-        if (this.matchCandidateCache.has(cacheKey)) {
+        if (!isManualSearch && this.matchCandidateCache.has(cacheKey)) {
             container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
             return;
         }
 
-        if (this.matchCandidateRequestsInFlight.has(cacheKey)) {
+        if (!isManualSearch && this.matchCandidateRequestsInFlight.has(cacheKey)) {
             return;
         }
 
         this.matchCandidateRequestsInFlight.add(cacheKey);
-        container.innerHTML = '<div class="match-review-inline-status">Searching candidates...</div>';
+        container.innerHTML = isManualSearch
+            ? `<div class="match-review-inline-status">Searching for "${this.escapeHtml(normalizedQuery)}"...</div>`
+            : '<div class="match-review-inline-status">Searching candidates...</div>';
 
         try {
             const params = new URLSearchParams({
                 entity_type: entityType,
                 id: String(reviewId),
-                limit: '10'
+                limit: '3'
             });
+            if (normalizedQuery) {
+                params.set('query', normalizedQuery);
+            }
             const response = await fetch(`/api/hifi/matches/candidates?${params.toString()}`);
             const data = await response.json() as HifiMatchCandidatesResponse;
             if (!response.ok) {
                 throw new Error(data.error || 'Failed to search candidates');
             }
 
+            if (isManualSearch) {
+                this.matchCandidateSearchTerms.set(cacheKey, normalizedQuery);
+            }
             this.matchCandidateCache.set(cacheKey, Array.isArray(data.candidates) ? data.candidates : []);
             container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
         } catch (error) {
@@ -3950,6 +4012,12 @@ class App {
         }
     }
 
+    private async reloadMatchReviewPreserveScroll(): Promise<void> {
+        const previousScrollY = window.scrollY;
+        await this.loadMatchReview();
+        window.scrollTo({ top: previousScrollY, behavior: 'auto' });
+    }
+
     private async handleMatchReviewClick(e: MouseEvent): Promise<void> {
         const target = e.target as HTMLElement;
         const toggleButton = target.closest('[data-match-toggle]') as HTMLButtonElement | null;
@@ -3977,6 +4045,31 @@ class App {
         const card = actionButton.closest('.match-review-card') as HTMLElement | null;
         const candidatesContainer = card?.querySelector(`[data-match-candidates-key="${entityType}:${reviewId}"]`) as HTMLElement | null;
         const manualIdInput = card?.querySelector(`[data-match-manual-id="${entityType}:${reviewId}"]`) as HTMLInputElement | null;
+        const candidateSearchInput = card?.querySelector(`[data-match-search-input="${entityType}:${reviewId}"]`) as HTMLInputElement | null;
+
+        if (action === 'search-candidates') {
+            if (!candidatesContainer) {
+                return;
+            }
+
+            const query = String(candidateSearchInput?.value || '').trim();
+            if (!query) {
+                this.setMatchReviewStatus('Enter a search query to find candidates.', true);
+                return;
+            }
+
+            try {
+                actionButton.disabled = true;
+                await this.loadMatchCandidates(entityType, reviewId, candidatesContainer, query);
+                this.setMatchReviewStatus('Search complete. Showing up to 3 candidates.');
+            } catch (error) {
+                console.error('Failed to search match candidates:', error);
+                this.setMatchReviewStatus((error as Error).message || 'Failed to search candidates', true);
+            } finally {
+                actionButton.disabled = false;
+            }
+            return;
+        }
 
         try {
             actionButton.disabled = true;
@@ -4005,12 +4098,41 @@ class App {
             }
 
             this.matchCandidateCache.delete(`${entityType}:${reviewId}`);
-            await this.loadMatchReview();
+            await this.reloadMatchReviewPreserveScroll();
         } catch (error) {
             console.error('Failed to update match review item:', error);
             this.setMatchReviewStatus((error as Error).message || 'Failed to update match review item', true);
             actionButton.disabled = false;
         }
+    }
+
+    private async handleMatchReviewKeydown(e: KeyboardEvent): Promise<void> {
+        if (e.key !== 'Enter') {
+            return;
+        }
+
+        const target = e.target as HTMLElement;
+        const input = target.closest('[data-match-search-input]') as HTMLInputElement | null;
+        if (!input) {
+            return;
+        }
+
+        const key = String(input.getAttribute('data-match-search-input') || '').trim();
+        const [entityTypeRaw, reviewIdRaw] = key.split(':');
+        const entityType = entityTypeRaw as 'artist' | 'album' | 'track';
+        const reviewId = Number(reviewIdRaw || '0');
+        if (!entityType || !Number.isFinite(reviewId) || reviewId <= 0) {
+            return;
+        }
+
+        const card = input.closest('.match-review-card') as HTMLElement | null;
+        const searchButton = card?.querySelector(`[data-match-action="search-candidates"][data-entity-type="${entityType}"][data-review-id="${reviewId}"]`) as HTMLButtonElement | null;
+        if (!searchButton) {
+            return;
+        }
+
+        e.preventDefault();
+        searchButton.click();
     }
 
     private async handleJobsContentClick(e: MouseEvent): Promise<void> {

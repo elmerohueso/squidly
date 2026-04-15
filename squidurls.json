@@ -2,5 +2,45 @@
     {
         "name": "squidly-hifi-api",
         "encodedUrl": "aHR0cDovL3NxdWlkbHktaGlmaS1hcGk6ODAwMA=="
+    },
+    {
+        "name": "triton",
+        "encodedUrl": "aHR0cHM6Ly90cml0b24uc3F1aWQud3Rm"
+    },
+    {
+        "name": "binimum",
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC1hcGkuYmluaW11bS5vcmc="
+    },
+    {
+        "name": "kinoplus",
+        "encodedUrl": "aHR0cHM6Ly90aWRhbC5raW5vcGx1cy5vbmxpbmU="
+    },
+    {
+        "name": "spoti-2",
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLXR3by5zcG90aXNhdmVyLm5ldA=="
+    },
+    {
+        "name": "spoti-1",
+        "encodedUrl": "aHR0cHM6Ly9oaWZpLW9uZS5zcG90aXNhdmVyLm5ldA=="
+    },
+    {
+        "name": "wolf",
+        "encodedUrl": "aHR0cHM6Ly93b2xmLnFxZGwuc2l0ZQ=="
+    },
+    {
+        "name": "hund",
+        "encodedUrl": "aHR0cHM6Ly9odW5kLnFxZGwuc2l0ZQ=="
+    },
+    {
+        "name": "katze",
+        "encodedUrl": "aHR0cHM6Ly9rYXR6ZS5xcWRsLnNpdGU="
+    },
+    {
+        "name": "vogel",
+        "encodedUrl": "aHR0cHM6Ly92b2dlbC5xcWRsLnNpdGU="
+    },
+    {
+        "name": "maus",
+        "encodedUrl": "aHR0cHM6Ly9tYXVzLnFxZGwuc2l0ZQ=="
     }
 ]
