@@ -1557,8 +1557,14 @@ class App {
         }
 
         if (normalizedPage === 'matches') {
-            void this.loadMatchActivity();
-            void this.loadMatchReview();
+            void this.loadMatchActivity().then(() => {
+                if (this.currentPage !== 'matches') {
+                    return;
+                }
+                if (!this.isMatchScanActive()) {
+                    void this.loadMatchReview();
+                }
+            });
         } else {
             this.stopMatchReviewPollingInterval();
         }
@@ -3136,6 +3142,36 @@ class App {
         }
     }
 
+    private isMatchScanActive(): boolean {
+        return Boolean(
+            this.activeMatchActivityJobId
+            || this.lastMatchActivityStatus === 'queued'
+            || this.lastMatchActivityStatus === 'in_progress'
+        );
+    }
+
+    private renderMatchReviewBlockedByActiveScan(): void {
+        if (!this.matchReviewContent || !this.matchReviewSummary) {
+            return;
+        }
+
+        this.matchReviewSummary.innerHTML = '';
+        this.matchReviewContent.innerHTML = `
+            <div class="match-review-empty">Hifi Match is currently running. Review cards will load after the scan completes.</div>
+        `;
+    }
+
+    private getMatchCoverageFromProgress(progress: Record<string, unknown>, entity: 'artists' | 'albums' | 'tracks'): { total: number; missing: number; matched: number } {
+        const total = Number(progress[`${entity}_total`] || 0);
+        const missing = Number(progress[`${entity}_missing_current`] || progress[`${entity}_processed`] || 0);
+        const matchedCurrent = Number(progress[`${entity}_matched_current_job`] || progress[`${entity}_matched`] || 0);
+        return {
+            total: Number.isFinite(total) ? total : 0,
+            missing: Number.isFinite(missing) ? missing : 0,
+            matched: Number.isFinite(matchedCurrent) ? matchedCurrent : 0,
+        };
+    }
+
     private renderMatchActivityCard(job: JobItem): string {
         const effectiveStatus = this.getEffectiveJobStatus(job);
         const statusLabel = this.formatJobStatus(effectiveStatus);
@@ -3143,18 +3179,14 @@ class App {
         const stages = (job.result?.stages || {}) as Record<string, string>;
         const progress = (job.result?.progress || {}) as Record<string, unknown>;
         const stageRows = [
-            { key: 'matching_artists', label: 'Matching Artists' },
+            { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
             { key: 'matching_albums', label: 'Matching Albums' },
-            { key: 'matching_tracks', label: 'Matching Tracks' },
             { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
         ];
 
-        const artistsProcessed = Number(progress.artists_processed || 0);
-        const artistsMatched = Number(progress.artists_matched || 0);
-        const albumsProcessed = Number(progress.albums_processed || 0);
-        const albumsMatched = Number(progress.albums_matched || 0);
-        const tracksProcessed = Number(progress.tracks_processed || 0);
-        const tracksMatched = Number(progress.tracks_matched || 0);
+        const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
+        const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
+        const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
 
         return `
             <div class="match-activity-card">
@@ -3166,9 +3198,9 @@ class App {
                 </div>
                 <div class="match-activity-meta">
                     <span class="match-activity-meta-item">Job ${job.id}</span>
-                    <span class="match-activity-meta-item">Artists ${artistsMatched}/${artistsProcessed}</span>
-                    <span class="match-activity-meta-item">Albums ${albumsMatched}/${albumsProcessed}</span>
-                    <span class="match-activity-meta-item">Tracks ${tracksMatched}/${tracksProcessed}</span>
+                    <span class="match-activity-meta-item">Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job</span>
+                    <span class="match-activity-meta-item">Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job</span>
+                    <span class="match-activity-meta-item">Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job</span>
                 </div>
                 <div class="match-activity-stages">
                     ${stageRows.map(stage => {
@@ -3226,6 +3258,9 @@ class App {
             if (isActive) {
                 this.startMatchReviewPollingInterval();
                 this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+                if (this.currentPage === 'matches') {
+                    this.renderMatchReviewBlockedByActiveScan();
+                }
             } else {
                 this.stopMatchReviewPollingInterval();
             }
@@ -3442,7 +3477,7 @@ class App {
                                     ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, entityType === 'artist' ? 'artist' : 'album')}
                                     <div class="match-review-candidate-copy">
                                         ${this.renderMatchReviewTitle(candidate.title, {
-                                            explicit: false,
+                                            explicit: candidate.explicit,
                                             className: 'match-review-candidate-title',
                                             href: this.getMatchExploreHref(entityType, candidate.hifi_id)
                                         })}
@@ -3790,9 +3825,15 @@ class App {
             return;
         }
 
+        if (this.isMatchScanActive()) {
+            this.renderMatchReviewBlockedByActiveScan();
+            return;
+        }
+
         const entityType = this.matchReviewEntityFilter?.value || 'all';
         const maxConfidence = this.matchReviewMaxConfidenceInput?.value || '0.94';
-        this.matchReviewContent.innerHTML = '<p class="loading-text">Loading match review items...</p>';
+        const loadingMessage = 'Loading match review items...';
+        this.matchReviewContent.innerHTML = `<p class="loading-text">${this.escapeHtml(loadingMessage)}</p>`;
         this.matchReviewSummary.innerHTML = '';
         this.setMatchReviewStatus('');
 
@@ -4326,9 +4367,8 @@ class App {
 
         if (job.job_type === 'hifi_match') {
             const stageRows = [
-                { key: 'matching_artists', label: 'Matching Artists' },
+                { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
                 { key: 'matching_albums', label: 'Matching Albums' },
-                { key: 'matching_tracks', label: 'Matching Tracks' },
                 { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
             ];
 
@@ -4344,10 +4384,10 @@ class App {
             }).join('');
 
             const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const artistsMatched = Number(progress.artists_matched || 0);
-            const albumsMatched = Number(progress.albums_matched || 0);
-            const tracksMatched = Number(progress.tracks_matched || 0);
-            const progressText = `${artistsMatched} artists matched • ${albumsMatched} albums matched • ${tracksMatched} tracks matched`;
+            const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
+            const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
+            const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
+            const progressText = `Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job • Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job • Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job`;
 
             return `
                 <div class="job-item">

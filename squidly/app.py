@@ -1847,6 +1847,52 @@ def _fetch_hifi_track_payload(track_id, quality='LOW'):
     return response.json() or {}
 
 
+def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
+    if not isinstance(track_row, dict):
+        return None
+
+    title = str(track_row.get('title') or '').strip()
+    artist_name = None
+    if track_row.get('artist_id'):
+        artist_row = _get_artist_row(cur, track_row.get('artist_id'))
+        artist_name = str(artist_row.get('name') or '').strip() if artist_row else None
+
+    def normalize_search_text(text):
+        if not text:
+            return ''
+        text = re.sub(r'\s*\[[^\]]*\]', '', text)
+        text = re.sub(r'\s*\([^\)]*\)', '', text)
+        return text.strip()
+
+    normalized_title = normalize_search_text(title)
+    normalized_artist = normalize_search_text(artist_name)
+
+    query_candidates = []
+    if str(track_hifi_id).strip():
+        query_candidates.append(str(track_hifi_id).strip())
+    if normalized_artist and normalized_title:
+        query_candidates.append(f"{normalized_artist} {normalized_title}".strip())
+    if normalized_title:
+        query_candidates.append(normalized_title)
+    if normalized_artist:
+        query_candidates.append(normalized_artist)
+    if title and title not in query_candidates:
+        query_candidates.append(title)
+
+    seen_queries = set()
+    for query in query_candidates:
+        query = str(query or '').strip()
+        if not query or query in seen_queries:
+            continue
+        seen_queries.add(query)
+
+        for candidate in _fetch_hifi_search_results('s', query, limit=50):
+            if str(candidate.get('id') or '').strip() == str(track_hifi_id).strip():
+                return candidate
+
+    return None
+
+
 def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_source='manual', match_status='confirmed', confidence=1.0):
     if not isinstance(track_row, dict):
         return track_row.get('album_id') if isinstance(track_row, dict) else None
@@ -1879,6 +1925,16 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
     if isinstance(album_item, dict):
         album_hifi_id = str(album_item.get('id') or '').strip() or None
         album_title = str(album_item.get('title') or '').strip() or None
+
+    if not album_hifi_id:
+        candidate = _find_hifi_track_search_candidate(cur, track_row, track_hifi_id)
+        if isinstance(candidate, dict):
+            album_item = candidate.get('album') if isinstance(candidate.get('album'), dict) else {}
+            if isinstance(album_item, dict):
+                album_hifi_id = str(album_item.get('id') or '').strip() or None
+                album_title = str(album_item.get('title') or '').strip() or None
+            if not track_artist_info:
+                track_artist_info = _extract_primary_hifi_artist(candidate)
 
     existing_album_row = _get_album_row(cur, track_row.get('album_id')) if track_row.get('album_id') else None
     existing_album_artist_row = _get_artist_row(cur, existing_album_row.get('artist_id')) if existing_album_row and existing_album_row.get('artist_id') else None
@@ -2866,6 +2922,7 @@ def _build_track_match_candidates(row, limit=10, query_override=None):
             'subtitle': ' • '.join(part for part in subtitle_parts if part),
             'confidence': confidence,
             'image_url': _format_hifi_image_value(album_data.get('cover') or candidate.get('cover'), size=MATCH_REVIEW_HIFI_ARTWORK_SIZE),
+            'explicit': _is_hifi_explicit(candidate),
         })
 
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
@@ -2931,6 +2988,55 @@ def start_hifi_match_job(trigger='manual'):
     return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
 
 
+def _fetch_hifi_match_coverage_counts(cur):
+    def fetch_counts(table_name):
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                SUM(
+                    CASE
+                        WHEN COALESCE(hifi_id, '') = '' OR match_status = 'unmatched' THEN 1
+                        ELSE 0
+                    END
+                ) AS missing
+            FROM {table_name}
+            WHERE library_id IS NOT NULL
+            """
+        )
+        row = cur.fetchone() or {}
+        return {
+            'total': _safe_int(row.get('total')) or 0,
+            'missing': _safe_int(row.get('missing')) or 0,
+        }
+
+    artists = fetch_counts('artists')
+    albums = fetch_counts('albums')
+    tracks = fetch_counts('tracks')
+    return {
+        'artists_total': artists['total'],
+        'artists_missing': artists['missing'],
+        'albums_total': albums['total'],
+        'albums_missing': albums['missing'],
+        'tracks_total': tracks['total'],
+        'tracks_missing': tracks['missing'],
+    }
+
+
+def _refresh_hifi_match_coverage_progress(cur, progress):
+    counts = _fetch_hifi_match_coverage_counts(cur)
+    progress['artists_missing_current'] = counts['artists_missing']
+    progress['albums_missing_current'] = counts['albums_missing']
+    progress['tracks_missing_current'] = counts['tracks_missing']
+
+    progress['artists_matched_current_job'] = max(0, (progress.get('artists_missing_start') or 0) - counts['artists_missing'])
+    progress['albums_matched_current_job'] = max(0, (progress.get('albums_missing_start') or 0) - counts['albums_missing'])
+    progress['tracks_matched_current_job'] = max(0, (progress.get('tracks_missing_start') or 0) - counts['tracks_missing'])
+
+    # Keep legacy keys updated for existing UI consumers.
+    progress['artists_matched'] = progress['artists_matched_current_job']
+
+
 def process_hifi_match_job(job_id, payload):
     stages = {
         'backfilling_track_seed_ids': 'pending',
@@ -2955,6 +3061,16 @@ def process_hifi_match_job(job_id, payload):
     now_dt = _now_utc()
 
     try:
+        coverage_counts = _fetch_hifi_match_coverage_counts(cur)
+        progress['artists_total'] = coverage_counts['artists_total']
+        progress['albums_total'] = coverage_counts['albums_total']
+        progress['tracks_total'] = coverage_counts['tracks_total']
+        progress['artists_missing_start'] = coverage_counts['artists_missing']
+        progress['albums_missing_start'] = coverage_counts['albums_missing']
+        progress['tracks_missing_start'] = coverage_counts['tracks_missing']
+        _refresh_hifi_match_coverage_progress(cur, progress)
+        update_job_progress(job_id, {'progress': progress})
+
         _raise_if_job_cancelled(job_id)
         stages['backfilling_track_seed_ids'] = 'in_progress'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -3003,9 +3119,11 @@ def process_hifi_match_job(job_id, payload):
 
             if progress['track_seed_rows_processed'] % 25 == 0 or progress['track_seed_rows_processed'] == len(track_seed_rows):
                 conn.commit()
+                _refresh_hifi_match_coverage_progress(cur, progress)
                 update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
+        _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['backfilling_track_seed_ids'] = 'done'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -3079,9 +3197,11 @@ def process_hifi_match_job(job_id, payload):
             progress['albums_processed'] += 1
             if progress['albums_processed'] % 25 == 0 or progress['albums_processed'] == len(album_rows):
                 conn.commit()
+                _refresh_hifi_match_coverage_progress(cur, progress)
                 update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
+        _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['matching_albums'] = 'done'
         print(f"[HIFI_MATCH] Job {job_id}: Albums matching complete - {progress['albums_matched']}/{progress['albums_processed']} matched", flush=True)
@@ -3106,9 +3226,11 @@ def process_hifi_match_job(job_id, payload):
             _refresh_album_completeness(cur, album_row)
             progress['albums_completed'] += 1
             if progress['albums_completed'] % 25 == 0 or progress['albums_completed'] == len(completeness_rows):
+                _refresh_hifi_match_coverage_progress(cur, progress)
                 update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
+        _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['updating_album_completeness'] = 'done'
         update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -7347,6 +7469,9 @@ def update_hifi_match_review_endpoint():
         return jsonify({'error': 'action must be confirm or reject'}), 400
     if not entity_id:
         return jsonify({'error': 'id is required'}), 400
+
+    if any_hifi_match_jobs_running_or_queued():
+        return jsonify({'error': 'Manual matching is disabled while Hifi Match is running. Please wait for the current scan to finish.'}), 409
 
     table_name = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]
     id_column = {'artist': 'artist_id', 'album': 'album_id', 'track': 'track_id'}[entity_type]

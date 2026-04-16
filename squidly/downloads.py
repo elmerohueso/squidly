@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from threading import Lock
 import time
 from itertools import cycle
 from mutagen.flac import FLAC
@@ -73,15 +74,7 @@ def get_online_mirror_names():
     return {row['name'] for row in rows}
 
 
-def select_next_mirror(url_iterator, allowed_names, total_count):
-    if not allowed_names:
-        return next(url_iterator)
-
-    for _ in range(total_count):
-        candidate = next(url_iterator)
-        if candidate['name'] in allowed_names:
-            return candidate
-
+def select_next_mirror(url_iterator):
     return next(url_iterator)
 
 
@@ -95,6 +88,7 @@ RATE_LIMIT_SUCCESS_STREAK_FOR_DECREASE = 3
 RATE_LIMIT_DECREASE_FACTOR = 0.85
 RATE_LIMIT_INCREASE_FACTOR = 2.0
 RATE_LIMIT_429_STEP_INTERVALS = [1.0, 2.0, 5.0, 15.0, 30.0, 60.0]
+MIRROR_PREFERRED_PENALTY_SECONDS = 180.0
 
 _mirror_rate_limit_state = {
     'current_interval': RATE_LIMIT_MIN_INTERVAL,
@@ -102,6 +96,71 @@ _mirror_rate_limit_state = {
     'request_history': [],  # [(timestamp, status_code)]
     'consecutive_successes': 0
 }
+
+_mirror_preference_state = {
+    'preferred_index': 0,
+    'preferred_until': 0.0,
+    'lock': Lock(),
+}
+
+
+def _get_ordered_online_mirrors(url_list):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT name, response_time
+        FROM mirror_endpoints
+        WHERE online = 1
+        """
+    )
+    online_rows = cur.fetchall()
+    conn.close()
+
+    response_times = {}
+    for row in online_rows:
+        try:
+            response_times[row['name']] = float(row.get('response_time'))
+        except (TypeError, ValueError):
+            response_times[row['name']] = None
+
+    eligible_urls = [
+        url_info
+        for url_info in url_list
+        if url_info.get('name') in response_times
+    ]
+    if not eligible_urls:
+        return []
+
+    eligible_urls.sort(
+        key=lambda candidate: response_times.get(candidate.get('name'))
+        if response_times.get(candidate.get('name')) is not None
+        else float('inf')
+    )
+    return eligible_urls
+
+
+def _get_preferred_mirror_index(total_count):
+    if total_count <= 0:
+        return 0
+
+    with _mirror_preference_state['lock']:
+        now = time.time()
+        if now < _mirror_preference_state['preferred_until']:
+            return min(_mirror_preference_state['preferred_index'], total_count - 1)
+
+        _mirror_preference_state['preferred_index'] = 0
+        _mirror_preference_state['preferred_until'] = 0.0
+        return 0
+
+
+def _set_preferred_mirror_index(index, total_count):
+    if total_count <= 0:
+        return
+
+    with _mirror_preference_state['lock']:
+        _mirror_preference_state['preferred_index'] = index % total_count
+        _mirror_preference_state['preferred_until'] = time.time() + MIRROR_PREFERRED_PENALTY_SECONDS
 
 
 def _prune_rate_limit_history():
@@ -215,12 +274,14 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     last_exception = None
     last_target = None
 
-    allowed_names = get_online_mirror_names()
-    if not allowed_names:
-        raise RuntimeError('No online mirror endpoints available')
+    eligible_urls = _get_ordered_online_mirrors(url_list)
+    if not eligible_urls:
+        raise RuntimeError('No configured mirror URLs are currently marked online')
 
-    total_count = len(url_list)
-    url_iterator = cycle(url_list)
+    eligible_count = len(eligible_urls)
+    start_index = _get_preferred_mirror_index(eligible_count)
+    rotated_urls = eligible_urls[start_index:] + eligible_urls[:start_index]
+    url_iterator = cycle(rotated_urls)
 
     rate_limit_sleep_seconds = 30
     rate_limit_attempts = 0
@@ -229,7 +290,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
         enforce_mirror_rate_limit()
 
         try:
-            target = select_next_mirror(url_iterator, allowed_names, total_count)
+            target = select_next_mirror(url_iterator)
             target_url = target['url'].rstrip('/')
             full_url = f"{target_url}{url_base}"
             last_target = target
@@ -242,6 +303,9 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
 
                 if response.status_code == 429:
                     _record_rate_limit_event(429)
+                    current_index = (start_index + attempt) % eligible_count
+                    _set_preferred_mirror_index(current_index + 1, eligible_count)
+
                     if rate_limit_attempts == 0:
                         print(
                             f"[DOWNLOAD] Mirror '{target['name']}' returned 429 Too Many Requests. Waiting {rate_limit_sleep_seconds}s before retrying...",
