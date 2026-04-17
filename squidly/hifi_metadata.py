@@ -694,47 +694,16 @@ def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[
 def fetch_hifi_track_manifests(track_id: Any) -> Dict[str, Any]:
     """Fetch track manifest payloads for a track.
 
-    Prefer the newer /trackManifests/ endpoint for a single adaptive manifest
-    response, falling back to legacy /track/ quality requests if needed.
+    Use the legacy /track/ quality endpoints to return direct stream URLs.
     """
     try:
-        from .app import _fetch_hifi_track_manifests_payload, _fetch_hifi_track_payload
+        from .app import _fetch_hifi_track_payload
     except ImportError:
-        from squidly.app import _fetch_hifi_track_manifests_payload, _fetch_hifi_track_payload
+        from squidly.app import _fetch_hifi_track_payload
 
     track_streams: Dict[str, Any] = {}
-
-    try:
-        payload = _fetch_hifi_track_manifests_payload(
-            track_id,
-            formats=['HEAACV1', 'AACLC', 'FLAC', 'FLAC_HIRES'],
-        )
-        if isinstance(payload, dict):
-            attributes = (
-                payload.get('data', {})
-                .get('data', {})
-                .get('attributes', {})
-                if isinstance(payload.get('data'), dict)
-                else {}
-            )
-            uri = attributes.get('uri')
-            formats = attributes.get('formats')
-            if isinstance(uri, str) and isinstance(formats, list) and formats:
-                for fmt in formats:
-                    if not isinstance(fmt, str):
-                        continue
-                    track_streams[fmt] = {
-                        'audioMode': None,
-                        'codec': None,
-                        'url': uri,
-                        'error': None,
-                    }
-                return {'track_streams': track_streams}
-    except Exception:
-        pass
-
-    # Fallback to legacy per-quality /track/ requests when trackManifests is unavailable.
     qualities = ['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+
     for quality in qualities:
         stream_entry: Dict[str, Any] = {
             'audioMode': None,
