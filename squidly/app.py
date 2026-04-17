@@ -1848,6 +1848,29 @@ def _fetch_hifi_track_payload(track_id, quality='LOW'):
     return response.json() or {}
 
 
+def _fetch_hifi_track_manifests_payload(track_id, formats=None):
+    params = {
+        'id': str(track_id),
+        'adaptive': 'true',
+        'manifestType': 'MPEG_DASH',
+        'uriScheme': 'HTTPS',
+        'usage': 'PLAYBACK',
+    }
+    if formats:
+        params['formats'] = ','.join(formats)
+
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/trackManifests/?{urlencode(params)}",
+        SQUID_URLS,
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
 def _fetch_hifi_track_info_payload(track_id):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/info/?{urlencode({'id': str(track_id)})}",
