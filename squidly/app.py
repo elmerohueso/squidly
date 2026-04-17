@@ -450,6 +450,7 @@ import base64
 import requests
 import psycopg2
 import psycopg2.extras
+from squidly.hifi_metadata import get_hifi_album_object, get_hifi_track_object
 from itertools import cycle
 from datetime import datetime, timedelta
 import time
@@ -5489,6 +5490,56 @@ def track_info(track_id=None):
             'error': f'Proxy error',
             'details': str(e)
         }), 502
+
+@app.route('/api/hifi/tracks/<track_id>/object', methods=['GET'])
+def track_object(track_id=None):
+    """
+    Get a normalized HiFi track object.
+    Query parameters:
+    - id={trackId}            : Tidal track ID
+    - include_streams={bool}  : include track manifest streams (true/false)
+    - include_album={bool}    : include nested album metadata (true/false)
+    """
+    track_id = str(track_id or request.args.get('id') or '').strip()
+
+    if not track_id:
+        return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
+    include_album = str(request.args.get('include_album', 'false')).strip().lower() in ('1', 'true', 'yes')
+
+    try:
+        result = get_hifi_track_object(track_id, include_streams=include_streams, include_album=include_album)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': 'Failed to build track object', 'details': str(e)}), 500
+
+@app.route('/api/hifi/albums/<album_id>/object', methods=['GET'])
+def album_object(album_id=None):
+    """
+    Get a normalized HiFi album object.
+    Query parameters:
+    - id={albumId}           : Tidal album ID
+    - include_streams={bool} : include track manifest streams for each track (true/false)
+    """
+    album_id = str(album_id or request.args.get('id', '')).strip()
+
+    if not album_id:
+        return jsonify({'error': 'Album ID parameter is required'}), 400
+
+    if not album_id.isdigit():
+        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+
+    include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
+
+    try:
+        result = get_hifi_album_object(album_id, include_streams=include_streams)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500
 
 @app.route('/api/hifi/albums/<album_id>', methods=['GET'])
 def album_info(album_id=None):

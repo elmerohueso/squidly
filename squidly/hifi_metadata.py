@@ -357,8 +357,14 @@ def _resolve_hifi_artist_details(artist_id: Any, artist_responses: Any) -> Dict[
     }
 
 
-def get_hifi_track_object(track_id: Any) -> Dict[str, Any]:
-    """Build a normalized track object by fetching HiFi track, album, and artist payloads."""
+def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_album: bool = False) -> Dict[str, Any]:
+    """Build a normalized track object by fetching HiFi track, album, and artist payloads.
+
+    Args:
+        track_id: HiFi track identifier.
+        include_streams: If True, include `track_streams` from the manifest fetch.
+        include_album: If True, include nested album metadata in the returned track.
+    """
     try:
         from .app import _fetch_hifi_track_info_payload, _fetch_hifi_album_payload, _fetch_hifi_artist_payload
     except ImportError:
@@ -367,9 +373,11 @@ def get_hifi_track_object(track_id: Any) -> Dict[str, Any]:
     track_response = _fetch_hifi_track_info_payload(track_id)
     track_info = extract_hifi_track_info(track_response)
 
-    album_id = track_info.get('album_id')
-    album_response = _fetch_hifi_album_payload(album_id) if album_id is not None else {}
-    album_info = extract_hifi_album_info(album_response)
+    album_info = {}
+    if include_album:
+        album_id = track_info.get('album_id')
+        album_response = _fetch_hifi_album_payload(album_id) if album_id is not None else {}
+        album_info = extract_hifi_album_info(album_response)
 
     artist_ids = set()
     for artist_entry in track_info.get('track_artists', []):
@@ -397,6 +405,84 @@ def get_hifi_track_object(track_id: Any) -> Dict[str, Any]:
         })
 
     album_artists = []
+    if include_album:
+        for artist_entry in album_info.get('album_artists', []):
+            if not isinstance(artist_entry, dict):
+                continue
+            artist_id = artist_entry.get('id')
+            artist_details = _resolve_hifi_artist_details(artist_id, artist_responses)
+            album_artists.append({
+                'id': artist_details.get('id'),
+                'name': artist_details.get('name'),
+                'picture': artist_details.get('picture'),
+                'type': artist_entry.get('type'),
+            })
+
+    track_object = {
+        'id': track_info.get('id'),
+        'title': track_info.get('title'),
+        'version': track_info.get('version'),
+        'explicit': track_info.get('explicit'),
+        'trackNumber': track_info.get('trackNumber'),
+        'replayGain': track_info.get('replayGain'),
+        'duration': track_info.get('duration'),
+        'discNumber': track_info.get('volumeNumber'),
+        'copyright': track_info.get('copyright'),
+        'url': track_info.get('url'),
+        'isrc': track_info.get('isrc'),
+        'maxAudioQuality': track_info.get('audioQuality'),
+        'artists': track_artists,
+        'track_streams': fetch_hifi_track_manifests(track_id).get('track_streams', {}) if include_streams else {},
+    }
+
+    if include_album:
+        track_object['album'] = {
+            'id': album_info.get('id'),
+            'title': album_info.get('title'),
+            'version': album_info.get('version'),
+            'cover': album_info.get('cover'),
+            'releaseDate': album_info.get('releaseDate'),
+            'explicit': album_info.get('explicit'),
+            'numberOfDiscs': album_info.get('numberOfVolumes'),
+            'numberOfTracks': album_info.get('numberOfTracks'),
+            'duration': album_info.get('duration'),
+            'copyright': album_info.get('copyright'),
+            'maxAudioQuality': album_info.get('audioQuality'),
+            'url': album_info.get('url'),
+            'artists': album_artists,
+        }
+
+    return {'track': track_object}
+
+
+def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[str, Any]:
+    """Build a normalized album object with artists and track objects.
+
+    Args:
+        album_id: HiFi album identifier.
+        include_streams: If True, include `track_streams` for each track.
+    """
+    try:
+        from .app import _fetch_hifi_album_payload, _fetch_hifi_artist_payload
+    except ImportError:
+        from squidly.app import _fetch_hifi_album_payload, _fetch_hifi_artist_payload
+
+    album_response = _fetch_hifi_album_payload(album_id)
+    album_info = extract_hifi_album_info(album_response)
+    if not album_info:
+        return {}
+
+    artist_ids = {
+        artist_entry.get('id')
+        for artist_entry in album_info.get('album_artists', [])
+        if isinstance(artist_entry, dict) and artist_entry.get('id') is not None
+    }
+    artist_responses = {
+        artist_id: _fetch_hifi_artist_payload(artist_id)
+        for artist_id in artist_ids
+    }
+
+    album_artists = []
     for artist_entry in album_info.get('album_artists', []):
         if not isinstance(artist_entry, dict):
             continue
@@ -409,39 +495,33 @@ def get_hifi_track_object(track_id: Any) -> Dict[str, Any]:
             'type': artist_entry.get('type'),
         })
 
+    tracks = []
+    for track_id in album_info.get('tracks', []):
+        if track_id is None:
+            continue
+        track_payload = get_hifi_track_object(
+            track_id,
+            include_streams=include_streams,
+            include_album=False,
+        )
+        track = track_payload.get('track', {})
+        if track:
+            tracks.append(track)
+
     return {
-        'track': {
-            'id': track_info.get('id'),
-            'title': track_info.get('title'),
-            'version': track_info.get('version'),
-            'explicit': track_info.get('explicit'),
-            'trackNumber': track_info.get('trackNumber'),
-            'replayGain': track_info.get('replayGain'),
-            'duration': track_info.get('duration'),
-            'discNumber': track_info.get('volumeNumber'),
-            'copyright': track_info.get('copyright'),
-            'url': track_info.get('url'),
-            'isrc': track_info.get('isrc'),
-            'maxAudioQuality': track_info.get('audioQuality'),
-            'artists': track_artists,
-            'album': {
-                'id': album_info.get('id'),
-                'title': album_info.get('title'),
-                'version': album_info.get('version'),
-                'cover': album_info.get('cover'),
-                'releaseDate': album_info.get('releaseDate'),
-                'explicit': album_info.get('explicit'),
-                'numberOfDiscs': album_info.get('numberOfVolumes'),
-                'numberOfTracks': album_info.get('numberOfTracks'),
-                'duration': album_info.get('duration'),
-                'copyright': album_info.get('copyright'),
-                'maxAudioQuality': album_info.get('audioQuality'),
-                'url': album_info.get('url'),
-                'artists': album_artists,
-            },
-            'track_streams': fetch_hifi_track_manifests(track_id).get('track_streams', {}),
-        }
+        'id': album_info.get('id'),
+        'title': album_info.get('title'),
+        'version': album_info.get('version'),
+        'cover': album_info.get('cover'),
+        'releaseDate': album_info.get('releaseDate'),
+        'numberOfTracks': album_info.get('numberOfTracks'),
+        'numberOfDiscs': album_info.get('numberOfVolumes'),
+        'explicit': album_info.get('explicit'),
+        'duration': album_info.get('duration'),
+        'artists': album_artists,
+        'tracks': tracks,
     }
+
 
 def fetch_hifi_track_manifests(track_id: Any) -> Dict[str, Any]:
     """Fetch track manifest payloads for standard HiFi quality levels.
