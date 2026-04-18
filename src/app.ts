@@ -1857,14 +1857,7 @@ class App {
             </div>
             <div class="albums-grid-wrapper" data-view-mode="library-albums">
                 <div class="albums-grid">
-                    <div class="albums-grid-header">
-                        <div class="grid-cell grid-col-artwork"></div>
-                        <div class="grid-cell grid-col-title">ALBUM</div>
-                        <div class="grid-cell grid-col-artist">ARTIST</div>
-                        <div class="grid-cell grid-col-year">YEAR</div>
-                        <div class="grid-cell grid-col-track-count">TRACKS</div>
-                        <div class="grid-cell grid-col-actions">ACTIONS</div>
-                    </div>
+                    ${this.formatAlbumGridHeader(false, false)}
                     ${albums.length > 0
                         ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
                         : '<div class="library-placeholder"><p>No albums found for this artist.</p></div>'}
@@ -1929,14 +1922,7 @@ class App {
             </div>
             <div class="tracks-grid-wrapper" data-view-mode="library-tracks">
                 <div class="tracks-grid">
-                    <div class="tracks-grid-header">
-                        <div class="grid-cell grid-col-track-number">#</div>
-                        <div class="grid-cell grid-col-title">Title</div>
-                        <div class="grid-cell grid-col-artist">Artist</div>
-                        <div class="grid-cell grid-col-quality">Duration</div>
-                        <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                        <div class="grid-cell grid-col-actions">Actions</div>
-                    </div>
+                    ${this.formatTrackGridHeader(true, false, false)}
                     ${tracks.length > 0
                         ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
                         : '<div class="library-placeholder"><p>No tracks found for this album.</p></div>'}
@@ -5676,14 +5662,7 @@ class App {
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            <div class="tracks-grid-header">
-                                <div class="grid-cell grid-col-artwork"></div>
-                                <div class="grid-cell grid-col-title">Title</div>
-                                <div class="grid-cell grid-col-artist">Artist</div>
-                                <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                                <div class="grid-cell grid-col-actions">Actions</div>
-                            </div>
+                            ${this.formatTrackGridHeader(false, true, false)}
                             <div id="lastfmResultsList"></div>
                         </div>
                     </div>
@@ -5820,14 +5799,7 @@ class App {
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            <div class="tracks-grid-header">
-                                <div class="grid-cell grid-col-artwork"></div>
-                                <div class="grid-cell grid-col-title">Title</div>
-                                <div class="grid-cell grid-col-artist">Artist</div>
-                                <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                                <div class="grid-cell grid-col-actions">Actions</div>
-                            </div>
+                            ${this.formatTrackGridHeader(false, true, false)}
                             <div id="lastfmResultsList"></div>
                         </div>
                     </div>
@@ -6061,14 +6033,7 @@ class App {
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            <div class="tracks-grid-header">
-                                <div class="grid-cell grid-col-artwork"></div>
-                                <div class="grid-cell grid-col-title">Title</div>
-                                <div class="grid-cell grid-col-artist">Artist</div>
-                                <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                                <div class="grid-cell grid-col-actions">Actions</div>
-                            </div>
+                            ${this.formatTrackGridHeader(false, true, false)}
                             <div id="listenbrainzResultsList"></div>
                         </div>
                     </div>
@@ -6898,15 +6863,7 @@ class App {
             return `
                 <div class="tracks-grid-wrapper" data-view-mode="single-album">
                     <div class="tracks-grid">
-                        <div class="tracks-grid-header">
-                            ${showTrackNumberColumn ? '<div class="grid-cell grid-col-track-number">#</div>' : ''}
-                            ${showArtworkInSingleAlbum ? '<div class="grid-cell grid-col-artwork"></div>' : ''}
-                            <div class="grid-cell grid-col-title">Title</div>
-                            <div class="grid-cell grid-col-artist">Artist</div>
-                            <div class="grid-cell grid-col-duration">Duration</div>
-                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                            <div class="grid-cell grid-col-actions">Actions</div>
-                        </div>
+                        ${this.formatTrackGridHeader(showTrackNumberColumn, false, showArtworkInSingleAlbum)}
                         ${tracks.map((track) => this.formatTrackGridRow(track, showTrackNumberColumn, numberOfVolumes, false, showArtworkInSingleAlbum)).join('')}
                     </div>
                 </div>
@@ -6916,15 +6873,7 @@ class App {
             return `
                 <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                     <div class="tracks-grid">
-                        <div class="tracks-grid-header">
-                            <div class="grid-cell grid-col-artwork"></div>
-                            <div class="grid-cell grid-col-title">Title</div>
-                            <div class="grid-cell grid-col-artist">Artist</div>
-                            <div class="grid-cell grid-col-album">Album</div>
-                            <div class="grid-cell grid-col-duration">Duration</div>
-                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                            <div class="grid-cell grid-col-actions">Actions</div>
-                        </div>
+                        ${this.formatTrackGridHeader(false, true, true)}
                         ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true, true)).join('')}
                     </div>
                 </div>
@@ -7025,6 +6974,35 @@ class App {
                         </svg>
                     </button>
                 </div>
+            </div>
+        `;
+    }
+
+    private formatTrackGridHeader(showTrackNumber: boolean, showAlbumColumn: boolean, showArtwork: boolean): string {
+        return `
+            <div class="tracks-grid-header">
+                ${showTrackNumber ? '<div class="grid-cell grid-col-track-number">#</div>' : ''}
+                ${showArtwork ? '<div class="grid-cell grid-col-artwork"></div>' : ''}
+                <div class="grid-cell grid-col-title">Title</div>
+                <div class="grid-cell grid-col-artist">Artist</div>
+                ${showAlbumColumn ? '<div class="grid-cell grid-col-album">Album</div>' : ''}
+                <div class="grid-cell grid-col-duration">Duration</div>
+                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
+                <div class="grid-cell grid-col-actions">Actions</div>
+            </div>
+        `;
+    }
+
+    private formatAlbumGridHeader(hideArtist: boolean = false, includeQuality: boolean = true): string {
+        return `
+            <div class="albums-grid-header${hideArtist ? ' hide-artist' : ''}">
+                <div class="grid-cell grid-col-artwork"></div>
+                <div class="grid-cell grid-col-title">ALBUM</div>
+                ${!hideArtist ? '<div class="grid-cell grid-col-artist">ARTIST</div>' : ''}
+                <div class="grid-cell grid-col-year">YEAR</div>
+                <div class="grid-cell grid-col-track-count">TRACKS</div>
+                ${includeQuality ? '<div class="grid-cell grid-col-quality">MAX QUALITY</div>' : ''}
+                <div class="grid-cell grid-col-actions">ACTIONS</div>
             </div>
         `;
     }
@@ -7638,14 +7616,7 @@ class App {
                 </div>
                 <div class="albums-grid-wrapper" data-view-mode="artist-albums">
                     <div class="albums-grid">
-                        <div class="albums-grid-header hide-artist">
-                            <div class="grid-cell grid-col-artwork"></div>
-                            <div class="grid-cell grid-col-title">ALBUM</div>
-                            <div class="grid-cell grid-col-year">YEAR</div>
-                            <div class="grid-cell grid-col-track-count">TRACKS</div>
-                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                            <div class="grid-cell grid-col-actions">ACTIONS</div>
-                        </div>
+                        ${this.formatAlbumGridHeader(true, true)}
                         ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, true)).join('')}
                     </div>
                 </div>
@@ -7994,15 +7965,7 @@ class App {
                 </div>
                 <div class="albums-grid-wrapper" data-view-mode="similar-albums">
                     <div class="albums-grid">
-                        <div class="albums-grid-header">
-                            <div class="grid-cell grid-col-artwork"></div>
-                            <div class="grid-cell grid-col-title">ALBUM</div>
-                            <div class="grid-cell grid-col-artist">ARTIST</div>
-                            <div class="grid-cell grid-col-year">YEAR</div>
-                            <div class="grid-cell grid-col-track-count">TRACKS</div>
-                            <div class="grid-cell grid-col-quality">MAX MAX QUALITY</div>
-                            <div class="grid-cell grid-col-actions">ACTIONS</div>
-                        </div>
+                        ${this.formatAlbumGridHeader(false, true)}
                         ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
                     </div>
                 </div>
@@ -8752,15 +8715,7 @@ class App {
         return `
             <div class="albums-grid-wrapper" data-view-mode="search-albums">
                 <div class="albums-grid">
-                    <div class="albums-grid-header">
-                        <div class="grid-cell grid-col-artwork"></div>
-                        <div class="grid-cell grid-col-title">ALBUM</div>
-                        <div class="grid-cell grid-col-artist">ARTIST</div>
-                        <div class="grid-cell grid-col-year">YEAR</div>
-                        <div class="grid-cell grid-col-track-count">TRACKS</div>
-                        <div class="grid-cell grid-col-quality">MAX QUALITY</div>
-                        <div class="grid-cell grid-col-actions">ACTIONS</div>
-                    </div>
+                    ${this.formatAlbumGridHeader(false, true)}
                     ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
                 </div>
             </div>
