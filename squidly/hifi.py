@@ -122,12 +122,7 @@ def extract_hifi_track_info(info_response: Any) -> Dict[str, Any]:
     url = track_data.get('url')
     replay_gain = track_data.get('replayGain')
 
-    audio_quality = track_data.get('audioQuality')
-    if not audio_quality:
-        media_metadata = track_data.get('mediaMetadata') if isinstance(track_data.get('mediaMetadata'), dict) else {}
-        tags = media_metadata.get('tags') if isinstance(media_metadata.get('tags'), list) else []
-        if tags:
-            audio_quality = str(tags[0] or '').strip() if tags[0] is not None else ''
+    audio_quality = _extract_hifi_audio_quality(track_data)
 
     artists = []
     if isinstance(track_data.get('artists'), list):
@@ -227,12 +222,7 @@ def extract_hifi_album_info(album_response: Any) -> Dict[str, Any]:
         return {}
 
     cover_url = _format_hifi_image_value(album_data.get('cover'), size=640)
-    audio_quality = album_data.get('audioQuality')
-    if not audio_quality:
-        media_metadata = album_data.get('mediaMetadata') if isinstance(album_data.get('mediaMetadata'), dict) else {}
-        tags = media_metadata.get('tags') if isinstance(media_metadata.get('tags'), list) else []
-        if tags:
-            audio_quality = str(tags[0] or '').strip() if tags[0] is not None else ''
+    audio_quality = _extract_hifi_audio_quality(album_data)
 
     album_artists: List[Dict[str, Any]] = []
     if isinstance(album_data.get('artists'), list):
@@ -263,16 +253,31 @@ def _extract_hifi_audio_quality(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return None
 
-    audio_quality = payload.get('audioQuality')
-    if audio_quality:
-        return audio_quality
-
     media_metadata = payload.get('mediaMetadata') if isinstance(payload.get('mediaMetadata'), dict) else {}
-    tags = media_metadata.get('tags') if isinstance(media_metadata.get('tags'), list) else []
-    if tags:
-        return str(tags[0] or '').strip() if tags[0] is not None else None
+    tags = []
+    if isinstance(media_metadata.get('tags'), list):
+        for tag in media_metadata.get('tags'):
+            if tag is None:
+                continue
+            tag_value = str(tag).strip().upper()
+            if tag_value:
+                tags.append(tag_value)
 
-    return None
+    if tags:
+        if 'DOLBY_ATMOS' in tags:
+            return 'DOLBY_ATMOS'
+        if 'HIRES_LOSSLESS' in tags:
+            return 'HI_RES_LOSSLESS' # the track manifest endpoint uses "HI_RES_LOSSLESS" instead of "HIRES_LOSSLESS" for this tag, so we'll normalize to the manifest value here
+        if 'LOSSLESS' in tags:
+            return 'LOSSLESS'
+        if 'HIGH' in tags:
+            return 'HIGH'
+        if 'LOW' in tags:
+            return 'LOW'
+        return None
+
+    audio_quality = payload.get('audioQuality')
+    return audio_quality
 
 
 def _extract_hifi_album_track_items(album_response: Any) -> List[Dict[str, Any]]:

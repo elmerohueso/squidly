@@ -1934,7 +1934,7 @@ class App {
                         <div class="grid-cell grid-col-title">Title</div>
                         <div class="grid-cell grid-col-artist">Artist</div>
                         <div class="grid-cell grid-col-quality">Duration</div>
-                        <div class="grid-cell grid-col-quality">QUALITY</div>
+                        <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                         <div class="grid-cell grid-col-actions">Actions</div>
                     </div>
                     ${tracks.length > 0
@@ -5681,7 +5681,7 @@ class App {
                                 <div class="grid-cell grid-col-title">Title</div>
                                 <div class="grid-cell grid-col-artist">Artist</div>
                                 <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                                 <div class="grid-cell grid-col-actions">Actions</div>
                             </div>
                             <div id="lastfmResultsList"></div>
@@ -5825,7 +5825,7 @@ class App {
                                 <div class="grid-cell grid-col-title">Title</div>
                                 <div class="grid-cell grid-col-artist">Artist</div>
                                 <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                                 <div class="grid-cell grid-col-actions">Actions</div>
                             </div>
                             <div id="lastfmResultsList"></div>
@@ -6066,7 +6066,7 @@ class App {
                                 <div class="grid-cell grid-col-title">Title</div>
                                 <div class="grid-cell grid-col-artist">Artist</div>
                                 <div class="grid-cell grid-col-album">Album</div>
-                                <div class="grid-cell grid-col-quality">Quality</div>
+                                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                                 <div class="grid-cell grid-col-actions">Actions</div>
                             </div>
                             <div id="listenbrainzResultsList"></div>
@@ -6904,7 +6904,7 @@ class App {
                             <div class="grid-cell grid-col-title">Title</div>
                             <div class="grid-cell grid-col-artist">Artist</div>
                             <div class="grid-cell grid-col-duration">Duration</div>
-                            <div class="grid-cell grid-col-quality">Quality</div>
+                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
                         ${tracks.map((track) => this.formatTrackGridRow(track, showTrackNumberColumn, numberOfVolumes, false, showArtworkInSingleAlbum)).join('')}
@@ -6922,7 +6922,7 @@ class App {
                             <div class="grid-cell grid-col-artist">Artist</div>
                             <div class="grid-cell grid-col-album">Album</div>
                             <div class="grid-cell grid-col-duration">Duration</div>
-                            <div class="grid-cell grid-col-quality">Quality</div>
+                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
                         ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true, true)).join('')}
@@ -7643,7 +7643,7 @@ class App {
                             <div class="grid-cell grid-col-title">ALBUM</div>
                             <div class="grid-cell grid-col-year">YEAR</div>
                             <div class="grid-cell grid-col-track-count">TRACKS</div>
-                            <div class="grid-cell grid-col-quality">QUALITY</div>
+                            <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                             <div class="grid-cell grid-col-actions">ACTIONS</div>
                         </div>
                         ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, true)).join('')}
@@ -8000,7 +8000,7 @@ class App {
                             <div class="grid-cell grid-col-artist">ARTIST</div>
                             <div class="grid-cell grid-col-year">YEAR</div>
                             <div class="grid-cell grid-col-track-count">TRACKS</div>
-                            <div class="grid-cell grid-col-quality">QUALITY</div>
+                            <div class="grid-cell grid-col-quality">MAX MAX QUALITY</div>
                             <div class="grid-cell grid-col-actions">ACTIONS</div>
                         </div>
                         ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
@@ -8758,7 +8758,7 @@ class App {
                         <div class="grid-cell grid-col-artist">ARTIST</div>
                         <div class="grid-cell grid-col-year">YEAR</div>
                         <div class="grid-cell grid-col-track-count">TRACKS</div>
-                        <div class="grid-cell grid-col-quality">QUALITY</div>
+                        <div class="grid-cell grid-col-quality">MAX QUALITY</div>
                         <div class="grid-cell grid-col-actions">ACTIONS</div>
                     </div>
                     ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
