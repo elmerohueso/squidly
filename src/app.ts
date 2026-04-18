@@ -7158,32 +7158,7 @@ class App {
     }
 
     private async fetchTrackStreamUrl(trackId: number): Promise<string> {
-        const qualities = ['LOSSLESS'];
-
-        for (const quality of qualities) {
-            try {
-                const response = await fetch(`/api/hifi/tracks/${encodeURIComponent(String(trackId))}/manifest?quality=${encodeURIComponent(quality)}`);
-                if (!response.ok) {
-                    continue;
-                }
-
-                const data = await response.json();
-                const manifestBase64 = data?.data?.manifest || data?.manifest;
-                if (typeof manifestBase64 !== 'string') {
-                    continue;
-                }
-
-                const manifest = this.decodeManifest(manifestBase64);
-                const urls = manifest?.urls;
-                if (Array.isArray(urls) && typeof urls[0] === 'string') {
-                    return urls[0];
-                }
-            } catch (error) {
-                console.warn(`[PLAYBACK] Failed to fetch ${quality} stream:`, error);
-            }
-        }
-
-        throw new Error('No playable stream found');
+        return `/api/hifi/tracks/${encodeURIComponent(String(trackId))}/stream?quality=LOW`;
     }
 
     private async handlePlayLibraryToggle(trackId: string, playButton: HTMLButtonElement): Promise<void> {

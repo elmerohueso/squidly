@@ -441,7 +441,7 @@ def plex_library_update_job_worker():
         except Exception as e:
             print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
             time.sleep(5)
-from flask import Flask, render_template, jsonify, request, session
+from flask import Flask, render_template, jsonify, request, session, Response, stream_with_context
 from flask_cors import CORS
 import threading
 import os
@@ -5567,6 +5567,88 @@ def track_object(track_id=None):
     except Exception as e:
         return jsonify({'error': 'Failed to build track object', 'details': str(e)}), 500
 
+@app.route('/api/hifi/tracks/<track_id>/stream', methods=['GET'])
+def track_stream(track_id=None):
+    """
+    Proxy a HiFi track stream through the application.
+    Query parameters:
+    - id={trackId} : Tidal track ID
+    - quality={quality} : Quality level (HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW)
+    """
+    track_id = str(track_id or request.args.get('id', '')).strip()
+    quality = str(request.args.get('quality', 'LOW')).strip().upper()
+
+    if not track_id:
+        return jsonify({'error': 'Track ID parameter is required'}), 400
+
+    if not track_id.isdigit():
+        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+
+    valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
+    if quality not in valid_qualities:
+        return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
+
+    try:
+        result = get_hifi_track_object(
+            track_id,
+            include_streams=True,
+            include_album=False,
+            audio_quality=quality
+        )
+
+        track = result.get('track') if isinstance(result, dict) else None
+        if not isinstance(track, dict):
+            return jsonify({'error': 'Failed to build track object'}), 500
+
+        streams = track.get('track_streams') if isinstance(track.get('track_streams'), dict) else {}
+        stream_entry = streams.get(quality) or next(
+            (entry for entry in streams.values() if isinstance(entry, dict) and isinstance(entry.get('url'), str) and entry.get('url')), None
+        )
+
+        if not stream_entry or not isinstance(stream_entry.get('url'), str):
+            return jsonify({'error': 'No stream URL available for this track'}), 500
+
+        stream_url = stream_entry.get('url')
+        headers = {}
+        if request.headers.get('Range'):
+            headers['Range'] = request.headers.get('Range')
+
+        upstream_response = requests.get(stream_url, headers=headers, stream=True, timeout=20)
+        if upstream_response.status_code >= 400:
+            return jsonify({
+                'error': 'Failed to fetch upstream audio stream',
+                'status_code': upstream_response.status_code,
+                'details': upstream_response.reason
+            }), upstream_response.status_code
+
+        excluded_headers = {
+            'content-encoding',
+            'transfer-encoding',
+            'connection',
+            'keep-alive',
+            'proxy-authenticate',
+            'proxy-authorization',
+            'te',
+            'trailers',
+            'upgrade'
+        }
+
+        response_headers = [
+            (name, value)
+            for name, value in upstream_response.headers.items()
+            if name.lower() not in excluded_headers
+        ]
+
+        return Response(
+            stream_with_context(upstream_response.iter_content(chunk_size=65536)),
+            status=upstream_response.status_code,
+            headers=response_headers
+        )
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': 'Proxy error', 'details': str(e)}), 502
+    except Exception as e:
+        return jsonify({'error': 'Failed to stream track', 'details': str(e)}), 500
+
 @app.route('/api/hifi/albums/<album_id>/object', methods=['GET'])
 def album_object(album_id=None):
     """
@@ -5796,11 +5878,6 @@ def track_download(track_id=None):
     valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
     if quality not in valid_qualities:
         return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
-    
-    # Ignore qualities less than LOSSLESS; treat them as LOSSLESS
-    low_quality_choices = {'HIGH', 'LOW'}
-    if quality in low_quality_choices:
-        quality = 'LOSSLESS'
 
     try:
         response, target = make_request_with_retry_rotating_mirrors(
