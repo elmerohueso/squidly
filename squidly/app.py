@@ -5649,21 +5649,21 @@ def track_stream(track_id=None):
     except Exception as e:
         return jsonify({'error': 'Failed to stream track', 'details': str(e)}), 500
 
-@app.route('/api/hifi/albums/<album_id>/object', methods=['GET'])
+@app.route('/api/hifi/albums/<album_id>', methods=['GET'])
 def album_object(album_id=None):
     """
     Get a normalized HiFi album object.
     Query parameters:
-    - id={albumId}           : Tidal album ID
     - include_streams={bool} : include track manifest streams for each track (true/false)
+    - audio_quality={quality}: Preferred audio quality
     """
-    album_id = str(album_id or request.args.get('id', '')).strip()
+    album_id = str(album_id or '').strip()
 
     if not album_id:
-        return jsonify({'error': 'Album ID parameter is required'}), 400
+        return jsonify({'error': 'Album ID path parameter is required'}), 400
 
     if not album_id.isdigit():
-        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
+        return jsonify({'error': 'Album ID path parameter must be a numeric Tidal album ID'}), 400
 
     include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
     audio_quality = str(request.args.get('audio_quality', '')).strip() or None
@@ -5677,55 +5677,6 @@ def album_object(album_id=None):
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500
-
-@app.route('/api/hifi/albums/<album_id>', methods=['GET'])
-def album_info(album_id=None):
-    """
-    Get album with all tracks.
-    Query parameter:
-    - id={albumId} : Tidal album ID
-    """
-    album_id = str(album_id or request.args.get('id', '')).strip()
-
-    if not album_id:
-        return jsonify({'error': 'Album ID parameter is required'}), 400
-
-    if not album_id.isdigit():
-        return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
-
-    params = {'id': album_id}
-    limit = request.args.get('limit')
-    offset = request.args.get('offset')
-    if limit is not None:
-        params['limit'] = limit
-    if offset is not None:
-        params['offset'] = offset
-
-    try:
-        response, target = make_request_with_retry_rotating_mirrors(
-            f"/album/?{urlencode(params)}",
-            SQUID_URLS,
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-        
-        if not response.ok:
-            return jsonify({
-                'error': f'Upstream API error via {target["name"]}',
-                'status_code': response.status_code
-            }), response.status_code
-        
-        result = response.json()
-        result['proxied_via'] = target['name']
-        
-        return jsonify(result)
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': f'Proxy error',
-            'details': str(e)
-        }), 502
 
 @app.route('/api/hifi/artists/<artist_id>', methods=['GET'])
 def artist_info(artist_id=None):

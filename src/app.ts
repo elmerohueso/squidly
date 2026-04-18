@@ -7710,7 +7710,7 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/object`, {
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -7863,7 +7863,7 @@ class App {
     }
 
     private async fetchAlbumObject(albumId: number): Promise<AlbumObject> {
-        const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/object`);
+        const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album');
         }
