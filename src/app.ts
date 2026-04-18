@@ -409,10 +409,10 @@ interface JobFilterTotals {
     failed: number;
 }
 
-type DownloadFormat = 'original' | 'mp3';
+type DownloadQuality = 'LOSSLESS' | 'HIGH' | 'LOW';
 
 interface DownloadSettings {
-    format: DownloadFormat;
+    quality: DownloadQuality;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
     ignoreMatches: boolean;
@@ -484,8 +484,9 @@ class App {
     private settingsFlyout: HTMLElement;
     private settingsOverlay: HTMLElement;
     private closeSettingsButton: HTMLButtonElement;
-    private formatOriginalInput: HTMLInputElement;
-    private formatMp3Input: HTMLInputElement;
+    private qualityLosslessInput: HTMLInputElement;
+    private qualityHighInput: HTMLInputElement;
+    private qualityLowInput: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
@@ -742,8 +743,9 @@ class App {
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
         this.closeSettingsButton = document.getElementById('closeSettings') as HTMLButtonElement;
-        this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
-        this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
+        this.qualityLosslessInput = document.getElementById('qualityLossless') as HTMLInputElement;
+        this.qualityHighInput = document.getElementById('qualityHigh') as HTMLInputElement;
+        this.qualityLowInput = document.getElementById('qualityLow') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
@@ -958,11 +960,14 @@ class App {
             this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
         }
 
-        if (this.formatOriginalInput) {
-            this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
+        if (this.qualityLosslessInput) {
+            this.qualityLosslessInput.addEventListener('change', () => this.updateSettingsFromForm());
         }
-        if (this.formatMp3Input) {
-            this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
+        if (this.qualityHighInput) {
+            this.qualityHighInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.qualityLowInput) {
+            this.qualityLowInput.addEventListener('change', () => this.updateSettingsFromForm());
         }
         if (this.fileNamingAlbumInput) {
             this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
@@ -4618,14 +4623,14 @@ class App {
 
     private defaultDownloadSettings(): DownloadSettings {
         return {
-            format: 'original',
+            quality: 'LOSSLESS',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
             jobsRefreshIntervalSeconds: 30,
             ignoreMatches: false
         };
     }
 
-    private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
+    private normalizeSettings(raw: Partial<DownloadSettings> & { format?: string; quality?: string }): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
@@ -4636,8 +4641,18 @@ class App {
             ?? jobsRefreshIntervalSecondsRaw
         );
 
+        let quality: DownloadQuality = fallback.quality;
+        const rawQuality = String(raw.quality || raw.format || '').trim().toUpperCase();
+        if (['LOSSLESS', 'HIGH', 'LOW'].includes(rawQuality)) {
+            quality = rawQuality as DownloadQuality;
+        } else if (String(raw.format).trim().toLowerCase() === 'original') {
+            quality = 'LOSSLESS';
+        } else if (String(raw.format).trim().toLowerCase() === 'mp3') {
+            quality = 'HIGH';
+        }
+
         return {
-            format: raw.format === 'mp3' ? 'mp3' : 'original',
+            quality,
             fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
                 ? (raw as DownloadSettings).fileNamingAlbum
                 : typeof fileNamingAlbum === 'string'
@@ -4670,20 +4685,28 @@ class App {
     }
 
     private applySettingsToForm(settings: DownloadSettings): void {
-        this.formatOriginalInput.checked = settings.format === 'original';
-        this.formatMp3Input.checked = settings.format === 'mp3';
+        this.qualityLosslessInput.checked = settings.quality === 'LOSSLESS';
+        this.qualityHighInput.checked = settings.quality === 'HIGH';
+        this.qualityLowInput.checked = settings.quality === 'LOW';
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
-        this.syncFormatToggleStyles();
+        this.syncQualityToggleStyles();
     }
 
     private readSettingsFromForm(): DownloadSettings {
         const fallbackIntervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
         const parsedJobsRefreshIntervalSeconds = this.normalizeJobsRefreshIntervalSeconds(this.jobsRefreshIntervalSecondsInput.value);
 
+        let quality: DownloadQuality = 'LOSSLESS';
+        if (this.qualityHighInput.checked) {
+            quality = 'HIGH';
+        } else if (this.qualityLowInput.checked) {
+            quality = 'LOW';
+        }
+
         return {
-            format: this.formatMp3Input.checked ? 'mp3' : 'original',
+            quality,
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
             ignoreMatches: this.ignoreMatchesCheckbox.checked
@@ -4694,7 +4717,7 @@ class App {
         this.downloadSettings = this.readSettingsFromForm();
         this.jobsRefreshIntervalSecondsInput.value = String(this.downloadSettings.jobsRefreshIntervalSeconds);
         this.queueSettingsSave();
-        this.syncFormatToggleStyles();
+        this.syncQualityToggleStyles();
 
         if (this.jobsFlyout.classList.contains('active')) {
             this.startJobsPollingInterval();
@@ -4811,16 +4834,19 @@ class App {
         }
     }
 
-    private syncFormatToggleStyles(): void {
-        const originalLabel = this.formatOriginalInput.closest('label');
-        const mp3Label = this.formatMp3Input.closest('label');
+    private syncQualityToggleStyles(): void {
+        const losslessLabel = this.qualityLosslessInput.closest('label');
+        const highLabel = this.qualityHighInput.closest('label');
+        const lowLabel = this.qualityLowInput.closest('label');
 
-        if (originalLabel) {
-            originalLabel.classList.toggle('active', this.formatOriginalInput.checked);
+        if (losslessLabel) {
+            losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
         }
-
-        if (mp3Label) {
-            mp3Label.classList.toggle('active', this.formatMp3Input.checked);
+        if (highLabel) {
+            highLabel.classList.toggle('active', this.qualityHighInput.checked);
+        }
+        if (lowLabel) {
+            lowLabel.classList.toggle('active', this.qualityLowInput.checked);
         }
     }
 
@@ -7856,6 +7882,24 @@ class App {
         }
     }
 
+    private async fetchAlbumObject(albumId: number): Promise<AlbumObject> {
+        const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/object`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch album');
+        }
+
+        const data: AlbumObjectResponse = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!data.album) {
+            throw new Error('No album data found');
+        }
+
+        return data.album;
+    }
+
     private async fetchSimilarTracks(trackId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'similar_tracks', trackId };
@@ -8061,7 +8105,7 @@ class App {
         downloadBtn.disabled = true;
 
         try {
-            console.log(`[DOWNLOAD] Calling downloadTrackToLibrary with format: ${this.downloadSettings.format}`);
+            console.log(`[DOWNLOAD] Calling downloadTrackToLibrary with quality: ${this.downloadSettings.quality}`);
             const jobId = await this.downloadTrackToLibrary(trackId, downloadType);
             console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
 
@@ -8309,7 +8353,7 @@ class App {
     ): Promise<number> {
         try {
             console.log(`[PLAYLIST] Sending download with playlist request for track ${trackId}`);
-            console.log(`[PLAYLIST] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[PLAYLIST] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[PLAYLIST] Download type: ${downloadType}, Playlist: ${playlistName}`);
             
             const plexUserId = this.getSelectedPlexUserId();
@@ -8320,7 +8364,8 @@ class App {
                 },
                 body: JSON.stringify({
                     trackId,
-                    format: this.downloadSettings.format,
+                    format: 'original',
+                    quality: this.downloadSettings.quality,
                     downloadType,
                     fileNaming: this.downloadSettings.fileNamingAlbum,
                     fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
@@ -8374,13 +8419,8 @@ class App {
         const originalDisabled = addPlaylistBtn.disabled;
 
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
-            if (!response.ok) {
-                throw new Error('Failed to fetch album');
-            }
-            const albumData: AlbumInfo = await response.json();
-            const trackItems = albumData.data?.items || [];
-            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
 
             if (tracks.length === 0) {
                 this.displayMessage('No tracks found in this album');
@@ -8605,13 +8645,8 @@ class App {
         const originalDisabled = addLibraryBtn.disabled;
 
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
-            if (!response.ok) {
-                throw new Error('Failed to fetch album');
-            }
-            const albumData: AlbumInfo = await response.json();
-            const trackItems = albumData.data?.items || [];
-            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
 
             if (tracks.length === 0) {
                 this.displayMessage('No tracks found in this album');
@@ -8662,13 +8697,8 @@ class App {
 
     private async handlePlayAlbum(albumId: number, playButton: HTMLButtonElement): Promise<void> {
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
-            if (!response.ok) {
-                throw new Error('Failed to fetch album');
-            }
-            const albumData: AlbumInfo = await response.json();
-            const trackItems = albumData.data?.items || [];
-            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
 
             if (tracks.length === 0) {
                 this.displayMessage('No tracks found in this album');
@@ -8763,7 +8793,7 @@ private async downloadTrackToLibrary(
     ): Promise<number> {
         try {
             console.log(`[DOWNLOAD] Sending download-to-library request for track ${trackId}`);
-            console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
             const response = await this.fetchWithRetry('/api/downloads', {
@@ -8773,7 +8803,8 @@ private async downloadTrackToLibrary(
                         },
                         body: JSON.stringify({
                             trackId,
-                            format: this.downloadSettings.format,
+                            format: 'original',
+                            quality: this.downloadSettings.quality,
                             downloadType,
                             fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
@@ -8823,7 +8854,7 @@ private async downloadTrackToLibrary(
     ): Promise<number> {
         try {
             console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
-            console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
             
             const plexUserId = this.getSelectedPlexUserId();
@@ -8834,7 +8865,8 @@ private async downloadTrackToLibrary(
                         },
                         body: JSON.stringify({
                             trackId,
-                            format: this.downloadSettings.format,
+                            format: 'original',
+                            quality: this.downloadSettings.quality,
                             downloadType,
                             fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,

@@ -671,6 +671,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS download_settings (
             id INTEGER PRIMARY KEY,
             format TEXT NOT NULL,
+            quality TEXT NOT NULL DEFAULT 'LOSSLESS',
             parent_folder TEXT NOT NULL,
             file_naming TEXT,
             file_naming_loose TEXT,
@@ -701,6 +702,8 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN jobs_refresh_interval_seconds INTEGER")
     if 'ignore_matches' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN ignore_matches BOOLEAN NOT NULL DEFAULT FALSE")
+    if 'quality' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN quality TEXT NOT NULL DEFAULT 'LOSSLESS'")
     
     cur.execute(
         """

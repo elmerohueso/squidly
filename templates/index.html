@@ -142,15 +142,19 @@
                     <h2>Settings</h2>
                     <div class="settings-content">
                         <div class="settings-section">
-                            <h3>Format</h3>
-                            <div class="format-toggle" role="radiogroup" aria-label="Download format">
+                            <h3>Quality</h3>
+                            <div class="format-toggle" role="radiogroup" aria-label="Download quality">
                                 <label class="toggle-option">
-                                    <input type="radio" name="downloadFormat" value="original" id="formatOriginal">
-                                    <span>FLAC</span>
+                                    <input type="radio" name="downloadQuality" value="LOSSLESS" id="qualityLossless">
+                                    <span>LOSSLESS</span>
                                 </label>
                                 <label class="toggle-option">
-                                    <input type="radio" name="downloadFormat" value="mp3" id="formatMp3">
-                                    <span>MP3</span>
+                                    <input type="radio" name="downloadQuality" value="HIGH" id="qualityHigh">
+                                    <span>HIGH</span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadQuality" value="LOW" id="qualityLow">
+                                    <span>LOW</span>
                                 </label>
                             </div>
                         </div>
