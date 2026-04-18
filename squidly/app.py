@@ -450,7 +450,7 @@ import base64
 import requests
 import psycopg2
 import psycopg2.extras
-from squidly.hifi_metadata import get_hifi_album_object, get_hifi_track_object
+from squidly.hifi import get_hifi_album_object, get_hifi_track_object
 from itertools import cycle
 from datetime import datetime, timedelta
 import time
@@ -5533,9 +5533,15 @@ def track_object(track_id=None):
 
     include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
     include_album = str(request.args.get('include_album', 'false')).strip().lower() in ('1', 'true', 'yes')
+    audio_quality = str(request.args.get('audio_quality', '')).strip() or None
 
     try:
-        result = get_hifi_track_object(track_id, include_streams=include_streams, include_album=include_album)
+        result = get_hifi_track_object(
+            track_id,
+            include_streams=include_streams,
+            include_album=include_album,
+            audio_quality=audio_quality
+        )
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': 'Failed to build track object', 'details': str(e)}), 500
@@ -5557,9 +5563,14 @@ def album_object(album_id=None):
         return jsonify({'error': 'Album ID parameter must be a numeric Tidal album ID'}), 400
 
     include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
+    audio_quality = str(request.args.get('audio_quality', '')).strip() or None
 
     try:
-        result = get_hifi_album_object(album_id, include_streams=include_streams)
+        result = get_hifi_album_object(
+            album_id,
+            include_streams=include_streams,
+            audio_quality=audio_quality
+        )
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500

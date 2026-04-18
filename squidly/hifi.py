@@ -341,7 +341,7 @@ def _build_hifi_track_artists(artist_entries: Any, artist_responses: Any) -> Lis
     return normalized_artists
 
 
-def _build_hifi_track_object_from_album_item(track_payload: Any, artist_responses: Any, include_streams: bool = False) -> Dict[str, Any]:
+def _build_hifi_track_object_from_album_item(track_payload: Any, artist_responses: Any, include_streams: bool = False, audio_quality: Any = None) -> Dict[str, Any]:
     if not isinstance(track_payload, dict):
         return {}
 
@@ -364,7 +364,10 @@ def _build_hifi_track_object_from_album_item(track_payload: Any, artist_response
         'isrc': track_info.get('isrc'),
         'maxAudioQuality': _extract_hifi_audio_quality(track_payload),
         'artists': track_artists,
-        'track_streams': fetch_hifi_track_manifests(track_id).get('track_streams', {}) if include_streams and track_id is not None else {},
+        'track_streams': fetch_hifi_track_manifest(
+            track_id,
+            audio_quality=audio_quality or _extract_hifi_audio_quality(track_payload)
+        ).get('track_streams', {}) if include_streams and track_id is not None else {},
     }
 
 
@@ -482,13 +485,14 @@ def _resolve_hifi_artist_details(artist_id: Any, artist_responses: Any) -> Dict[
     }
 
 
-def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_album: bool = False) -> Dict[str, Any]:
+def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_album: bool = False, audio_quality: Any = None) -> Dict[str, Any]:
     """Build a normalized track object by fetching HiFi track, album, and artist payloads.
 
     Args:
         track_id: HiFi track identifier.
         include_streams: If True, include `track_streams` from the manifest fetch.
         include_album: If True, include nested album metadata in the returned track.
+        audio_quality: Optional requested audio quality for the manifest fetch.
     """
     try:
         from .app import _fetch_hifi_track_info_payload, _fetch_hifi_album_payload, _fetch_hifi_artist_payload
@@ -557,7 +561,10 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
         'isrc': track_info.get('isrc'),
         'maxAudioQuality': track_info.get('audioQuality'),
         'artists': track_artists,
-        'track_streams': fetch_hifi_track_manifests(track_id).get('track_streams', {}) if include_streams else {},
+        'track_streams': fetch_hifi_track_manifest(
+            track_id,
+            audio_quality=audio_quality or track_info.get('audioQuality')
+        ).get('track_streams', {}) if include_streams else {},
     }
 
     if include_album:
@@ -580,12 +587,13 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
     return {'track': track_object}
 
 
-def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[str, Any]:
+def get_hifi_album_object(album_id: Any, include_streams: bool = False, audio_quality: Any = None) -> Dict[str, Any]:
     """Build a normalized album object with artists and track objects.
 
     Args:
         album_id: HiFi album identifier.
         include_streams: If True, include `track_streams` for each track.
+        audio_quality: Optional requested audio quality for the manifest fetch.
     """
     try:
         from .app import _fetch_hifi_album_payload, _fetch_hifi_artist_payload
@@ -671,7 +679,12 @@ def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[
     for track_item in album_track_items:
         if not isinstance(track_item, dict):
             continue
-        track = _build_hifi_track_object_from_album_item(track_item, artist_details_by_id, include_streams=include_streams)
+        track = _build_hifi_track_object_from_album_item(
+            track_item,
+            artist_details_by_id,
+            include_streams=include_streams,
+            audio_quality=audio_quality
+        )
         if track:
             tracks.append(track)
 
@@ -693,65 +706,67 @@ def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[
     return {'album': album_object}
 
 
-def fetch_hifi_track_manifests(track_id: Any) -> Dict[str, Any]:
-    """Fetch track manifest payloads for a track.
+def fetch_hifi_track_manifest(track_id: Any, audio_quality: Any = None) -> Dict[str, Any]:
+    """Fetch a single track manifest payload for a track at the requested quality.
 
-    Use the legacy /track/ quality endpoints to return direct stream URLs.
+    Use the legacy /track/ quality endpoint to return a direct stream URL.
     """
     try:
         from .app import _fetch_hifi_track_payload
     except ImportError:
         from squidly.app import _fetch_hifi_track_payload
 
+    if not audio_quality:
+        return {'track_streams': {}}
+
     track_streams: Dict[str, Any] = {}
-    qualities = ['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+    quality = str(audio_quality).strip()
 
-    for quality in qualities:
-        stream_entry: Dict[str, Any] = {
-            'audioMode': None,
-            'codec': None,
-            'url': None,
-            'error': None,
-        }
-        audio_quality = None
+    stream_entry: Dict[str, Any] = {
+        'audioMode': None,
+        'codec': None,
+        'url': None,
+        'error': None,
+    }
+    resolved_audio_quality = None
 
-        try:
-            payload = _fetch_hifi_track_payload(track_id, quality=quality)
-            if not isinstance(payload, dict):
-                raise ValueError(f'Unexpected payload type: {type(payload).__name__}')
+    try:
+        payload = _fetch_hifi_track_payload(track_id, quality=quality)
+        if not isinstance(payload, dict):
+            raise ValueError(f'Unexpected payload type: {type(payload).__name__}')
 
-            data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
-            stream_entry['audioMode'] = data.get('audioMode') if isinstance(data, dict) else None
-            audio_quality = data.get('audioQuality') if isinstance(data, dict) else None
+        data = payload.get('data') if isinstance(payload.get('data'), dict) else payload
+        stream_entry['audioMode'] = data.get('audioMode') if isinstance(data, dict) else None
+        resolved_audio_quality = data.get('audioQuality') if isinstance(data, dict) else None
 
-            manifest_value = None
-            if isinstance(data, dict):
-                manifest_value = data.get('manifest')
-            elif 'manifest' in payload:
-                manifest_value = payload.get('manifest')
+        manifest_value = None
+        if isinstance(data, dict):
+            manifest_value = data.get('manifest')
+        elif 'manifest' in payload:
+            manifest_value = payload.get('manifest')
 
-            if not isinstance(manifest_value, str):
-                if manifest_value is None:
-                    raise ValueError('No manifest field found in payload')
-                raise ValueError('Manifest field is not a string')
+        if not isinstance(manifest_value, str):
+            if manifest_value is None:
+                raise ValueError('No manifest field found in payload')
+            raise ValueError('Manifest field is not a string')
 
-            normalized = manifest_value.replace('-', '+').replace('_', '/')
-            normalized += '=' * (-len(normalized) % 4)
-            decoded_bytes = base64.b64decode(normalized)
-            decoded_manifest = json.loads(decoded_bytes.decode('utf-8'))
+        normalized = manifest_value.replace('-', '+').replace('_', '/')
+        normalized += '=' * (-len(normalized) % 4)
+        decoded_bytes = base64.b64decode(normalized)
+        decoded_manifest = json.loads(decoded_bytes.decode('utf-8'))
 
-            stream_entry['codec'] = decoded_manifest.get('codecs')
+        stream_entry['codec'] = decoded_manifest.get('codecs')
 
-            urls = decoded_manifest.get('urls') if isinstance(decoded_manifest, dict) else None
-            if isinstance(urls, list) and urls:
-                stream_entry['url'] = urls[0]
-            else:
-                raise ValueError('No urls found in decoded manifest')
+        urls = decoded_manifest.get('urls') if isinstance(decoded_manifest, dict) else None
+        if isinstance(urls, list) and urls:
+            stream_entry['url'] = urls[0]
+        else:
+            raise ValueError('No urls found in decoded manifest')
 
-        except Exception as exc:
-            stream_entry['error'] = str(exc)
+    except Exception as exc:
+        stream_entry['error'] = str(exc)
 
-        key = audio_quality if audio_quality else quality
-        track_streams[key] = stream_entry
+    key = resolved_audio_quality if resolved_audio_quality else quality
+    track_streams[key] = stream_entry
 
     return {'track_streams': track_streams}
