@@ -569,6 +569,7 @@ class App {
     private currentExploreRoute: AppRouteState = { view: 'home' };
     private exploreBreadcrumbRoutes: AppRouteState[] = [];
     private exploreSearchRoute: AppRouteState | null = null;
+    private exploreParentRoute: AppRouteState | null = null;
     private exploreArtistName: string | null = null;
     private exploreAlbumTitle: string | null = null;
     private explorePlaylistTitle: string | null = null;
@@ -621,6 +622,9 @@ class App {
                 const query = this.exploreSearchRoute.query || '';
                 const label = query ? `${this.getSearchTypeName(this.exploreSearchRoute.searchType)} - "${query}"` : this.getSearchTypeName(this.exploreSearchRoute.searchType);
                 crumbs.push({ label, route: { ...this.exploreSearchRoute } });
+            }
+            if (this.exploreParentRoute?.view === 'artist') {
+                crumbs.push({ label: this.exploreArtistName || 'Artist', route: { ...this.exploreParentRoute } });
             }
             crumbs.push({ label: this.exploreAlbumTitle || 'Album' });
         } else if (route.view === 'playlist') {
@@ -2731,6 +2735,15 @@ class App {
         // Abort all pending requests from the previous route
         if (this.pendingRequestController) {
             this.pendingRequestController.abort();
+        }
+
+        const previousExploreRoute = { ...this.currentExploreRoute };
+        if (route.view === 'album' && previousExploreRoute.view === 'artist' && previousExploreRoute.artistId) {
+            this.exploreParentRoute = { ...previousExploreRoute };
+        } else if (route.view !== 'album') {
+            this.exploreParentRoute = null;
+        } else {
+            this.exploreParentRoute = null;
         }
 
         this.currentExploreRoute = { ...route };
@@ -6452,19 +6465,7 @@ class App {
             ? `${trackTotal} track${trackTotal !== 1 ? 's' : ''}`
             : '';
 
-        let quality = playlist.audioQuality || '';
-        if (playlist.mediaMetadata?.tags && playlist.mediaMetadata.tags.length > 0) {
-            const tags = playlist.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = playlist.audioQuality || '';
         const qualityDisplay = this.formatQuality(quality);
         const coverImage = this.getPlaylistCoverUrl(playlist);
 
@@ -6765,20 +6766,7 @@ class App {
             : '';
 
         // Get quality info - prefer the normalized maxAudioQuality field
-        let quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
-        if (!quality && track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            const tags = track.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
         const qualityDisplay = this.formatQuality(quality);
 
         // Format track title with optional track number and version
@@ -6894,19 +6882,7 @@ class App {
         const albumId = track.album?.id;
 
         // Get quality info - prefer the normalized maxAudioQuality field
-        let quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
-        if (!quality && track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
-            const tags = track.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
         const qualityDisplay = this.formatQuality(quality);
         const durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
 
@@ -7234,20 +7210,7 @@ class App {
             : '';
 
         // Format audio quality if available - prefer the normalized maxAudioQuality field
-        let quality = album.maxAudioQuality || album.audioQuality || '';
-        const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
-        if (!quality && tags && tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = album.maxAudioQuality || album.audioQuality || '';
         const qualityDisplay = this.formatQuality(quality);
 
         return `
@@ -7305,20 +7268,7 @@ class App {
             : '';
 
         // Format audio quality if available - prefer the normalized maxAudioQuality field
-        let quality = album.maxAudioQuality || album.audioQuality || '';
-        const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
-        if (!quality && tags && tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = album.maxAudioQuality || album.audioQuality || '';
         const qualityDisplay = this.formatQuality(quality);
 
         const albumCover = album.cover;
@@ -7419,6 +7369,7 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
+            'DOLBY_ATMOS': 'DOLBY ATMOS',
             'HI_RES_LOSSLESS': 'HI-RES FLAC',
             'HIRES_LOSSLESS': 'HI-RES FLAC',
             'LOSSLESS': 'LOSSLESS FLAC',

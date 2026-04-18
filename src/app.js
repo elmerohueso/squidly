@@ -5673,7 +5673,7 @@ var App = /** @class */ (function () {
         addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
     };
     App.prototype.formatSearchPlaylistCard = function (playlist) {
-        var _a, _b;
+        var _a;
         var playlistId = this.escapeHtml(this.getPlaylistId(playlist));
         var playlistName = this.escapeHtml(playlist.title || 'Unknown Playlist');
         var playlistDescription = this.escapeHtml((playlist.description || '').trim());
@@ -5682,21 +5682,6 @@ var App = /** @class */ (function () {
             ? "".concat(trackTotal, " track").concat(trackTotal !== 1 ? 's' : '')
             : '';
         var quality = playlist.audioQuality || '';
-        if (((_b = playlist.mediaMetadata) === null || _b === void 0 ? void 0 : _b.tags) && playlist.mediaMetadata.tags.length > 0) {
-            var tags = playlist.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            }
-            else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
         var qualityDisplay = this.formatQuality(quality);
         var coverImage = this.getPlaylistCoverUrl(playlist);
         return "\n            <div class=\"track-card album-card playlist-search-card clickable\" data-playlist-id=\"".concat(playlistId, "\" title=\"Click to view tracks\">\n                <div class=\"track-artwork\">\n                    ").concat(coverImage
@@ -5901,7 +5886,7 @@ var App = /** @class */ (function () {
         });
     };
     App.prototype.formatTrackCard = function (track, showTrackNumber, numberOfVolumes) {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
+        var _a, _b, _c, _d, _e, _f, _g;
         if (showTrackNumber === void 0) { showTrackNumber = false; }
         // Get artist names and IDs
         var artistNames = track.artists && track.artists.length > 0
@@ -5918,22 +5903,6 @@ var App = /** @class */ (function () {
             : '';
         // Get quality info - prefer the normalized maxAudioQuality field
         var quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
-        if (!quality && ((_h = track.mediaMetadata) === null || _h === void 0 ? void 0 : _h.tags) && track.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            var tags = track.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            }
-            else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
         var qualityDisplay = this.formatQuality(quality);
         // Format track title with optional track number and version
         // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
@@ -5976,7 +5945,7 @@ var App = /** @class */ (function () {
         }
     };
     App.prototype.formatTrackGridRow = function (track, showTrackNumber, numberOfVolumes, showAlbumColumn, showArtwork) {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
+        var _a, _b, _c, _d, _e, _f, _g;
         // Get artist names and IDs
         var artistNames = track.artists && track.artists.length > 0
             ? track.artists.map(function (a) { return a.name; }).join(', ')
@@ -5988,21 +5957,6 @@ var App = /** @class */ (function () {
         var albumId = (_g = track.album) === null || _g === void 0 ? void 0 : _g.id;
         // Get quality info - prefer the normalized maxAudioQuality field
         var quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
-        if (!quality && ((_h = track.mediaMetadata) === null || _h === void 0 ? void 0 : _h.tags) && track.mediaMetadata.tags.length > 0) {
-            var tags = track.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            }
-            else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
         var qualityDisplay = this.formatQuality(quality);
         var durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
         // Format track title with optional version
@@ -6238,7 +6192,7 @@ var App = /** @class */ (function () {
         }
     };
     App.prototype.formatAlbumCard = function (album) {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
+        var _a, _b, _c, _d, _e, _f, _g;
         // Get artist names and IDs
         var artistNames = album.artists && album.artists.length > 0
             ? album.artists.map(function (a) { return a.name; }).join(', ')
@@ -6254,29 +6208,13 @@ var App = /** @class */ (function () {
             : '';
         // Format audio quality if available - prefer the normalized maxAudioQuality field
         var quality = album.maxAudioQuality || album.audioQuality || '';
-        var tags = ((_h = album.mediaMetadata) === null || _h === void 0 ? void 0 : _h.tags) || album.mediaTags;
-        if (!quality && tags && tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            }
-            else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
         var qualityDisplay = this.formatQuality(quality);
         return "\n            <div class=\"track-card album-card clickable\" data-album-id=\"".concat(album.id, "\" ").concat(primaryArtistId ? "data-artist-id=\"".concat(primaryArtistId, "\"") : '', " title=\"Click to view tracks\">\n                <div class=\"track-artwork\">\n                    ").concat(album.cover
             ? "<img src=\"".concat(this.getHifiImageUrl(album.cover, 1280), "\" alt=\"").concat(album.title, "\" loading=\"lazy\">")
             : "<div class=\"track-artwork-placeholder\">\n                            <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">\n                                <rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\" ry=\"2\"></rect>\n                                <circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"></circle>\n                                <polyline points=\"21 15 16 10 5 21\"></polyline>\n                            </svg>\n                           </div>", "\n                </div>\n                <div class=\"track-info\">\n                    <div class=\"track-title\">").concat(this.escapeHtml(album.title), "</div>\n                    <div class=\"track-artist\">\n                        <span class=\"track-artist-name\" ").concat(primaryArtistId ? "title=\"View albums by ".concat(this.escapeHtml(artistNames), "\"") : '', ">").concat(this.escapeHtml(artistNames), "</span>\n                    </div>\n                    <div class=\"track-metadata\">\n                        ").concat(releaseYear ? "<span>".concat(releaseYear, "</span>") : '', "\n                        ").concat(releaseYear && trackCount ? "<span>\u2022</span>" : '', "\n                        ").concat(trackCount ? "<span>".concat(trackCount, "</span>") : '', "\n                        ").concat(trackCount && qualityDisplay ? "<span>\u2022</span>" : '', "\n                        ").concat(qualityDisplay ? "<span>".concat(qualityDisplay, "</span>") : '', "\n                        ").concat(album.explicit ? "<span>\u2022</span><span class=\"explicit-badge\" title=\"Explicit content\">E</span>" : '', "\n                    </div>\n                </div>\n                <div class=\"track-actions\">\n                    <button class=\"track-more-btn\" title=\"More Like This\" aria-label=\"More Like This\">\n                        ").concat(this.getMoreLikeIconSvg(), "\n                    </button>\n                </div>\n            </div>\n        ");
     };
     App.prototype.formatAlbumGridRow = function (album, hideArtist) {
-        var _a, _b, _c, _d, _e, _f, _g;
+        var _a, _b, _c, _d, _e, _f;
         if (hideArtist === void 0) { hideArtist = false; }
         // Get artist names and IDs
         var artistNames = album.artists && album.artists.length > 0
@@ -6293,22 +6231,6 @@ var App = /** @class */ (function () {
             : '';
         // Format audio quality if available - prefer the normalized maxAudioQuality field
         var quality = album.maxAudioQuality || album.audioQuality || '';
-        var tags = ((_g = album.mediaMetadata) === null || _g === void 0 ? void 0 : _g.tags) || album.mediaTags;
-        if (!quality && tags && tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            }
-            else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            }
-            else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
         var qualityDisplay = this.formatQuality(quality);
         var albumCover = album.cover;
         return "\n            <div class=\"albums-grid-row ".concat(hideArtist ? 'hide-artist' : '', "\" data-album-id=\"").concat(album.id, "\" ").concat(primaryArtistId ? "data-artist-id=\"".concat(primaryArtistId, "\"") : '', ">\n                <div class=\"grid-cell grid-col-artwork\">\n                    ").concat(albumCover
@@ -6330,6 +6252,7 @@ var App = /** @class */ (function () {
     };
     App.prototype.formatQuality = function (quality) {
         var qualityMap = {
+            'DOLBY_ATMOS': 'DOLBY ATMOS',
             'HI_RES_LOSSLESS': 'HI-RES FLAC',
             'HIRES_LOSSLESS': 'HI-RES FLAC',
             'LOSSLESS': 'LOSSLESS FLAC',
