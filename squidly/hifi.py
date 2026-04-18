@@ -354,6 +354,8 @@ def _build_hifi_track_object_from_album_item(track_payload: Any, artist_response
     track_artists = _build_hifi_track_artists(artist_entries, artist_responses)
 
     track_id = track_info.get('id')
+    album_payload = track_payload.get('album') if isinstance(track_payload.get('album'), dict) else {}
+    album_cover = _format_hifi_image_value(album_payload.get('cover'), size=640) if isinstance(album_payload, dict) else None
     return {
         'id': track_info.get('id'),
         'title': track_info.get('title'),
@@ -367,6 +369,11 @@ def _build_hifi_track_object_from_album_item(track_payload: Any, artist_response
         'url': track_info.get('url'),
         'isrc': track_info.get('isrc'),
         'maxAudioQuality': _extract_hifi_audio_quality(track_payload),
+        'album': {
+            'id': track_info.get('album_id'),
+            'title': album_payload.get('title'),
+            'cover': album_cover,
+        },
         'artists': track_artists,
         'track_streams': fetch_hifi_track_manifest(
             track_id,

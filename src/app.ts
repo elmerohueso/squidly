@@ -30,6 +30,7 @@ interface Track {
     album?: Album;
     quality?: string;
     audioQuality?: string;
+    maxAudioQuality?: string;
     cover?: string;
     trackNumber?: number;
     volumeNumber?: number;
@@ -62,6 +63,7 @@ interface AlbumSearchItem {
     numberOfVolumes?: number;
     duration?: number;
     audioQuality?: string;
+    maxAudioQuality?: string;
     explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
@@ -188,6 +190,18 @@ interface AlbumInfo {
             type: string;
             item: Track;
         }>;
+    };
+    proxied_via?: string;
+    error?: string;
+}
+
+interface ArtistObject {
+    artist?: {
+        id?: number;
+        name?: string;
+        picture?: string;
+        albums?: AlbumSearchItem[];
+        top_tracks?: Track[] | number[];
     };
     proxied_via?: string;
     error?: string;
@@ -6588,11 +6602,7 @@ class App {
             return '';
         }
 
-        if (rawCover.startsWith('http://') || rawCover.startsWith('https://')) {
-            return rawCover;
-        }
-
-        return this.formatTidalImageUrl(rawCover, 640);
+        return this.getHifiImageUrl(rawCover, 640);
     }
 
     private normalizePlaylistId(value: string): string {
@@ -6748,9 +6758,9 @@ class App {
             ? this.formatDuration(track.duration)
             : '';
 
-        // Get quality info - check mediaMetadata.tags for best quality
-        let quality = track.audioQuality || track.quality || '';
-        if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
+        // Get quality info - prefer the normalized maxAudioQuality field
+        let quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
+        if (!quality && track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
             // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             const tags = track.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
@@ -6837,23 +6847,26 @@ class App {
         return tracks.every(track => track.album?.id === firstAlbumId);
     }
 
-    private formatTracksGrid(tracks: Track[], numberOfVolumes?: number): string {
+    private formatTracksGrid(tracks: Track[], numberOfVolumes?: number, includeTrackNumbers: boolean = true): string {
         const isSingleAlbum = this.allTracksFromSameAlbum(tracks);
+        const showTrackNumberColumn = includeTrackNumbers && isSingleAlbum;
+        const showArtworkInSingleAlbum = !includeTrackNumbers && isSingleAlbum;
         
         if (isSingleAlbum) {
-            // Single album view - show track number column, hide album column
+            // Single album view - optionally show track number column or album artwork, hide album column
             return `
                 <div class="tracks-grid-wrapper" data-view-mode="single-album">
                     <div class="tracks-grid">
                         <div class="tracks-grid-header">
-                            <div class="grid-cell grid-col-track-number">#</div>
+                            ${showTrackNumberColumn ? '<div class="grid-cell grid-col-track-number">#</div>' : ''}
+                            ${showArtworkInSingleAlbum ? '<div class="grid-cell grid-col-artwork"></div>' : ''}
                             <div class="grid-cell grid-col-title">Title</div>
                             <div class="grid-cell grid-col-artist">Artist</div>
                             <div class="grid-cell grid-col-duration">Duration</div>
                             <div class="grid-cell grid-col-quality">Quality</div>
                             <div class="grid-cell grid-col-actions">Actions</div>
                         </div>
-                        ${tracks.map((track) => this.formatTrackGridRow(track, true, numberOfVolumes, false, false)).join('')}
+                        ${tracks.map((track) => this.formatTrackGridRow(track, showTrackNumberColumn, numberOfVolumes, false, showArtworkInSingleAlbum)).join('')}
                     </div>
                 </div>
             `;
@@ -6890,9 +6903,9 @@ class App {
         const albumCover = track.album?.cover || track.cover;
         const albumId = track.album?.id;
 
-        // Get quality info
-        let quality = track.audioQuality || track.quality || '';
-        if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
+        // Get quality info - prefer the normalized maxAudioQuality field
+        let quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
+        if (!quality && track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
             const tags = track.mediaMetadata.tags;
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
@@ -6926,7 +6939,7 @@ class App {
             <div class="tracks-grid-row" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
                 ${showArtwork ? `<div class="grid-cell grid-col-artwork">
                     ${albumCover 
-                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                        ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
                         : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
@@ -7226,10 +7239,10 @@ class App {
             ? `${album.numberOfTracks ?? album.numberOfItems} track${(album.numberOfTracks ?? album.numberOfItems) !== 1 ? 's' : ''}`
             : '';
 
-        // Format audio quality if available - check mediaMetadata.tags for best quality
-        let quality = album.audioQuality || '';
+        // Format audio quality if available - prefer the normalized maxAudioQuality field
+        let quality = album.maxAudioQuality || album.audioQuality || '';
         const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
-        if (tags && tags.length > 0) {
+        if (!quality && tags && tags.length > 0) {
             // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
@@ -7247,7 +7260,7 @@ class App {
             <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
                     ${album.cover 
-                        ? `<img src="${this.formatTidalImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
+                        ? `<img src="${this.getHifiImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
                         : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -7297,10 +7310,10 @@ class App {
             ? `${album.numberOfTracks ?? album.numberOfItems}`
             : '';
 
-        // Format audio quality if available - check mediaMetadata.tags for best quality
-        let quality = album.audioQuality || '';
+        // Format audio quality if available - prefer the normalized maxAudioQuality field
+        let quality = album.maxAudioQuality || album.audioQuality || '';
         const tags = album.mediaMetadata?.tags || (album as any).mediaTags;
-        if (tags && tags.length > 0) {
+        if (!quality && tags && tags.length > 0) {
             // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
             if (tags.includes('HIRES_LOSSLESS')) {
                 quality = 'HIRES_LOSSLESS';
@@ -7320,7 +7333,7 @@ class App {
             <div class="albums-grid-row ${hideArtist ? 'hide-artist' : ''}" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''}>
                 <div class="grid-cell grid-col-artwork">
                     ${albumCover 
-                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
+                        ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
                         : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -7373,7 +7386,7 @@ class App {
                 <div class="artist-card-name">${this.escapeHtml(artist.name)}</div>
                 <div class="artist-card-image">
                     ${artist.picture 
-                        ? `<img src="${this.formatTidalImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
+                        ? `<img src="${this.getHifiImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
                         : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
@@ -7419,6 +7432,31 @@ class App {
             'LOW': 'LOW AAC'
         };
         return qualityMap[quality] || quality;
+    }
+
+    private getHifiImageUrl(imageIdOrPath: string | undefined, size: number): string {
+        if (!imageIdOrPath) {
+            return '';
+        }
+
+        const normalized = imageIdOrPath.trim();
+        if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+            return normalized;
+        }
+
+        if (normalized.startsWith('//')) {
+            return `https:${normalized}`;
+        }
+
+        if (normalized.startsWith('resources.tidal.com/')) {
+            return `https://${normalized}`;
+        }
+
+        if (normalized.startsWith('/images/')) {
+            return `https://resources.tidal.com${normalized}`;
+        }
+
+        return this.formatTidalImageUrl(normalized, size);
     }
 
     private formatTidalImageUrl(imageIdOrPath: string, size: number): string {
@@ -7519,7 +7557,7 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}`, {
+                const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}/object?include_albums=true&include_tracks=true`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -7527,29 +7565,28 @@ class App {
                 throw new Error('Failed to fetch artist');
             }
 
-            const data: any = await response.json();
+            const data: ArtistObject = await response.json();
 
             if (data.error) {
                 this.displayMessage(`Error: ${data.error}`, () => this.fetchArtistAlbums(artistId));
                 return;
             }
 
-            // Extract albums from data.albums.items
-            const albums = data.albums?.items || [];
+            const artistData = data.artist || {};
+            const albums = Array.isArray(artistData.albums) ? artistData.albums : [];
+            const topTracks = Array.isArray(artistData.top_tracks) ? (artistData.top_tracks as Track[]).slice(0, 5) : [];
 
-            if (albums.length === 0) {
-                this.displayMessage('No albums found for this artist');
+            if (albums.length === 0 && topTracks.length === 0) {
+                this.displayMessage('No albums or top tracks found for this artist');
                 return;
             }
 
-            // Get artist name and picture from the first album's artist data
-            const artistName = albums[0]?.artist?.name || albums[0]?.artists?.[0]?.name || 'Artist';
-            const artistPictureId = albums[0]?.artist?.picture || albums[0]?.artists?.[0]?.picture || null;
-            const artistPictureUrl = artistPictureId ? this.formatTidalImageUrl(artistPictureId, 750) : null;
+            const artistName = artistData.name || 'Artist';
+            const artistPictureUrl = artistData.picture || null;
             this.exploreArtistName = artistName;
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
-            // Display albums with hero card (matching album hero structure)
+            // Display artist hero with top tracks and albums
             this.resultsContainer.innerHTML = `
                 <div class="artist-hero-section">
                     <div class="artist-hero-content">
@@ -7570,6 +7607,14 @@ class App {
                         </button>
                     </div>
                 </div>
+                ${topTracks.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Top Tracks</h2>
+                        </div>
+                    </div>
+                    ${this.formatTracksGrid(topTracks, undefined, false)}
+                ` : ''}
                 <div class="results-header">
                     <div class="results-header-top">
                         <h2>Albums</h2>
@@ -7719,7 +7764,7 @@ class App {
             );
             
             const coverArt = albumData.cover
-                ? this.formatTidalImageUrl(albumData.cover, 1280)
+                ? this.getHifiImageUrl(albumData.cover, 1280)
                 : '';
 
             // Display tracks with TIDAL-style album header
