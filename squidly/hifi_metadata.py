@@ -685,6 +685,8 @@ def get_hifi_album_object(album_id: Any, include_streams: bool = False) -> Dict[
         'numberOfDiscs': album_info.get('numberOfVolumes'),
         'explicit': album_info.get('explicit'),
         'duration': album_info.get('duration'),
+        'copyright': album_info.get('copyright'),
+        'maxAudioQuality': album_info.get('audioQuality'),
         'artists': album_artists,
         'tracks': tracks,
     }

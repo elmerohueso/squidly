@@ -1934,7 +1934,7 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
     if not isinstance(track_row, dict):
         return track_row.get('album_id') if isinstance(track_row, dict) else None
 
-    track_payload = _fetch_hifi_track_payload(track_hifi_id)
+    track_payload = _fetch_hifi_track_info_payload(track_hifi_id)
     track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
     if not isinstance(track_data, dict):
         track_data = {}
