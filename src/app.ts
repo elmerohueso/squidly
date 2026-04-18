@@ -7573,7 +7573,7 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-                const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}/object?include_albums=true&include_tracks=true`, {
+                const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}?include_albums=true&include_tracks=true`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -7615,7 +7615,7 @@ class App {
                         </div>
                     </div>
                     <div class="artist-actions">
-                        <button class="album-action-btn primary" id="artistPlayBtn" title="Play artist" ${albums.length === 0 ? 'disabled' : ''}>
+                        <button class="album-action-btn primary" id="artistPlayBtn" title="Play artist" ${topTracks.length === 0 && albums.length === 0 ? 'disabled' : ''}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
                         </button>
                         <button class="album-action-btn hero-bottom-right" id="findSimilarArtistBtn" title="Find similar artists" data-artist-id="${artistId}">
@@ -7655,7 +7655,12 @@ class App {
             const playBtn = document.getElementById('artistPlayBtn') as HTMLButtonElement;
             if (playBtn) {
                 playBtn.addEventListener('click', async () => {
-                    // Play the first track from the first album
+                    if (topTracks.length > 0) {
+                        void this.handlePlayToggle(topTracks[0].id, undefined as any, playBtn);
+                        return;
+                    }
+
+                    // Fallback to the first track from the first album when no top tracks are available.
                     if (albums.length > 0) {
                         const firstAlbumId = albums[0].id;
                         try {

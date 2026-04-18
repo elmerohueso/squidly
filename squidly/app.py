@@ -5678,36 +5678,6 @@ def album_object(album_id=None):
     except Exception as e:
         return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500
 
-@app.route('/api/hifi/artists/<artist_id>/object', methods=['GET'])
-def artist_object(artist_id=None):
-    """
-    Get a normalized HiFi artist object.
-    Query parameters:
-    - id={artistId}          : Tidal artist ID
-    - include_tracks={bool}  : include normalized top track objects (true/false)
-    - include_albums={bool}  : include album IDs (true/false)
-    """
-    artist_id = str(artist_id or request.args.get('id', '')).strip()
-
-    if not artist_id:
-        return jsonify({'error': 'Artist ID parameter is required'}), 400
-
-    if not artist_id.isdigit():
-        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
-
-    include_tracks = str(request.args.get('include_tracks', 'true')).strip().lower() in ('1', 'true', 'yes')
-    include_albums = str(request.args.get('include_albums', 'true')).strip().lower() in ('1', 'true', 'yes')
-
-    try:
-        result = get_hifi_artist_object(
-            artist_id,
-            include_tracks=include_tracks,
-            include_albums=include_albums
-        )
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': 'Failed to build artist object', 'details': str(e)}), 500
-
 @app.route('/api/hifi/albums/<album_id>', methods=['GET'])
 def album_info(album_id=None):
     """
@@ -5760,57 +5730,33 @@ def album_info(album_id=None):
 @app.route('/api/hifi/artists/<artist_id>', methods=['GET'])
 def artist_info(artist_id=None):
     """
-    Get artist with all albums.
-    Query parameter:
-    - f={artistId} : Tidal artist ID
+    Get a normalized HiFi artist object.
+    Query parameters:
+    - include_tracks={bool}  : include normalized top track objects (true/false)
+    - include_albums={bool}  : include album objects (true/false)
     """
-    artist_id = str(artist_id or request.args.get('f', '')).strip()
+    artist_id = str(artist_id or '').strip()
 
     if not artist_id:
-        return jsonify({'error': 'Artist ID parameter (f) is required'}), 400
+        return jsonify({'error': 'Artist ID path parameter is required'}), 400
 
     if not artist_id.isdigit():
         return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
 
-    params = {'f': artist_id}
-    skip_tracks = request.args.get('skip_tracks')
-    if skip_tracks is not None:
-        params['skip_tracks'] = skip_tracks
+    include_tracks = str(request.args.get('include_tracks', 'true')).strip().lower() in ('1', 'true', 'yes')
+    include_albums = str(request.args.get('include_albums', 'true')).strip().lower() in ('1', 'true', 'yes')
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
-            f"/artist/?{urlencode(params)}",
-            SQUID_URLS,
-            method='GET',
-            timeout=10,
-            max_retries=3
+        result = get_hifi_artist_object(
+            artist_id,
+            include_tracks=include_tracks,
+            include_albums=include_albums
         )
-        
-        if not response.ok:
-            return jsonify({
-                'error': f'Upstream API error via {target["name"]}',
-                'status_code': response.status_code
-            }), response.status_code
-        
-        result = response.json()
-        result['proxied_via'] = target['name']
-        
-        # Deduplicate albums in artist result
-        if isinstance(result, dict):
-            # Direct structure: result['albums']['items']
-            albums = result.get('albums')
-            if isinstance(albums, dict):
-                items = albums.get('items')
-                if isinstance(items, list):
-                    albums['items'] = _deduplicate_albums(items)
-        
+        if not result:
+            return jsonify({'error': 'Failed to build artist object'}), 500
         return jsonify(result)
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': f'Proxy error',
-            'details': str(e)
-        }), 502
+    except Exception as e:
+        return jsonify({'error': 'Failed to build artist object', 'details': str(e)}), 500
 
 @app.route('/api/hifi/playlists/<playlist_id>', methods=['GET'])
 def playlist_info(playlist_id=None):
