@@ -195,6 +195,21 @@ interface AlbumInfo {
     error?: string;
 }
 
+interface AlbumObject extends AlbumSearchItem {
+    version?: string;
+    numberOfDiscs?: number;
+    duration?: number;
+    copyright?: string;
+    artists?: Artist[];
+    tracks?: Track[];
+}
+
+interface AlbumObjectResponse {
+    album?: AlbumObject;
+    proxied_via?: string;
+    error?: string;
+}
+
 interface ArtistObject {
     artist?: {
         id?: number;
@@ -7689,7 +7704,7 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/object`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -7697,25 +7712,20 @@ class App {
                 throw new Error('Failed to fetch album');
             }
 
-            const data: AlbumInfo = await response.json();
+            const data: AlbumObjectResponse = await response.json();
 
             if (data.error) {
                 this.displayMessage(`Error: ${data.error}`, () => this.fetchAlbumTracks(albumId));
                 return;
             }
 
-            // Extract album metadata from data root
-            const albumData = data.data;
+            const albumData = data.album;
             if (!albumData) {
                 this.displayMessage('No album data found');
                 return;
             }
 
-            // Extract tracks from items array
-            const trackItems = albumData.items || [];
-            const tracks = trackItems
-                .filter(item => item.type === 'track')
-                .map(item => item.item);
+            const tracks = albumData.tracks || [];
 
             if (tracks.length === 0) {
                 this.displayMessage('No tracks found in this album');
