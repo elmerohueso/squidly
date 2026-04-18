@@ -450,7 +450,7 @@ import base64
 import requests
 import psycopg2
 import psycopg2.extras
-from squidly.hifi import get_hifi_album_object, get_hifi_track_object
+from squidly.hifi import get_hifi_album_object, get_hifi_artist_object, get_hifi_track_object
 from itertools import cycle
 from datetime import datetime, timedelta
 import time
@@ -1809,9 +1809,13 @@ def _fetch_hifi_search_results(search_type, query, limit=10):
     return data.get('items', []) or []
 
 
-def _fetch_hifi_artist_payload(artist_id):
+def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
+    params = {'f': str(artist_id)}
+    if skip_tracks:
+        params['skip_tracks'] = 'true'
+
     response, _target = make_request_with_retry_rotating_mirrors(
-        f"/artist/?{urlencode({'f': str(artist_id)})}",
+        f"/artist/?{urlencode(params)}",
         SQUID_URLS,
         method='GET',
         timeout=10,
@@ -5574,6 +5578,36 @@ def album_object(album_id=None):
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500
+
+@app.route('/api/hifi/artists/<artist_id>/object', methods=['GET'])
+def artist_object(artist_id=None):
+    """
+    Get a normalized HiFi artist object.
+    Query parameters:
+    - id={artistId}          : Tidal artist ID
+    - include_tracks={bool}  : include normalized top track objects (true/false)
+    - include_albums={bool}  : include album IDs (true/false)
+    """
+    artist_id = str(artist_id or request.args.get('id', '')).strip()
+
+    if not artist_id:
+        return jsonify({'error': 'Artist ID parameter is required'}), 400
+
+    if not artist_id.isdigit():
+        return jsonify({'error': 'Artist ID parameter must be a numeric Tidal artist ID'}), 400
+
+    include_tracks = str(request.args.get('include_tracks', 'true')).strip().lower() in ('1', 'true', 'yes')
+    include_albums = str(request.args.get('include_albums', 'true')).strip().lower() in ('1', 'true', 'yes')
+
+    try:
+        result = get_hifi_artist_object(
+            artist_id,
+            include_tracks=include_tracks,
+            include_albums=include_albums
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': 'Failed to build artist object', 'details': str(e)}), 500
 
 @app.route('/api/hifi/albums/<album_id>', methods=['GET'])
 def album_info(album_id=None):

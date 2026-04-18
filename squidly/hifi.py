@@ -453,6 +453,146 @@ def extract_hifi_artist_info(artist_response: Any) -> Dict[str, Any]:
     }
 
 
+def _extract_hifi_artist_album_ids(artist_response: Any) -> List[Any]:
+    album_ids: List[Any] = []
+    albums_payload = artist_response.get('albums')
+    if not isinstance(albums_payload, dict):
+        return album_ids
+
+    items = albums_payload.get('items')
+    if not isinstance(items, list):
+        return album_ids
+
+    seen = set()
+    for album_item in items:
+        if not isinstance(album_item, dict):
+            continue
+        album_id = album_item.get('id')
+        if album_id is None:
+            item_payload = album_item.get('item')
+            if isinstance(item_payload, dict):
+                album_id = item_payload.get('id')
+        if album_id is not None and album_id not in seen:
+            seen.add(album_id)
+            album_ids.append(album_id)
+
+    return album_ids
+
+
+def _extract_hifi_album_artists_from_item(album_item: Any) -> List[Dict[str, Any]]:
+    artists: List[Dict[str, Any]] = []
+    if isinstance(album_item.get('artists'), list):
+        for artist_entry in album_item.get('artists'):
+            if not isinstance(artist_entry, dict):
+                continue
+            artists.append(_normalize_hifi_artist_entry(artist_entry))
+    elif isinstance(album_item.get('artist'), dict):
+        artists.append(_normalize_hifi_artist_entry(album_item.get('artist')))
+    return artists
+
+
+def _build_hifi_album_object_from_artist_item(album_item: Any) -> Dict[str, Any]:
+    if not isinstance(album_item, dict):
+        return {}
+
+    return {
+        'id': album_item.get('id'),
+        'title': str(album_item.get('title') or '').strip(),
+        'version': str(album_item.get('version') or '').strip() if album_item.get('version') is not None else '',
+        'cover': _format_hifi_image_value(album_item.get('cover'), size=640),
+        'releaseDate': album_item.get('releaseDate'),
+        'numberOfTracks': album_item.get('numberOfTracks'),
+        'numberOfDiscs': album_item.get('numberOfVolumes'),
+        'explicit': bool(album_item.get('explicit')),
+        'duration': album_item.get('duration'),
+        'copyright': album_item.get('copyright'),
+        'maxAudioQuality': _extract_hifi_audio_quality(album_item),
+        'url': album_item.get('url'),
+        'artists': _extract_hifi_album_artists_from_item(album_item),
+        'tracks': [],
+    }
+
+
+def _normalize_hifi_artist_track_payload(track_payload: Any) -> Dict[str, Any]:
+    if not isinstance(track_payload, dict):
+        return {}
+    if track_payload.get('type') == 'track' and isinstance(track_payload.get('item'), dict):
+        return track_payload.get('item')
+    if track_payload.get('id') is not None:
+        return track_payload
+    return {}
+
+
+def _extract_hifi_artist_top_track_items(artist_response: Any) -> List[Dict[str, Any]]:
+    top_tracks: List[Dict[str, Any]] = []
+    tracks_payload = artist_response.get('tracks')
+    if isinstance(tracks_payload, list):
+        for track_item in tracks_payload:
+            normalized_track = _normalize_hifi_artist_track_payload(track_item)
+            if normalized_track.get('id') is not None:
+                top_tracks.append(normalized_track)
+        return top_tracks
+
+    if isinstance(tracks_payload, dict):
+        items = tracks_payload.get('items')
+        if isinstance(items, list):
+            for track_item in items:
+                normalized_track = _normalize_hifi_artist_track_payload(track_item)
+                if normalized_track.get('id') is not None:
+                    top_tracks.append(normalized_track)
+
+    return top_tracks
+
+
+def get_hifi_artist_object(artist_id: Any, include_tracks: bool = True, include_albums: bool = True) -> Dict[str, Any]:
+    """Build a normalized artist object using the HiFi artist endpoint."""
+    try:
+        from .app import _fetch_hifi_artist_payload
+    except ImportError:
+        from squidly.app import _fetch_hifi_artist_payload
+
+    artist_response = _fetch_hifi_artist_payload(artist_id, skip_tracks=True)
+    artist_info = extract_hifi_artist_info(artist_response)
+    if not artist_info:
+        return {}
+
+    album_objects = []
+    if include_albums:
+        albums_payload = artist_response.get('albums')
+        if isinstance(albums_payload, dict):
+            for album_item in albums_payload.get('items', []):
+                if not isinstance(album_item, dict):
+                    continue
+                album_object = _build_hifi_album_object_from_artist_item(album_item)
+                if album_object.get('id') is not None:
+                    album_objects.append(album_object)
+
+    top_track_items = _extract_hifi_artist_top_track_items(artist_response)
+
+    top_tracks = []
+    if include_tracks:
+        for track_item in top_track_items:
+            track = _build_hifi_track_object_from_album_item(
+                track_item,
+                {},
+                include_streams=False
+            )
+            if track:
+                top_tracks.append(track)
+    else:
+        top_tracks = [track_item.get('id') for track_item in top_track_items if track_item.get('id') is not None]
+
+    return {
+        'artist': {
+            'id': artist_info.get('id'),
+            'name': artist_info.get('name'),
+            'picture': artist_info.get('picture'),
+            'albums': album_objects,
+            'top_tracks': top_tracks,
+        }
+    }
+
+
 def _resolve_hifi_artist_details(artist_id: Any, artist_responses: Any) -> Dict[str, Any]:
     if artist_id is None:
         return {
