@@ -3798,6 +3798,10 @@ def process_download_job(job_id, payload):
     track_id = payload.get('trackId')
     file_format = payload.get('format', 'original')
     download_type = payload.get('downloadType', 'loose')
+    quality_choice = str(payload.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])).strip().upper() or DEFAULT_DOWNLOAD_SETTINGS['quality']
+    if quality_choice not in ('LOSSLESS', 'HIGH', 'LOW'):
+        quality_choice = DEFAULT_DOWNLOAD_SETTINGS['quality']
+
     stages = {
         'downloaded': 'pending',
         'id3_tagged': 'pending',
@@ -3823,6 +3827,7 @@ def process_download_job(job_id, payload):
 
     print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
     print(f"[DOWNLOAD] Format: {file_format}", flush=True)
+    print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
     print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
     print(f"[DOWNLOAD] Download type: {download_type}", flush=True)
     print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
@@ -4207,7 +4212,12 @@ def process_download_job(job_id, payload):
     if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
         media_tags.append('HIRES_LOSSLESS')
 
-    quality_candidates = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+    if quality_choice == 'LOSSLESS':
+        quality_candidates = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+    elif quality_choice == 'HIGH':
+        quality_candidates = ['HIGH', 'LOW']
+    else:
+        quality_candidates = ['LOW']
 
     print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
 
@@ -4610,7 +4620,7 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+        SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
         FROM download_settings
         WHERE id = 1
         """
@@ -4622,12 +4632,13 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+                id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
+                DEFAULT_DOWNLOAD_SETTINGS['quality'],
                 DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
@@ -4639,7 +4650,7 @@ def get_download_settings():
         conn.commit()
         cur.execute(
             """
-            SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+            SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
             FROM download_settings
             WHERE id = 1
             """
@@ -4672,6 +4683,7 @@ def get_download_settings():
     conn.close()
     return {
         'format': row['format'],
+        'quality': row.get('quality') or DEFAULT_DOWNLOAD_SETTINGS['quality'],
         'parent_folder': row['parent_folder'],
         'file_naming': file_naming_album,
         'file_naming_album': file_naming_album,
@@ -4686,11 +4698,12 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+            id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
+            quality = excluded.quality,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
             file_naming_album = excluded.file_naming_album,
@@ -4700,6 +4713,7 @@ def save_download_settings(settings):
         """,
         (
             settings['format'],
+            settings.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality']),
             settings['parent_folder'],
             settings['file_naming_album'],
             settings['file_naming_album'],
@@ -7075,15 +7089,16 @@ def download_settings():
     )
 
     updated = {
-        'format': payload.get('format', current['format']),
+        'format': current['format'],
+        'quality': payload.get('quality', current.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])),
         'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))))
     }
 
-    if updated['format'] not in ('original', 'mp3'):
-        return jsonify({'error': 'Invalid format value'}), 400
+    if updated['quality'] not in ('LOSSLESS', 'HIGH', 'LOW'):
+        return jsonify({'error': 'Invalid quality value'}), 400
 
     if not isinstance(updated['file_naming_album'], str):
         return jsonify({'error': 'Invalid settings payload'}), 400
@@ -7101,6 +7116,7 @@ def download_settings():
     save_download_settings(updated)
     return jsonify({
         'format': updated['format'],
+        'quality': updated['quality'],
         'file_naming': updated['file_naming_album'],
         'file_naming_album': updated['file_naming_album'],
         'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
