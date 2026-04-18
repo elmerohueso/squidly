@@ -2510,9 +2510,7 @@ def _build_stored_track_match_lookup(cur, track_ids):
         FROM tracks
         WHERE hifi_id = ANY(%s)
           AND library_id IS NOT NULL
-          AND match_status IN ('proposed', 'confirmed')
         ORDER BY hifi_id ASC,
-                 CASE match_status WHEN 'confirmed' THEN 0 ELSE 1 END ASC,
                  confidence DESC,
                  bitrate DESC NULLS LAST,
                  path ASC
@@ -2563,12 +2561,9 @@ def _build_stored_album_match_lookup(cur, album_ids):
         LEFT JOIN tracks
           ON tracks.album_id = albums.album_id
          AND tracks.library_id IS NOT NULL
-         AND tracks.match_status IN ('proposed', 'confirmed')
         WHERE albums.hifi_id = ANY(%s)
           AND albums.library_id IS NOT NULL
-          AND albums.match_status IN ('proposed', 'confirmed')
         ORDER BY albums.hifi_id ASC,
-                 CASE albums.match_status WHEN 'confirmed' THEN 0 ELSE 1 END ASC,
                  albums.confidence DESC,
                  tracks.track_id ASC
         """,
@@ -2597,6 +2592,48 @@ def _build_stored_album_match_lookup(cur, album_ids):
             'matched_track_count': max((_safe_int(row.get('matched_track_count')) or 0) for row in matched_rows) if matched_rows else 0,
             'expected_track_count': max((_safe_int(row.get('expected_track_count')) or 0) for row in matched_rows) if matched_rows else 0,
             'variants': _serialize_match_variants(matched_rows),
+        })
+
+    return results
+
+
+def _build_stored_artist_match_lookup(cur, artist_ids):
+    requested_ids = [str(artist_id).strip() for artist_id in (artist_ids or []) if str(artist_id).strip()]
+    if not requested_ids:
+        return []
+
+    cur.execute(
+        """
+        SELECT artists.hifi_id,
+               COALESCE(bool_and(albums.complete), TRUE) AS complete
+        FROM artists
+        LEFT JOIN albums
+          ON albums.artist_id = artists.artist_id
+        WHERE artists.hifi_id = ANY(%s)
+          AND artists.library_id IS NOT NULL
+        GROUP BY artists.hifi_id
+        """,
+        (requested_ids,)
+    )
+    rows = cur.fetchall() or []
+
+    grouped = {}
+    for row in rows:
+        hifi_id = str(row.get('hifi_id') or '').strip()
+        if not hifi_id:
+            continue
+        grouped[hifi_id] = row
+
+    results = []
+    for requested_id in requested_ids:
+        row = grouped.get(requested_id)
+        results.append({
+            'artist_id': requested_id,
+            'exists': bool(row),
+            'complete': bool(row.get('complete')) if row else False,
+            'match_status': None,
+            'confidence': None,
+            'variants': []
         })
 
     return results
@@ -6979,7 +7016,7 @@ def endpoints_status():
         """
         SELECT name, encoded_url, online, response_time, last_checked
         FROM mirror_endpoints
-        ORDER BY name
+        ORDER BY response_time ASC NULLS LAST, name ASC
         """
     )
     rows = cursor.fetchall()
@@ -7201,15 +7238,17 @@ def lookup_hifi_matches_endpoint():
     payload = request.get_json(silent=True) or {}
     track_ids = payload.get('track_ids') or []
     album_ids = payload.get('album_ids') or []
+    artist_ids = payload.get('artist_ids') or []
 
-    if not isinstance(track_ids, list) or not isinstance(album_ids, list):
-        return jsonify({'error': 'track_ids and album_ids must be arrays'}), 400
+    if not isinstance(track_ids, list) or not isinstance(album_ids, list) or not isinstance(artist_ids, list):
+        return jsonify({'error': 'track_ids, album_ids, and artist_ids must be arrays'}), 400
 
-    if len(track_ids) > 200 or len(album_ids) > 200:
-        return jsonify({'error': 'track_ids and album_ids are limited to 200 items each'}), 400
+    if len(track_ids) > 200 or len(album_ids) > 200 or len(artist_ids) > 200:
+        return jsonify({'error': 'track_ids, album_ids, and artist_ids are limited to 200 items each'}), 400
 
     normalized_track_ids = [str(item).strip() for item in track_ids if str(item).strip()]
     normalized_album_ids = [str(item).strip() for item in album_ids if str(item).strip()]
+    normalized_artist_ids = [str(item).strip() for item in artist_ids if str(item).strip()]
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -7218,6 +7257,7 @@ def lookup_hifi_matches_endpoint():
             'success': True,
             'tracks': _build_stored_track_match_lookup(cur, normalized_track_ids),
             'albums': _build_stored_album_match_lookup(cur, normalized_album_ids),
+            'artists': _build_stored_artist_match_lookup(cur, normalized_artist_ids),
         })
     finally:
         conn.close()

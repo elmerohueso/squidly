@@ -913,6 +913,10 @@ body {
     align-items: flex-start;
 }
 
+.artist-hero-section {
+    position: relative;
+}
+
 .artist-cover-container {
     flex-shrink: 0;
     width: 200px;
@@ -1239,6 +1243,29 @@ body {
 
 .plex-existing-chip--in-actions.plex-existing-chip--proposed:hover {
     background: rgba(255, 184, 77, 0.25);
+}
+
+.plex-existing-chip--incomplete {
+    border-color: rgba(255, 184, 77, 0.45);
+    background: rgba(255, 184, 77, 0.12);
+    color: #ffd27d;
+}
+
+.plex-existing-chip--in-actions.plex-existing-chip--incomplete {
+    background: rgba(255, 184, 77, 0.16);
+    color: #ffd27d;
+}
+
+.plex-existing-chip--in-actions.plex-existing-chip--incomplete:hover {
+    background: rgba(255, 184, 77, 0.25);
+}
+
+.plex-existing-chip--hero {
+    position: absolute;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    margin: 0;
+    z-index: 1;
 }
 
 .plex-existing-chip--bulk {
@@ -3356,6 +3383,10 @@ body {
     gap: 2rem;
     margin-bottom: 2rem;
     align-items: flex-start;
+}
+
+.album-hero-section {
+    position: relative;
 }
 
 .album-cover-container {

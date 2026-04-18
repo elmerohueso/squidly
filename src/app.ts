@@ -301,10 +301,20 @@ interface HifiAlbumLookupMatch {
     variants?: PlexSongVariant[];
 }
 
+interface HifiArtistLookupMatch {
+    artist_id: string;
+    exists: boolean;
+    complete: boolean;
+    match_status?: string;
+    confidence?: number | null;
+    variants?: PlexSongVariant[];
+}
+
 interface HifiMatchLookupResponse {
     success?: boolean;
     tracks?: HifiTrackLookupMatch[];
     albums?: HifiAlbumLookupMatch[];
+    artists?: HifiArtistLookupMatch[];
     error?: string;
 }
 
@@ -6220,19 +6230,24 @@ class App {
             void this.annotateTrackCardsWithPlexStatus(items as Track[]);
         } else if (searchType === 'al') {
             void this.annotateAlbumGridsWithPlexStatus(items as AlbumSearchItem[]);
+        } else if (searchType === 'a') {
+            void this.annotateArtistCardsWithPlexStatus(items as ArtistSearchItem[]);
         }
     }
 
-    private async lookupStoredMatches(trackIds: Array<number | string>, albumIds: Array<number | string>, signal?: AbortSignal): Promise<HifiMatchLookupResponse> {
+    private async lookupStoredMatches(trackIds: Array<number | string>, albumIds: Array<number | string>, artistIds: Array<number | string>, signal?: AbortSignal): Promise<HifiMatchLookupResponse> {
         const normalizedTrackIds = trackIds
             .map(trackId => String(trackId).trim())
             .filter(Boolean);
         const normalizedAlbumIds = albumIds
             .map(albumId => String(albumId).trim())
             .filter(Boolean);
+        const normalizedArtistIds = artistIds
+            .map(artistId => String(artistId).trim())
+            .filter(Boolean);
 
-        if (normalizedTrackIds.length === 0 && normalizedAlbumIds.length === 0) {
-            return { tracks: [], albums: [] };
+        if (normalizedTrackIds.length === 0 && normalizedAlbumIds.length === 0 && normalizedArtistIds.length === 0) {
+            return { tracks: [], albums: [], artists: [] };
         }
 
         const response = await fetch('/api/hifi/matches/lookup', {
@@ -6242,7 +6257,8 @@ class App {
             },
             body: JSON.stringify({
                 track_ids: normalizedTrackIds,
-                album_ids: normalizedAlbumIds
+                album_ids: normalizedAlbumIds,
+                artist_ids: normalizedArtistIds
             }),
             signal
         });
@@ -6264,13 +6280,8 @@ class App {
             );
     }
 
-    private buildStoredMatchTooltip(matchStatus?: string | null, confidence?: number | null, variants: PlexSongVariant[] = [], partial: boolean = false): string {
-        const headingBase = partial
-            ? 'Partial Plex match'
-            : (String(matchStatus || '').toLowerCase() === 'proposed' ? 'Likely in Plex' : 'Exists in Plex');
-        const heading = typeof confidence === 'number' && Number.isFinite(confidence)
-            ? `${headingBase} (${Math.round(confidence * 100)}%)`
-            : headingBase;
+    private buildStoredMatchTooltip(matchStatus?: string | null, confidence?: number | null, variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
+        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
 
         if (!Array.isArray(variants) || variants.length === 0) {
             return heading;
@@ -6288,11 +6299,10 @@ class App {
         return `${heading}\n${details.join('\n')}`;
     }
 
-    private createPlexMatchChip(match: { match_status?: string | null; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; partial?: boolean }): HTMLSpanElement {
+    private createPlexMatchChip(match: { [key: string]: any; match_status?: string | null; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
         const chip = document.createElement('span');
         const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
-        const proposed = String(match.match_status || '').toLowerCase() === 'proposed';
-        const partial = options?.partial === true;
+        const incomplete = options?.incomplete === true;
 
         const classNames = ['plex-existing-chip'];
         if (options?.inActions) {
@@ -6304,17 +6314,20 @@ class App {
         if (lowQuality) {
             classNames.push('plex-existing-chip--low-quality');
         }
-        if (proposed) {
-            classNames.push('plex-existing-chip--proposed');
+        if (options?.hero) {
+            classNames.push('plex-existing-chip--hero');
+        }
+        if (incomplete) {
+            classNames.push('plex-existing-chip--incomplete');
         }
         chip.className = classNames.join(' ');
 
-        let label = partial ? 'Partially in Plex' : (proposed ? 'Likely in Plex' : 'In Plex');
+        let label = 'In Plex';
         if (lowQuality) {
             label += ' · low quality';
         }
         chip.textContent = label;
-        chip.title = this.buildStoredMatchTooltip(match.match_status, match.confidence, match.variants || [], partial);
+        chip.title = this.buildStoredMatchTooltip(match.match_status, match.confidence, match.variants || [], incomplete);
         return chip;
     }
 
@@ -6330,7 +6343,7 @@ class App {
         }
 
         try {
-            const lookup = await this.lookupStoredMatches(trackIds, [], signal);
+            const lookup = await this.lookupStoredMatches(trackIds, [], [], signal);
             const trackMatches = Array.isArray(lookup.tracks) ? lookup.tracks : [];
             const matchById = new Map(trackMatches.map(match => [String(match.track_id), match]));
 
@@ -6410,7 +6423,7 @@ class App {
         }
 
         try {
-            const lookup = await this.lookupStoredMatches([], albumIds, signal);
+            const lookup = await this.lookupStoredMatches([], albumIds, [], signal);
             const albumMatches = Array.isArray(lookup.albums) ? lookup.albums : [];
             const matchById = new Map(albumMatches.map(match => [String(match.album_id), match]));
             const gridRows = Array.from(this.resultsContainer.querySelectorAll('.albums-grid-row')) as HTMLElement[];
@@ -6418,7 +6431,7 @@ class App {
             for (const row of gridRows) {
                 const albumId = String(row.getAttribute('data-album-id') || '').trim();
                 const match = matchById.get(albumId);
-                if (!match || !match.exists || !match.complete) {
+                if (!match || !match.exists) {
                     continue;
                 }
 
@@ -6430,7 +6443,7 @@ class App {
                     continue;
                 }
 
-                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true }));
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: !match.complete }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -6440,18 +6453,144 @@ class App {
         }
     }
 
+    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean }): void {
+        if (!container || !match || !match.exists) {
+            return;
+        }
+        if (container.querySelector('.plex-existing-chip')) {
+            return;
+        }
+
+        const chip = this.createPlexMatchChip(match, {
+            inActions: options?.inActions,
+            bulk: options?.bulk,
+            incomplete: match.complete === false,
+            hero: options?.hero
+        });
+
+        if (options?.hero) {
+            container.appendChild(chip);
+            return;
+        }
+
+        const heading = container.querySelector('h1, .artist-hero-name, .album-title') as HTMLElement | null;
+        if (heading) {
+            heading.insertAdjacentElement('afterend', chip);
+            return;
+        }
+
+        container.appendChild(chip);
+    }
+
+    private async annotateArtistCardsWithPlexStatus(artists: ArtistSearchItem[]): Promise<void> {
+        if (!Array.isArray(artists) || artists.length === 0) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        const artistIds = artists.map(artist => artist.id).filter(artistId => Number.isFinite(artistId));
+        if (artistIds.length === 0) {
+            return;
+        }
+
+        try {
+            const lookup = await this.lookupStoredMatches([], [], artistIds, signal);
+            const artistMatches = Array.isArray(lookup.artists) ? lookup.artists : [];
+            const matchById = new Map(artistMatches.map(match => [String(match.artist_id), match]));
+            const cards = Array.from(this.resultsContainer.querySelectorAll('.artist-card-compact')) as HTMLElement[];
+
+            for (const card of cards) {
+                const artistId = String(card.getAttribute('data-artist-id') || '').trim();
+                const match = matchById.get(artistId);
+                if (!match || !match.exists || card.querySelector('.plex-existing-chip')) {
+                    continue;
+                }
+
+                const nameEl = card.querySelector('.artist-card-name') as HTMLElement | null;
+                if (!nameEl) {
+                    continue;
+                }
+
+                const chip = this.createPlexMatchChip(match, { inActions: true, incomplete: !match.complete });
+                nameEl.insertAdjacentElement('afterend', chip);
+            }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate artist cards with Plex status.', error);
+        }
+    }
+
+    private async annotateAlbumHeroWithPlexStatus(albumId: number): Promise<void> {
+        if (!Number.isFinite(albumId)) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        try {
+            const lookup = await this.lookupStoredMatches([], [albumId], [], signal);
+            const albumMatch = Array.isArray(lookup.albums) ? lookup.albums[0] : undefined;
+            if (!albumMatch || !albumMatch.exists) {
+                return;
+            }
+
+            const container = document.querySelector('.album-actions') as HTMLElement | null;
+            this.insertHeroPlexChip(container, albumMatch, { inActions: true, bulk: true });
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate album hero with Plex status.', error);
+        }
+    }
+
+    private async annotateArtistHeroWithPlexStatus(artistId: number): Promise<void> {
+        if (!Number.isFinite(artistId)) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        try {
+            const lookup = await this.lookupStoredMatches([], [], [artistId], signal);
+            const artistMatch = Array.isArray(lookup.artists) ? lookup.artists[0] : undefined;
+            if (!artistMatch || !artistMatch.exists) {
+                return;
+            }
+
+            const container = document.querySelector('.artist-actions') as HTMLElement | null;
+            this.insertHeroPlexChip(container, artistMatch, { inActions: true, bulk: true });
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate artist hero with Plex status.', error);
+        }
+    }
+
     private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[]): void {
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
         if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
             return;
         }
 
+        const albumActions = document.querySelector('.album-actions') as HTMLElement | null;
+        if (albumActions?.querySelector('.plex-existing-chip')) {
+            addAllLibraryBtn.remove();
+            return;
+        }
+
         const aggregateMatch: PlexTrackMatch = {
             exists: true,
-            match_status: matches.every(match => String(match.match_status || '').toLowerCase() === 'confirmed') ? 'confirmed' : 'proposed',
             confidence: matches.reduce((highest, match) => Math.max(highest, typeof match.confidence === 'number' ? match.confidence : 0), 0),
             variants: matches.flatMap(match => match.variants || [])
         };
+
+        if (albumActions) {
+            addAllLibraryBtn.remove();
+            albumActions.appendChild(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
+            return;
+        }
 
         addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
     }
@@ -7614,6 +7753,7 @@ class App {
 
             // Annotate with Plex status
             void this.annotateAlbumGridsWithPlexStatus(albums);
+            void this.annotateArtistHeroWithPlexStatus(artistId);
         } catch (error) {
             this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));
             console.error('Artist fetch error:', error);
@@ -7778,6 +7918,7 @@ class App {
             this.movePlexPlaylistContainerBeneathDownloadAll();
 
             void this.annotateTrackCardsWithPlexStatus(tracks);
+            void this.annotateAlbumHeroWithPlexStatus(albumId);
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
             console.error('Album fetch error:', error);
