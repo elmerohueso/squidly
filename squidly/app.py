@@ -3873,31 +3873,17 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
         os.makedirs(downloads_folder, exist_ok=True)
 
-    print(f"[DOWNLOAD] Fetching track metadata...", flush=True)
+    print(f"[DOWNLOAD] Fetching track metadata from normalized HiFi object...", flush=True)
     try:
-        info_response, target = make_request_with_retry_rotating_mirrors(
-            f"/info/?id={track_id}",
-            SQUID_URLS,
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-    except requests.exceptions.RequestException as e:
-        raise TransientDownloadError(f"Failed to fetch track info: {str(e)}") from e
+        track_object = get_hifi_track_object(track_id, include_album=True)
+    except Exception as e:
+        raise TransientDownloadError(f"Failed to fetch track metadata: {str(e)}") from e
 
-    mirror_name = target.get('name') if isinstance(target, dict) else 'unknown'
-    print(f"[DOWNLOAD] Track info fetched from mirror '{mirror_name}' with status {info_response.status_code}", flush=True)
+    if not isinstance(track_object, dict):
+        raise TransientDownloadError("Failed to build normalized track metadata")
 
-    if not info_response.ok:
-        raise TransientDownloadError(
-            f"Failed to get track info. Status: {info_response.status_code} from mirror '{mirror_name}'"
-        )
-
-    info_data = info_response.json()
-    print(f"[DOWNLOAD] Track info response structure: {info_data.keys() if isinstance(info_data, dict) else type(info_data)}", flush=True)
-
-    track_info = info_data.get('data', info_data) if isinstance(info_data, dict) else {}
-    track_metadata = track_info.get('track', track_info) if 'track' in track_info else track_info
+    track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
+    album_data = track_object.get('album') if isinstance(track_object.get('album'), dict) else {}
 
     track_artist_name = 'Unknown Artist'
     track_artist_id = None
@@ -3912,169 +3898,88 @@ def process_download_job(job_id, payload):
     copyright_text = ''
     cover_url = ''
     album_id = ''
+    album_disc_count = 1
+    album_has_multiple_discs = False
 
-    if isinstance(track_metadata, dict):
-        if 'artists' in track_metadata and isinstance(track_metadata['artists'], list) and len(track_metadata['artists']) > 0:
-            # Extract all artists and join with semicolon separator (prefer array over singular)
-            artist_names = [str(a.get('name', '')) for a in track_metadata['artists'] if a.get('name')]
+    if isinstance(track_data, dict):
+        if isinstance(track_data.get('artists'), list) and track_data['artists']:
+            artist_names = [str(a.get('name', '')).strip() for a in track_data['artists'] if isinstance(a, dict) and a.get('name')]
             track_artist_name = '; '.join(artist_names) if artist_names else 'Unknown Artist'
-            first_artist = track_metadata['artists'][0] if isinstance(track_metadata['artists'][0], dict) else None
+            first_artist = track_data['artists'][0] if isinstance(track_data['artists'][0], dict) else None
             if first_artist and first_artist.get('id') is not None:
                 track_artist_id = str(first_artist.get('id')).strip() or None
-        elif 'artist' in track_metadata and isinstance(track_metadata['artist'], dict):
-            track_artist_name = track_metadata['artist'].get('name', 'Unknown Artist')
-            if track_metadata['artist'].get('id') is not None:
-                track_artist_id = str(track_metadata['artist'].get('id')).strip() or None
-        elif 'artistName' in track_metadata:
-            track_artist_name = track_metadata['artistName']
+        elif isinstance(track_data.get('artists'), dict):
+            artist = track_data['artists']
+            track_artist_name = str(artist.get('name', 'Unknown Artist'))
+            if artist.get('id') is not None:
+                track_artist_id = str(artist.get('id')).strip() or None
 
-
-        if 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-            album_name = track_metadata['album'].get('title', 'Unknown Album')
-
-            if 'id' in track_metadata['album']:
-                album_id = track_metadata['album']['id']
-
-            # Append [Explicit] to album name if album is marked as explicit
-            if bool(track_metadata['album'].get('explicit', False)):
-                if '[Explicit]' not in album_name:
-                    album_name += ' [Explicit]'
-
-            if 'cover' in track_metadata['album'] and track_metadata['album']['cover']:
-                cover_val = track_metadata['album']['cover']
-                if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_tidal_image_url(cover_val, 1280)
-                else:
-                    cover_url = cover_val
-
-            if not cover_url:
-                for cover_field in ['coverUri', 'imageUri', 'image']:
-                    if cover_field in track_metadata['album']:
-                        cover_val = track_metadata['album'][cover_field]
-                        if isinstance(cover_val, str):
-                            if not cover_val.startswith('http'):
-                                cover_url = format_tidal_image_url(cover_val, 1280)
-                            else:
-                                cover_url = cover_val
-                            break
-
-        elif 'albumTitle' in track_metadata:
-            album_name = track_metadata['albumTitle']
-
-        if 'title' in track_metadata:
-            track_title = track_metadata['title']
-
-        # Add Explicit tag to title if marked as explicit in TIDAL metadata
-        if 'version' in track_metadata and track_metadata['version']:
-            track_version = str(track_metadata['version']).strip()
-
-        if 'explicit' in track_metadata:
-            if bool(track_metadata['explicit']) == True:
-                track_title += ' [Explicit]'
-
+        track_title = str(track_data.get('title') or track_title)
+        track_version = str(track_data.get('version') or '').strip()
+        if track_data.get('explicit') and '[Explicit]' not in track_title:
+            track_title += ' [Explicit]'
         if track_version:
             track_title = f"{track_title} ({track_version})"
 
-        if 'trackNumber' in track_metadata:
-            track_num = str(track_metadata['trackNumber']).zfill(2)
+        track_number = track_data.get('trackNumber')
+        if track_number is not None:
+            track_num = str(track_number).zfill(2)
 
-        if 'volumeNumber' in track_metadata:
-            volume_number = track_metadata['volumeNumber']
+        disc_value = track_data.get('discNumber')
+        if disc_value is None:
+            disc_value = track_data.get('volumeNumber')
+        if disc_value is not None:
             try:
-                parsed_disc_num = int(str(volume_number).strip())
+                parsed_disc_num = int(str(disc_value).strip())
                 if parsed_disc_num > 0:
                     disc_num = str(parsed_disc_num)
             except (TypeError, ValueError):
                 disc_num = ''
 
-        if 'releaseDate' in track_metadata:
-            date_str = track_metadata['releaseDate']
-            if isinstance(date_str, str) and len(date_str) >= 4:
-                release_year = date_str[:4]
-        elif 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-            date_str = track_metadata['album'].get('releaseDate')
-            if isinstance(date_str, str) and len(date_str) >= 4:
-                release_year = date_str[:4]
+        if isinstance(track_data.get('copyright'), str) and track_data.get('copyright').strip():
+            copyright_text = str(track_data.get('copyright')).strip()
 
-        if 'copyright' in track_metadata and track_metadata['copyright']:
-            copyright_text = str(track_metadata['copyright']).strip()
+    if isinstance(album_data, dict):
+        album_name = str(album_data.get('title') or album_name)
+        album_id = str(album_data.get('id')) if album_data.get('id') is not None else ''
+        cover_url = str(album_data.get('cover') or '')
+        if album_data.get('explicit') and '[Explicit]' not in album_name:
+            album_name += ' [Explicit]'
 
-        if not copyright_text and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-            raw_copyright = track_metadata['album'].get('copyright')
-            if raw_copyright:
-                copyright_text = str(raw_copyright).strip()
+        if isinstance(album_data.get('releaseDate'), str) and len(album_data.get('releaseDate')) >= 4:
+            release_year = album_data.get('releaseDate')[:4]
 
-        if not release_year:
-            release_year = extract_year_from_text(copyright_text)
-        if not release_year and 'album' in track_metadata and isinstance(track_metadata['album'], dict):
-            release_year = extract_year_from_text(track_metadata['album'].get('copyright', ''))
+        album_artists = []
+        if isinstance(album_data.get('artists'), list):
+            for artist in album_data['artists']:
+                if isinstance(artist, dict) and artist.get('name'):
+                    album_artists.append(str(artist.get('name')).strip())
+                    if album_artist_id is None and artist.get('id') is not None:
+                        album_artist_id = str(artist.get('id')).strip() or None
+        elif isinstance(album_data.get('artists'), dict):
+            artist = album_data['artists']
+            if isinstance(artist, dict) and artist.get('name'):
+                album_artists.append(str(artist.get('name')).strip())
+                if artist.get('id') is not None:
+                    album_artist_id = str(artist.get('id')).strip() or None
 
-        if not cover_url and album_id:
-            cover_url = format_tidal_image_url(str(album_id), 1280)
+        if album_artists:
+            album_artist_name = album_artists[0]
 
-        if not cover_url:
-            if 'cover' in track_metadata:
-                cover_val = track_metadata['cover']
-                if isinstance(cover_val, str) and not cover_val.startswith('http'):
-                    cover_url = format_tidal_image_url(cover_val, 1280)
-                else:
-                    cover_url = cover_val
-
-    # Attempt to resolve album artist from album metadata endpoint (preferred over track-level artist)
-    album_artist_name = None
-    album_disc_count = 1
-    album_has_multiple_discs = False
-    if album_id:
         try:
-            album_response, album_target = make_request_with_retry_rotating_mirrors(
-                f"/album/?id={album_id}",
-                SQUID_URLS,
-                method='GET',
-                timeout=10,
-                max_retries=3
-            )
-            if album_response.ok:
-                album_data = album_response.json()
-                album_payload = album_data.get('data', album_data) if isinstance(album_data, dict) else {}
-                album_obj = album_payload.get('album', album_payload) if isinstance(album_payload, dict) else {}
+            album_disc_count = int(album_data.get('numberOfDiscs') or album_data.get('numberOfVolumes') or 1)
+        except (TypeError, ValueError):
+            album_disc_count = 1
+        album_has_multiple_discs = album_disc_count > 1
 
-                # Detect multi-disc album by inspecting the track-level volumeNumber values
-                if isinstance(album_payload, dict):
-                    album_items = album_payload.get('items', [])
-                    volume_numbers = set()
-                    if isinstance(album_items, list):
-                        for entry in album_items:
-                            if isinstance(entry, dict):
-                                item = entry.get('item') if isinstance(entry.get('item'), dict) else {}
-                                volume_number = item.get('volumeNumber')
-                                try:
-                                    if volume_number is not None:
-                                        volume_numbers.add(int(volume_number))
-                                except (TypeError, ValueError):
-                                    pass
-                    if len(volume_numbers) > 1:
-                        album_disc_count = len(volume_numbers)
-                        album_has_multiple_discs = True
+    if not release_year and copyright_text:
+        release_year = extract_year_from_text(copyright_text)
 
-                if isinstance(album_obj, dict):
-                    # Check if album is explicit and append to album name if needed
-                    if bool(album_obj.get('explicit', False)):
-                        if '[Explicit]' not in album_name:
-                            album_name += ' [Explicit]'
+    if not cover_url and album_id:
+        cover_url = format_tidal_image_url(str(album_id), 1280)
 
-                    if 'artist' in album_obj and isinstance(album_obj['artist'], dict):
-                        album_artist_name = album_obj['artist'].get('name')
-                        if album_obj['artist'].get('id') is not None:
-                            album_artist_id = str(album_obj['artist'].get('id')).strip() or None
-                    elif 'artists' in album_obj and isinstance(album_obj['artists'], list) and len(album_obj['artists']) > 0:
-                        first_artist = album_obj['artists'][0]
-                        if isinstance(first_artist, dict):
-                            album_artist_name = first_artist.get('name')
-                            if first_artist.get('id') is not None:
-                                album_artist_id = str(first_artist.get('id')).strip() or None
-
-        except requests.exceptions.RequestException as e:
-            print(f"[DOWNLOAD] Warning: Failed to fetch album artist for album {album_id}: {str(e)}", flush=True)
+    if not album_artist_name:
+        album_artist_name = track_artist_name
 
     artist_name = track_artist_name
     effective_artist_name = album_artist_name or track_artist_name
@@ -4234,16 +4139,10 @@ def process_download_job(job_id, payload):
     quality_candidates = []
     media_tags = []
     audio_quality = None
-    if isinstance(track_metadata, dict):
-        audio_quality = track_metadata.get('audioQuality')
-        media_meta = track_metadata.get('mediaMetadata')
-        if isinstance(media_meta, dict):
-            tags = media_meta.get('tags', [])
-            if isinstance(tags, list):
-                media_tags = tags
-
-    if isinstance(audio_quality, str) and audio_quality:
-        media_tags.append(audio_quality)
+    if isinstance(track_data, dict):
+        audio_quality = track_data.get('maxAudioQuality') or track_data.get('audioQuality')
+        if isinstance(audio_quality, str) and audio_quality:
+            media_tags.append(audio_quality)
 
     # Treat DOLBY_ATMOS as HIRES_LOSSLESS since it requires high-quality audio
     if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
@@ -4394,7 +4293,9 @@ def process_download_job(job_id, payload):
         'version': track_version,
         'copyright': copyright_text,
         'tidal_track_id': track_id,
-        'tidal_album_id': album_id
+        'tidal_album_id': album_id,
+        'isrc': track_data.get('isrc'),
+        'audio_quality': track_data.get('maxAudioQuality') or track_data.get('audioQuality'),
     }
 
     temp_folder = '/app/temp'
@@ -6308,6 +6209,10 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['TIDAL_ALBUM_ID'] = str(metadata.get('tidal_album_id'))
                 if metadata.get('version'):
                     audio['VERSION'] = str(metadata.get('version'))
+                if metadata.get('isrc'):
+                    audio['ISRC'] = str(metadata.get('isrc'))
+                if metadata.get('audio_quality'):
+                    audio['TXXX:audio_quality'] = str(metadata.get('audio_quality'))
 
                 # Add cover art if available
                 if cover_image_data:
@@ -6358,6 +6263,10 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['----:com.apple.iTunes:tidal_album_id'] = [str(metadata.get('tidal_album_id')).encode('utf-8')]
                 if metadata.get('version'):
                     audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
+                if metadata.get('isrc'):
+                    audio['----:com.apple.iTunes:isrc'] = [str(metadata.get('isrc')).encode('utf-8')]
+                if metadata.get('audio_quality'):
+                    audio['----:com.apple.iTunes:audio_quality'] = [str(metadata.get('audio_quality')).encode('utf-8')]
                 
                 if cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
@@ -6400,6 +6309,10 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
                 if metadata.get('version'):
                     audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
+                if metadata.get('isrc'):
+                    audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
+                if metadata.get('audio_quality'):
+                    audio['TXXX:audio_quality'] = TXXX(encoding=3, desc='audio_quality', text=str(metadata.get('audio_quality')))
                 
                 # Add cover art if available
                 if cover_image_data:
