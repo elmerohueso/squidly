@@ -139,12 +139,16 @@ def extract_hifi_track_info(info_response: Any) -> Dict[str, Any]:
             artists.append({
                 'id': artist_id,
                 'type': artist_type,
+                'name': artist_item.get('name'),
+                'picture': _format_hifi_image_value(artist_item.get('picture'), size=750),
             })
     elif isinstance(track_data.get('artist'), dict):
         artist_item = track_data.get('artist')
         artists.append({
             'id': artist_item.get('id'),
             'type': artist_item.get('type'),
+            'name': artist_item.get('name'),
+            'picture': _format_hifi_image_value(artist_item.get('picture'), size=750),
         })
 
     album_info = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
@@ -648,16 +652,26 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
         album_response = _fetch_hifi_album_payload(album_id) if album_id is not None else {}
         album_info = extract_hifi_album_info(album_response)
 
-    artist_ids = set()
+    missing_artist_ids = set()
     for artist_entry in track_info.get('track_artists', []):
-        if isinstance(artist_entry, dict) and artist_entry.get('id') is not None:
-            artist_ids.add(artist_entry.get('id'))
+        if not isinstance(artist_entry, dict):
+            continue
+        artist_id = artist_entry.get('id')
+        if artist_id is None:
+            continue
+        if artist_entry.get('name') is None or artist_entry.get('picture') is None:
+            missing_artist_ids.add(artist_id)
     for artist_entry in album_info.get('album_artists', []):
-        if isinstance(artist_entry, dict) and artist_entry.get('id') is not None:
-            artist_ids.add(artist_entry.get('id'))
+        if not isinstance(artist_entry, dict):
+            continue
+        artist_id = artist_entry.get('id')
+        if artist_id is None:
+            continue
+        if artist_entry.get('name') is None or artist_entry.get('picture') is None:
+            missing_artist_ids.add(artist_id)
 
     artist_responses = {}
-    for artist_id in artist_ids:
+    for artist_id in missing_artist_ids:
         artist_responses[artist_id] = _fetch_hifi_artist_payload(artist_id)
 
     track_artists = []
@@ -665,6 +679,17 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
         if not isinstance(artist_entry, dict):
             continue
         artist_id = artist_entry.get('id')
+        if artist_id is None:
+            continue
+        if artist_entry.get('name') is not None or artist_entry.get('picture') is not None:
+            track_artists.append({
+                'id': artist_id,
+                'name': artist_entry.get('name'),
+                'picture': artist_entry.get('picture'),
+                'type': artist_entry.get('type'),
+            })
+            continue
+
         artist_details = _resolve_hifi_artist_details(artist_id, artist_responses)
         track_artists.append({
             'id': artist_details.get('id'),
@@ -679,6 +704,16 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
             if not isinstance(artist_entry, dict):
                 continue
             artist_id = artist_entry.get('id')
+            if artist_id is None:
+                continue
+            if artist_entry.get('name') is not None or artist_entry.get('picture') is not None:
+                album_artists.append({
+                    'id': artist_id,
+                    'name': artist_entry.get('name'),
+                    'picture': artist_entry.get('picture'),
+                    'type': artist_entry.get('type'),
+                })
+                continue
             artist_details = _resolve_hifi_artist_details(artist_id, artist_responses)
             album_artists.append({
                 'id': artist_details.get('id'),
