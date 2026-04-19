@@ -8399,9 +8399,7 @@ class App {
                 },
                 body: JSON.stringify({
                     trackId,
-                    format: 'original',
                     quality: this.downloadSettings.quality,
-                    downloadType,
                     fileNaming: this.downloadSettings.fileNamingAlbum,
                     fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
                     plex_playlist: playlistName,
@@ -8830,9 +8828,7 @@ private async downloadTrackToLibrary(
                         },
                         body: JSON.stringify({
                             trackId,
-                            format: 'original',
                             quality: this.downloadSettings.quality,
-                            downloadType,
                             fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
                             ignore_matches: this.downloadSettings.ignoreMatches
@@ -8892,9 +8888,7 @@ private async downloadTrackToLibrary(
                         },
                         body: JSON.stringify({
                             trackId,
-                            format: 'original',
                             quality: this.downloadSettings.quality,
-                            downloadType,
                             fileNaming: this.downloadSettings.fileNamingAlbum,
                             fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
                             plex_playlist: plexPlaylistName,

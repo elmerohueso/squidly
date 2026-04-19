@@ -3833,11 +3833,9 @@ def _raise_if_job_cancelled(job_id):
 
 def process_download_job(job_id, payload):
     track_id = payload.get('trackId')
-    file_format = payload.get('format', 'original')
-    download_type = payload.get('downloadType', 'loose')
-    quality_choice = str(payload.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])).strip().upper() or DEFAULT_DOWNLOAD_SETTINGS['quality']
+    quality_choice = str(payload.get('downloadQuality', payload.get('quality'))).strip().upper()
     if quality_choice not in ('LOSSLESS', 'HIGH', 'LOW'):
-        quality_choice = DEFAULT_DOWNLOAD_SETTINGS['quality']
+        quality_choice = 'LOSSLESS'
 
     stages = {
         'downloaded': 'pending',
@@ -3850,40 +3848,71 @@ def process_download_job(job_id, payload):
     if not track_id:
         raise ValueError('trackId is required')
 
-    if download_type not in ('album', 'loose'):
-        download_type = 'loose'
+    print(f"[DOWNLOAD] Fetching track metadata from normalized HiFi object for quality={quality_choice}", flush=True)
+    try:
+        track_object = get_hifi_track_object(
+            track_id,
+            include_streams=True,
+            include_album=True,
+            audio_quality=quality_choice
+        )
+    except Exception as e:
+        raise TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
+
+    if not isinstance(track_object, dict):
+        raise TransientDownloadError("Failed to build normalized track object")
 
     file_naming = payload.get('fileNaming')
     if not file_naming:
         file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
 
-    if file_format not in ('original', 'mp3'):
-        raise ValueError('Invalid format value')
-
     downloads_folder = DOWNLOADS_ROOT
-
-    print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
-    print(f"[DOWNLOAD] Format: {file_format}", flush=True)
-    print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
-    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
-    print(f"[DOWNLOAD] Download type: {download_type}", flush=True)
-    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
 
     if not os.path.exists(downloads_folder):
         print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
         os.makedirs(downloads_folder, exist_ok=True)
 
-    print(f"[DOWNLOAD] Fetching track metadata from normalized HiFi object...", flush=True)
-    try:
-        track_object = get_hifi_track_object(track_id, include_album=True)
-    except Exception as e:
-        raise TransientDownloadError(f"Failed to fetch track metadata: {str(e)}") from e
+    track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
+    album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+    track_streams = track_data.get('track_streams') if isinstance(track_data.get('track_streams'), dict) else {}
+    selected_stream = track_streams.get(quality_choice)
+    if not (isinstance(selected_stream, dict) and isinstance(selected_stream.get('url'), str) and selected_stream.get('url')):
+        raise ManifestDownloadError(f"Failed to get track stream for quality '{quality_choice}' from normalized HiFi object")
 
-    if not isinstance(track_object, dict):
-        raise TransientDownloadError("Failed to build normalized track metadata")
+    download_url = selected_stream.get('url')
+    stream_codec = selected_stream.get('codec')
+    stream_audio_mode = selected_stream.get('audioMode')
+    codec_value = str(stream_codec or '').strip().lower()
+    if 'flac' in codec_value:
+        output_format = 'flac'
+    elif 'aac' in codec_value or 'mp4' in codec_value or 'alac' in codec_value:
+        output_format = 'm4a'
+    else:
+        output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
+    print(
+        f"[DOWNLOAD] Selected stream quality='{quality_choice}' codec={stream_codec!r} output_format={output_format!r} audioMode={stream_audio_mode!r} url={download_url}",
+        flush=True
+    )
+
+
+    print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
+    print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
+    print(f"[DOWNLOAD] Output format: {output_format}", flush=True)
+    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
+    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
-    album_data = track_object.get('album') if isinstance(track_object.get('album'), dict) else {}
+    album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+
+    print(f"[DOWNLOAD_DEBUG] raw track_object keys={list(track_object.keys())}", flush=True)
+    print(
+        f"[DOWNLOAD_DEBUG] read track fields id={track_data.get('id')!r} title={track_data.get('title')!r} version={track_data.get('version')!r} explicit={track_data.get('explicit')!r} trackNumber={track_data.get('trackNumber')!r} discNumber={track_data.get('discNumber')!r} volumeNumber={track_data.get('volumeNumber')!r} isrc={track_data.get('isrc')!r} maxAudioQuality={track_data.get('maxAudioQuality')!r} audioQuality={track_data.get('audioQuality')!r} copyright={track_data.get('copyright')!r} artists={[a.get('name') if isinstance(a, dict) else None for a in (track_data.get('artists') or [])]!r}",
+        flush=True
+    )
+    print(
+        f"[DOWNLOAD_DEBUG] read album fields id={album_data.get('id')!r} title={album_data.get('title')!r} cover={album_data.get('cover')!r} releaseDate={album_data.get('releaseDate')!r} explicit={album_data.get('explicit')!r} numberOfDiscs={album_data.get('numberOfDiscs')!r} numberOfVolumes={album_data.get('numberOfVolumes')!r} numberOfTracks={album_data.get('numberOfTracks')!r} maxAudioQuality={album_data.get('maxAudioQuality')!r} copyright={album_data.get('copyright')!r} artists={[a.get('name') if isinstance(a, dict) else None for a in (album_data.get('artists') or [])]!r}",
+        flush=True
+    )
 
     track_artist_name = 'Unknown Artist'
     track_artist_id = None
@@ -3950,20 +3979,29 @@ def process_download_job(job_id, payload):
             release_year = album_data.get('releaseDate')[:4]
 
         album_artists = []
+        main_album_artist_name = None
         if isinstance(album_data.get('artists'), list):
             for artist in album_data['artists']:
                 if isinstance(artist, dict) and artist.get('name'):
-                    album_artists.append(str(artist.get('name')).strip())
+                    artist_name = str(artist.get('name')).strip()
+                    album_artists.append(artist_name)
+                    if main_album_artist_name is None and str(artist.get('type') or '').upper() == 'MAIN':
+                        main_album_artist_name = artist_name
                     if album_artist_id is None and artist.get('id') is not None:
                         album_artist_id = str(artist.get('id')).strip() or None
         elif isinstance(album_data.get('artists'), dict):
             artist = album_data['artists']
             if isinstance(artist, dict) and artist.get('name'):
-                album_artists.append(str(artist.get('name')).strip())
+                artist_name = str(artist.get('name')).strip()
+                album_artists.append(artist_name)
+                if str(artist.get('type') or '').upper() == 'MAIN':
+                    main_album_artist_name = artist_name
                 if artist.get('id') is not None:
                     album_artist_id = str(artist.get('id')).strip() or None
 
-        if album_artists:
+        if main_album_artist_name:
+            album_artist_name = main_album_artist_name
+        elif album_artists:
             album_artist_name = album_artists[0]
 
         try:
@@ -3986,7 +4024,7 @@ def process_download_job(job_id, payload):
 
     print(f"[DOWNLOAD] Extracted metadata: TrackArtist='{track_artist_name}', AlbumArtist='{album_artist_name or ''}', EffectiveArtistForPath='{effective_artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', DiscNum='{disc_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
 
-    file_ext = 'flac' if file_format == 'original' else 'mp3'
+    file_ext = output_format
 
     safe_artist = sanitize_filename_component(effective_artist_name)
     safe_album = sanitize_filename_component(album_name)
@@ -4008,8 +4046,10 @@ def process_download_job(job_id, payload):
     full_path = os.path.join(downloads_folder, file_path)
     full_path = os.path.normpath(full_path)
 
+    print(f"[DOWNLOAD_DEBUG] file_naming='{file_naming}' template -> file_path='{file_path}'", flush=True)
+    print(f"[DOWNLOAD_DEBUG] resolved full_path='{full_path}' downloads_folder='{downloads_folder}'", flush=True)
     print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{file_format}', title='{track_title}', artist='{artist_name}', album='{album_name}', effective_artist='{effective_artist_name}'",
+        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{output_format}', title='{track_title}', artist='{artist_name}', album='{album_name}', effective_artist='{effective_artist_name}'",
         flush=True
     )
 
@@ -4021,24 +4061,7 @@ def process_download_job(job_id, payload):
     ignore_matches = bool(payload.get('ignore_matches', False))
     matching_rows = []
     if not ignore_matches:
-        matching_rows = [row for row in metadata_rows if _matches_requested_format(file_format, row.get('format'))]
-
-    # If downloading MP3, skip the "existing match" shortcut for low-quality copies (≤192 kbps).
-    # Those will be re-downloaded and overwrite the existing file.
-    low_quality_mp3_rows = []
-    if file_format == 'mp3':
-        kept, low_quality_mp3_rows = [], []
-        for row in matching_rows:
-            if (_matches_requested_format('mp3', row.get('format'))
-                    and isinstance(row.get('bitrate'), int)
-                    and row['bitrate'] <= 192):
-                low_quality_mp3_rows.append(row)
-            else:
-                kept.append(row)
-        matching_rows = kept
-
-    is_upgrading = not matching_rows and bool(low_quality_mp3_rows)
-    upgrade_from_bitrate = low_quality_mp3_rows[0].get('bitrate') if is_upgrading else None
+        matching_rows = [row for row in metadata_rows if _matches_requested_format(output_format, row.get('format'))]
 
     summary_rows = [
         {
@@ -4052,12 +4075,6 @@ def process_download_job(job_id, payload):
         f"[DOWNLOAD_DECISION] Job {job_id}: metadata_candidates={len(metadata_rows)}, matching_selected_format={len(matching_rows)}, candidate_summary={summary_rows}",
         flush=True
     )
-    if is_upgrading:
-        print(
-            f"[DOWNLOAD_DECISION] Job {job_id}: re-downloading to upgrade existing MP3 ({upgrade_from_bitrate} kbps ≤ 192 threshold)",
-            flush=True
-        )
-
     if matching_rows:
         matched_row = matching_rows[0]
         matched_path = str(matched_row.get('file_path') or '').strip()
@@ -4070,7 +4087,7 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
         stages['downloaded'] = 'done'
         stages['id3_tagged'] = 'done'
-        stages['converted'] = 'done' if file_format == 'mp3' else 'skipped'
+        stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
         update_job_progress(job_id, {
@@ -4105,7 +4122,7 @@ def process_download_job(job_id, payload):
             album_title=album_name,
             album_artist_name=album_artist_name or track_artist_name,
             full_path=full_path,
-            audio_format=file_format,
+            audio_format=output_format,
             hifi_track_id=str(track_id),
             hifi_album_id=str(album_id) if album_id else None,
             track_hifi_artist_id=track_artist_id,
@@ -4114,7 +4131,7 @@ def process_download_job(job_id, payload):
 
         return {
             'file_path': full_path,
-            'format': file_format,
+            'format': output_format,
             'artist': artist_name,
             'album': album_name,
             'title': track_title,
@@ -4124,7 +4141,7 @@ def process_download_job(job_id, payload):
         }
 
     print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: downloading because no existing Plex inventory metadata matched selected format '{file_format}'",
+        f"[DOWNLOAD_DECISION] Job {job_id}: downloading because no existing Plex inventory metadata matched selected format '{output_format}'",
         flush=True
     )
 
@@ -4136,7 +4153,6 @@ def process_download_job(job_id, payload):
         'stages': stages
     })
 
-    quality_candidates = []
     media_tags = []
     audio_quality = None
     if isinstance(track_data, dict):
@@ -4147,108 +4163,6 @@ def process_download_job(job_id, payload):
     # Treat DOLBY_ATMOS as HIRES_LOSSLESS since it requires high-quality audio
     if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
         media_tags.append('HIRES_LOSSLESS')
-
-    if quality_choice == 'LOSSLESS':
-        quality_candidates = ['HI_RES_LOSSLESS', 'HIRES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
-    elif quality_choice == 'HIGH':
-        quality_candidates = ['HIGH', 'LOW']
-    else:
-        quality_candidates = ['LOW']
-
-    print(f"[DOWNLOAD] Available quality tags, selected: {quality_candidates}", flush=True)
-
-    print(f"[DOWNLOAD] Fetching track manifest...", flush=True)
-    manifest_base64 = None
-    last_manifest_status = None
-    manifest_error_message = None
-
-    for quality in quality_candidates:
-        try:
-            manifest_response, target = make_request_with_retry_rotating_mirrors(
-                f"/track/?id={track_id}&quality={quality}",
-                SQUID_URLS,
-                method='GET',
-                timeout=10,
-                max_retries=3
-            )
-        except requests.exceptions.RequestException as e:
-            manifest_error_message = str(e)
-            print(f"[DOWNLOAD] Quality '{quality}' manifest fetch failed: {manifest_error_message}", flush=True)
-            continue
-
-        last_manifest_status = manifest_response.status_code
-        mirror_name = target.get('name') if isinstance(target, dict) else 'unknown'
-
-        print(
-            f"[DOWNLOAD] Track manifest request via mirror '{mirror_name}' quality='{quality}' got status {manifest_response.status_code}",
-            flush=True
-        )
-
-        if manifest_response.status_code in (401, 403):
-            body_text = manifest_response.text or ''
-            manifest_error_message = f"{manifest_response.status_code}: {body_text.strip()}"
-            print(
-                f"[DOWNLOAD] Quality '{quality}' returned {manifest_response.status_code}. Trying next quality if available...",
-                flush=True
-            )
-            continue
-
-        if not manifest_response.ok:
-            print(
-                f"[DOWNLOAD] Mirror '{mirror_name}' returned non-OK status {manifest_response.status_code} for quality '{quality}'",
-                flush=True
-            )
-            manifest_error_message = f"{manifest_response.status_code}: {manifest_response.text or ''}".strip()
-            continue
-
-        manifest_data = manifest_response.json()
-        print(f"[DOWNLOAD] Track info response keys: {manifest_data.keys()}", flush=True)
-
-        manifest_mime_type = None
-        if isinstance(manifest_data, dict):
-            data = manifest_data.get('data')
-            if isinstance(data, dict):
-                manifest_base64 = data.get('manifest') or data.get('manifestBase64')
-                manifest_mime_type = data.get('manifestMimeType')
-
-            if not manifest_base64:
-                manifest_base64 = manifest_data.get('manifest') or manifest_data.get('manifestBase64')
-            if not manifest_mime_type:
-                manifest_mime_type = manifest_data.get('manifestMimeType')
-
-        if manifest_mime_type == 'application/dash+xml':
-            print(f"[DOWNLOAD] Quality {quality} returned MPD/DASH manifest (not supported), trying next quality...", flush=True)
-            manifest_base64 = None
-            continue
-
-        if isinstance(manifest_base64, str) and manifest_base64:
-            break
-
-    if not isinstance(manifest_base64, str) or not manifest_base64:
-        status_note = f" Status: {last_manifest_status}" if last_manifest_status is not None else ""
-        error_note = f" Last error: {manifest_error_message}" if manifest_error_message else ""
-        raise ManifestDownloadError(f"Failed to get track manifest.{status_note}{error_note}")
-
-    print(f"[DOWNLOAD] Got base64 manifest (length: {len(manifest_base64)})", flush=True)
-
-    normalized = manifest_base64.replace('-', '+').replace('_', '/')
-    padding = '=' * (-len(normalized) % 4)
-    manifest_json_bytes = base64.b64decode(normalized + padding)
-    manifest_json = manifest_json_bytes.decode('utf-8')
-    print(f"[DOWNLOAD] Decoded manifest: {manifest_json}", flush=True)
-
-    manifest = json.loads(manifest_json)
-    print(f"[DOWNLOAD] Parsed manifest keys: {manifest.keys()}", flush=True)
-
-    if 'urls' not in manifest or not manifest['urls']:
-        raise Exception('No download URLs found in manifest')
-
-    download_urls = manifest['urls']
-    if not isinstance(download_urls, list) or len(download_urls) == 0:
-        raise Exception('Invalid URLs format in manifest')
-
-    download_url = download_urls[0]
-    print(f"[DOWNLOAD] Download URL: {download_url}", flush=True)
 
     print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
 
@@ -4282,14 +4196,30 @@ def process_download_job(job_id, payload):
     if cover_url:
         cover_image_data = download_cover_image(cover_url)
 
+    album_track_count = None
+    if isinstance(album_data.get('numberOfTracks'), int):
+        album_track_count = album_data.get('numberOfTracks')
+    elif isinstance(album_data.get('numberOfTracks'), str) and album_data.get('numberOfTracks').isdigit():
+        album_track_count = int(album_data.get('numberOfTracks'))
+
+    album_disc_count = None
+    if isinstance(album_data.get('numberOfDiscs'), int):
+        album_disc_count = album_data.get('numberOfDiscs')
+    elif isinstance(album_data.get('numberOfDiscs'), str) and album_data.get('numberOfDiscs').isdigit():
+        album_disc_count = int(album_data.get('numberOfDiscs'))
+
     metadata_dict = {
-        'artist': artist_name,
+        'artist': track_artist_name,
+        'track_artists': track_artists or [track_artist_name],
         'album_artist': album_artist_name,
+        'album_artists': album_artists or ([album_artist_name] if album_artist_name else []),
         'title': track_title,
         'album': album_name,
         'year': release_year,
         'track_number': track_num,
         'disc_number': disc_num,
+        'track_total': album_track_count,
+        'disc_total': album_disc_count,
         'version': track_version,
         'copyright': copyright_text,
         'tidal_track_id': track_id,
@@ -4298,12 +4228,15 @@ def process_download_job(job_id, payload):
         'audio_quality': track_data.get('maxAudioQuality') or track_data.get('audioQuality'),
     }
 
+    print(f"[DOWNLOAD_DEBUG] cover_url='{cover_url}' cover_bytes={len(cover_image_data) if cover_image_data else 0}", flush=True)
+    print(f"[DOWNLOAD_DEBUG] metadata_dict={metadata_dict}", flush=True)
+
     temp_folder = '/app/temp'
     os.makedirs(temp_folder, exist_ok=True)
 
     temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
     temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
-    temp_mp3_path = os.path.join(temp_folder, f'temp_{track_id}.mp3')
+    temp_target_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
     print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
 
@@ -4315,48 +4248,59 @@ def process_download_job(job_id, payload):
     update_job_progress(job_id, {'stages': stages})
 
     print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
+    print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
     add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
+    print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
     stages['id3_tagged'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
-    if file_format == 'mp3':
-        print(f"[DOWNLOAD] Format is MP3 - converting staged {temp_source_ext.upper()}", flush=True)
-
-        success = convert_to_mp3(temp_source_path, temp_mp3_path, source_format=temp_source_ext)
-
+    converted = False
+    if output_format == 'm4a' and audio_format != 'm4a':
+        print(f"[DOWNLOAD] Output format is AAC - converting staged {temp_source_ext.upper()} to M4A", flush=True)
+        success = convert_to_aac(temp_source_path, temp_target_path, source_format=temp_source_ext)
         if not success:
             cleanup_file(temp_source_path)
-            cleanup_file(temp_mp3_path)
-            raise Exception(f"Failed to convert {temp_source_ext.upper()} to MP3")
+            cleanup_file(temp_target_path)
+            raise Exception(f"Failed to convert {temp_source_ext.upper()} to M4A")
 
-        shutil.move(temp_mp3_path, full_path)
-
-        # Ensure final MP3 has correct ID3 metadata after conversion.
+        shutil.move(temp_target_path, full_path)
+        print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
         add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+        print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
+        converted = True
+    elif output_format == 'flac' and audio_format != 'flac':
+        print(f"[DOWNLOAD] Output format is FLAC - converting staged {temp_source_ext.upper()} to FLAC", flush=True)
+        success = convert_to_flac(temp_source_path, temp_target_path, source_format=temp_source_ext)
+        if not success:
+            cleanup_file(temp_source_path)
+            cleanup_file(temp_target_path)
+            raise Exception(f"Failed to convert {temp_source_ext.upper()} to FLAC")
 
-        stages['converted'] = 'done'
-        stages['written'] = 'done'
-        set_last_download_activity_at(datetime.utcnow())
-        update_job_progress(job_id, {'stages': stages})
-        cleanup_file(temp_source_path)
-        cleanup_file(temp_mp3_path)
-
-        print(f"[DOWNLOAD] SUCCESS: Converted and saved MP3 to {full_path}", flush=True)
+        shutil.move(temp_target_path, full_path)
+        print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
+        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+        print(f"[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='{full_path}'", flush=True)
+        converted = True
     else:
-        original_ext = 'm4a' if audio_format == 'm4a' else 'flac'
-
-        if not full_path.endswith(f'.{original_ext}'):
-            full_path = full_path.rsplit('.', 1)[0] + f'.{original_ext}'
+        if not full_path.endswith(f'.{output_format}'):
+            full_path = full_path.rsplit('.', 1)[0] + f'.{output_format}'
             print(f"[DOWNLOAD] Updated output path with correct extension: {full_path}", flush=True)
 
-        print(f"[DOWNLOAD] Format is original ({original_ext.upper()}) - moving from temp", flush=True)
+        print(f"[DOWNLOAD] Output is {output_format.upper()} - moving from temp", flush=True)
         shutil.move(temp_source_path, full_path)
-        stages['converted'] = 'skipped'
-        stages['written'] = 'done'
-        set_last_download_activity_at(datetime.utcnow())
-        update_job_progress(job_id, {'stages': stages})
+
+    stages['converted'] = 'done' if converted else 'skipped'
+    stages['written'] = 'done'
+    set_last_download_activity_at(datetime.utcnow())
+    update_job_progress(job_id, {'stages': stages})
+
+    if converted:
         cleanup_file(temp_source_path)
-        print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
+        cleanup_file(temp_target_path)
+    else:
+        cleanup_file(temp_source_path)
+
+    print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
@@ -4374,11 +4318,9 @@ def process_download_job(job_id, payload):
     else:
         print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
         stages['playlist_added'] = 'skipped'
-    if is_upgrading:
-        stages['upgraded_existing'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
-    final_audio_format = 'mp3' if file_format == 'mp3' else original_ext
+    final_audio_format = output_format
     upsert_download_match_hint(
         track_title=track_title,
         track_artist_name=track_artist_name,
@@ -4394,16 +4336,13 @@ def process_download_job(job_id, payload):
 
     result = {
         'file_path': full_path,
-        'format': file_format,
+        'format': output_format,
         'artist': artist_name,
         'album': album_name,
         'title': track_title,
         'playlist_name': playlist_name,
         'stages': stages
     }
-    if is_upgrading:
-        result['download_upgraded_existing'] = True
-        result['upgraded_from_bitrate'] = upgrade_from_bitrate
     return result
 
 def download_job_worker():
@@ -5999,19 +5938,21 @@ def extract_year_from_text(text: str) -> str:
     return match.group(0) if match else ''
 
 def _requested_download_format(file_format):
-    normalized = str(file_format or 'original').strip().lower()
-    if normalized not in ('original', 'mp3'):
-        return 'original'
-    return normalized
+    normalized = str(file_format or '').strip().lower()
+    if normalized in ('m4a', 'aac', 'mp4'):
+        return 'm4a'
+    if normalized == 'flac':
+        return 'flac'
+    return 'm4a'
 
 def _matches_requested_format(file_format, candidate_format):
     normalized_request = _requested_download_format(file_format)
     normalized_candidate = str(candidate_format or '').strip().lower()
 
-    if normalized_request == 'mp3':
-        return normalized_candidate in ('mp3', 'mpeg')
+    if normalized_request == 'flac':
+        return normalized_candidate == 'flac'
 
-    return normalized_candidate not in ('', 'mp3', 'mpeg')
+    return normalized_candidate in ('m4a', 'aac', 'mp4')
 
 def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):
     """Query local tracks table for rows matching title+artist+album, falling back to title+artist.
@@ -6186,21 +6127,39 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         year = metadata.get('year', '')
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
+        file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
+        print(
+            f"[ID3_DEBUG] Writing tags for '{file_path}' type='{file_type}'",
+            flush=True
+        )
+        print(
+            f"[ID3_DEBUG] tag payload artist={artist!r} track_artists={metadata.get('track_artists')!r} album_artist={metadata.get('album_artist')!r} album_artists={metadata.get('album_artists')!r} title={title!r} album={album!r} year={year!r} track_number={track_num!r} disc_number={disc_num!r} version={metadata.get('version')!r} isrc={metadata.get('isrc')!r} audio_quality={metadata.get('audio_quality')!r}",
+            flush=True
+        )
         
         # Handle FLAC files
         if file_path.lower().endswith('.flac'):
             try:
                 audio = FLAC(file_path)
                 audio['TITLE'] = title
-                audio['ARTIST'] = artist
-                if metadata.get('album_artist'):
+                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                    audio['ARTIST'] = metadata.get('track_artists')
+                else:
+                    audio['ARTIST'] = artist
+                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                    audio['ALBUMARTIST'] = metadata.get('album_artists')
+                elif metadata.get('album_artist'):
                     audio['ALBUMARTIST'] = metadata.get('album_artist')
                 audio['ALBUM'] = album
                 if year:
                     audio['DATE'] = str(year)
                 audio['TRACKNUMBER'] = str(track_num)
+                if metadata.get('track_total') is not None:
+                    audio['TRACKTOTAL'] = str(metadata.get('track_total'))
                 if disc_num:
                     audio['DISCNUMBER'] = str(disc_num)
+                if metadata.get('disc_total') is not None:
+                    audio['DISCTOTAL'] = str(metadata.get('disc_total'))
                 if metadata.get('copyright'):
                     audio['COPYRIGHT'] = str(metadata.get('copyright'))
                 if metadata.get('tidal_track_id'):
@@ -6211,9 +6170,6 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['VERSION'] = str(metadata.get('version'))
                 if metadata.get('isrc'):
                     audio['ISRC'] = str(metadata.get('isrc'))
-                if metadata.get('audio_quality'):
-                    audio['TXXX:audio_quality'] = str(metadata.get('audio_quality'))
-
                 # Add cover art if available
                 if cover_image_data:
                     from mutagen.flac import Picture
@@ -6233,9 +6189,14 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
             try:
                 audio = MP4(file_path)
                 audio['\xa9nam'] = title
-                audio['\xa9ART'] = artist
-                if metadata.get('album_artist'):
-                    audio['aART'] = metadata.get('album_artist')
+                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                    audio['\xa9ART'] = metadata.get('track_artists')
+                else:
+                    audio['\xa9ART'] = [artist]
+                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                    audio['aART'] = metadata.get('album_artists')
+                elif metadata.get('album_artist'):
+                    audio['aART'] = [metadata.get('album_artist')]
                 audio['\xa9alb'] = album
                 
                 if year:
@@ -6244,14 +6205,22 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 if track_num:
                     try:
                         track_number = int(track_num)
-                        audio['trkn'] = [(track_number, 0)]
+                        track_total = metadata.get('track_total')
+                        if isinstance(track_total, int):
+                            audio['trkn'] = [(track_number, track_total)]
+                        else:
+                            audio['trkn'] = [(track_number, 0)]
                     except ValueError:
                         pass
 
                 if disc_num:
                     try:
                         disc_number = int(disc_num)
-                        audio['disk'] = [(disc_number, 0)]
+                        disc_total = metadata.get('disc_total')
+                        if isinstance(disc_total, int):
+                            audio['disk'] = [(disc_number, disc_total)]
+                        else:
+                            audio['disk'] = [(disc_number, 0)]
                     except ValueError:
                         pass
 
@@ -6265,8 +6234,6 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
                 if metadata.get('isrc'):
                     audio['----:com.apple.iTunes:isrc'] = [str(metadata.get('isrc')).encode('utf-8')]
-                if metadata.get('audio_quality'):
-                    audio['----:com.apple.iTunes:audio_quality'] = [str(metadata.get('audio_quality')).encode('utf-8')]
                 
                 if cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
@@ -6292,15 +6259,26 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                 
                 # Add text tags
                 audio['TIT2'] = TIT2(encoding=3, text=title)
-                audio['TPE1'] = TPE1(encoding=3, text=artist)
-                if metadata.get('album_artist'):
+                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                    audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
+                else:
+                    audio['TPE1'] = TPE1(encoding=3, text=artist)
+                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                    audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
+                elif metadata.get('album_artist'):
                     audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
                 audio['TALB'] = TALB(encoding=3, text=album)
                 if year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
-                audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
+                if metadata.get('track_total') is not None:
+                    audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
+                else:
+                    audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
                 if disc_num:
-                    audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
+                    if metadata.get('disc_total') is not None:
+                        audio['TPOS'] = TPOS(encoding=3, text=f"{disc_num}/{metadata.get('disc_total')}")
+                    else:
+                        audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
                 if metadata.get('copyright'):
                     audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
                 if metadata.get('tidal_track_id'):
@@ -6311,8 +6289,6 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
                 if metadata.get('isrc'):
                     audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
-                if metadata.get('audio_quality'):
-                    audio['TXXX:audio_quality'] = TXXX(encoding=3, desc='audio_quality', text=str(metadata.get('audio_quality')))
                 
                 # Add cover art if available
                 if cover_image_data:
@@ -6408,15 +6384,12 @@ def download_track():
     Enqueue a download job with specified settings.
     Expects JSON body with:
     - trackId: integer
-    - format: 'original' or 'mp3'
-    - downloadType: 'album'
+    - quality: 'LOSSLESS' | 'HIGH' | 'LOW'
     - fileNaming: string (template for filename, e.g. '{artist}/{album}/{track} - {title}.{ext}')
     - fileNamingAlbum: string (file naming template)
     """
     payload = request.get_json(silent=True) or {}
     track_id = payload.get('trackId')
-    file_format = payload.get('format', 'original')
-    download_type = 'album'  # All downloads treated as albums
 
     settings = get_download_settings()
     file_naming_album = settings.get('file_naming_album', DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'])
@@ -6427,9 +6400,6 @@ def download_track():
         print(f"[DOWNLOAD] ERROR: trackId is missing", flush=True)
         return jsonify({'error': 'trackId is required'}), 400
 
-    if file_format not in ('original', 'mp3'):
-        return jsonify({'error': 'Invalid format value'}), 400
-
     # Use global setting as fallback if not specified in payload
     ignore_matches = payload.get('ignore_matches')
     if ignore_matches is None:
@@ -6438,8 +6408,6 @@ def download_track():
 
     job_payload = {
         'trackId': track_id,
-        'format': file_format,
-        'downloadType': download_type,
         'fileNaming': file_naming,
         'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
         'plex_playlist': payload.get('plex_playlist'),
