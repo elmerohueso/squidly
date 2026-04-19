@@ -3929,17 +3929,21 @@ def process_download_job(job_id, payload):
     album_id = ''
     album_disc_count = 1
     album_has_multiple_discs = False
+    track_artists = []
 
     if isinstance(track_data, dict):
         if isinstance(track_data.get('artists'), list) and track_data['artists']:
             artist_names = [str(a.get('name', '')).strip() for a in track_data['artists'] if isinstance(a, dict) and a.get('name')]
             track_artist_name = '; '.join(artist_names) if artist_names else 'Unknown Artist'
+            track_artists = artist_names
             first_artist = track_data['artists'][0] if isinstance(track_data['artists'][0], dict) else None
             if first_artist and first_artist.get('id') is not None:
                 track_artist_id = str(first_artist.get('id')).strip() or None
         elif isinstance(track_data.get('artists'), dict):
             artist = track_data['artists']
             track_artist_name = str(artist.get('name', 'Unknown Artist'))
+            if artist.get('name'):
+                track_artists = [track_artist_name]
             if artist.get('id') is not None:
                 track_artist_id = str(artist.get('id')).strip() or None
 
@@ -4222,6 +4226,9 @@ def process_download_job(job_id, payload):
         'disc_total': album_disc_count,
         'version': track_version,
         'copyright': copyright_text,
+        'track_explicit': bool(track_data.get('explicit')),
+        'album_explicit': bool(album_data.get('explicit')),
+        'explicit': bool(track_data.get('explicit') or album_data.get('explicit')),
         'tidal_track_id': track_id,
         'tidal_album_id': album_id,
         'isrc': track_data.get('isrc'),
@@ -6162,6 +6169,9 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio['DISCTOTAL'] = str(metadata.get('disc_total'))
                 if metadata.get('copyright'):
                     audio['COPYRIGHT'] = str(metadata.get('copyright'))
+                if metadata.get('explicit'):
+                    audio['EXPLICIT'] = '1'
+                    audio['RATING'] = 'explicit'
                 if metadata.get('tidal_track_id'):
                     audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
                 if metadata.get('tidal_album_id'):
@@ -6226,6 +6236,9 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
 
                 if metadata.get('copyright'):
                     audio['©cpy'] = str(metadata.get('copyright'))
+                if metadata.get('explicit'):
+                    audio['rtng'] = [1]
+                    audio['----:com.apple.iTunes:explicit'] = [b'1']
                 if metadata.get('tidal_track_id'):
                     audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
                 if metadata.get('tidal_album_id'):
