@@ -450,7 +450,13 @@ import base64
 import requests
 import psycopg2
 import psycopg2.extras
-from squidly.hifi import get_hifi_album_object, get_hifi_artist_object, get_hifi_track_object
+from squidly.hifi import (
+    get_hifi_album_object,
+    get_hifi_artist_object,
+    get_hifi_track_object,
+    _get_hifi_album_dedupe_key,
+    _get_hifi_audio_quality_rank,
+)
 from itertools import cycle
 from datetime import datetime, timedelta
 import time
@@ -5239,12 +5245,50 @@ def search():
         result = response.json()
         result['proxied_via'] = target['name']
         
-        # Deduplicate results based on search type
+        # Deduplicate album search results locally while preserving upstream payload shape.
         if isinstance(result, dict):
             data = result.get('data')
             if isinstance(data, dict):
-                # Preserve upstream search result ordering and payload shape without local deduplication.
-                pass
+                albums = data.get('albums')
+                if isinstance(albums, dict):
+                    album_items = albums.get('items')
+                    if isinstance(album_items, list):
+                        best_by_key = {}
+                        for album in album_items:
+                            if not isinstance(album, dict):
+                                continue
+                            key = _get_hifi_album_dedupe_key(album)
+                            if key is None:
+                                continue
+                            existing = best_by_key.get(key)
+                            if existing is None:
+                                best_by_key[key] = album
+                                continue
+                            current_rank = _get_hifi_audio_quality_rank(album.get('audioQuality'))
+                            existing_rank = _get_hifi_audio_quality_rank(existing.get('audioQuality'))
+                            if current_rank > existing_rank:
+                                best_by_key[key] = album
+
+                        deduped_items = []
+                        seen_keys = set()
+                        for album in album_items:
+                            if not isinstance(album, dict):
+                                continue
+                            key = _get_hifi_album_dedupe_key(album)
+                            if key is None:
+                                deduped_items.append(album)
+                                continue
+                            if key in seen_keys:
+                                continue
+                            chosen = best_by_key.get(key)
+                            if chosen is not None:
+                                deduped_items.append(chosen)
+                                seen_keys.add(key)
+                            else:
+                                deduped_items.append(album)
+                                seen_keys.add(key)
+
+                        albums['items'] = deduped_items
         
         return jsonify(result)
     

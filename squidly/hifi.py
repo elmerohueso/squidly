@@ -529,6 +529,69 @@ def _build_hifi_album_object_from_artist_item(album_item: Any) -> Dict[str, Any]
     }
 
 
+def _normalize_hifi_album_title_and_version(album: Any) -> Any:
+    if not isinstance(album, dict):
+        return ('', '')
+
+    title = str(album.get('title') or '').strip()
+    version = str(album.get('version') or '').strip()
+
+    # Normalize common edition labels so equivalent deluxe variants collapse.
+    title_normalized = re.sub(r'\s+', ' ', title)
+    version_normalized = re.sub(r'\s+', ' ', version)
+
+    deluxe_pattern = re.compile(
+        r"\s*\((deluxe(?: edition)?|deluxe version|deluxe|additional track version|additional tracks version)\)\s*$",
+        re.IGNORECASE
+    )
+    match = deluxe_pattern.search(title_normalized)
+    if match:
+        title_normalized = deluxe_pattern.sub('', title_normalized).strip()
+        if not version_normalized:
+            version_normalized = match.group(1)
+
+    version_lower = version_normalized.strip().lower()
+    if version_lower in ('deluxe', 'deluxe edition', 'deluxe version', 'deluxe ed', 'deluxe ed.'):
+        version_normalized = 'deluxe'
+
+    return (title_normalized.strip().lower(), version_normalized.strip().lower())
+
+
+def _get_hifi_album_dedupe_key(album: Any) -> Any:
+    if not isinstance(album, dict):
+        return None
+
+    title, version = _normalize_hifi_album_title_and_version(album)
+    release_date = album.get('releaseDate')
+    number_of_tracks = album.get('numberOfTracks')
+    number_of_discs = album.get('numberOfDiscs') if album.get('numberOfDiscs') is not None else album.get('numberOfVolumes')
+    artists = []
+    for artist in album.get('artists', []):
+        if not isinstance(artist, dict):
+            continue
+        artists.append((artist.get('id'), str(artist.get('name') or '').strip().lower()))
+
+    return (
+        title,
+        version,
+        release_date,
+        number_of_tracks,
+        number_of_discs,
+        tuple(artists),
+    )
+
+
+def _get_hifi_audio_quality_rank(quality: Any) -> int:
+    quality_rank = {
+        'DOLBY_ATMOS': 5,
+        'HI_RES_LOSSLESS': 4,
+        'LOSSLESS': 3,
+        'HIGH': 2,
+        'LOW': 1,
+    }
+    return quality_rank.get(str(quality).strip().upper(), 0)
+
+
 def _normalize_hifi_artist_track_payload(track_payload: Any) -> Dict[str, Any]:
     if not isinstance(track_payload, dict):
         return {}
@@ -582,6 +645,21 @@ def get_hifi_artist_object(artist_id: Any, include_tracks: bool = True, include_
                 album_object = _build_hifi_album_object_from_artist_item(album_item)
                 if album_object.get('id') is not None:
                     album_objects.append(album_object)
+
+        deduped_albums = {}
+        for album_object in album_objects:
+            key = _get_hifi_album_dedupe_key(album_object)
+            existing = deduped_albums.get(key)
+            if existing is None:
+                deduped_albums[key] = album_object
+                continue
+
+            current_rank = _get_hifi_audio_quality_rank(album_object.get('maxAudioQuality'))
+            existing_rank = _get_hifi_audio_quality_rank(existing.get('maxAudioQuality'))
+            if current_rank > existing_rank:
+                deduped_albums[key] = album_object
+
+        album_objects = list(deduped_albums.values())
 
     top_track_items = _extract_hifi_artist_top_track_items(artist_response)
 
