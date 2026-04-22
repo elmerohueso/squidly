@@ -3351,6 +3351,10 @@ def process_hifi_match_job(job_id, payload):
                    matched_at, confirmed_at, last_seen_at
             FROM albums
             WHERE hifi_id IS NOT NULL
+              AND (
+                    complete = FALSE
+                 OR matched_track_count < expected_track_count
+              )
             ORDER BY album_id ASC
             """
         )
