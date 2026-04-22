@@ -253,6 +253,12 @@ def _extract_hifi_audio_quality(payload: Any) -> Any:
     if not isinstance(payload, dict):
         return None
 
+    audio_modes = payload.get('audioModes')
+    if isinstance(audio_modes, list):
+        for mode in audio_modes:
+            if str(mode).strip().upper() == 'DOLBY_ATMOS':
+                return 'DOLBY_ATMOS'
+
     media_metadata = payload.get('mediaMetadata') if isinstance(payload.get('mediaMetadata'), dict) else {}
     tags = []
     if isinstance(media_metadata.get('tags'), list):
@@ -579,6 +585,111 @@ def _get_hifi_album_dedupe_key(album: Any) -> Any:
         number_of_discs,
         tuple(artists),
     )
+
+
+def _get_hifi_track_dedupe_key(track: Any) -> Any:
+    if not isinstance(track, dict):
+        return None
+
+    title = str(track.get('title') or '').strip().lower()
+    version = str(track.get('version') or '').strip().lower()
+    album = track.get('album') if isinstance(track.get('album'), dict) else {}
+    album_title = str(album.get('title') or '').strip().lower()
+    album_version = str(album.get('version') or '').strip().lower()
+    artists = []
+    primary_artist = track.get('artist') if isinstance(track.get('artist'), dict) else None
+    if primary_artist:
+        artists.append((primary_artist.get('id'), str(primary_artist.get('name') or '').strip().lower()))
+    for artist in track.get('artists', []):
+        if not isinstance(artist, dict):
+            continue
+        key = (artist.get('id'), str(artist.get('name') or '').strip().lower())
+        if key not in artists:
+            artists.append(key)
+
+    if title and album_title:
+        return ('track', title, version, album_title, album_version, tuple(artists))
+
+    isrc = str(track.get('isrc') or '').strip()
+    if isrc:
+        return ('isrc', isrc, tuple(artists))
+
+    return None
+
+
+def _normalize_hifi_track_payload(track_payload: Any) -> Dict[str, Any]:
+    if not isinstance(track_payload, dict):
+        return {}
+
+    if track_payload.get('type') == 'track' and isinstance(track_payload.get('item'), dict):
+        return track_payload.get('item')
+
+    if isinstance(track_payload.get('track'), dict):
+        return track_payload.get('track')
+
+    return track_payload
+
+
+def _build_normalized_hifi_track_object(track_payload: Any) -> Dict[str, Any]:
+    track_payload = _normalize_hifi_track_payload(track_payload)
+    if not isinstance(track_payload, dict):
+        return {}
+
+    title = str(track_payload.get('title') or track_payload.get('track_name') or track_payload.get('name') or '').strip()
+    version = str(track_payload.get('version') or track_payload.get('track_version') or '').strip()
+    explicit = bool(track_payload.get('explicit'))
+    duration = track_payload.get('duration')
+    track_number = track_payload.get('trackNumber') if track_payload.get('trackNumber') is not None else track_payload.get('track_number')
+    disc_number = track_payload.get('volumeNumber') if track_payload.get('volumeNumber') is not None else track_payload.get('discNumber')
+    if disc_number is None:
+        disc_number = track_payload.get('disc_number')
+    replay_gain = track_payload.get('replayGain') if track_payload.get('replayGain') is not None else track_payload.get('replay_gain')
+    copyright_text = track_payload.get('copyright')
+    isrc = track_payload.get('isrc') or track_payload.get('isrc_code')
+    url = track_payload.get('url')
+    max_audio_quality = _extract_hifi_audio_quality(track_payload)
+
+    artists = []
+    if isinstance(track_payload.get('artists'), list):
+        for artist_entry in track_payload.get('artists'):
+            if not isinstance(artist_entry, dict):
+                continue
+            artists.append(_normalize_hifi_artist_entry(artist_entry))
+    elif isinstance(track_payload.get('artist'), dict):
+        artists.append(_normalize_hifi_artist_entry(track_payload.get('artist')))
+    elif isinstance(track_payload.get('artist_name'), str):
+        artists.append({'id': None, 'name': str(track_payload.get('artist_name')).strip(), 'picture': None, 'type': None})
+
+    album_payload = track_payload.get('album') if isinstance(track_payload.get('album'), dict) else {}
+    album = {
+        'id': album_payload.get('id'),
+        'title': str(album_payload.get('title') or album_payload.get('album_title') or '').strip(),
+        'version': str(album_payload.get('version') or '').strip() if album_payload.get('version') is not None else '',
+        'cover': _format_hifi_image_value(album_payload.get('cover'), size=640),
+        'releaseDate': album_payload.get('releaseDate'),
+        'url': album_payload.get('url'),
+    }
+
+    if not album['title'] and isinstance(track_payload.get('album_title'), str):
+        album['title'] = str(track_payload.get('album_title')).strip()
+
+    return {
+        'id': track_payload.get('id'),
+        'title': title,
+        'version': version,
+        'explicit': explicit,
+        'trackNumber': track_number,
+        'replayGain': replay_gain,
+        'duration': duration,
+        'discNumber': disc_number,
+        'copyright': copyright_text,
+        'url': url,
+        'isrc': isrc,
+        'maxAudioQuality': max_audio_quality,
+        'artists': artists,
+        'album': album,
+        'track_streams': {},
+    }
 
 
 def _get_hifi_audio_quality_rank(quality: Any) -> int:

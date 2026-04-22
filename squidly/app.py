@@ -454,7 +454,9 @@ from squidly.hifi import (
     get_hifi_album_object,
     get_hifi_artist_object,
     get_hifi_track_object,
+    _build_normalized_hifi_track_object,
     _get_hifi_album_dedupe_key,
+    _get_hifi_track_dedupe_key,
     _get_hifi_audio_quality_rank,
 )
 from itertools import cycle
@@ -1816,6 +1818,51 @@ def _fetch_hifi_search_results(search_type, query, limit=10):
     if search_type == 'al':
         return data.get('albums', {}).get('items', []) or []
     return data.get('items', []) or []
+
+
+def _normalize_hifi_playlist_items(items):
+    if not isinstance(items, list):
+        return items or []
+
+    best_by_key = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized = _build_normalized_hifi_track_object(item)
+        key = _get_hifi_track_dedupe_key(normalized)
+        if key is None:
+            continue
+        existing = best_by_key.get(key)
+        if existing is None:
+            best_by_key[key] = normalized
+            continue
+        current_rank = _get_hifi_audio_quality_rank(normalized.get('maxAudioQuality'))
+        existing_rank = _get_hifi_audio_quality_rank(existing.get('maxAudioQuality'))
+        if current_rank > existing_rank:
+            best_by_key[key] = normalized
+
+    deduped_items = []
+    seen_keys = set()
+    for item in items:
+        if not isinstance(item, dict):
+            deduped_items.append(item)
+            continue
+        normalized = _build_normalized_hifi_track_object(item)
+        key = _get_hifi_track_dedupe_key(normalized)
+        if key is None:
+            deduped_items.append(normalized)
+            continue
+        if key in seen_keys:
+            continue
+        chosen = best_by_key.get(key)
+        if chosen is not None:
+            deduped_items.append(chosen)
+            seen_keys.add(key)
+        else:
+            deduped_items.append(normalized)
+            seen_keys.add(key)
+
+    return deduped_items
 
 
 def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
@@ -5208,9 +5255,11 @@ def search():
             if 'id' not in track_item or not track_item.get('id'):
                 track_item['id'] = int(query)
 
+            normalized_track_item = _build_normalized_hifi_track_object(track_item) if isinstance(track_item, dict) else track_item
+
             # Coerce to track-list shape for front-end
             return jsonify({
-                'data': {'items': [track_item]},
+                'data': {'items': [normalized_track_item]},
                 'proxied_via': target['name']
             })
 
@@ -5245,38 +5294,78 @@ def search():
         result = response.json()
         result['proxied_via'] = target['name']
         
-        # Deduplicate album search results locally while preserving upstream payload shape.
+        # Deduplicate search results locally while preserving upstream payload shape.
         if isinstance(result, dict):
             data = result.get('data')
             if isinstance(data, dict):
-                albums = data.get('albums')
-                if isinstance(albums, dict):
-                    album_items = albums.get('items')
-                    if isinstance(album_items, list):
+                if search_type == 'al':
+                    albums = data.get('albums')
+                    if isinstance(albums, dict):
+                        album_items = albums.get('items')
+                        if isinstance(album_items, list):
+                            best_by_key = {}
+                            for album in album_items:
+                                if not isinstance(album, dict):
+                                    continue
+                                key = _get_hifi_album_dedupe_key(album)
+                                if key is None:
+                                    continue
+                                existing = best_by_key.get(key)
+                                if existing is None:
+                                    best_by_key[key] = album
+                                    continue
+                                current_rank = _get_hifi_audio_quality_rank(album.get('audioQuality'))
+                                existing_rank = _get_hifi_audio_quality_rank(existing.get('audioQuality'))
+                                if current_rank > existing_rank:
+                                    best_by_key[key] = album
+
+                            deduped_items = []
+                            seen_keys = set()
+                            for album in album_items:
+                                if not isinstance(album, dict):
+                                    continue
+                                key = _get_hifi_album_dedupe_key(album)
+                                if key is None:
+                                    deduped_items.append(album)
+                                    continue
+                                if key in seen_keys:
+                                    continue
+                                chosen = best_by_key.get(key)
+                                if chosen is not None:
+                                    deduped_items.append(chosen)
+                                    seen_keys.add(key)
+                                else:
+                                    deduped_items.append(album)
+                                    seen_keys.add(key)
+
+                            albums['items'] = deduped_items
+                elif search_type == 's':
+                    items = data.get('items')
+                    if isinstance(items, list):
                         best_by_key = {}
-                        for album in album_items:
-                            if not isinstance(album, dict):
+                        for item in items:
+                            if not isinstance(item, dict):
                                 continue
-                            key = _get_hifi_album_dedupe_key(album)
+                            key = _get_hifi_track_dedupe_key(item)
                             if key is None:
                                 continue
                             existing = best_by_key.get(key)
                             if existing is None:
-                                best_by_key[key] = album
+                                best_by_key[key] = item
                                 continue
-                            current_rank = _get_hifi_audio_quality_rank(album.get('audioQuality'))
+                            current_rank = _get_hifi_audio_quality_rank(item.get('audioQuality'))
                             existing_rank = _get_hifi_audio_quality_rank(existing.get('audioQuality'))
                             if current_rank > existing_rank:
-                                best_by_key[key] = album
+                                best_by_key[key] = item
 
                         deduped_items = []
                         seen_keys = set()
-                        for album in album_items:
-                            if not isinstance(album, dict):
+                        for item in items:
+                            if not isinstance(item, dict):
                                 continue
-                            key = _get_hifi_album_dedupe_key(album)
+                            key = _get_hifi_track_dedupe_key(item)
                             if key is None:
-                                deduped_items.append(album)
+                                deduped_items.append(item)
                                 continue
                             if key in seen_keys:
                                 continue
@@ -5285,11 +5374,11 @@ def search():
                                 deduped_items.append(chosen)
                                 seen_keys.add(key)
                             else:
-                                deduped_items.append(album)
+                                deduped_items.append(item)
                                 seen_keys.add(key)
 
-                        albums['items'] = deduped_items
-        
+                        data['items'] = [_build_normalized_hifi_track_object(item) if isinstance(item, dict) else item for item in deduped_items]
+
         return jsonify(result)
     
     except requests.exceptions.RequestException as e:
@@ -5553,6 +5642,14 @@ def playlist_info(playlist_id=None):
         
         result = response.json()
         result['proxied_via'] = target['name']
+
+        if isinstance(result, dict):
+            data = result.get('data')
+            if isinstance(data, dict):
+                playlist_items = data.get('items')
+                if isinstance(playlist_items, list):
+                    data['items'] = _normalize_hifi_playlist_items(playlist_items)
+                    result['data'] = data
         
         return jsonify(result)
     
