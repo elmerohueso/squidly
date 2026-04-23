@@ -507,8 +507,6 @@ class App {
     private plexPinDisplay: HTMLElement;
     private plexPinCopyButton: HTMLButtonElement;
     private plexPinStatus: HTMLElement;
-    private plexLibraryConfigContainer: HTMLElement;
-    private plexLibraryNameSelect: HTMLSelectElement;
     private plexLoginOnlyContainer: HTMLElement;
     private plexLoginOnlyButton: HTMLButtonElement;
     private plexLoginOnlyPinContainer: HTMLElement;
@@ -778,8 +776,6 @@ class App {
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
         this.plexPinCopyButton = document.getElementById('plexPinCopy') as HTMLButtonElement;
         this.plexPinStatus = document.getElementById('plexPinStatus') as HTMLElement;
-        this.plexLibraryConfigContainer = document.getElementById('plexLibraryConfig') as HTMLElement;
-        this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
         this.plexLoginOnlyContainer = document.getElementById('plexLoginOnlyContainer') as HTMLElement;
         this.plexLoginOnlyButton = document.getElementById('plexLoginOnlyButton') as HTMLButtonElement;
         this.plexLoginOnlyPinContainer = document.getElementById('plexLoginOnlyPinContainer') as HTMLElement;
@@ -2298,6 +2294,7 @@ class App {
                     console.log('[USER_INIT] Loading playlists for user');
                     await this.updateSidebarPlaylists();
                     this.updateUserTypeAccess();
+                    await this.updatePlexLoginOnlyState();
                 } else {
                     console.log('[USER_INIT] No selected user found, checking for owner');
                     if (users.length > 0) {
@@ -2314,6 +2311,7 @@ class App {
                             this.isPlexSelectedUserOwner = true;
                             await this.updateSidebarPlaylists();
                             this.updateUserTypeAccess();
+                            await this.updatePlexLoginOnlyState();
                         }
                     }
                 }
@@ -4937,19 +4935,19 @@ class App {
             const response = await fetch('/api/plex/config');
             if (response.ok) {
                 const data = await response.json();
-                // Populate library dropdown with saved library
-                if (this.plexLibraryNameSelect) {
-                    this.plexLibraryNameSelect.innerHTML = '';
+                // Populate the login-only library dropdown with saved library
+                if (this.plexLoginOnlyLibraryNameSelect) {
+                    this.plexLoginOnlyLibraryNameSelect.innerHTML = '';
                     const defaultOption = document.createElement('option');
                     defaultOption.value = '';
                     defaultOption.textContent = 'Select a library...';
-                    this.plexLibraryNameSelect.appendChild(defaultOption);
+                    this.plexLoginOnlyLibraryNameSelect.appendChild(defaultOption);
                     if (data.library_name) {
                         const option = document.createElement('option');
                         option.value = data.library_name;
                         option.textContent = data.library_name;
-                        this.plexLibraryNameSelect.appendChild(option);
-                        this.plexLibraryNameSelect.value = data.library_name;
+                        this.plexLoginOnlyLibraryNameSelect.appendChild(option);
+                        this.plexLoginOnlyLibraryNameSelect.value = data.library_name;
                     }
                 }
                 const intervalHours = Number(data.sync_interval_hours);
@@ -4959,8 +4957,9 @@ class App {
                 this.isPlexConfigured = data.has_config ? true : false;
                 this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
 
+                const configuredLibraryName = String(data.library_name || '').trim();
                 const savedUserId = window.localStorage.getItem('plexSelectedUserId') || '';
-                const libraryConfigured = Boolean(data.library_name);
+                const libraryConfigured = Boolean(configuredLibraryName);
                 const shouldShowPlexLoginOnly = !data.has_config || !libraryConfigured || !savedUserId;
 
                 if (this.plexLoginOnlyContainer) {
@@ -4971,16 +4970,10 @@ class App {
                 }
 
                 if (this.plexLoginOnlyLibraryNameSelect) {
-                    this.plexLoginOnlyLibraryNameSelect.value = data.library_name || '';
+                    this.plexLoginOnlyLibraryNameSelect.value = configuredLibraryName;
                 }
 
                 this.updatePlexLoginOnlyState();
-
-                // Show library selector only when Plex is configured (server+token exist) and a library hasn't been saved yet.
-                const shouldShowLibraryConfig = Boolean(data.has_config) && !libraryConfigured;
-                if (this.plexLibraryConfigContainer) {
-                    this.plexLibraryConfigContainer.style.display = shouldShowLibraryConfig ? '' : 'none';
-                }
 
                 this.updatePlexPlaylistContainerVisibility(false);
                 if (this.isPlexConfigured) {
@@ -5000,7 +4993,7 @@ class App {
         }
 
         const savedUserId = window.localStorage.getItem('plexSelectedUserId') || '';
-        const libraryName = this.plexLibraryNameSelect?.value?.trim() || this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
         const libraryConfigured = Boolean(libraryName);
         const needsLogin = !this.isPlexConfigured;
         const needsLibrary = this.isPlexConfigured && !libraryConfigured;
@@ -5041,32 +5034,20 @@ class App {
             }
             const data = await response.json();
             const libraries = Array.isArray(data.libraries) ? data.libraries : [];
-            const current = this.plexLibraryNameSelect?.value || this.plexLoginOnlyLibraryNameSelect?.value || '';
-
-            if (this.plexLibraryNameSelect) {
-                this.plexLibraryNameSelect.innerHTML = '';
-                const defaultOption = document.createElement('option');
-                defaultOption.value = '';
-                defaultOption.textContent = 'Select a library...';
-                this.plexLibraryNameSelect.appendChild(defaultOption);
-            }
+            const current = this.plexLoginOnlyLibraryNameSelect?.value || '';
 
             if (this.plexLoginOnlyLibraryNameSelect) {
                 this.plexLoginOnlyLibraryNameSelect.innerHTML = '';
-                const defaultOptionCopy = document.createElement('option');
-                defaultOptionCopy.value = '';
-                defaultOptionCopy.textContent = 'Select a library...';
-                this.plexLoginOnlyLibraryNameSelect.appendChild(defaultOptionCopy);
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select a library...';
+                this.plexLoginOnlyLibraryNameSelect.appendChild(defaultOption);
             }
 
             libraries.forEach((library: string) => {
                 const option = document.createElement('option');
                 option.value = library;
                 option.textContent = library;
-                if (this.plexLibraryNameSelect) {
-                    this.plexLibraryNameSelect.appendChild(option);
-                }
-
                 if (this.plexLoginOnlyLibraryNameSelect) {
                     const cloneOption = document.createElement('option');
                     cloneOption.value = library;
@@ -5075,13 +5056,8 @@ class App {
                 }
             });
 
-            if (current) {
-                if (this.plexLibraryNameSelect) {
-                    this.plexLibraryNameSelect.value = current;
-                }
-                if (this.plexLoginOnlyLibraryNameSelect) {
-                    this.plexLoginOnlyLibraryNameSelect.value = current;
-                }
+            if (current && this.plexLoginOnlyLibraryNameSelect) {
+                this.plexLoginOnlyLibraryNameSelect.value = current;
             }
         } catch (error) {
             console.warn('Failed to load Plex libraries.', error);
@@ -5089,7 +5065,7 @@ class App {
     }
 
     private async savePlexConfig(): Promise<void> {
-const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOnlyLibraryNameSelect?.value.trim() || '';
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
         if (!libraryName) {
             window.alert('Please select a library before saving.');
             return;
@@ -5117,16 +5093,13 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
             void this.updatePlexClearCredentialsButton();
 
             // Show saved state and hide config controls
-            const library = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOnlyLibraryNameSelect?.value.trim() || '';
+            const library = this.plexLoginOnlyLibraryNameSelect?.value.trim() || '';
             if (this.plexConnectedStatusEl) {
                 const serverLabel = this.plexConnectedStatusEl.textContent?.replace(/^Connected to\s*/, '') || '';
                 const serverName = serverLabel || '';
                 const libraryText = library ? ` (library: ${library})` : '';
                 this.plexConnectedStatusEl.textContent = `Connected to ${serverName}${libraryText}`.trim();
                 this.plexConnectedStatusEl.style.display = 'block';
-            }
-            if (this.plexLibraryConfigContainer) {
-                this.plexLibraryConfigContainer.style.display = 'none';
             }
 
             window.alert('Plex configuration saved.');
@@ -5140,7 +5113,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
 
 
     private async savePlexConfigFromLoginOnly(): Promise<void> {
-        const libraryName = this.plexLoginOnlyLibraryNameSelect.value.trim();
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
         if (!libraryName) {
             window.alert('Please select a library before saving.');
             return;
@@ -5396,7 +5369,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
 
             if (this.plexConnectedStatusEl) {
                 if (healthOk && typeof healthData.server_name === 'string' && healthData.server_name.trim()) {
-                    const library = this.plexLibraryNameSelect?.value?.trim() || '';
+                    const library = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
                     const libraryText = library ? ` (library: ${library})` : '';
                     this.plexConnectedStatusEl.textContent = `Connected to ${healthData.server_name}${libraryText}`;
                     this.plexConnectedStatusEl.style.display = 'block';
@@ -5474,6 +5447,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
                     await this.updateSidebarPlaylists();
                     await this.loadPlexPlaylists();
                     this.updateUserTypeAccess();
+                    await this.updatePlexLoginOnlyState();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });
@@ -5489,6 +5463,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
                         window.localStorage.setItem('plexSelectedUserIsOwner', 'true');
                         this.isPlexSelectedUserOwner = true;
                         this.updateUserTypeAccess();
+                        await this.updatePlexLoginOnlyState();
                     }
                 }
             }
