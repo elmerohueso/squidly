@@ -69,17 +69,6 @@ def init_db():
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS listenbrainz_config (
-            id INTEGER PRIMARY KEY,
-            user_token TEXT,
-            username TEXT,
-            updated_at TIMESTAMP NOT NULL,
-            CONSTRAINT check_single_row_lb CHECK (id = 1)
-        )
-        """
-    )
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS plex_config (
             id INTEGER PRIMARY KEY,
             server_url TEXT,
@@ -98,7 +87,8 @@ def init_db():
             id SERIAL PRIMARY KEY,
             username TEXT,
             plex_client_id TEXT UNIQUE,
-            plex_owner BOOLEAN NOT NULL DEFAULT FALSE
+            plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
+            listenbrainz_key TEXT
         )
         """
     )
@@ -112,6 +102,66 @@ def init_db():
     user_settings_columns = {row['column_name'] for row in cur.fetchall()}
     if 'plex_owner' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
+        user_settings_columns.add('plex_owner')
+    if 'listenbrainz_key' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = 'listenbrainz_config'
+              AND table_schema = 'public'
+        )
+        """
+    )
+    table_exists_row = cur.fetchone()
+    if table_exists_row and table_exists_row.get('exists'):
+        cur.execute('SELECT user_token FROM listenbrainz_config WHERE id = 1')
+        lb_row = cur.fetchone()
+        if lb_row and lb_row.get('user_token'):
+            token = lb_row['user_token']
+            cur.execute(
+                """
+                SELECT plex_client_id
+                FROM user_settings
+                WHERE plex_owner = TRUE
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            )
+            owner_row = cur.fetchone()
+            target_client_id = owner_row['plex_client_id'] if owner_row and owner_row.get('plex_client_id') else None
+            if not target_client_id:
+                cur.execute(
+                    """
+                    SELECT plex_client_id
+                    FROM user_settings
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                )
+                default_row = cur.fetchone()
+                target_client_id = default_row['plex_client_id'] if default_row and default_row.get('plex_client_id') else None
+            if target_client_id:
+                cur.execute(
+                    """
+                    UPDATE user_settings
+                    SET listenbrainz_key = %s
+                    WHERE plex_client_id = %s
+                    """,
+                    (token, target_client_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
+                    VALUES (%s, %s, %s)
+                    """,
+                    ('listenbrainz', 'listenbrainz_default', token)
+                )
+        cur.execute('DROP TABLE IF EXISTS listenbrainz_config')
     cur.execute(
         """
         SELECT column_name
@@ -383,7 +433,7 @@ def get_plex_user_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, username, plex_client_id, plex_owner
+        SELECT id, username, plex_client_id, plex_owner, listenbrainz_key
         FROM user_settings
         ORDER BY id ASC
         """
@@ -455,16 +505,30 @@ def clear_plex_user_settings():
     conn.close()
 
 
-def get_listenbrainz_config():
+def get_listenbrainz_config(user_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT user_token
-        FROM listenbrainz_config
-        WHERE id = 1
-        """
-    )
+
+    if user_id:
+        cur.execute(
+            """
+            SELECT listenbrainz_key
+            FROM user_settings
+            WHERE plex_client_id = %s
+            """,
+            (user_id,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT listenbrainz_key
+            FROM user_settings
+            WHERE listenbrainz_key IS NOT NULL
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+
     row = cur.fetchone()
     conn.close()
 
@@ -472,23 +536,43 @@ def get_listenbrainz_config():
         return {'user_token': None}
 
     return {
-        'user_token': row['user_token']
+        'user_token': row['listenbrainz_key']
     }
 
 
-def save_listenbrainz_config(user_token):
-    now = datetime.utcnow().isoformat() + 'Z'
+def save_listenbrainz_config(user_token, user_id=None):
+    user_token = str(user_token or '').strip()
+    if not user_token:
+        return
+
+    user_id = str(user_id or '').strip()
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if not user_id:
+        cur.execute(
+            """
+            SELECT plex_client_id
+            FROM user_settings
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        user_id = row['plex_client_id'] if row and row.get('plex_client_id') else None
+
+    if not user_id:
+        conn.close()
+        return
+
     cur.execute(
         """
-        INSERT INTO listenbrainz_config (id, user_token, username, updated_at)
-        VALUES (1, %s, NULL, %s)
-        ON CONFLICT(id) DO UPDATE SET
-            user_token = excluded.user_token,
-            updated_at = excluded.updated_at
+        INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (plex_client_id) DO UPDATE SET
+            listenbrainz_key = excluded.listenbrainz_key
         """,
-        (user_token, now)
+        (None, user_id, user_token)
     )
     conn.commit()
     conn.close()

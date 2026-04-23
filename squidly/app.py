@@ -768,17 +768,6 @@ def init_db():
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS listenbrainz_config (
-            id INTEGER PRIMARY KEY,
-            user_token TEXT,
-            username TEXT,
-            updated_at TIMESTAMP NOT NULL,
-            CONSTRAINT check_single_row_lb CHECK (id = 1)
-        )
-        """
-    )
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS plex_config (
             id INTEGER PRIMARY KEY,
             server_url TEXT,
@@ -797,7 +786,8 @@ def init_db():
             id SERIAL PRIMARY KEY,
             username TEXT,
             plex_client_id TEXT UNIQUE,
-            plex_owner BOOLEAN NOT NULL DEFAULT FALSE
+            plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
+            listenbrainz_key TEXT
         )
         """
     )
@@ -811,6 +801,66 @@ def init_db():
     user_settings_columns = {row['column_name'] for row in cur.fetchall()}
     if 'plex_owner' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
+        user_settings_columns.add('plex_owner')
+    if 'listenbrainz_key' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = 'listenbrainz_config'
+              AND table_schema = 'public'
+        )
+        """
+    )
+    table_exists_row = cur.fetchone()
+    if table_exists_row and table_exists_row.get('exists'):
+        cur.execute('SELECT user_token FROM listenbrainz_config WHERE id = 1')
+        lb_row = cur.fetchone()
+        if lb_row and lb_row.get('user_token'):
+            token = lb_row['user_token']
+            cur.execute(
+                """
+                SELECT plex_client_id
+                FROM user_settings
+                WHERE plex_owner = TRUE
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            )
+            owner_row = cur.fetchone()
+            target_client_id = owner_row['plex_client_id'] if owner_row and owner_row.get('plex_client_id') else None
+            if not target_client_id:
+                cur.execute(
+                    """
+                    SELECT plex_client_id
+                    FROM user_settings
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                )
+                default_row = cur.fetchone()
+                target_client_id = default_row['plex_client_id'] if default_row and default_row.get('plex_client_id') else None
+            if target_client_id:
+                cur.execute(
+                    """
+                    UPDATE user_settings
+                    SET listenbrainz_key = %s
+                    WHERE plex_client_id = %s
+                    """,
+                    (token, target_client_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
+                    VALUES (%s, %s, %s)
+                    """,
+                    ('listenbrainz', 'listenbrainz_default', token)
+                )
+        cur.execute('DROP TABLE IF EXISTS listenbrainz_config')
     cur.execute(
         """
         SELECT column_name
@@ -7152,7 +7202,8 @@ def endpoints_status():
 @app.route('/api/listenbrainz/config', methods=['GET'])
 def get_listenbrainz_config_endpoint():
     """Get the current ListenBrainz configuration"""
-    config = get_listenbrainz_config()
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
     return jsonify({
         'has_token': config['user_token'] is not None
     })
@@ -7166,11 +7217,14 @@ def save_listenbrainz_config_endpoint():
         return jsonify({'error': 'No JSON payload provided'}), 400
     
     user_token = payload.get('user_token')
+    user_id = payload.get('user_id')
     
     if not user_token:
         return jsonify({'error': 'user_token is required'}), 400
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
     
-    save_listenbrainz_config(user_token)
+    save_listenbrainz_config(user_token, user_id)
     return jsonify({
         'success': True
     })
@@ -7178,7 +7232,8 @@ def save_listenbrainz_config_endpoint():
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
 def get_listenbrainz_playlists():
     """Fetch recommended playlists created for user from ListenBrainz"""
-    config = get_listenbrainz_config()
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
     
     if not config['user_token']:
         return jsonify({'error': 'ListenBrainz token not configured'}), 400
@@ -7247,9 +7302,15 @@ def get_listenbrainz_playlists():
 @app.route('/api/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_playlist(playlist_mbid):
     """Fetch a ListenBrainz playlist and its tracks by MBID"""
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
+    
+    if not config['user_token']:
+        return jsonify({'error': 'ListenBrainz token not configured'}), 400
+
     try:
         url = f'https://api.listenbrainz.org/1/playlist/{playlist_mbid}'
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers={'Authorization': f'Token {config["user_token"]}'})
         response.raise_for_status()
         data = response.json()
         

@@ -4880,7 +4880,8 @@ class App {
 
     private async loadListenbrainzConfig(): Promise<void> {
         try {
-            const response = await fetch('/api/listenbrainz/config');
+            const userId = this.getSelectedPlexUserId();
+            const response = await fetch(`/api/listenbrainz/config${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
             if (response.ok) {
                 const data = await response.json();
                 this.lbConfigStatusEl.textContent = data.has_token ? '✓ Token configured' : '';
@@ -4901,13 +4902,21 @@ class App {
         }
 
         try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.lbConfigStatusEl.textContent = '⚠ Select a Plex user before saving ListenBrainz settings';
+                this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+                return;
+            }
+
             const response = await fetch('/api/listenbrainz/config', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    user_token: userToken
+                    user_token: userToken,
+                    user_id: userId
                 })
             });
 
@@ -6113,7 +6122,9 @@ class App {
         this.displayMessage('Loading ListenBrainz playlists...');
 
         try {
-            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}`, {
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `&user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}${userIdQuery}`, {
                 signal: this.pendingRequestController?.signal
             });
             
@@ -6196,7 +6207,9 @@ class App {
             }
 
             const playlistMbid = mbidMatch[1];
-            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}`, {
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}${userIdQuery}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -6628,7 +6641,7 @@ class App {
                     continue;
                 }
 
-                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: !match.complete }));
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -6696,7 +6709,7 @@ class App {
                     continue;
                 }
 
-                const chip = this.createPlexMatchChip(match, { inActions: true, incomplete: !match.complete });
+                const chip = this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false });
                 nameEl.insertAdjacentElement('afterend', chip);
             }
         } catch (error) {
