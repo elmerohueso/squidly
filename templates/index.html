@@ -8,6 +8,35 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+    <div id="plexLoginOnlyContainer" class="plex-login-only-container" style="display: none;">
+        <div class="plex-login-only-card">
+            <h2 style="margin-bottom: 0.75rem;">Connect to Plex</h2>
+            
+            <button id="plexLoginOnlyButton" class="save-button">Login to Plex</button>
+
+            <div id="plexLoginOnlyPinContainer" style="display:none; margin-top: 1rem; width: 100%;">
+                <label class="settings-label">Plex PIN</label>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <span id="plexLoginOnlyPinDisplay" style="font-size: 1.25rem; font-weight: bold; letter-spacing: 0.15em;"></span>
+                </div>
+                <p class="settings-hint" style="margin-top: 0.5rem;">Go to <a href="https://plex.tv/link" target="_blank" style="color: var(--accent-primary); text-decoration: none;">plex.tv/link</a> and enter the PIN above.</p>
+                <p class="settings-note" id="plexLoginOnlyPinStatus" style="margin-top: 0.5rem;"></p>
+            </div>
+
+            <div id="plexLoginOnlyLibraryContainer" style="display:none; flex-direction: column; gap: 0.5rem; margin-top: 1rem; width: 100%;">
+                <label class="settings-label" for="plexLoginOnlyLibraryName">Music Library</label>
+                <select id="plexLoginOnlyLibraryName" class="settings-input" style="width: 100%;">
+                    <option value="">Select a library...</option>
+                </select>
+                <button id="plexLoginOnlySaveButton" class="save-button" style="width: fit-content; margin: 0 auto; display: block;">Save Library</button>
+            </div>
+
+            <div id="plexLoginOnlyUserContainer" style="display:none; flex-direction: column; gap: 0.5rem; margin-top: 1rem; width: 100%;">
+                <label class="settings-label" for="plexLoginOnlyUserList">Select Plex User</label>
+                <div id="plexLoginOnlyUserList" class="plex-login-only-user-list" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+            </div>
+        </div>
+    </div>
     <div class="app-wrapper">
         <!-- Left Sidebar -->
         <aside class="sidebar">
@@ -169,7 +198,7 @@
                             <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1" value="30" placeholder="30">
                             <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
                         </div>
-                        <div class="settings-section">
+                        <div class="settings-section" id="listenbrainzSettings">
                             <div class="settings-section-title">ListenBrainz</div>
                             <label class="settings-label" for="listenbrainzToken">User Token</label>
                             <input type="password" id="listenbrainzToken" class="settings-input" placeholder="Your ListenBrainz user token">
@@ -177,39 +206,24 @@
                             <button id="saveLbConfig" class="save-button" style="margin-top: 1rem;">Save ListenBrainz Config</button>
                             <p class="settings-note" id="lbConfigStatus"></p>
                         </div>
-                        <div class="settings-section">
+                        <div class="settings-section" id="plexSettings">
                             <div class="settings-section-title">Plex Integration</div>
                             <div id="plexConnectedStatus" style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></div>
                             <label class="settings-label" for="ignoreMatchesCheckbox" style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
                                 <input type="checkbox" id="ignoreMatchesCheckbox">
                                 <span>Always re-download track (ignore existing Plex matches)</span>
                             </label>
-                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;">
-                                <button id="plexLoginButton" class="save-button">Login to Plex</button>
-                                <button id="plexClearCredentialsButton" class="save-button" style="background: #b00020; color: #fff; display: none;">Clear credentials</button>
-                            </div>
-                            <div id="plexPinContainer" style="display:none; margin-bottom: 1rem;">
-                                <label class="settings-label">Plex PIN</label>
-                                <div style="display: flex; align-items: center; gap: 1rem;">
-                                    <span id="plexPinDisplay" style="font-size: 1.5rem; font-weight: bold; letter-spacing: 0.2em;"></span>
-                                    <button id="plexPinCopy" type="button" class="save-button" style="padding: 0.2rem 0.7rem; font-size: 1rem;">Copy</button>
-                                </div>
-                                <p class="settings-hint">Go to <a href="https://plex.tv/link" target="_blank" style="color: var(--accent-primary); text-decoration: none;">plex.tv/link</a> and enter the PIN above.</p>
-                                <p class="settings-note" id="plexPinStatus"></p>
-                            </div>
-                            <div id="plexLibraryConfig" style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; margin-bottom: 0.75rem;">
-                                <label class="settings-label" for="plexLibraryName">Music Library</label>
-                                <select id="plexLibraryName" class="settings-input" style="width: 100%;">
-                                    <option value="">Select a library...</option>
-                                </select>
-                                <button id="savePlexConfig" class="save-button" style="white-space: nowrap; width: fit-content;">Save</button>
-                            </div>
                             <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library Sync Interval (hours)</label>
                             <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1" value="24" placeholder="24">
                             <p class="settings-hint">Default: 24 hours</p>
                             <p class="settings-note" id="plexConfigStatus"></p>
                             <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library Sync Now</button>
                             <p class="settings-note" id="plexSyncStatus"></p>
+                        </div>
+                        <div id="plexDangerZone" class="settings-section settings-danger-zone" style="margin-top: 1rem;">
+                            <div class="settings-section-title">DANGER ZONE</div>
+                            <p class="settings-note">Disconnecting from Plex will clear all user data from Squidly.</p>
+                            <button id="plexClearCredentialsButton" class="save-button" style="background: #b00020; color: #fff; width: 100%;">Disconnect From Plex and Logout</button>
                         </div>
                     </div>
                 </div>

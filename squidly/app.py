@@ -494,14 +494,17 @@ from squidly import jobs
 
 from squidly.storage import (
     clear_plex_config,
+    clear_plex_user_settings,
     get_download_settings,
     get_listenbrainz_config,
     get_plex_config,
+    get_plex_user_settings,
     init_db,
     init_library_update_status,
     save_download_settings,
     save_listenbrainz_config,
     save_plex_config,
+    save_plex_user_setting,
 )
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -515,14 +518,52 @@ CORS(app)
 # ...existing code...
 @app.route('/api/plex/users', methods=['GET'])
 def plex_list_users():
-    """Return a list of Plex users (owner and managed) as JSON."""
-    users = get_all_plex_users()
-    # Remove user_obj (not serializable)
-    result = [
-        {k: v for k, v in user.items() if k not in ('user_obj',)}
-        for user in users
-    ]
-    return jsonify({'users': result})
+    """Return saved Plex users, or refresh the saved list when requested."""
+    sync_flag = str(request.args.get('sync', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+    if sync_flag:
+        try:
+            users = get_all_plex_users()
+            for user in users:
+                plex_client_id = str(user.get('client_id') or '').strip()
+                username = str(user.get('title') or user.get('username') or '').strip()
+                plex_owner = bool(user.get('is_owner'))
+                if plex_client_id and username:
+                    try:
+                        save_plex_user_setting(username, plex_client_id, plex_owner)
+                    except Exception as e:
+                        print(f'[PLEX] Failed to save user setting for {username}/{plex_client_id}: {e}', flush=True)
+        except Exception as e:
+            print(f'[PLEX] /api/plex/users?sync failed: {e}', flush=True)
+            return jsonify({'users': []}), 200
+
+        result = [
+            {k: v for k, v in user.items() if k not in ('user_obj',)}
+            for user in users
+        ]
+        return jsonify({'users': result})
+
+    try:
+        rows = get_plex_user_settings()
+        result = []
+        for row in rows:
+            client_id = str(row.get('plex_client_id') or '').strip()
+            username = str(row.get('username') or '').strip()
+            plex_owner = bool(row.get('plex_owner'))
+            if not client_id or not username:
+                continue
+            result.append({
+                'id': client_id,
+                'client_id': client_id,
+                'username': username,
+                'title': username,
+                'is_owner': plex_owner,
+                'is_managed': not plex_owner,
+            })
+        return jsonify({'users': result})
+    except Exception as e:
+        print(f'[PLEX] /api/plex/users failed to read saved users: {e}', flush=True)
+        return jsonify({'users': []}), 200
 # --- Plex PIN OAuth API ---
 import threading
 
@@ -543,8 +584,9 @@ def plex_health_status():
 
 @app.route('/api/plex/clear_credentials', methods=['POST'])
 def plex_clear_credentials():
-    """Clear saved Plex configuration."""
+    """Clear saved Plex configuration and Plex user settings."""
     clear_plex_config()
+    clear_plex_user_settings()
     set_plex_health_status(False, 'No Plex credentials configured')
     return jsonify({'ok': True})
 
@@ -749,6 +791,26 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_settings (
+            id SERIAL PRIMARY KEY,
+            username TEXT,
+            plex_client_id TEXT UNIQUE,
+            plex_owner BOOLEAN NOT NULL DEFAULT FALSE
+        )
+        """
+    )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings'
+        """
+    )
+    user_settings_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'plex_owner' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
     cur.execute(
         """
         SELECT column_name

@@ -94,6 +94,26 @@ def init_db():
     )
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS user_settings (
+            id SERIAL PRIMARY KEY,
+            username TEXT,
+            plex_client_id TEXT UNIQUE,
+            plex_owner BOOLEAN NOT NULL DEFAULT FALSE
+        )
+        """
+    )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings'
+        """
+    )
+    user_settings_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'plex_owner' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
+    cur.execute(
+        """
         SELECT column_name
         FROM information_schema.columns
         WHERE table_name = 'plex_config'
@@ -358,6 +378,44 @@ def get_plex_config():
     }
 
 
+def get_plex_user_settings():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, username, plex_client_id, plex_owner
+        FROM user_settings
+        ORDER BY id ASC
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return rows
+
+
+def save_plex_user_setting(username, plex_client_id, plex_owner=False):
+    username = str(username or '').strip()
+    plex_client_id = str(plex_client_id or '').strip()
+    plex_owner = bool(plex_owner)
+    if not plex_client_id or not username:
+        return
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO user_settings (username, plex_client_id, plex_owner)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (plex_client_id) DO UPDATE SET
+            username = excluded.username,
+            plex_owner = excluded.plex_owner
+        """,
+        (username, plex_client_id, plex_owner)
+    )
+    conn.commit()
+    conn.close()
+
+
 def save_plex_config(server_url, api_token, library_name, sync_interval_hours=24):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
@@ -384,6 +442,15 @@ def clear_plex_config():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('TRUNCATE TABLE plex_config')
+    conn.commit()
+    conn.close()
+
+
+def clear_plex_user_settings():
+    """Remove saved Plex user settings."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('TRUNCATE TABLE user_settings')
     conn.commit()
     conn.close()
 

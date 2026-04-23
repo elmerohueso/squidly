@@ -54,6 +54,30 @@ body {
     min-height: 100vh;
 }
 
+.plex-login-only-container {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at center, rgba(10, 14, 39, 0.96), rgba(10, 14, 39, 0.98));
+    z-index: 300;
+    padding: 1rem;
+}
+
+.plex-login-only-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 2rem;
+    border-radius: var(--radius-lg);
+    background: rgba(20, 25, 66, 0.95);
+    box-shadow: var(--shadow-lg);
+    text-align: center;
+}
+
 /* === Sidebar === */
 .sidebar {
     width: var(--sidebar-width);
@@ -409,6 +433,18 @@ body {
 .user-dropdown-checkmark {
     color: var(--accent-primary);
     margin-left: auto;
+}
+
+.user-dropdown-item.logout-item {
+    padding: 0.75rem 1rem 1rem;
+}
+
+.user-dropdown-logout-button {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
 }
 
 /* === Playlist Modal === */
@@ -2240,6 +2276,20 @@ body {
     font-size: 0.875rem;
     color: var(--text-secondary);
     margin-top: 0.75rem;
+}
+
+.settings-danger-zone {
+    border-color: rgba(216, 39, 39, 0.35);
+    background: rgba(216, 39, 39, 0.06);
+}
+
+.settings-danger-zone .settings-section-title {
+    color: #b91c1c;
+}
+
+.settings-danger-zone .settings-note {
+    color: #86198f;
+    margin-bottom: 1rem;
 }
 
 .save-button {
