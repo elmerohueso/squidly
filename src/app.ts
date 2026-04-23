@@ -5480,7 +5480,7 @@ class App {
         const isOwner = this.isPlexSelectedUserOwner || window.localStorage.getItem('plexSelectedUserIsOwner') === 'true';
         this.isPlexSelectedUserOwner = isOwner;
 
-        const hidePages = ['explore', 'library'];
+        const hidePages = ['mirrors', 'matches', 'jobs'];
         hidePages.forEach(page => {
             const navItem = document.querySelector(`.nav-item[data-page="${page}"]`) as HTMLElement | null;
             if (navItem) {
@@ -5498,8 +5498,8 @@ class App {
             }
         });
 
-        if (!isOwner && this.currentPage !== 'settings' && this.currentPage !== 'mirrors' && this.currentPage !== 'matches' && this.currentPage !== 'jobs') {
-            this.switchPage('mirrors', false);
+        if (!isOwner && hidePages.includes(this.currentPage)) {
+            this.switchPage('explore', false);
         }
     }
 
