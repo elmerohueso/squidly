@@ -558,6 +558,7 @@ class App {
     private currentDownloadController: AbortController | null = null;
     private downloadAllScope: 'album' | 'loose' = 'loose';
     private currentAudio: HTMLAudioElement | null = null;
+    private isPlexSelectedUserOwner: boolean = false;
     private currentPlayingTrackId: string | null = null;
     private currentPlayButton: HTMLButtonElement | null = null;
     private currentAudioCleanup: {
@@ -1065,6 +1066,8 @@ class App {
 
                     window.localStorage.removeItem('plexSelectedUserId');
                     window.localStorage.removeItem('plexSelectedUserName');
+                    window.localStorage.removeItem('plexSelectedUserIsOwner');
+                    this.isPlexSelectedUserOwner = false;
                     await this.loadPlexConfig();
                     void this.updatePlexClearCredentialsButton();
                 }
@@ -2171,6 +2174,8 @@ class App {
     private logoutPlexUser(): void {
         window.localStorage.removeItem('plexSelectedUserId');
         window.localStorage.removeItem('plexSelectedUserName');
+        window.localStorage.removeItem('plexSelectedUserIsOwner');
+        this.isPlexSelectedUserOwner = false;
 
         if (this.userButtonText) {
             this.userButtonText.textContent = 'User';
@@ -2179,6 +2184,7 @@ class App {
         this.closeUserDropdown();
         void this.updateSidebarPlaylists();
         void this.updatePlexLoginOnlyState();
+        this.updateUserTypeAccess();
     }
 
     private async loadPlexUsersForDropdown(): Promise<void> {
@@ -2276,7 +2282,10 @@ class App {
 
                 if (selectedUser) {
                     const userName = String(selectedUser.username || selectedUser.title || 'User');
-                    console.log('[USER_INIT] Found selected user:', userName);
+                    const isOwner = Boolean(selectedUser.is_owner);
+                    this.isPlexSelectedUserOwner = isOwner;
+                    window.localStorage.setItem('plexSelectedUserIsOwner', String(isOwner));
+                    console.log('[USER_INIT] Found selected user:', userName, { isOwner });
                     if (this.userButtonText) {
                         this.userButtonText.textContent = userName;
                         console.log('[USER_INIT] Updated button text to:', userName);
@@ -2288,6 +2297,7 @@ class App {
                     // Load playlists for this user
                     console.log('[USER_INIT] Loading playlists for user');
                     await this.updateSidebarPlaylists();
+                    this.updateUserTypeAccess();
                 } else {
                     console.log('[USER_INIT] No selected user found, checking for owner');
                     if (users.length > 0) {
@@ -2300,7 +2310,10 @@ class App {
                             this.userButtonText.textContent = ownerName;
                             window.localStorage.setItem('plexSelectedUserId', ownerId);
                             window.localStorage.setItem('plexSelectedUserName', ownerName);
+                            window.localStorage.setItem('plexSelectedUserIsOwner', 'true');
+                            this.isPlexSelectedUserOwner = true;
                             await this.updateSidebarPlaylists();
+                            this.updateUserTypeAccess();
                         }
                     }
                 }
@@ -5436,6 +5449,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
             users.forEach((user: any) => {
                 const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
                 const label = String(user.username || user.title || id);
+                const isOwner = Boolean(user.is_owner);
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className = 'save-button plex-login-only-user-button';
@@ -5443,6 +5457,7 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
                 button.style.textAlign = 'left';
                 button.textContent = label;
                 button.dataset.userId = id;
+                button.dataset.userIsOwner = String(isOwner);
 
                 if (savedId && id === savedId) {
                     button.classList.add('active');
@@ -5451,14 +5466,15 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
                 button.addEventListener('click', async () => {
                     window.localStorage.setItem('plexSelectedUserId', id);
                     window.localStorage.setItem('plexSelectedUserName', label);
+                    window.localStorage.setItem('plexSelectedUserIsOwner', String(isOwner));
+                    this.isPlexSelectedUserOwner = isOwner;
                     if (this.userButtonText) {
                         this.userButtonText.textContent = label;
                     }
                     await this.updateSidebarPlaylists();
                     await this.loadPlexPlaylists();
-                    await this.updatePlexLoginOnlyState();
+                    this.updateUserTypeAccess();
                 });
-
                 this.plexLoginOnlyUserList.appendChild(button);
             });
 
@@ -5466,8 +5482,13 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
                 const owner = users.find((u: any) => u.is_owner);
                 if (owner) {
                     const ownerId = String(owner.client_id ?? owner.id ?? owner.username ?? owner.title ?? '');
+                    const ownerName = String(owner.username || owner.title || ownerId);
                     if (ownerId) {
                         window.localStorage.setItem('plexSelectedUserId', ownerId);
+                        window.localStorage.setItem('plexSelectedUserName', ownerName);
+                        window.localStorage.setItem('plexSelectedUserIsOwner', 'true');
+                        this.isPlexSelectedUserOwner = true;
+                        this.updateUserTypeAccess();
                     }
                 }
             }
@@ -5478,6 +5499,33 @@ const libraryName = this.plexLibraryNameSelect?.value.trim() || this.plexLoginOn
 
     private updatePlexPlaylistContainerVisibility(show: boolean): void {
         // Plex playlist container has been removed; no-op.
+    }
+
+    private updateUserTypeAccess(): void {
+        const isOwner = this.isPlexSelectedUserOwner || window.localStorage.getItem('plexSelectedUserIsOwner') === 'true';
+        this.isPlexSelectedUserOwner = isOwner;
+
+        const hidePages = ['explore', 'library'];
+        hidePages.forEach(page => {
+            const navItem = document.querySelector(`.nav-item[data-page="${page}"]`) as HTMLElement | null;
+            if (navItem) {
+                navItem.style.display = isOwner ? '' : 'none';
+            }
+        });
+
+        const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
+        settingsSections.forEach(section => {
+            const sectionEl = section as HTMLElement;
+            if (sectionEl.id === 'listenbrainzSettings') {
+                sectionEl.style.display = '';
+            } else {
+                sectionEl.style.display = isOwner ? '' : 'none';
+            }
+        });
+
+        if (!isOwner && this.currentPage !== 'settings' && this.currentPage !== 'mirrors' && this.currentPage !== 'matches' && this.currentPage !== 'jobs') {
+            this.switchPage('mirrors', false);
+        }
     }
 
     private movePlexPlaylistContainerBeneathDownloadAll(): void {
