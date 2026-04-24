@@ -787,7 +787,8 @@ def init_db():
             username TEXT,
             plex_client_id TEXT UNIQUE,
             plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
-            listenbrainz_key TEXT
+            listenbrainz_key TEXT,
+            listenbrainz_username TEXT
         )
         """
     )
@@ -804,6 +805,8 @@ def init_db():
         user_settings_columns.add('plex_owner')
     if 'listenbrainz_key' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
+    if 'listenbrainz_username' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_username TEXT')
 
     cur.execute(
         """
@@ -7191,7 +7194,8 @@ def get_listenbrainz_config_endpoint():
     user_id = request.args.get('user_id')
     config = get_listenbrainz_config(user_id)
     return jsonify({
-        'has_token': config['user_token'] is not None
+        'has_token': config['user_token'] is not None,
+        'username': config.get('username')
     })
 
 @app.route('/api/listenbrainz/config', methods=['POST'])
@@ -7205,12 +7209,14 @@ def save_listenbrainz_config_endpoint():
     user_token = payload.get('user_token')
     user_id = payload.get('user_id')
     
+    username = payload.get('username')
+    
     if not user_token:
         return jsonify({'error': 'user_token is required'}), 400
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
     
-    save_listenbrainz_config(user_token, user_id)
+    save_listenbrainz_config(user_token, user_id, username)
     return jsonify({
         'success': True
     })
@@ -7228,13 +7234,23 @@ def get_listenbrainz_playlists():
     if not username:
         return jsonify({'error': 'username parameter is required'}), 400
     
+    playlist_type = request.args.get('type')
+    
     try:
         headers = {'Authorization': f'Token {config["user_token"]}'}
-        endpoints = [
-            f'https://api.listenbrainz.org/1/user/{username}/playlists/createdfor',
-            f'https://api.listenbrainz.org/1/user/{username}/playlists',
-            f'https://api.listenbrainz.org/1/user/{username}/playlists/collaborator'
-        ]
+        
+        if playlist_type == 'createdfor':
+            endpoints = [f'https://api.listenbrainz.org/1/user/{username}/playlists/createdfor']
+        elif playlist_type == 'collaborator':
+            endpoints = [f'https://api.listenbrainz.org/1/user/{username}/playlists/collaborator']
+        elif playlist_type == 'user':
+            endpoints = [f'https://api.listenbrainz.org/1/user/{username}/playlists']
+        else:
+            endpoints = [
+                f'https://api.listenbrainz.org/1/user/{username}/playlists/createdfor',
+                f'https://api.listenbrainz.org/1/user/{username}/playlists',
+                f'https://api.listenbrainz.org/1/user/{username}/playlists/collaborator'
+            ]
 
         combined_playlists = []
         seen_identifiers = set()

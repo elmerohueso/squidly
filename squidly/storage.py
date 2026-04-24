@@ -88,7 +88,8 @@ def init_db():
             username TEXT,
             plex_client_id TEXT UNIQUE,
             plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
-            listenbrainz_key TEXT
+            listenbrainz_key TEXT,
+            listenbrainz_username TEXT
         )
         """
     )
@@ -105,6 +106,8 @@ def init_db():
         user_settings_columns.add('plex_owner')
     if 'listenbrainz_key' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
+    if 'listenbrainz_username' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_username TEXT')
 
     cur.execute(
         """
@@ -512,7 +515,7 @@ def get_listenbrainz_config(user_id=None):
     if user_id:
         cur.execute(
             """
-            SELECT listenbrainz_key
+            SELECT listenbrainz_key, listenbrainz_username
             FROM user_settings
             WHERE plex_client_id = %s
             """,
@@ -521,7 +524,7 @@ def get_listenbrainz_config(user_id=None):
     else:
         cur.execute(
             """
-            SELECT listenbrainz_key
+            SELECT listenbrainz_key, listenbrainz_username
             FROM user_settings
             WHERE listenbrainz_key IS NOT NULL
             ORDER BY id ASC
@@ -533,15 +536,17 @@ def get_listenbrainz_config(user_id=None):
     conn.close()
 
     if row is None:
-        return {'user_token': None}
+        return {'user_token': None, 'username': None}
 
     return {
-        'user_token': row['listenbrainz_key']
+        'user_token': row['listenbrainz_key'],
+        'username': row.get('listenbrainz_username')
     }
 
 
-def save_listenbrainz_config(user_token, user_id=None):
+def save_listenbrainz_config(user_token, user_id=None, listenbrainz_username=None):
     user_token = str(user_token or '').strip()
+    listenbrainz_username = str(listenbrainz_username or '').strip()
     if not user_token:
         return
 
@@ -567,12 +572,13 @@ def save_listenbrainz_config(user_token, user_id=None):
 
     cur.execute(
         """
-        INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
-        VALUES (%s, %s, %s)
+        INSERT INTO user_settings (username, plex_client_id, listenbrainz_key, listenbrainz_username)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (plex_client_id) DO UPDATE SET
-            listenbrainz_key = excluded.listenbrainz_key
+            listenbrainz_key = excluded.listenbrainz_key,
+            listenbrainz_username = excluded.listenbrainz_username
         """,
-        (None, user_id, user_token)
+        (None, user_id, user_token, listenbrainz_username)
     )
     conn.commit()
     conn.close()

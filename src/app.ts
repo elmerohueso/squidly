@@ -438,6 +438,7 @@ interface AppRouteState {
     playlistId?: string;
     username?: string;
     playlistUrl?: string;
+    playlistType?: string;
 }
 
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs';
@@ -500,6 +501,7 @@ class App {
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
+    private listenbrainzUsernameInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
     private lbConfigStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
@@ -735,7 +737,7 @@ class App {
         this.libraryBreadcrumbContainer = document.getElementById('libraryBreadcrumb');
         this.resultsContainer = document.getElementById('results') as HTMLElement;
         this.libraryResultsContainer = document.getElementById('libraryResults') as HTMLElement;
-        
+
         // Old flyout elements (may not exist in new layout)
         this.statusButton = document.getElementById('statusButton') as HTMLButtonElement;
         this.statusFlyout = document.getElementById('statusFlyout') as HTMLElement;
@@ -769,6 +771,7 @@ class App {
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
+        this.listenbrainzUsernameInput = document.getElementById('listenbrainzUsername') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
@@ -799,32 +802,32 @@ class App {
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
         this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
-        
+
         // User dropdown for top bar
         this.userButton = document.getElementById('userButton') as HTMLButtonElement;
         this.userDropdownModal = document.getElementById('userDropdownModal') as HTMLElement;
         this.userDropdownOverlay = document.getElementById('userDropdownOverlay') as HTMLElement;
         this.userDropdownList = document.getElementById('userDropdownList') as HTMLElement;
         this.userButtonText = document.getElementById('userButtonText') as HTMLElement;
-        
+
         this.initializeEventListeners();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
-        
+
         // Initialize page navigation (start with Explore page)
         this.switchPage('explore', false);
-        
+
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
-        
+
         // Initialize user button and sidebar playlists
         void this.initializeUserButton();
-        
+
         this.updateEndpointStatus(); // Initial load
-        
+
         // Update status every 30 seconds
         this.statusUpdateInterval = window.setInterval(() => {
             this.updateEndpointStatus();
@@ -1151,7 +1154,7 @@ class App {
                             return;
                         }
                     }
-                    
+
                     // Check for album grid play button
                     const albumRow = gridPlayBtn.closest('.albums-grid-row') as HTMLElement;
                     if (albumRow) {
@@ -1187,7 +1190,7 @@ class App {
                             return;
                         }
                     }
-                    
+
                     // Check for album grid
                     const albumRow = gridAddPlaylistBtn.closest('.albums-grid-row') as HTMLElement;
                     if (albumRow) {
@@ -1211,7 +1214,7 @@ class App {
                             return;
                         }
                     }
-                    
+
                     // Check for album grid
                     const albumRow = gridAddLibraryBtn.closest('.albums-grid-row') as HTMLElement;
                     if (albumRow) {
@@ -1237,7 +1240,7 @@ class App {
                             return;
                         }
                     }
-                    
+
                     // Check for album grid
                     const albumRow = gridMoreBtn.closest('.albums-grid-row') as HTMLElement | null;
                     if (albumRow) {
@@ -1261,196 +1264,196 @@ class App {
                     }
                     return;
                 }
-            
-            // Check for add to playlist button clicks
-            const addPlaylistBtn = target.closest('.track-add-playlist-btn');
-            if (addPlaylistBtn) {
-                const trackCard = addPlaylistBtn.closest('.track-card') as HTMLElement;
-                const trackId = trackCard?.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.handleAddToPlaylist(parseInt(trackId, 10), trackCard, 'loose');
-                }
-                return;
-            }
 
-            // Check for download button clicks
-            const downloadBtn = target.closest('.track-download-btn');
-            if (downloadBtn) {
-                const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
-                const trackId = trackCard?.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
-                }
-                return; // Stop here if it was a download button
-            }
-
-            // Check for "More Like This" actions before generic card click handlers
-            const moreLikeBtn = target.closest('.track-more-btn') as HTMLButtonElement | null;
-            if (moreLikeBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const card = moreLikeBtn.closest('.track-card') as HTMLElement | null;
-                if (!card) {
+                // Check for add to playlist button clicks
+                const addPlaylistBtn = target.closest('.track-add-playlist-btn');
+                if (addPlaylistBtn) {
+                    const trackCard = addPlaylistBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleAddToPlaylist(parseInt(trackId, 10), trackCard, 'loose');
+                    }
                     return;
                 }
 
-                const trackId = card.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                // Check for download button clicks
+                const downloadBtn = target.closest('.track-download-btn');
+                if (downloadBtn) {
+                    const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
+                    }
+                    return; // Stop here if it was a download button
+                }
+
+                // Check for "More Like This" actions before generic card click handlers
+                const moreLikeBtn = target.closest('.track-more-btn') as HTMLButtonElement | null;
+                if (moreLikeBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const card = moreLikeBtn.closest('.track-card') as HTMLElement | null;
+                    if (!card) {
+                        return;
+                    }
+
+                    const trackId = card.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                        return;
+                    }
+
+                    if (card.classList.contains('album-card')) {
+                        const albumId = card.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                        }
+                        return;
+                    }
+
+                    if (card.classList.contains('artist-card')) {
+                        const artistId = card.getAttribute('data-artist-id');
+                        if (artistId) {
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        }
+                        return;
+                    }
+                }
+
+                // Check for artist card compact button clicks (Find Similar)
+                const artistCardBtn = target.closest('.artist-card-btn') as HTMLButtonElement | null;
+                if (artistCardBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistCard = artistCardBtn.closest('.artist-card-compact') as HTMLElement | null;
+                    if (artistCard) {
+                        const artistId = artistCard.getAttribute('data-artist-id');
+                        if (artistId) {
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        }
+                    }
                     return;
                 }
 
-                if (card.classList.contains('album-card')) {
-                    const albumId = card.getAttribute('data-album-id');
+                // Check for artist card compact clicks (view artist albums)
+                const artistCardCompact = target.closest('.artist-card-compact.clickable') as HTMLElement | null;
+                if (artistCardCompact && !target.closest('.artist-card-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistId = artistCardCompact.getAttribute('data-artist-id');
+                    if (artistId) {
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                    }
+                    return;
+                }
+
+                // Check for artist name clicks within grid rows
+                const gridArtistName = target.closest('.tracks-grid-row .track-artist-name');
+                if (gridArtistName) {
+                    const trackRow = gridArtistName.closest('.tracks-grid-row');
+                    const artistId = trackRow?.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for artist name clicks within album hero header
+                const heroArtistName = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
+                if (heroArtistName) {
+                    const artistId = heroArtistName.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for album name clicks within grid rows
+                const gridAlbumName = target.closest('.tracks-grid-row .track-album-name');
+                if (gridAlbumName) {
+                    const trackRow = gridAlbumName.closest('.tracks-grid-row');
+                    const albumId = trackRow?.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        return;
                     }
-                    return;
                 }
 
-                if (card.classList.contains('artist-card')) {
-                    const artistId = card.getAttribute('data-artist-id');
+                // Check for artist name clicks within album grid rows
+                const gridAlbumArtistName = target.closest('.albums-grid-row .album-artist-name');
+                if (gridAlbumArtistName) {
+                    const albumRow = gridAlbumArtistName.closest('.albums-grid-row');
+                    const artistId = albumRow?.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
                     }
-                    return;
                 }
-            }
 
-            // Check for artist card compact button clicks (Find Similar)
-            const artistCardBtn = target.closest('.artist-card-btn') as HTMLButtonElement | null;
-            if (artistCardBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const artistCard = artistCardBtn.closest('.artist-card-compact') as HTMLElement | null;
-                if (artistCard) {
-                    const artistId = artistCard.getAttribute('data-artist-id');
+                // Check for artist name clicks within track cards
+                const artistName = target.closest('.track-card .track-artist-name');
+                if (artistName) {
+                    const trackCard = artistName.closest('.track-card');
+                    const artistId = trackCard?.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
                     }
                 }
-                return;
-            }
 
-            // Check for artist card compact clicks (view artist albums)
-            const artistCardCompact = target.closest('.artist-card-compact.clickable') as HTMLElement | null;
-            if (artistCardCompact && !target.closest('.artist-card-btn')) {
-                e.preventDefault();
-                e.stopPropagation();
-                const artistId = artistCardCompact.getAttribute('data-artist-id');
-                if (artistId) {
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                // Check for album name clicks within track cards
+                const albumName = target.closest('.track-card .track-album-name');
+                if (albumName) {
+                    const trackCard = albumName.closest('.track-card');
+                    const albumId = trackCard?.getAttribute('data-album-id');
+                    if (albumId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        return;
+                    }
                 }
-                return;
-            }
-            
-            // Check for artist name clicks within grid rows
-            const gridArtistName = target.closest('.tracks-grid-row .track-artist-name');
-            if (gridArtistName) {
-                const trackRow = gridArtistName.closest('.tracks-grid-row');
-                const artistId = trackRow?.getAttribute('data-artist-id');
-                if (artistId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
-                    return;
-                }
-            }
 
-            // Check for artist name clicks within album hero header
-            const heroArtistName = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
-            if (heroArtistName) {
-                const artistId = heroArtistName.getAttribute('data-artist-id');
-                if (artistId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
-                    return;
+                // Check for playlist card clicks
+                const playlistCard = target.closest('.playlist-card');
+                if (playlistCard) {
+                    const playlistId = playlistCard.getAttribute('data-playlist-id');
+                    if (playlistId) {
+                        void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined }, true);
+                        return;
+                    }
                 }
-            }
-            
-            // Check for album name clicks within grid rows
-            const gridAlbumName = target.closest('.tracks-grid-row .track-album-name');
-            if (gridAlbumName) {
-                const trackRow = gridAlbumName.closest('.tracks-grid-row');
-                const albumId = trackRow?.getAttribute('data-album-id');
-                if (albumId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
-                    return;
-                }
-            }
 
-            // Check for artist name clicks within album grid rows
-            const gridAlbumArtistName = target.closest('.albums-grid-row .album-artist-name');
-            if (gridAlbumArtistName) {
-                const albumRow = gridAlbumArtistName.closest('.albums-grid-row');
-                const artistId = albumRow?.getAttribute('data-artist-id');
-                if (artistId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
-                    return;
+                // Check for search playlist card clicks
+                const searchPlaylistCard = target.closest('.playlist-search-card') as HTMLElement | null;
+                if (searchPlaylistCard) {
+                    const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
+                    if (playlistId) {
+                        void this.navigateToRoute({ view: 'playlist', playlistId }, true);
+                        return;
+                    }
                 }
-            }
-            
-            // Check for artist name clicks within track cards
-            const artistName = target.closest('.track-card .track-artist-name');
-            if (artistName) {
-                const trackCard = artistName.closest('.track-card');
-                const artistId = trackCard?.getAttribute('data-artist-id');
-                if (artistId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
-                    return;
-                }
-            }
-            
-            // Check for album name clicks within track cards
-            const albumName = target.closest('.track-card .track-album-name');
-            if (albumName) {
-                const trackCard = albumName.closest('.track-card');
-                const albumId = trackCard?.getAttribute('data-album-id');
-                if (albumId) {
-                    e.stopPropagation();
-                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
-                    return;
-                }
-            }
-            
-            // Check for playlist card clicks
-            const playlistCard = target.closest('.playlist-card');
-            if (playlistCard) {
-                const playlistId = playlistCard.getAttribute('data-playlist-id');
-                if (playlistId) {
-                    void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined }, true);
-                    return;
-                }
-            }
 
-            // Check for search playlist card clicks
-            const searchPlaylistCard = target.closest('.playlist-search-card') as HTMLElement | null;
-            if (searchPlaylistCard) {
-                const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
-                if (playlistId) {
-                    void this.navigateToRoute({ view: 'playlist', playlistId }, true);
-                    return;
+                // Check for album card clicks (albums have both track-card and album-card classes)
+                const clickedCard = target.closest('.track-card') as HTMLElement;
+                if (clickedCard && clickedCard.classList.contains('album-card')) {
+                    const albumId = clickedCard.getAttribute('data-album-id');
+                    if (albumId) {
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                    }
                 }
-            }
-            
-            // Check for album card clicks (albums have both track-card and album-card classes)
-            const clickedCard = target.closest('.track-card') as HTMLElement;
-            if (clickedCard && clickedCard.classList.contains('album-card')) {
-                const albumId = clickedCard.getAttribute('data-album-id');
-                if (albumId) {
-                    void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+
+                // Check for artist card clicks
+                if (clickedCard && clickedCard.classList.contains('artist-card')) {
+                    const artistId = clickedCard.getAttribute('data-artist-id');
+                    if (artistId) {
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                    }
                 }
-            }
-            
-            // Check for artist card clicks
-            if (clickedCard && clickedCard.classList.contains('artist-card')) {
-                const artistId = clickedCard.getAttribute('data-artist-id');
-                if (artistId) {
-                    void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
-                }
-            }
             });
         }
 
@@ -1718,14 +1721,14 @@ class App {
                 <div class="artist-card-name">${artistName}</div>
                 <div class="artist-card-image">
                     ${artist.picture
-                        ? `<img src="${artist.picture}" alt="${artistName}" loading="lazy">`
-                        : `<div class="artist-card-placeholder">
+                ? `<img src="${artist.picture}" alt="${artistName}" loading="lazy">`
+                : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
                                 <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
             </div>
         `;
@@ -1741,15 +1744,15 @@ class App {
             <div class="albums-grid-row library-clickable-row" data-library-album-id="${this.escapeHtml(album.id)}" data-library-album-title="${title}" data-library-artist-name="${artist}">
                 <div class="grid-cell grid-col-artwork">
                     ${album.cover
-                        ? `<img src="${album.cover}" alt="${title}" loading="lazy">`
-                        : `<div class="grid-artwork-placeholder">
+                ? `<img src="${album.cover}" alt="${title}" loading="lazy">`
+                : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <circle cx="8.5" cy="8.5" r="1.5"></circle>
                                 <polyline points="21 15 16 10 5 21"></polyline>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
                 <div class="grid-cell grid-col-artist"><span class="library-album-artist-name">${artist}</span></div>
@@ -1858,8 +1861,8 @@ class App {
             </div>
             <div class="results-list artist-results">
                 ${artists.length > 0
-                    ? artists.map((artist) => this.formatLibraryArtistCard(artist)).join('')
-                    : '<div class="library-placeholder"><p>No artists found in Plex library.</p></div>'}
+                ? artists.map((artist) => this.formatLibraryArtistCard(artist)).join('')
+                : '<div class="library-placeholder"><p>No artists found in Plex library.</p></div>'}
             </div>
             <div class="library-pagination">
                 <button class="library-page-btn" data-library-offset="${firstOffset}" ${hasPrev ? '' : 'disabled'}>First</button>
@@ -1882,8 +1885,8 @@ class App {
                 <div class="artist-hero-content">
                     <div class="artist-cover-container">
                         ${artistPicture
-                            ? `<img src="${artistPicture}" alt="${this.escapeHtml(artistName)}" class="artist-cover">`
-                            : '<div class="artist-cover-placeholder"></div>'}
+                ? `<img src="${artistPicture}" alt="${this.escapeHtml(artistName)}" class="artist-cover">`
+                : '<div class="artist-cover-placeholder"></div>'}
                     </div>
                     <div class="artist-info">
                         <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
@@ -1904,8 +1907,8 @@ class App {
                 <div class="albums-grid">
                     ${this.formatAlbumGridHeader(false, false)}
                     ${albums.length > 0
-                        ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
-                        : '<div class="library-placeholder"><p>No albums found for this artist.</p></div>'}
+                ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
+                : '<div class="library-placeholder"><p>No albums found for this artist.</p></div>'}
                 </div>
             </div>
         `;
@@ -1941,8 +1944,8 @@ class App {
                 <div class="album-hero-content">
                     <div class="album-cover-container">
                         ${albumCover
-                            ? `<img src="${albumCover}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">`
-                            : '<div class="album-cover-placeholder"></div>'}
+                ? `<img src="${albumCover}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">`
+                : '<div class="album-cover-placeholder"></div>'}
                     </div>
                     <div class="album-info">
                         <h1 class="album-title">${this.escapeHtml(albumTitle)}</h1>
@@ -1969,8 +1972,8 @@ class App {
                 <div class="tracks-grid">
                     ${this.formatTrackGridHeader(true, false, false)}
                     ${tracks.length > 0
-                        ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
-                        : '<div class="library-placeholder"><p>No tracks found for this album.</p></div>'}
+                ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
+                : '<div class="library-placeholder"><p>No tracks found for this album.</p></div>'}
                 </div>
             </div>
         `;
@@ -2149,11 +2152,11 @@ class App {
             console.error('User dropdown elements not found');
             return;
         }
-        
+
         // Show the dropdown
         this.userDropdownModal.style.display = 'block';
         this.userDropdownOverlay.style.display = 'block';
-        
+
         // Load users
         await this.loadPlexUsersForDropdown();
     }
@@ -2162,7 +2165,7 @@ class App {
         if (!this.userDropdownModal || !this.userDropdownOverlay) {
             return;
         }
-        
+
         this.userDropdownModal.style.display = 'none';
         this.userDropdownOverlay.style.display = 'none';
     }
@@ -2227,22 +2230,62 @@ class App {
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
-        try {
-            const userId = window.localStorage.getItem('plexSelectedUserId');
-            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+        let plexPlaylists: string[] = [];
+        const userId = window.localStorage.getItem('plexSelectedUserId') || '';
 
+        try {
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
             const response = await fetch(`/api/plex/playlists${query}`, { cache: 'no-store' });
-            if (!response.ok) {
-                this.populateSidebarPlaylists([]);
-                return;
+            if (response.ok) {
+                const data = await response.json();
+                plexPlaylists = Array.isArray(data.playlists) ? data.playlists : [];
+            }
+        } catch (error) {
+            console.warn('Failed to load Plex playlists:', error);
+        }
+
+        // Render Plex playlists first so it doesn't block while LB loads
+        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: null });
+
+        if (!userId) return;
+
+        // Fetch LB playlists
+        try {
+            let username = this.listenbrainzUsernameInput.value.trim();
+            if (!username) {
+                const configResp = await fetch(`/api/listenbrainz/config?user_id=${encodeURIComponent(userId)}`);
+                if (configResp.ok) {
+                    const configData = await configResp.json();
+                    if (configData.username) username = configData.username;
+                }
             }
 
-            const data = await response.json();
-            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
-            this.populateSidebarPlaylists(playlists);
+            if (username) {
+                const lbData: any = { username, user: [], collaborator: [], createdfor: [] };
+                const types = ['user', 'collaborator', 'createdfor'];
+
+                await Promise.all(types.map(async (type) => {
+                    try {
+                        const query = `?username=${encodeURIComponent(username)}&user_id=${encodeURIComponent(userId)}&type=${type}`;
+                        const response = await fetch(`/api/listenbrainz/playlists${query}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.playlists) {
+                                lbData[type] = data.playlists.map((item: any) => item.playlist).filter(Boolean);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to fetch LB playlist type ${type}`, e);
+                    }
+                }));
+
+                const createdForIds = new Set(lbData.createdfor.map((p: any) => p.identifier));
+                lbData.collaborator = lbData.collaborator.filter((p: any) => !createdForIds.has(p.identifier));
+
+                this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: lbData });
+            }
         } catch (error) {
-            console.warn('Failed to load playlists:', error);
-            this.populateSidebarPlaylists([]);
+            console.warn('Failed to load ListenBrainz sidebar playlists', error);
         }
     }
 
@@ -2323,7 +2366,7 @@ class App {
         }
     }
 
-    private populateSidebarPlaylists(playlists: string[]): void {
+    private populateSidebarPlaylists(data: { plex: string[], listenbrainz: any | null }): void {
         const playlistNavItems = document.getElementById('playlistNavItems');
         if (!playlistNavItems) {
             return;
@@ -2331,30 +2374,102 @@ class App {
 
         playlistNavItems.innerHTML = '';
 
-        if (playlists.length === 0) {
+        // --- Plex Playlists ---
+        const plexHeader = document.createElement('li');
+        plexHeader.className = 'nav-section-title';
+        plexHeader.style.fontSize = '0.5rem';
+        plexHeader.textContent = 'Plex';
+        playlistNavItems.appendChild(plexHeader);
+
+        if (data.plex.length === 0) {
             const li = document.createElement('li');
             li.style.padding = '0.5rem 0.75rem';
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.875rem';
             li.textContent = 'No playlists';
             playlistNavItems.appendChild(li);
+        } else {
+            data.plex.forEach((playlistName: string) => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'nav-item';
+                a.textContent = playlistName;
+                a.style.fontSize = '0.875rem';
+                a.style.paddingTop = '0.25rem';
+                a.style.paddingBottom = '0.25rem';
+                a.addEventListener('click', (e: Event) => {
+                    e.preventDefault();
+                    // Playlist click handling could be added here
+                });
+                li.appendChild(a);
+                playlistNavItems.appendChild(li);
+            });
+        }
+
+        // --- ListenBrainz Playlists ---
+        const lbHeader = document.createElement('li');
+        lbHeader.className = 'nav-section-title';
+        lbHeader.style.fontSize = '0.5rem';
+        lbHeader.textContent = 'ListenBrainz';
+        playlistNavItems.appendChild(lbHeader);
+
+        if (!data.listenbrainz) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Loading or not configured...';
+            playlistNavItems.appendChild(li);
             return;
         }
 
-        playlists.forEach((playlistName: string) => {
-            const li = document.createElement('li');
-            const a = document.createElement('a');
-            a.href = '#';
-            a.className = 'nav-item';
-            a.textContent = playlistName;
-            a.style.fontSize = '0.875rem';
-            a.addEventListener('click', (e: Event) => {
-                e.preventDefault();
-                // Playlist click handling could be added here
+        const renderLbSection = (title: string, items: any[], username: string) => {
+            if (!items || items.length === 0) return;
+            const subHeader = document.createElement('li');
+            subHeader.className = 'nav-section-title';
+            subHeader.style.fontSize = '0.5rem';
+            subHeader.style.color = 'var(--text-muted)';
+            subHeader.style.paddingLeft = '1.5rem';
+            subHeader.textContent = title;
+            playlistNavItems.appendChild(subHeader);
+
+            items.forEach((playlist: any) => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'nav-item';
+                a.textContent = playlist.title || 'Unknown';
+                a.style.fontSize = '0.875rem';
+                a.style.paddingLeft = '2.25rem';
+                a.style.paddingTop = '0.25rem';
+                a.style.paddingBottom = '0.25rem';
+                a.addEventListener('click', (e: Event) => {
+                    e.preventDefault();
+                    if (playlist.identifier) {
+                        this.switchPage('explore');
+                        this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId: playlist.identifier, username });
+                        void this.fetchListenbrainzPlaylistTracks(playlist.identifier, false, username);
+                    }
+                });
+                li.appendChild(a);
+                playlistNavItems.appendChild(li);
             });
-            li.appendChild(a);
+        };
+
+        renderLbSection('User Playlists', data.listenbrainz.user, data.listenbrainz.username);
+        renderLbSection('Collaborator Playlists', data.listenbrainz.collaborator, data.listenbrainz.username);
+        renderLbSection('Recommendation Playlists', data.listenbrainz.createdfor, data.listenbrainz.username);
+
+        const lbTotal = (data.listenbrainz.user?.length || 0) + (data.listenbrainz.collaborator?.length || 0) + (data.listenbrainz.createdfor?.length || 0);
+        if (lbTotal === 0) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.875rem';
+            li.textContent = 'No playlists found';
             playlistNavItems.appendChild(li);
-        });
+        }
     }
 
     private initializeHistoryNavigation(): void {
@@ -2822,7 +2937,7 @@ class App {
             this.searchTypeSelect.value = 'listenbrainz';
             this.searchInput.value = route.username;
             this.updateSearchPlaceholder();
-            await this.handleListenbrainzPlaylists(route.username, updateHistory);
+            await this.handleListenbrainzPlaylists(route.username, updateHistory, route.playlistType);
             return;
         }
 
@@ -3266,14 +3381,14 @@ class App {
                 </div>
                 <div class="match-activity-stages">
                     ${stageRows.map(stage => {
-                        const stageStatus = this.resolvePlexSyncStageStatus(job, stage.key, stages);
-                        return `
+            const stageStatus = this.resolvePlexSyncStageStatus(job, stage.key, stages);
+            return `
                             <div class="job-stage">
                                 <span>${stage.label}</span>
                                 <span class="job-stage-status status-${stageStatus}">${this.formatStageStatus(stageStatus)}</span>
                             </div>
                         `;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>
         `;
@@ -3521,13 +3636,13 @@ class App {
                         </div>
                         <div class="match-review-candidate-main">
                             ${entityType === 'album'
-                                ? `
+                ? `
                                     <div class="match-review-album-header">
                                         ${this.renderMatchReviewTitle(candidate.title, {
-                                            explicit: candidate.explicit,
-                                            className: 'match-review-candidate-title',
-                                            href: this.getMatchExploreHref(entityType, candidate.hifi_id)
-                                        })}
+                    explicit: candidate.explicit,
+                    className: 'match-review-candidate-title',
+                    href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                })}
                                         <div class="match-review-album-artist">${this.escapeHtml(candidate.subtitle || 'Unknown Artist')}</div>
                                     </div>
                                     <div class="match-review-album-body">
@@ -3535,14 +3650,14 @@ class App {
                                         ${this.renderMatchTrackList(candidate.track_titles, 'Track list unavailable for this candidate.')}
                                     </div>
                                 `
-                                : `
+                : `
                                     ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, entityType === 'artist' ? 'artist' : 'album')}
                                     <div class="match-review-candidate-copy">
                                         ${this.renderMatchReviewTitle(candidate.title, {
-                                            explicit: candidate.explicit,
-                                            className: 'match-review-candidate-title',
-                                            href: this.getMatchExploreHref(entityType, candidate.hifi_id)
-                                        })}
+                    explicit: candidate.explicit,
+                    className: 'match-review-candidate-title',
+                    href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                })}
                                         ${candidate.subtitle ? `<div class="match-review-candidate-subtitle">${this.escapeHtml(candidate.subtitle)}</div>` : ''}
                                     </div>
                                 `}
@@ -3612,7 +3727,7 @@ class App {
                 artistId: artist.library_id,
                 artistName: artist.name || 'Artist'
             });
-            }
+        }
 
         if (entityType === 'album') {
             const album = item as HifiReviewAlbum;
@@ -4886,6 +5001,11 @@ class App {
                 const data = await response.json();
                 this.lbConfigStatusEl.textContent = data.has_token ? '✓ Token configured' : '';
                 this.lbConfigStatusEl.style.color = data.has_token ? 'var(--accent-primary)' : '';
+                if (data.username) {
+                    this.listenbrainzUsernameInput.value = data.username;
+                } else {
+                    this.listenbrainzUsernameInput.value = '';
+                }
             }
         } catch (error) {
             console.warn('Failed to load ListenBrainz config.', error);
@@ -4894,6 +5014,7 @@ class App {
 
     private async saveListenbrainzConfig(): Promise<void> {
         const userToken = this.listenbrainzTokenInput.value.trim();
+        const username = this.listenbrainzUsernameInput.value.trim();
 
         if (!userToken) {
             this.lbConfigStatusEl.textContent = '⚠ User token is required';
@@ -4916,6 +5037,7 @@ class App {
                 },
                 body: JSON.stringify({
                     user_token: userToken,
+                    username: username,
                     user_id: userId
                 })
             });
@@ -4924,6 +5046,7 @@ class App {
                 this.lbConfigStatusEl.textContent = '✓ Configuration saved';
                 this.lbConfigStatusEl.style.color = 'var(--accent-primary)';
                 this.listenbrainzTokenInput.value = '';
+                void this.updateSidebarPlaylists();
                 // Clear status message after 3 seconds
                 setTimeout(() => {
                     this.lbConfigStatusEl.textContent = '';
@@ -5709,10 +5832,10 @@ class App {
             const url = atob(endpoint.encodedUrl);
             const statusClass = endpoint.online ? 'online' : 'offline';
             const statusText = endpoint.online ? 'Online' : 'Offline';
-            const responseTime = endpoint.responseTime 
-                ? `${endpoint.responseTime.toFixed(0)}ms` 
+            const responseTime = endpoint.responseTime
+                ? `${endpoint.responseTime.toFixed(0)}ms`
                 : 'N/A';
-            const lastChecked = endpoint.lastChecked 
+            const lastChecked = endpoint.lastChecked
                 ? new Date(endpoint.lastChecked).toLocaleTimeString()
                 : 'Never';
 
@@ -5771,7 +5894,7 @@ class App {
     private async handleSearch(updateHistory: boolean = true): Promise<void> {
         const searchType = this.searchTypeSelect.value;
         const query = this.searchInput.value.trim();
-        
+
         if (searchType === 'listenbrainz') {
             // Handle ListenBrainz playlists without requiring query
             await this.handleListenbrainzPlaylists(undefined, updateHistory);
@@ -5900,11 +6023,11 @@ class App {
                     const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
                         signal: this.pendingRequestController?.signal
                     });
-                    
+
                     if (searchResponse.ok) {
                         const searchData = await searchResponse.json();
                         const items = searchData.data?.items || [];
-                        
+
                         if (items.length > 0) {
                             // Add the first match to results
                             const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
@@ -6102,19 +6225,36 @@ class App {
         }
     }
 
-    private async handleListenbrainzPlaylists(usernameOverride?: string, updateHistory: boolean = true): Promise<void> {
-        const username = (usernameOverride ?? this.searchInput.value).trim();
-        
+    private async handleListenbrainzPlaylists(usernameOverride?: string, updateHistory: boolean = true, type?: string): Promise<void> {
+        let username = (usernameOverride ?? this.searchInput.value).trim();
+
         if (!username) {
-            this.displayMessage('Please enter ListenBrainz username');
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                try {
+                    const response = await fetch(`/api/listenbrainz/config?user_id=${encodeURIComponent(userId)}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.username) {
+                            username = data.username;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch listenbrainz config for username', e);
+                }
+            }
+        }
+
+        if (!username) {
+            this.displayMessage('Please enter ListenBrainz username or configure it in Settings');
             return;
         }
 
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'listenbrainz_playlists', username });
+            this.pushHistoryRoute({ view: 'listenbrainz_playlists', username, playlistType: type });
         }
 
-        this.currentExploreRoute = { view: 'listenbrainz_playlists', username };
+        this.currentExploreRoute = { view: 'listenbrainz_playlists', username, playlistType: type };
         this.listenbrainzCurrentUsername = username;
         this.listenbrainzCurrentPlaylist = null;
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
@@ -6124,10 +6264,11 @@ class App {
         try {
             const userId = this.getSelectedPlexUserId();
             const userIdQuery = userId ? `&user_id=${encodeURIComponent(userId)}` : '';
-            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}${userIdQuery}`, {
+            const typeQuery = type ? `&type=${encodeURIComponent(type)}` : '';
+            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}${userIdQuery}${typeQuery}`, {
                 signal: this.pendingRequestController?.signal
             });
-            
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
                 throw new Error(errorData.error || 'Failed to fetch ListenBrainz playlists');
@@ -6147,9 +6288,14 @@ class App {
                 .filter((playlist: any) => playlist && playlist.title);
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
+            let displayTitle = 'ListenBrainz Playlists';
+            if (type === 'user') displayTitle = 'User Playlists';
+            if (type === 'collaborator') displayTitle = 'Collaborator Playlists';
+            if (type === 'createdfor') displayTitle = 'Recommendation Playlists';
+
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
-                    <h2>ListenBrainz Playlists (${playlists.length})</h2>
+                    <h2>${displayTitle} (${playlists.length})</h2>
                 </div>
                 <div class="results-list">
                     ${playlists.map((playlist: any) => this.formatPlaylistCard(playlist)).join('')}
@@ -6168,7 +6314,7 @@ class App {
 
         // Extract public status from extension
         const isPublic = playlist.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.public || false;
-        
+
         // Extract identifier (which is the full URL)
         const playlistId = playlist.identifier ? playlist.identifier : '';
 
@@ -6276,11 +6422,11 @@ class App {
                     const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
                         signal: this.pendingRequestController?.signal
                     });
-                    
+
                     if (searchResponse.ok) {
                         const searchData = await searchResponse.json();
                         const items = searchData.data?.items || [];
-                        
+
                         if (items.length > 0) {
                             // Add the first match to results
                             const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
@@ -6354,10 +6500,10 @@ class App {
             id: Math.random() * 1000000, // Generate a temporary ID since ListenBrainz doesn't provide numeric IDs
             title: lbTrack.title || 'Unknown',
             duration: lbTrack.duration ? Math.floor(lbTrack.duration / 1000) : undefined,
-            artists: lbTrack.creator 
+            artists: lbTrack.creator
                 ? [{ id: 0, name: lbTrack.creator }]
                 : [],
-            artist: lbTrack.creator 
+            artist: lbTrack.creator
                 ? { id: 0, name: lbTrack.creator }
                 : undefined,
             album: undefined,
@@ -6391,30 +6537,30 @@ class App {
         } else {
             items = data.data?.items || [];
         }
-        
+
         if (items.length === 0) {
             this.displayMessage(`No results found for "${query}"${data.proxied_via ? ' (via ' + data.proxied_via + ')' : ''}`);
             return;
         }
 
         // Display results with proxy info
-        const searchTypeName = searchType === 's' ? 'Tracks' : 
-                              searchType === 'a' ? 'Artists' :
-                              searchType === 'al' ? 'Albums' :
-                              searchType === 'p' ? 'Playlists' :
-                              searchType === 'trackid' ? 'Track ID' :
-                              'Results';
+        const searchTypeName = searchType === 's' ? 'Tracks' :
+            searchType === 'a' ? 'Artists' :
+                searchType === 'al' ? 'Albums' :
+                    searchType === 'p' ? 'Playlists' :
+                        searchType === 'trackid' ? 'Track ID' :
+                            'Results';
 
         this.resultsContainer.innerHTML = `
             <div class="results-header">
                 <h2>${searchTypeName} - "${this.escapeHtml(query)}"</h2>
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
-            ${searchType === 'al' 
+            ${searchType === 'al'
                 ? this.formatAlbumsGrid(items as AlbumSearchItem[])
                 : searchType === 's' || searchType === 'trackid'
-                ? this.formatTracksGrid(items as Track[])
-                : `<div class="results-list${searchType === 'a' ? ' artist-results' : ''}">
+                    ? this.formatTracksGrid(items as Track[])
+                    : `<div class="results-list${searchType === 'a' ? ' artist-results' : ''}">
                     ${items.map(item => {
                         if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
                         if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
@@ -6810,8 +6956,8 @@ class App {
             <div class="track-card album-card playlist-search-card clickable" data-playlist-id="${playlistId}" title="Click to view tracks">
                 <div class="track-artwork">
                     ${coverImage
-                        ? `<img src="${coverImage}" alt="${playlistName}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                ? `<img src="${coverImage}" alt="${playlistName}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <path d="M9 9h6"></path>
@@ -6819,7 +6965,7 @@ class App {
                                 <path d="M9 17h4"></path>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${playlistName}</div>
@@ -6891,7 +7037,7 @@ class App {
             </svg>
         `;
     }
-    
+
     private getAddAllLibraryIconSvg(): string {
         return `
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -6902,7 +7048,7 @@ class App {
             </svg>
         `;
     }
-    
+
     private setBulkActionButtonState(
         button: HTMLButtonElement | null,
         buttonType: 'playlist' | 'library',
@@ -7098,7 +7244,7 @@ class App {
         const albumId = track.album?.id;
 
         // Format duration
-        const duration = track.duration 
+        const duration = track.duration
             ? this.formatDuration(track.duration)
             : '';
 
@@ -7109,12 +7255,12 @@ class App {
         // Format track title with optional track number and version
         // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
         let trackTitle = this.escapeHtml(track.title);
-        
+
         // Append version info if available
         if (track.version && typeof track.version === 'string' && track.version.trim()) {
             trackTitle += ` (${this.escapeHtml(track.version)})`;
         }
-        
+
         if (showTrackNumber && track.trackNumber) {
             const volumeNumber = track.volumeNumber || 1;
             const displayTrackNumber = numberOfVolumes && numberOfVolumes > 1
@@ -7129,15 +7275,15 @@ class App {
                     ${this.getPlayIconSvg()}
                 </button>
                 <div class="track-artwork">
-                    ${albumCover 
-                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                    ${albumCover
+                ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <circle cx="12" cy="12" r="3"></circle>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${trackTitle}</div>
@@ -7182,7 +7328,7 @@ class App {
         const isSingleAlbum = this.allTracksFromSameAlbum(tracks);
         const showTrackNumberColumn = includeTrackNumbers && isSingleAlbum;
         const showArtworkInSingleAlbum = !includeTrackNumbers && isSingleAlbum;
-        
+
         if (isSingleAlbum) {
             // Single album view - optionally show track number column or album artwork, hide album column
             return `
@@ -7241,15 +7387,15 @@ class App {
         return `
             <div class="tracks-grid-row" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
                 ${showArtwork ? `<div class="grid-cell grid-col-artwork">
-                    ${albumCover 
-                        ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
-                        : `<div class="grid-artwork-placeholder">
+                    ${albumCover
+                    ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                    : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <circle cx="12" cy="12" r="3"></circle>
                             </svg>
                            </div>`
-                    }
+                }
                 </div>` : ''}
                 ${showTrackNumber ? `<div class="grid-cell grid-col-track-number">${trackNumberDisplay}</div>` : ''}
                 <div class="grid-cell grid-col-title">
@@ -7537,7 +7683,7 @@ class App {
         const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
 
         // Format release year if available
-        const releaseYear = album.releaseDate 
+        const releaseYear = album.releaseDate
             ? new Date(album.releaseDate).getFullYear()
             : '';
 
@@ -7553,16 +7699,16 @@ class App {
         return `
             <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
-                    ${album.cover 
-                        ? `<img src="${this.getHifiImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                    ${album.cover
+                ? `<img src="${this.getHifiImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <circle cx="8.5" cy="8.5" r="1.5"></circle>
                                 <polyline points="21 15 16 10 5 21"></polyline>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${this.escapeHtml(album.title)}</div>
@@ -7595,7 +7741,7 @@ class App {
         const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
 
         // Format release year if available
-        const releaseYear = album.releaseDate 
+        const releaseYear = album.releaseDate
             ? new Date(album.releaseDate).getFullYear()
             : '';
 
@@ -7613,16 +7759,16 @@ class App {
         return `
             <div class="albums-grid-row ${hideArtist ? 'hide-artist' : ''}" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''}>
                 <div class="grid-cell grid-col-artwork">
-                    ${albumCover 
-                        ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
-                        : `<div class="grid-artwork-placeholder">
+                    ${albumCover
+                ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
+                : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <circle cx="8.5" cy="8.5" r="1.5"></circle>
                                 <polyline points="21 15 16 10 5 21"></polyline>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="grid-cell grid-col-title">
                     <div class="track-title-with-badge">
@@ -7666,15 +7812,15 @@ class App {
             <div class="artist-card-compact clickable" data-artist-id="${artist.id}" title="Click to view albums">
                 <div class="artist-card-name">${this.escapeHtml(artist.name)}</div>
                 <div class="artist-card-image">
-                    ${artist.picture 
-                        ? `<img src="${this.getHifiImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
-                        : `<div class="artist-card-placeholder">
+                    ${artist.picture
+                ? `<img src="${this.getHifiImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
+                : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
                                 <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <button class="artist-card-btn" title="Find Similar Artists" aria-label="Find Similar Artists">
                     ${this.getMoreLikeIconSvg()}
@@ -7758,22 +7904,22 @@ class App {
         maxRetries: number = 3
     ): Promise<Response> {
         let lastError: Error | null = null;
-        
+
         // Ensure abort signal is included if not already provided
         const finalOptions = {
             ...options,
             signal: options?.signal || this.pendingRequestController?.signal
         };
-        
+
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 const response = await fetch(url, finalOptions);
-                
+
                 // Only retry on 5xx errors or connection issues
                 if (response.status < 500) {
                     return response;
                 }
-                
+
                 // 5xx error - log and retry
                 lastError = new Error(`HTTP ${response.status}`);
                 if (attempt < maxRetries) {
@@ -7782,7 +7928,7 @@ class App {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
-                
+
                 // Last attempt, return the response
                 return response;
             } catch (error) {
@@ -7797,7 +7943,7 @@ class App {
                 throw error;
             }
         }
-        
+
         throw lastError || new Error('Fetch failed');
     }
 
@@ -7805,18 +7951,18 @@ class App {
         this.stopPlayback();
         this.updatePlexPlaylistContainerVisibility(false);
         this.lastRetryFunction = retryFn || null;
-        
-        const retryButton = retryFn 
+
+        const retryButton = retryFn
             ? `<button class="retry-button" id="retryButton">Retry</button>`
             : '';
-        
+
         this.resultsContainer.innerHTML = `
             <div class="message">
                 <p>${message}</p>
                 ${retryButton}
             </div>
         `;
-        
+
         if (retryFn) {
             const retryBtn = document.getElementById('retryButton');
             if (retryBtn) {
@@ -7839,7 +7985,7 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-                const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}?include_albums=true&include_tracks=true`, {
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}?include_albums=true&include_tracks=true`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -8025,11 +8171,11 @@ class App {
             const totalDurationMinutes = Math.floor(totalDurationSeconds / 60);
             const totalDurationHours = Math.floor(totalDurationMinutes / 60);
             const remainingMinutes = totalDurationMinutes % 60;
-            const durationStr = totalDurationHours > 0 
+            const durationStr = totalDurationHours > 0
                 ? `${totalDurationHours}h ${remainingMinutes}m`
                 : `${totalDurationMinutes}m`;
 
-            const releaseDate = albumData.releaseDate 
+            const releaseDate = albumData.releaseDate
                 ? new Date(albumData.releaseDate).getFullYear()
                 : '';
 
@@ -8038,7 +8184,7 @@ class App {
                 albumData.mediaMetadata?.tags?.includes('EXPLICIT') ||
                 tracks.some(track => track.explicit)
             );
-            
+
             const coverArt = albumData.cover
                 ? this.getHifiImageUrl(albumData.cover, 1280)
                 : '';
@@ -8464,19 +8610,19 @@ class App {
             // Create new playlist section
             const createSection = document.createElement('div');
             createSection.className = 'playlist-create-section';
-            
+
             const divider = document.createElement('div');
             divider.className = 'playlist-create-divider';
             divider.textContent = 'or';
-            
+
             const inputGroup = document.createElement('div');
             inputGroup.className = 'playlist-create-inline-group';
-            
+
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'playlist-create-inline-input';
             input.placeholder = 'New playlist name...';
-            
+
             const okBtn = document.createElement('button');
             okBtn.className = 'playlist-create-inline-btn';
             okBtn.textContent = 'OK';
@@ -8488,7 +8634,7 @@ class App {
                     resolve();
                 }
             });
-            
+
             input.addEventListener('keypress', (e: KeyboardEvent) => {
                 if (e.key === 'Enter') {
                     const playlistName = input.value.trim();
@@ -8499,10 +8645,10 @@ class App {
                     }
                 }
             });
-            
+
             inputGroup.appendChild(input);
             inputGroup.appendChild(okBtn);
-            
+
             if (playlists.length > 0) {
                 createSection.appendChild(divider);
             }
@@ -8588,7 +8734,7 @@ class App {
             console.log(`[PLAYLIST] Sending download with playlist request for track ${trackId}`);
             console.log(`[PLAYLIST] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[PLAYLIST] Download type: ${downloadType}, Playlist: ${playlistName}`);
-            
+
             const plexUserId = this.getSelectedPlexUserId();
             const response = await this.fetchWithRetry('/api/downloads', {
                 method: 'POST',
@@ -8608,7 +8754,7 @@ class App {
             }, 3);
 
             console.log(`[PLAYLIST] Response status: ${response.status}`);
-            
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -8618,7 +8764,7 @@ class App {
 
             const data = await response.json();
             console.log(`[PLAYLIST] Server response:`, data);
-            
+
             if (!data.success) {
                 throw new Error(data.error || 'Download failed');
             }
@@ -8737,19 +8883,19 @@ class App {
             // Create new playlist section
             const createSection = document.createElement('div');
             createSection.className = 'playlist-create-section';
-            
+
             const divider = document.createElement('div');
             divider.className = 'playlist-create-divider';
             divider.textContent = 'or';
-            
+
             const inputGroup = document.createElement('div');
             inputGroup.className = 'playlist-create-inline-group';
-            
+
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'playlist-create-inline-input';
             input.placeholder = 'New playlist name...';
-            
+
             const okBtn = document.createElement('button');
             okBtn.className = 'playlist-create-inline-btn';
             okBtn.textContent = 'OK';
@@ -8761,7 +8907,7 @@ class App {
                     resolve(playlistName);
                 }
             });
-            
+
             input.addEventListener('keypress', (e: KeyboardEvent) => {
                 if (e.key === 'Enter') {
                     const playlistName = input.value.trim();
@@ -8772,10 +8918,10 @@ class App {
                     }
                 }
             });
-            
+
             inputGroup.appendChild(input);
             inputGroup.appendChild(okBtn);
-            
+
             if (playlists.length > 0) {
                 createSection.appendChild(divider);
             }
@@ -8825,7 +8971,7 @@ class App {
 
         try {
             const jobIds: number[] = [];
-            
+
             // Queue all tracks for adding to playlist
             for (const track of tracks) {
                 try {
@@ -9010,7 +9156,7 @@ class App {
         `;
     }
 
-private async downloadTrackToLibrary(
+    private async downloadTrackToLibrary(
         trackId: number,
         downloadType: 'album' | 'loose'
     ): Promise<number> {
@@ -9018,24 +9164,24 @@ private async downloadTrackToLibrary(
             console.log(`[DOWNLOAD] Sending download-to-library request for track ${trackId}`);
             console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
-            
+
             const response = await this.fetchWithRetry('/api/downloads', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            trackId,
-                            quality: this.downloadSettings.quality,
-                            fileNaming: this.downloadSettings.fileNamingAlbum,
-                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                            ignore_matches: this.downloadSettings.ignoreMatches
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    quality: this.downloadSettings.quality,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    ignore_matches: this.downloadSettings.ignoreMatches
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
-            
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -9046,7 +9192,7 @@ private async downloadTrackToLibrary(
             // Parse the JSON response
             const data = await response.json();
             console.log(`[DOWNLOAD] Server response:`, data);
-            
+
             if (!data.success) {
                 throw new Error(data.error || 'Download failed');
             }
@@ -9077,27 +9223,27 @@ private async downloadTrackToLibrary(
             console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
             console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
-            
+
             const plexUserId = this.getSelectedPlexUserId();
             const response = await this.fetchWithRetry('/api/downloads', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            trackId,
-                            quality: this.downloadSettings.quality,
-                            fileNaming: this.downloadSettings.fileNamingAlbum,
-                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                            plex_playlist: plexPlaylistName,
-                            plex_user_id: plexUserId,
-                            ignore_matches: this.downloadSettings.ignoreMatches
-                        }),
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    quality: this.downloadSettings.quality,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    plex_playlist: plexPlaylistName,
+                    plex_user_id: plexUserId,
+                    ignore_matches: this.downloadSettings.ignoreMatches
+                }),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
-            
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -9108,7 +9254,7 @@ private async downloadTrackToLibrary(
             // Parse the JSON response
             const data = await response.json();
             console.log(`[DOWNLOAD] Server response:`, data);
-            
+
             if (!data.success) {
                 throw new Error(data.error || 'Download failed');
             }
@@ -9152,7 +9298,7 @@ private async downloadTrackToLibrary(
         const effectiveStatus = status.replace('_', '-');
         downloadBtn.classList.remove('queued', 'in-progress', 'completed', 'failed');
         downloadBtn.classList.add(effectiveStatus);
-        
+
         if (effectiveStatus === 'queued' || effectiveStatus === 'in-progress') {
             downloadBtn.innerHTML = this.getSpinnerIconSvg();
         } else if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed-with-errors') {
@@ -9283,7 +9429,7 @@ private async downloadTrackToLibrary(
 
         this.isDownloadingAll = true;
         this.downloadAllCancelRequested = false;
-        
+
         const downloadAllBtn = document.getElementById('downloadAllBtn') as HTMLButtonElement;
         if (downloadAllBtn) {
             downloadAllBtn.textContent = 'Cancel';
@@ -9301,7 +9447,7 @@ private async downloadTrackToLibrary(
             // Check if cancel was requested
             if (this.downloadAllCancelRequested) {
                 console.log('[DOWNLOAD_ALL] Download all cancelled by user');
-                
+
                 // Restore buttons for incomplete downloads
                 for (let j = i; j < trackCards.length; j++) {
                     const trackCard = trackCards[j];
@@ -9315,25 +9461,25 @@ private async downloadTrackToLibrary(
 
             const trackCard = trackCards[i];
             const trackId = trackCard.getAttribute('data-track-id');
-            
+
             if (trackId) {
                 try {
                     console.log(`[DOWNLOAD_ALL] Downloading track ${i + 1}/${totalTracks}`);
                     const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
-                    
+
                     if (downloadBtn && !downloadBtn.classList.contains('completed')) {
                         this.currentDownloadController = new AbortController();
-                        
+
                         try {
                             await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
                         } catch (error) {
                             console.error(`[DOWNLOAD_ALL] Download error for track ${trackId}:`, error);
                         }
                     }
-                    
+
                     // Count as queued whether processed or not (including skipped/already completed)
                     downloadedCount++;
-                    
+
                 } catch (error) {
                     console.error(`[DOWNLOAD_ALL] Error processing track ${trackId}:`, error);
                 }
@@ -9344,7 +9490,7 @@ private async downloadTrackToLibrary(
         this.isDownloadingAll = false;
         this.downloadAllCancelRequested = false;
         this.currentDownloadController = null;
-        
+
         if (downloadAllBtn) {
             downloadAllBtn.textContent = 'Download All';
             downloadAllBtn.classList.remove('cancelling');
@@ -9361,7 +9507,7 @@ private async downloadTrackToLibrary(
 
         this.isDownloadingAll = true;
         this.downloadAllCancelRequested = false;
-        
+
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
         this.setBulkActionButtonState(addAllLibraryBtn, 'library', 'loading');
 
@@ -9375,12 +9521,12 @@ private async downloadTrackToLibrary(
         for (let i = 0; i < trackCards.length; i++) {
             const trackCard = trackCards[i];
             const trackId = trackCard.getAttribute('data-track-id');
-            
+
             if (trackId) {
                 try {
                     console.log(`[ADD_ALL_LIBRARY] Adding to library ${i + 1}/${totalTracks}`);
                     const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
-                    
+
                     if (libraryBtn && !libraryBtn.classList.contains('completed')) {
                         const wasQueued = libraryBtn.classList.contains('queued');
                         await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
@@ -9392,7 +9538,7 @@ private async downloadTrackToLibrary(
                             failedCount++;
                         }
                     }
-                    
+
                 } catch (error) {
                     console.error(`[ADD_ALL_LIBRARY] Error processing track ${trackId}:`, error);
                     failedCount++;
@@ -9569,7 +9715,7 @@ private async downloadTrackToLibrary(
                             failedCount++;
                         }
                     }
-                    
+
                 } catch (error) {
                     console.error(`[PLAYLIST_ALL] Error processing track ${trackId}:`, error);
                     failedCount++;
