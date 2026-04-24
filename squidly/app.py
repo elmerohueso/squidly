@@ -4021,7 +4021,7 @@ def process_download_job(job_id, payload):
     try:
         track_object = get_hifi_track_object(
             track_id,
-            include_streams=True,
+            include_streams=False,
             include_album=True,
             audio_quality=quality_choice
         )
@@ -4043,26 +4043,33 @@ def process_download_job(job_id, payload):
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
-    track_streams = track_data.get('track_streams') if isinstance(track_data.get('track_streams'), dict) else {}
-    selected_stream = track_streams.get(quality_choice)
-    if not (isinstance(selected_stream, dict) and isinstance(selected_stream.get('url'), str) and selected_stream.get('url')):
-        raise ManifestDownloadError(f"Failed to get track stream for quality '{quality_choice}' from normalized HiFi object")
 
-    download_url = selected_stream.get('url')
-    stream_codec = selected_stream.get('codec')
-    stream_audio_mode = selected_stream.get('audioMode')
-    codec_value = str(stream_codec or '').strip().lower()
-    if 'flac' in codec_value:
-        output_format = 'flac'
-    elif 'aac' in codec_value or 'mp4' in codec_value or 'alac' in codec_value:
-        output_format = 'm4a'
-    else:
-        output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
-    print(
-        f"[DOWNLOAD] Selected stream quality='{quality_choice}' codec={stream_codec!r} output_format={output_format!r} audioMode={stream_audio_mode!r} url={download_url}",
-        flush=True
-    )
+    output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
+    print(f"[DOWNLOAD] Selected output format={output_format!r} for quality='{quality_choice}'", flush=True)
 
+    temp_folder = '/app/temp'
+    os.makedirs(temp_folder, exist_ok=True)
+    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
+
+    print(f"[DOWNLOAD] Downloading track data from trackManifests into temporary file: {temp_source_path}", flush=True)
+    try:
+        downloads.download_track_manifest(
+            track_id=track_id,
+            output_path=temp_source_path,
+            quality=quality_choice,
+            url_list=SQUID_URLS,
+            usage='DOWNLOAD'
+        )
+    except Exception as e:
+        raise TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+
+    with open(temp_source_path, 'rb') as tmp_file:
+        audio_format = detect_audio_format(tmp_file.read(32))
+
+    print(f"[DOWNLOAD] Detected downloaded audio format: {audio_format}", flush=True)
+    if audio_format == 'unknown':
+        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
+        audio_format = 'flac'
 
     print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
     print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
@@ -4347,23 +4354,7 @@ def process_download_job(job_id, payload):
     os.makedirs(output_dir, exist_ok=True)
     print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
 
-    print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
-    try:
-        track_response = make_request_with_retry(download_url, method='GET', timeout=60, max_retries=3, backoff_factor=2.0)
-    except requests.exceptions.RequestException as e:
-        raise TransientDownloadError(f"Failed to download track from CDN: {str(e)}") from e
-
-    if not track_response.ok:
-        raise TransientDownloadError(f"Failed to download track from CDN. Status: {track_response.status_code}")
-
-    print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
-
-    audio_format = detect_audio_format(track_response.content)
-    print(f"[DOWNLOAD] Detected audio format: {audio_format}", flush=True)
-
-    if audio_format == 'unknown':
-        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
-        audio_format = 'flac'
+    print(f"[DOWNLOAD] Download complete. Using temporary source file: {temp_source_path}", flush=True)
 
     cover_image_data = None
     if cover_url:
@@ -4410,20 +4401,15 @@ def process_download_job(job_id, payload):
     temp_folder = '/app/temp'
     os.makedirs(temp_folder, exist_ok=True)
 
-    temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
-    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
     temp_target_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
-    print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
-
-    with open(temp_source_path, 'wb') as f:
-        f.write(track_response.content)
+    print(f"[DOWNLOAD] Using temporary source file: {temp_source_path}", flush=True)
 
     stages['downloaded'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
     update_job_progress(job_id, {'stages': stages})
 
-    print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
+    print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
     add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
@@ -4432,12 +4418,12 @@ def process_download_job(job_id, payload):
 
     converted = False
     if output_format == 'm4a' and audio_format != 'm4a':
-        print(f"[DOWNLOAD] Output format is AAC - converting staged {temp_source_ext.upper()} to M4A", flush=True)
-        success = convert_to_aac(temp_source_path, temp_target_path, source_format=temp_source_ext)
+        print(f"[DOWNLOAD] Output format is AAC - converting staged {audio_format.upper()} to M4A", flush=True)
+        success = convert_to_aac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             cleanup_file(temp_source_path)
             cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {temp_source_ext.upper()} to M4A")
+            raise Exception(f"Failed to convert {audio_format.upper()} to M4A")
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
@@ -4445,12 +4431,12 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
         converted = True
     elif output_format == 'flac' and audio_format != 'flac':
-        print(f"[DOWNLOAD] Output format is FLAC - converting staged {temp_source_ext.upper()} to FLAC", flush=True)
-        success = convert_to_flac(temp_source_path, temp_target_path, source_format=temp_source_ext)
+        print(f"[DOWNLOAD] Output format is FLAC - converting staged {audio_format.upper()} to FLAC", flush=True)
+        success = convert_to_flac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             cleanup_file(temp_source_path)
             cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {temp_source_ext.upper()} to FLAC")
+            raise Exception(f"Failed to convert {audio_format.upper()} to FLAC")
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
