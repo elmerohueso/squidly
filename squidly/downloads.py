@@ -5,10 +5,13 @@ from datetime import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
+from pathlib import Path
 from threading import Lock
 import time
 from itertools import cycle
+from urllib.parse import urljoin, urlencode
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TPE2, TALB, TDRC, TRCK, TPOS, TCOP, TXXX
 from mutagen.mp3 import MP3
@@ -24,6 +27,288 @@ def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
 
     image_path = image_id_or_path.replace('-', '/')
     return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
+
+
+HLS_TAG_MAP_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
+
+QUALITY_PRESETS = {
+    'DOLBY_ATMOS': (['EAC3_JOC'], 'MPEG_DASH'),
+    'HIRES_LOSSLESS': (['FLAC_HIRES'], 'HLS'),
+    'HI_RES_LOSSLESS': (['FLAC_HIRES'], 'HLS'),
+    'LOSSLESS': (['FLAC'], 'HLS'),
+    'HIGH': (['AACLC'], 'HLS'),
+    'LOW': (['HEAACV1'], 'HLS'),
+}
+
+
+def resolve_formats_and_manifest_type(
+    quality: str | None,
+    manifest_type: str | None = None,
+) -> tuple[list[str], str]:
+    quality_key = str(quality or '').strip().upper()
+    if quality_key in QUALITY_PRESETS:
+        formats, quality_manifest = QUALITY_PRESETS[quality_key]
+        manifest_type = manifest_type or quality_manifest
+    else:
+        formats, quality_manifest = QUALITY_PRESETS['LOSSLESS']
+        manifest_type = manifest_type or quality_manifest
+
+    return formats, manifest_type or 'HLS'
+
+
+def extract_track_manifest_uri(payload: dict) -> str:
+    if not isinstance(payload, dict):
+        raise ValueError('Track manifests payload is not a dictionary')
+
+    candidates = []
+    data_node = payload.get('data')
+    if isinstance(data_node, dict):
+        nested = data_node.get('data')
+        if isinstance(nested, dict):
+            data_node = nested
+        if isinstance(data_node.get('attributes'), dict):
+            candidates.append(data_node['attributes'].get('uri'))
+        candidates.append(data_node.get('uri'))
+
+    candidates.append(payload.get('uri'))
+
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            return candidate
+
+    raise ValueError('No manifest URI found in trackManifests payload')
+
+
+def download_binary(url: str, timeout: int = 30) -> bytes:
+    response = make_request_with_retry(url, method='GET', timeout=timeout, max_retries=3, allow_redirects=True)
+    if response is None:
+        raise requests.exceptions.RequestException(f'Failed to download binary URL: {url}')
+    response.raise_for_status()
+    return response.content
+
+
+def ffmpeg_available() -> bool:
+    return shutil.which('ffmpeg') is not None
+
+
+def demux_flac(input_path: Path, output_path: Path) -> None:
+    if not ffmpeg_available():
+        raise RuntimeError('ffmpeg is required to demux FLAC from MP4. Install ffmpeg and retry.')
+
+    try:
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-y',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-i',
+                str(input_path),
+                '-map',
+                '0:a:0',
+                '-c',
+                'copy',
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f'ffmpeg failed while demuxing {input_path} -> {output_path}: {exc.returncode}\n{exc.stderr}'
+        ) from exc
+
+
+def download_dash_audio(manifest_uri: str, output_path: Path) -> None:
+    if not ffmpeg_available():
+        raise RuntimeError('ffmpeg is required to download DASH audio. Install ffmpeg and retry.')
+
+    try:
+        subprocess.run(
+            [
+                'ffmpeg',
+                '-y',
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-protocol_whitelist',
+                'file,http,https,tcp,tls,crypto',
+                '-i',
+                manifest_uri,
+                '-map',
+                '0:a:0',
+                '-c',
+                'copy',
+                str(output_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f'ffmpeg failed while downloading DASH audio from {manifest_uri} -> {output_path}: {exc.returncode}\n{exc.stderr}'
+        ) from exc
+
+
+def parse_hls_playlist(text: str, playlist_url: str):
+    init_uri = None
+    segment_uris = []
+    variant_uri = None
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    for index, line in enumerate(lines):
+        if line.startswith('#EXTM3U'):
+            continue
+
+        if line.startswith('#EXT-X-STREAM-INF'):
+            for next_line in lines[index + 1 :]:
+                if not next_line.startswith('#'):
+                    variant_uri = urljoin(playlist_url, next_line)
+                    break
+            break
+
+        if line.startswith('#EXT-X-MAP'):
+            match = HLS_TAG_MAP_RE.search(line)
+            if match:
+                init_uri = match.group(1)
+            continue
+
+        if line.startswith('#'):
+            continue
+
+        segment_uris.append(urljoin(playlist_url, line))
+
+    if variant_uri:
+        return None, [variant_uri]
+
+    if not segment_uris:
+        raise ValueError('No segment URIs found in the HLS playlist')
+
+    if init_uri:
+        init_uri = urljoin(playlist_url, init_uri)
+
+    return init_uri, segment_uris
+
+
+def download_track_manifest(
+    track_id: str,
+    output_path,
+    quality: str | None,
+    url_list,
+    usage: str = 'DOWNLOAD',
+    manifest_type: str | None = None,
+):
+    formats, manifest_type = resolve_formats_and_manifest_type(quality, manifest_type)
+    params = {
+        'id': str(track_id),
+        'formats': ','.join(formats),
+        'usage': usage,
+        'manifestType': manifest_type,
+        'adaptive': 'true',
+        'uriScheme': 'HTTPS',
+    }
+
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/trackManifests/?{urlencode(params)}",
+        url_list,
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        raise requests.exceptions.HTTPError(f"Failed to fetch track manifest for {track_id}: {response.status_code}")
+
+    payload = response.json() or {}
+    manifest_uri = extract_track_manifest_uri(payload)
+
+    playlist_resp = make_request_with_retry(manifest_uri, method='GET', timeout=30, max_retries=3, allow_redirects=True)
+    if playlist_resp is None:
+        raise requests.exceptions.RequestException(f'Failed to fetch track manifest URI: {manifest_uri}')
+    playlist_resp.raise_for_status()
+
+    playlist_uri = manifest_uri
+    playlist_text = playlist_resp.text
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    intermediate_path = output_path
+    should_demux = formats[0].upper() in {'FLAC', 'FLAC_HIRES'} and output_path.suffix.lower() == '.flac'
+
+    if output_path.suffix.lower() == '.flac' and formats[0].upper() not in {'FLAC', 'FLAC_HIRES'}:
+        raise ValueError('Only FLAC/FLAC_HIRES formats support .flac output when using HLS. Use a different output extension or format.')
+
+    if should_demux:
+        intermediate_path = output_path.with_suffix('.m4a')
+
+    try:
+        if manifest_type == 'HLS' or playlist_uri.endswith('.m3u8') or '#EXTM3U' in playlist_text:
+            init_uri, segment_uris = parse_hls_playlist(playlist_text, playlist_uri)
+            if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
+                playlist_uri = segment_uris[0]
+                playlist_resp = make_request_with_retry(playlist_uri, method='GET', timeout=30, max_retries=3, allow_redirects=True)
+                if playlist_resp is None:
+                    raise requests.exceptions.RequestException(f'Failed to fetch HLS variant playlist: {playlist_uri}')
+                playlist_resp.raise_for_status()
+                playlist_text = playlist_resp.text
+                init_uri, segment_uris = parse_hls_playlist(playlist_text, playlist_uri)
+
+            print(f"[DOWNLOAD] Found {len(segment_uris)} segment URIs", flush=True)
+            if init_uri:
+                print('[DOWNLOAD] Found init segment URI', flush=True)
+
+            with intermediate_path.open('wb') as output_file:
+                if init_uri:
+                    print('[DOWNLOAD] Downloading HLS init segment', flush=True)
+                    try:
+                        output_file.write(download_binary(init_uri))
+                    except Exception as exc:
+                        raise RuntimeError(f'Failed to download HLS init segment: {init_uri}') from exc
+
+                print(f'[DOWNLOAD] Downloading {len(segment_uris)} HLS segments', flush=True)
+                downloaded_segments = 0
+                for segment_url in segment_uris:
+                    try:
+                        output_file.write(download_binary(segment_url))
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f'Failed to download HLS segment {downloaded_segments + 1}/{len(segment_uris)}'
+                        ) from exc
+                    downloaded_segments += 1
+
+                print(f'[DOWNLOAD] Downloaded {downloaded_segments}/{len(segment_uris)} HLS segments', flush=True)
+
+            if should_demux:
+                print(f'[DOWNLOAD] Demuxing FLAC from MP4 container: {intermediate_path} -> {output_path}', flush=True)
+                demux_flac(intermediate_path, output_path)
+                intermediate_path.unlink()
+                print(f'[DOWNLOAD] Demux complete: {output_path}', flush=True)
+            else:
+                print(f'[DOWNLOAD] Download complete: {output_path}', flush=True)
+
+        elif manifest_type == 'MPEG_DASH' or playlist_uri.endswith('.mpd') or '<MPD' in playlist_text:
+            if output_path.suffix.lower() == '.mpd':
+                print(f'[DOWNLOAD] Saving MPEG-DASH manifest to: {output_path}', flush=True)
+                output_path.write_bytes(playlist_resp.content)
+                print('[DOWNLOAD] MPEG-DASH manifest saved. Media segment download is not implemented in this helper.', flush=True)
+            else:
+                print(f'[DOWNLOAD] Downloading MPEG-DASH audio from manifest: {playlist_uri}', flush=True)
+                download_dash_audio(playlist_uri, output_path)
+                print(f'[DOWNLOAD] Download complete: {output_path}', flush=True)
+        else:
+            raise ValueError('Unsupported manifest type or response content for download.')
+    except Exception:
+        if should_demux and intermediate_path.exists():
+            try:
+                intermediate_path.unlink()
+            except Exception:
+                pass
+        raise
+
+    return str(output_path)
 
 
 def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):

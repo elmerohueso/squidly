@@ -494,14 +494,17 @@ from squidly import jobs
 
 from squidly.storage import (
     clear_plex_config,
+    clear_plex_user_settings,
     get_download_settings,
     get_listenbrainz_config,
     get_plex_config,
+    get_plex_user_settings,
     init_db,
     init_library_update_status,
     save_download_settings,
     save_listenbrainz_config,
     save_plex_config,
+    save_plex_user_setting,
 )
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -515,14 +518,52 @@ CORS(app)
 # ...existing code...
 @app.route('/api/plex/users', methods=['GET'])
 def plex_list_users():
-    """Return a list of Plex users (owner and managed) as JSON."""
-    users = get_all_plex_users()
-    # Remove user_obj (not serializable)
-    result = [
-        {k: v for k, v in user.items() if k not in ('user_obj',)}
-        for user in users
-    ]
-    return jsonify({'users': result})
+    """Return saved Plex users, or refresh the saved list when requested."""
+    sync_flag = str(request.args.get('sync', '') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+    if sync_flag:
+        try:
+            users = get_all_plex_users()
+            for user in users:
+                plex_client_id = str(user.get('client_id') or '').strip()
+                username = str(user.get('title') or user.get('username') or '').strip()
+                plex_owner = bool(user.get('is_owner'))
+                if plex_client_id and username:
+                    try:
+                        save_plex_user_setting(username, plex_client_id, plex_owner)
+                    except Exception as e:
+                        print(f'[PLEX] Failed to save user setting for {username}/{plex_client_id}: {e}', flush=True)
+        except Exception as e:
+            print(f'[PLEX] /api/plex/users?sync failed: {e}', flush=True)
+            return jsonify({'users': []}), 200
+
+        result = [
+            {k: v for k, v in user.items() if k not in ('user_obj',)}
+            for user in users
+        ]
+        return jsonify({'users': result})
+
+    try:
+        rows = get_plex_user_settings()
+        result = []
+        for row in rows:
+            client_id = str(row.get('plex_client_id') or '').strip()
+            username = str(row.get('username') or '').strip()
+            plex_owner = bool(row.get('plex_owner'))
+            if not client_id or not username:
+                continue
+            result.append({
+                'id': client_id,
+                'client_id': client_id,
+                'username': username,
+                'title': username,
+                'is_owner': plex_owner,
+                'is_managed': not plex_owner,
+            })
+        return jsonify({'users': result})
+    except Exception as e:
+        print(f'[PLEX] /api/plex/users failed to read saved users: {e}', flush=True)
+        return jsonify({'users': []}), 200
 # --- Plex PIN OAuth API ---
 import threading
 
@@ -543,8 +584,9 @@ def plex_health_status():
 
 @app.route('/api/plex/clear_credentials', methods=['POST'])
 def plex_clear_credentials():
-    """Clear saved Plex configuration."""
+    """Clear saved Plex configuration and Plex user settings."""
     clear_plex_config()
+    clear_plex_user_settings()
     set_plex_health_status(False, 'No Plex credentials configured')
     return jsonify({'ok': True})
 
@@ -726,17 +768,6 @@ def init_db():
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS listenbrainz_config (
-            id INTEGER PRIMARY KEY,
-            user_token TEXT,
-            username TEXT,
-            updated_at TIMESTAMP NOT NULL,
-            CONSTRAINT check_single_row_lb CHECK (id = 1)
-        )
-        """
-    )
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS plex_config (
             id INTEGER PRIMARY KEY,
             server_url TEXT,
@@ -749,6 +780,87 @@ def init_db():
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_settings (
+            id SERIAL PRIMARY KEY,
+            username TEXT,
+            plex_client_id TEXT UNIQUE,
+            plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
+            listenbrainz_key TEXT
+        )
+        """
+    )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings'
+        """
+    )
+    user_settings_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'plex_owner' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
+        user_settings_columns.add('plex_owner')
+    if 'listenbrainz_key' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
+
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = 'listenbrainz_config'
+              AND table_schema = 'public'
+        )
+        """
+    )
+    table_exists_row = cur.fetchone()
+    if table_exists_row and table_exists_row.get('exists'):
+        cur.execute('SELECT user_token FROM listenbrainz_config WHERE id = 1')
+        lb_row = cur.fetchone()
+        if lb_row and lb_row.get('user_token'):
+            token = lb_row['user_token']
+            cur.execute(
+                """
+                SELECT plex_client_id
+                FROM user_settings
+                WHERE plex_owner = TRUE
+                ORDER BY id ASC
+                LIMIT 1
+                """
+            )
+            owner_row = cur.fetchone()
+            target_client_id = owner_row['plex_client_id'] if owner_row and owner_row.get('plex_client_id') else None
+            if not target_client_id:
+                cur.execute(
+                    """
+                    SELECT plex_client_id
+                    FROM user_settings
+                    ORDER BY id ASC
+                    LIMIT 1
+                    """
+                )
+                default_row = cur.fetchone()
+                target_client_id = default_row['plex_client_id'] if default_row and default_row.get('plex_client_id') else None
+            if target_client_id:
+                cur.execute(
+                    """
+                    UPDATE user_settings
+                    SET listenbrainz_key = %s
+                    WHERE plex_client_id = %s
+                    """,
+                    (token, target_client_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
+                    VALUES (%s, %s, %s)
+                    """,
+                    ('listenbrainz', 'listenbrainz_default', token)
+                )
+        cur.execute('DROP TABLE IF EXISTS listenbrainz_config')
     cur.execute(
         """
         SELECT column_name
@@ -3909,7 +4021,7 @@ def process_download_job(job_id, payload):
     try:
         track_object = get_hifi_track_object(
             track_id,
-            include_streams=True,
+            include_streams=False,
             include_album=True,
             audio_quality=quality_choice
         )
@@ -3931,26 +4043,33 @@ def process_download_job(job_id, payload):
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
-    track_streams = track_data.get('track_streams') if isinstance(track_data.get('track_streams'), dict) else {}
-    selected_stream = track_streams.get(quality_choice)
-    if not (isinstance(selected_stream, dict) and isinstance(selected_stream.get('url'), str) and selected_stream.get('url')):
-        raise ManifestDownloadError(f"Failed to get track stream for quality '{quality_choice}' from normalized HiFi object")
 
-    download_url = selected_stream.get('url')
-    stream_codec = selected_stream.get('codec')
-    stream_audio_mode = selected_stream.get('audioMode')
-    codec_value = str(stream_codec or '').strip().lower()
-    if 'flac' in codec_value:
-        output_format = 'flac'
-    elif 'aac' in codec_value or 'mp4' in codec_value or 'alac' in codec_value:
-        output_format = 'm4a'
-    else:
-        output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
-    print(
-        f"[DOWNLOAD] Selected stream quality='{quality_choice}' codec={stream_codec!r} output_format={output_format!r} audioMode={stream_audio_mode!r} url={download_url}",
-        flush=True
-    )
+    output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
+    print(f"[DOWNLOAD] Selected output format={output_format!r} for quality='{quality_choice}'", flush=True)
 
+    temp_folder = '/app/temp'
+    os.makedirs(temp_folder, exist_ok=True)
+    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
+
+    print(f"[DOWNLOAD] Downloading track data from trackManifests into temporary file: {temp_source_path}", flush=True)
+    try:
+        downloads.download_track_manifest(
+            track_id=track_id,
+            output_path=temp_source_path,
+            quality=quality_choice,
+            url_list=SQUID_URLS,
+            usage='DOWNLOAD'
+        )
+    except Exception as e:
+        raise TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+
+    with open(temp_source_path, 'rb') as tmp_file:
+        audio_format = detect_audio_format(tmp_file.read(32))
+
+    print(f"[DOWNLOAD] Detected downloaded audio format: {audio_format}", flush=True)
+    if audio_format == 'unknown':
+        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
+        audio_format = 'flac'
 
     print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
     print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
@@ -4235,23 +4354,7 @@ def process_download_job(job_id, payload):
     os.makedirs(output_dir, exist_ok=True)
     print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
 
-    print(f"[DOWNLOAD] Downloading from CDN...", flush=True)
-    try:
-        track_response = make_request_with_retry(download_url, method='GET', timeout=60, max_retries=3, backoff_factor=2.0)
-    except requests.exceptions.RequestException as e:
-        raise TransientDownloadError(f"Failed to download track from CDN: {str(e)}") from e
-
-    if not track_response.ok:
-        raise TransientDownloadError(f"Failed to download track from CDN. Status: {track_response.status_code}")
-
-    print(f"[DOWNLOAD] Downloaded {len(track_response.content)} bytes", flush=True)
-
-    audio_format = detect_audio_format(track_response.content)
-    print(f"[DOWNLOAD] Detected audio format: {audio_format}", flush=True)
-
-    if audio_format == 'unknown':
-        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
-        audio_format = 'flac'
+    print(f"[DOWNLOAD] Download complete. Using temporary source file: {temp_source_path}", flush=True)
 
     cover_image_data = None
     if cover_url:
@@ -4298,20 +4401,15 @@ def process_download_job(job_id, payload):
     temp_folder = '/app/temp'
     os.makedirs(temp_folder, exist_ok=True)
 
-    temp_source_ext = audio_format if audio_format in ['flac', 'm4a'] else 'flac'
-    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{temp_source_ext}')
     temp_target_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
-    print(f"[DOWNLOAD] Saving temporary {temp_source_ext.upper()}: {temp_source_path}", flush=True)
-
-    with open(temp_source_path, 'wb') as f:
-        f.write(track_response.content)
+    print(f"[DOWNLOAD] Using temporary source file: {temp_source_path}", flush=True)
 
     stages['downloaded'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
     update_job_progress(job_id, {'stages': stages})
 
-    print(f"[DOWNLOAD] Adding metadata to staged {temp_source_ext.upper()}...", flush=True)
+    print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
     add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
@@ -4320,12 +4418,12 @@ def process_download_job(job_id, payload):
 
     converted = False
     if output_format == 'm4a' and audio_format != 'm4a':
-        print(f"[DOWNLOAD] Output format is AAC - converting staged {temp_source_ext.upper()} to M4A", flush=True)
-        success = convert_to_aac(temp_source_path, temp_target_path, source_format=temp_source_ext)
+        print(f"[DOWNLOAD] Output format is AAC - converting staged {audio_format.upper()} to M4A", flush=True)
+        success = convert_to_aac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             cleanup_file(temp_source_path)
             cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {temp_source_ext.upper()} to M4A")
+            raise Exception(f"Failed to convert {audio_format.upper()} to M4A")
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
@@ -4333,12 +4431,12 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
         converted = True
     elif output_format == 'flac' and audio_format != 'flac':
-        print(f"[DOWNLOAD] Output format is FLAC - converting staged {temp_source_ext.upper()} to FLAC", flush=True)
-        success = convert_to_flac(temp_source_path, temp_target_path, source_format=temp_source_ext)
+        print(f"[DOWNLOAD] Output format is FLAC - converting staged {audio_format.upper()} to FLAC", flush=True)
+        success = convert_to_flac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             cleanup_file(temp_source_path)
             cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {temp_source_ext.upper()} to FLAC")
+            raise Exception(f"Failed to convert {audio_format.upper()} to FLAC")
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
@@ -7090,7 +7188,8 @@ def endpoints_status():
 @app.route('/api/listenbrainz/config', methods=['GET'])
 def get_listenbrainz_config_endpoint():
     """Get the current ListenBrainz configuration"""
-    config = get_listenbrainz_config()
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
     return jsonify({
         'has_token': config['user_token'] is not None
     })
@@ -7104,11 +7203,14 @@ def save_listenbrainz_config_endpoint():
         return jsonify({'error': 'No JSON payload provided'}), 400
     
     user_token = payload.get('user_token')
+    user_id = payload.get('user_id')
     
     if not user_token:
         return jsonify({'error': 'user_token is required'}), 400
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
     
-    save_listenbrainz_config(user_token)
+    save_listenbrainz_config(user_token, user_id)
     return jsonify({
         'success': True
     })
@@ -7116,7 +7218,8 @@ def save_listenbrainz_config_endpoint():
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
 def get_listenbrainz_playlists():
     """Fetch recommended playlists created for user from ListenBrainz"""
-    config = get_listenbrainz_config()
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
     
     if not config['user_token']:
         return jsonify({'error': 'ListenBrainz token not configured'}), 400
@@ -7185,9 +7288,15 @@ def get_listenbrainz_playlists():
 @app.route('/api/listenbrainz/playlist/<playlist_mbid>', methods=['GET'])
 def get_listenbrainz_playlist(playlist_mbid):
     """Fetch a ListenBrainz playlist and its tracks by MBID"""
+    user_id = request.args.get('user_id')
+    config = get_listenbrainz_config(user_id)
+    
+    if not config['user_token']:
+        return jsonify({'error': 'ListenBrainz token not configured'}), 400
+
     try:
         url = f'https://api.listenbrainz.org/1/playlist/{playlist_mbid}'
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, headers={'Authorization': f'Token {config["user_token"]}'})
         response.raise_for_status()
         data = response.json()
         

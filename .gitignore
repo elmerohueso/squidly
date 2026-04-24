@@ -78,3 +78,5 @@ copilot-instructions.md
 
 # Test scripts
 test_scripts/
+# Generated TypeScript output
+src/app.js
