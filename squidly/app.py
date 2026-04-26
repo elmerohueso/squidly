@@ -5062,6 +5062,33 @@ def _get_album_quality_rank(album):
     
     return rank
 
+
+def _derive_audio_quality_from_tags(album):
+    """
+    Derive maxAudioQuality from mediaTags or mediaMetadata.tags on an album object.
+    Returns the highest quality tag found, or None.
+    """
+    quality_priority = ['DOLBY_ATMOS', 'HIRES_LOSSLESS', 'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+
+    media_metadata = album.get('mediaMetadata')
+    if isinstance(media_metadata, dict):
+        tags = media_metadata.get('tags')
+        if isinstance(tags, list):
+            tags_upper = [t.upper() for t in tags if t]
+            for q in quality_priority:
+                if q in tags_upper:
+                    return q
+
+    media_tags = album.get('mediaTags')
+    if isinstance(media_tags, list):
+        tags_upper = [t.upper() for t in media_tags if t]
+        for q in quality_priority:
+            if q in tags_upper:
+                return q
+
+    return None
+
+
 @app.route('/')
 def index():
     """Serve the main page"""
@@ -5718,6 +5745,12 @@ def album_similar(album_id=None):
 
         result = response.json()
         result['proxied_via'] = target['name']
+
+        albums = result.get('albums')
+        if isinstance(albums, list):
+            for album in albums:
+                if isinstance(album, dict) and 'maxAudioQuality' not in album:
+                    album['maxAudioQuality'] = _derive_audio_quality_from_tags(album)
 
         return jsonify(result)
 

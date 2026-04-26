@@ -94,6 +94,29 @@ interface PlexLibraryAlbum {
     cover?: string;
 }
 
+interface NormalizedAlbum {
+    id: string;
+    title: string;
+    artist: string;
+    artistId?: number;
+    year: number | null;
+    trackCount: number | null;
+    quality: string;
+    explicit: boolean;
+    cover?: string;
+}
+
+interface AlbumGridOptions {
+    viewMode: 'search-albums' | 'artist-albums' | 'similar-albums' | 'library-albums';
+    hideArtist?: boolean;
+    includeQuality?: boolean;
+    dataAttr?: string;
+    extraRowClass?: string;
+    actions?: 'full' | 'play-only';
+    rowDataAttrs?: (album: NormalizedAlbum) => Record<string, string>;
+    emptyMessage?: string;
+}
+
 interface PlexLibraryTrack {
     id: string;
     title: string;
@@ -1757,39 +1780,6 @@ class App {
         `;
     }
 
-    private formatLibraryAlbumRow(album: PlexLibraryAlbum): string {
-        const title = this.escapeHtml(album.title || 'Unknown Album');
-        const artist = this.escapeHtml(album.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
-        const year = album.year ? String(album.year) : '—';
-        const trackCount = typeof album.track_count === 'number' ? String(album.track_count) : '—';
-
-        return `
-            <div class="albums-grid-row library-clickable-row" data-library-album-id="${this.escapeHtml(album.id)}" data-library-album-title="${title}" data-library-artist-name="${artist}">
-                <div class="grid-cell grid-col-artwork">
-                    ${album.cover
-                ? `<img src="${album.cover}" alt="${title}" loading="lazy">`
-                : `<div class="grid-artwork-placeholder">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                                <polyline points="21 15 16 10 5 21"></polyline>
-                            </svg>
-                           </div>`
-            }
-                </div>
-                <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
-                <div class="grid-cell grid-col-artist"><span class="library-album-artist-name">${artist}</span></div>
-                <div class="grid-cell grid-col-year">${year}</div>
-                <div class="grid-cell grid-col-track-count">${trackCount}</div>
-                <div class="grid-cell grid-col-actions">
-                    <button class="grid-play-btn" title="Play" aria-label="Play" data-library-album-id="${this.escapeHtml(album.id)}">
-                        ${this.getPlayIconSvg()}
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
     private formatLibraryTrackRow(track: PlexLibraryTrack, showDiscPrefix: boolean): string {
         const title = this.escapeHtml(track.title || 'Unknown Track');
         const artist = this.escapeHtml(track.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
@@ -1926,14 +1916,18 @@ class App {
                     <h2>Albums</h2>
                 </div>
             </div>
-            <div class="albums-grid-wrapper" data-view-mode="library-albums">
-                <div class="albums-grid">
-                    ${this.formatAlbumGridHeader(false, false)}
-                    ${albums.length > 0
-                ? albums.map((album) => this.formatLibraryAlbumRow(album)).join('')
-                : '<div class="library-placeholder"><p>No albums found for this artist.</p></div>'}
-                </div>
-            </div>
+            ${this.renderAlbumGrid(albums, {
+                viewMode: 'library-albums',
+                includeQuality: false,
+                dataAttr: 'data-library-album-id',
+                extraRowClass: 'library-clickable-row',
+                actions: 'play-only',
+                emptyMessage: '<div class="library-placeholder"><p>No albums found for this artist.</p></div>',
+                rowDataAttrs: (album) => ({
+                    'data-library-album-title': album.title,
+                    'data-library-artist-name': album.artist,
+                }),
+            })}
         `;
     }
 
@@ -6655,7 +6649,7 @@ class App {
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
             ${searchType === 'al'
-                ? this.formatAlbumsGrid(items as AlbumSearchItem[])
+                ? this.renderAlbumGrid(items as AlbumSearchItem[], { viewMode: 'search-albums' })
                 : searchType === 's' || searchType === 'trackid'
                     ? this.formatTracksGrid(items as Track[])
                     : `<div class="results-list${searchType === 'a' ? ' artist-results' : ''}">
@@ -7550,6 +7544,39 @@ class App {
         `;
     }
 
+    private normalizeAlbum(album: AlbumSearchItem | PlexLibraryAlbum): NormalizedAlbum {
+        if ('maxAudioQuality' in album || 'audioQuality' in album || 'releaseDate' in album || 'numberOfTracks' in album || 'numberOfItems' in album || 'explicit' in album) {
+            const a = album as AlbumSearchItem;
+            const artistNames = a.artists && a.artists.length > 0
+                ? a.artists.map(ar => ar.name).join(', ')
+                : (typeof a.artist === 'object' ? (a.artist as Artist)?.name : a.artist) || 'Unknown Artist';
+            const primaryArtistId = a.artists?.[0]?.id ?? (typeof a.artist === 'object' ? (a.artist as Artist)?.id : undefined);
+            const quality = a.maxAudioQuality || a.audioQuality || '';
+            return {
+                id: String(a.id),
+                title: a.title,
+                artist: artistNames,
+                artistId: primaryArtistId,
+                year: a.releaseDate ? new Date(a.releaseDate).getFullYear() : null,
+                trackCount: a.numberOfTracks ?? a.numberOfItems ?? null,
+                quality,
+                explicit: a.explicit || false,
+                cover: a.cover,
+            };
+        }
+        const p = album as PlexLibraryAlbum;
+        return {
+            id: p.id,
+            title: p.title || 'Unknown Album',
+            artist: p.artist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+            year: p.year ?? null,
+            trackCount: typeof p.track_count === 'number' ? p.track_count : null,
+            quality: '',
+            explicit: false,
+            cover: p.cover,
+        };
+    }
+
     private formatAlbumGridHeader(hideArtist: boolean = false, includeQuality: boolean = true): string {
         return `
             <div class="albums-grid-header${hideArtist ? ' hide-artist' : ''}">
@@ -7831,34 +7858,30 @@ class App {
         `;
     }
 
-    private formatAlbumGridRow(album: AlbumSearchItem, hideArtist: boolean = false): string {
-        // Get artist names and IDs
-        const artistNames = album.artists && album.artists.length > 0
-            ? album.artists.map(a => a.name).join(', ')
-            : album.artist?.name || 'Unknown Artist';
-        const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
-
-        // Format release year if available
-        const releaseYear = album.releaseDate
-            ? new Date(album.releaseDate).getFullYear()
+    private formatAlbumGridRow(album: NormalizedAlbum, options: AlbumGridOptions): string {
+        const hideArtist = options.hideArtist || false;
+        const includeQuality = options.includeQuality !== false;
+        const dataAttr = options.dataAttr || 'data-album-id';
+        const extraRowClass = options.extraRowClass || '';
+        const actions = options.actions || 'full';
+        const rowClasses = ['albums-grid-row', ...(hideArtist ? ['hide-artist'] : []), ...(extraRowClass ? [extraRowClass] : [])].join(' ');
+        const extraAttrs = options.rowDataAttrs
+            ? Object.entries(options.rowDataAttrs(album)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
             : '';
 
-        // Format track count - just the number
-        const trackCount = (album.numberOfTracks ?? album.numberOfItems)
-            ? `${album.numberOfTracks ?? album.numberOfItems}`
-            : '';
+        const artworkSrc = album.cover
+            ? (album.cover.startsWith('http') ? album.cover : this.getHifiImageUrl(album.cover, 1280))
+            : null;
 
-        // Format audio quality if available - prefer the normalized maxAudioQuality field
-        const quality = album.maxAudioQuality || album.audioQuality || '';
-        const qualityDisplay = this.formatQuality(quality);
-
-        const albumCover = album.cover;
+        const year = album.year ? String(album.year) : '—';
+        const trackCount = album.trackCount ? String(album.trackCount) : '—';
+        const qualityDisplay = album.quality ? this.formatQuality(album.quality) : '—';
 
         return `
-            <div class="albums-grid-row ${hideArtist ? 'hide-artist' : ''}" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''}>
+            <div class="${rowClasses}" ${dataAttr}="${album.id}" ${album.artistId ? `data-artist-id="${album.artistId}"` : ''} ${extraAttrs}>
                 <div class="grid-cell grid-col-artwork">
-                    ${albumCover
-                ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${album.title}" loading="lazy">`
+                    ${artworkSrc
+                ? `<img src="${artworkSrc}" alt="${this.escapeHtml(album.title)}" loading="lazy">`
                 : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -7875,31 +7898,48 @@ class App {
                     </div>
                 </div>
                 ${!hideArtist ? `<div class="grid-cell grid-col-artist">
-                    <span class="album-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                    <span class="album-artist-name" ${album.artistId ? `title="View albums by ${this.escapeHtml(album.artist)}"` : ''}>${this.escapeHtml(album.artist)}</span>
                 </div>` : ''}
-                <div class="grid-cell grid-col-year">${releaseYear || '—'}</div>
-                <div class="grid-cell grid-col-track-count">${trackCount || '—'}</div>
-                <div class="grid-cell grid-col-quality">${qualityDisplay || '—'}</div>
+                <div class="grid-cell grid-col-year">${year}</div>
+                <div class="grid-cell grid-col-track-count">${trackCount}</div>
+                ${includeQuality ? `<div class="grid-cell grid-col-quality">${qualityDisplay}</div>` : ''}
                 <div class="grid-cell grid-col-actions">
-                    <button class="grid-play-btn" title="View Tracks" aria-label="View Tracks" data-album-id="${album.id}">
+                    <button class="grid-play-btn" title="View Tracks" aria-label="View Tracks" ${dataAttr}="${album.id}">
                         ${this.getPlayIconSvg()}
                     </button>
+                    ${actions === 'full' ? `
                     <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
                         ${this.getMoreLikeIconSvg()}
                     </button>
-                    <button class="grid-add-playlist-btn" title="Add to Playlist" data-album-id="${album.id}">
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${album.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 5v14"></path>
                             <path d="M5 12h14"></path>
                         </svg>
                     </button>
-                    <button class="grid-add-library-btn" title="Add to Library" data-album-id="${album.id}">
+                    <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${album.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="5" rx="1"></rect>
                             <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
                             <rect x="8" y="12" width="8" height="1"></rect>
                         </svg>
-                    </button>
+                    </button>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    private renderAlbumGrid(albums: (AlbumSearchItem | PlexLibraryAlbum)[], options: AlbumGridOptions): string {
+        const normalized = albums.map(a => this.normalizeAlbum(a));
+        const emptyMessage = options.emptyMessage || '<div class="library-placeholder"><p>No albums found.</p></div>';
+
+        return `
+            <div class="albums-grid-wrapper" data-view-mode="${options.viewMode}">
+                <div class="albums-grid">
+                    ${this.formatAlbumGridHeader(options.hideArtist || false, options.includeQuality !== false)}
+                    ${normalized.length > 0
+                ? normalized.map(album => this.formatAlbumGridRow(album, options)).join('')
+                : emptyMessage}
                 </div>
             </div>
         `;
@@ -8146,12 +8186,7 @@ class App {
                         <h2>Albums</h2>
                     </div>
                 </div>
-                <div class="albums-grid-wrapper" data-view-mode="artist-albums">
-                    <div class="albums-grid">
-                        ${this.formatAlbumGridHeader(true, true)}
-                        ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, true)).join('')}
-                    </div>
-                </div>
+                ${this.renderAlbumGrid(albums, { viewMode: 'artist-albums', hideArtist: true })}
             `;
 
             // Attach event listener to play button
@@ -8497,12 +8532,7 @@ class App {
                     <h2>More Like This - Similar Albums</h2>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
-                <div class="albums-grid-wrapper" data-view-mode="similar-albums">
-                    <div class="albums-grid">
-                        ${this.formatAlbumGridHeader(false, true)}
-                        ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
-                    </div>
-                </div>
+                ${this.renderAlbumGrid(albums, { viewMode: 'similar-albums' })}
             `;
 
             // Annotate with Plex status
@@ -9241,17 +9271,6 @@ class App {
             console.error('[ARTIST_PLAYBACK] Error playing Plex library artist:', error);
             this.displayMessage('Error playing artist. Please try again.');
         }
-    }
-
-    private formatAlbumsGrid(albums: AlbumSearchItem[]): string {
-        return `
-            <div class="albums-grid-wrapper" data-view-mode="search-albums">
-                <div class="albums-grid">
-                    ${this.formatAlbumGridHeader(false, true)}
-                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumGridRow(album, false)).join('')}
-                </div>
-            </div>
-        `;
     }
 
     private async downloadTrackToLibrary(
