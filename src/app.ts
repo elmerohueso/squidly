@@ -144,6 +144,23 @@ interface PlexLibraryAlbumTracksResponse {
     error?: string;
 }
 
+interface PlexPlaylist {
+    name: string;
+    ratingKey: string | null;
+}
+
+interface PlexPlaylistTracksResponse {
+    success?: boolean;
+    playlist?: {
+        id: string;
+        title: string;
+        track_count?: number;
+        cover?: string;
+    };
+    tracks?: PlexLibraryTrack[];
+    error?: string;
+}
+
 interface PlaylistSearchItem {
     id?: number | string;
     uuid?: string;
@@ -444,13 +461,15 @@ interface AppRouteState {
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs';
 
 interface LibraryRouteState {
-    view: 'artists' | 'artist_albums' | 'album_tracks';
+    view: 'artists' | 'artist_albums' | 'album_tracks' | 'playlist_tracks';
     offset?: number;
     artistId?: string;
     artistName?: string;
     albumId?: string;
     albumTitle?: string;
     albumArtist?: string;
+    playlistRatingKey?: string;
+    playlistName?: string;
 }
 
 interface AppHistoryState {
@@ -576,6 +595,7 @@ class App {
     private libraryArtistsTotal: number = 0;
     private libraryCurrentArtist: { id: string; name: string } | null = null;
     private libraryCurrentAlbum: { id: string; title: string; artist?: string } | null = null;
+    private libraryCurrentPlaylist: string | null = null;
     private libraryLoadedOnce: boolean = false;
     private matchReviewPollingInterval: number | null = null;
     private lastMatchActivityJobId: number | null = null;
@@ -1677,10 +1697,13 @@ class App {
     private formatLibraryBreadcrumb(): string {
         const artist = this.libraryCurrentArtist;
         const album = this.libraryCurrentAlbum;
+        const playlistTitle = this.libraryCurrentPlaylist;
 
         let trail = '<button class="library-crumb-btn" data-library-crumb="library">Library</button>';
 
-        if (artist) {
+        if (playlistTitle) {
+            trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(playlistTitle)}</span>`;
+        } else if (artist) {
             if (album) {
                 trail += `<span class="library-crumb-separator">&gt;</span><button class="library-crumb-btn" data-library-crumb="artist">${this.escapeHtml(artist.name)}</button>`;
             } else {
@@ -1988,6 +2011,7 @@ class App {
         this.updatePlexPlaylistContainerVisibility(false);
         this.libraryCurrentArtist = null;
         this.libraryCurrentAlbum = null;
+        this.libraryCurrentPlaylist = null;
         this.libraryArtistsOffset = Math.max(0, offset);
 
         if (updateHistory) {
@@ -2039,6 +2063,7 @@ class App {
 
         this.libraryCurrentArtist = { id: artistId, name: artistName };
         this.libraryCurrentAlbum = null;
+        this.libraryCurrentPlaylist = null;
 
         if (updateHistory) {
             this.pushHistoryLibraryRoute({
@@ -2090,6 +2115,7 @@ class App {
         }
 
         this.libraryCurrentAlbum = { id: albumId, title: albumTitle, artist: artistName };
+        this.libraryCurrentPlaylist = null;
 
         if (updateHistory) {
             this.pushHistoryLibraryRoute({
@@ -2144,6 +2170,66 @@ class App {
             }
             console.error('[LIBRARY] Failed to load album tracks:', error);
             this.setLibraryMessage('Failed to load album tracks.');
+        }
+    }
+
+    private async navigateToLibraryPlaylistTracks(playlistRatingKey: string, playlistName: string): Promise<void> {
+        this.switchPage('library');
+        await this.fetchPlexPlaylistTracks(playlistRatingKey, playlistName, true);
+    }
+
+    private async fetchPlexPlaylistTracks(playlistRatingKey: string, playlistTitle: string, updateHistory: boolean = true): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentAlbum = null;
+        this.libraryCurrentArtist = null;
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'playlist_tracks',
+                playlistRatingKey,
+                playlistName: playlistTitle
+            });
+        }
+
+        this.setLibraryMessage(`Loading tracks for ${playlistTitle}...`);
+
+        try {
+            const params = new URLSearchParams();
+            params.set('rating_key', playlistRatingKey);
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/playlist/tracks?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data: PlexPlaylistTracksResponse = await response.json().catch(() => ({}) as PlexPlaylistTracksResponse);
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load playlist tracks.');
+                return;
+            }
+
+            const resolvedTitle = data.playlist?.title || playlistTitle;
+            this.libraryCurrentPlaylist = resolvedTitle;
+            this.renderLibraryAlbumTracks(
+                resolvedTitle,
+                Array.isArray(data.tracks) ? data.tracks : [],
+                '',
+                undefined,
+                ''
+            );
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load playlist tracks:', error);
+            this.setLibraryMessage('Failed to load playlist tracks.');
         }
     }
 
@@ -2230,7 +2316,7 @@ class App {
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
-        let plexPlaylists: string[] = [];
+        let plexPlaylists: PlexPlaylist[] = [];
         const userId = window.localStorage.getItem('plexSelectedUserId') || '';
 
         try {
@@ -2366,7 +2452,7 @@ class App {
         }
     }
 
-    private populateSidebarPlaylists(data: { plex: string[], listenbrainz: any | null }): void {
+    private populateSidebarPlaylists(data: { plex: PlexPlaylist[], listenbrainz: any | null }): void {
         const playlistNavItems = document.getElementById('playlistNavItems');
         if (!playlistNavItems) {
             return;
@@ -2389,18 +2475,20 @@ class App {
             li.textContent = 'No playlists';
             playlistNavItems.appendChild(li);
         } else {
-            data.plex.forEach((playlistName: string) => {
+            data.plex.forEach((playlist: PlexPlaylist) => {
                 const li = document.createElement('li');
                 const a = document.createElement('a');
                 a.href = '#';
                 a.className = 'nav-item';
-                a.textContent = playlistName;
+                a.textContent = playlist.name;
                 a.style.fontSize = '0.875rem';
                 a.style.paddingTop = '0.25rem';
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
-                    // Playlist click handling could be added here
+                    if (playlist.ratingKey) {
+                        void this.navigateToLibraryPlaylistTracks(playlist.ratingKey, playlist.name);
+                    }
                 });
                 li.appendChild(a);
                 playlistNavItems.appendChild(li);
@@ -2867,6 +2955,15 @@ class App {
                 route.albumId,
                 route.albumTitle || 'Album',
                 route.albumArtist,
+                updateHistory
+            );
+            return;
+        }
+
+        if (route.view === 'playlist_tracks' && route.playlistRatingKey) {
+            await this.fetchPlexPlaylistTracks(
+                route.playlistRatingKey,
+                route.playlistName || 'Playlist',
                 updateHistory
             );
             return;

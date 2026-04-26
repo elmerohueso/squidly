@@ -4866,11 +4866,11 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
     Get existing Plex music playlists, excluding smart playlists.
 
     Returns:
-        tuple: (success: bool, playlists: list[str], error: str | None)
+        tuple: (success: bool, playlists: list[dict{name, ratingKey}], error: str | None)
     """
     try:
         plex = _get_plex_server_for_user(server_url, api_token, user_id)
-        playlist_titles = []
+        playlists = []
 
         for playlist in plex.playlists():
             playlist_type = (getattr(playlist, 'playlistType', None) or '').lower()
@@ -4887,10 +4887,14 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
                 continue
 
             title = getattr(playlist, 'title', None)
+            rating_key = getattr(playlist, 'ratingKey', None)
             if isinstance(title, str) and title.strip():
-                playlist_titles.append(title.strip())
+                playlists.append({
+                    'name': title.strip(),
+                    'ratingKey': str(rating_key) if rating_key else None
+                })
 
-        return True, sorted(set(playlist_titles), key=str.casefold), None
+        return True, sorted(playlists, key=lambda p: p['name'].casefold()), None
     except Exception as e:
         print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
         return False, [], str(e)
@@ -7814,6 +7818,83 @@ def get_plex_playlists_endpoint():
         return jsonify({'error': f'Failed to fetch Plex playlists: {message}'}), 500
 
     return jsonify({'playlists': playlists})
+
+@app.route('/api/plex/playlist/tracks', methods=['GET'])
+def get_plex_playlist_tracks():
+    """Get tracks from a Plex playlist by ratingKey."""
+    config = get_plex_config()
+    server_url = config.get('server_url')
+    api_token = config.get('api_token')
+
+    if not server_url or not api_token:
+        return jsonify({'error': 'Plex is not configured'}), 400
+
+    rating_key = request.args.get('rating_key', '').strip()
+    user_id = request.args.get('user_id')
+
+    if not rating_key:
+        return jsonify({'error': 'rating_key parameter is required'}), 400
+
+    try:
+        rating_key_int = int(rating_key)
+    except ValueError:
+        return jsonify({'error': 'rating_key must be a valid integer'}), 400
+
+    try:
+        from plexapi.server import PlexServer
+
+        plex = _get_plex_server_for_user(server_url, api_token, user_id)
+
+        playlist = plex.fetchItem(rating_key_int)
+
+        tracks = []
+        for item in playlist.items():
+            track_type = getattr(item, 'type', None)
+            if track_type and track_type.lower() != 'track':
+                continue
+
+            title = getattr(item, 'title', None) or 'Unknown'
+            artist = getattr(item, 'grandparentTitle', None) or getattr(item, 'parentTitle', None) or ''
+            album = getattr(item, 'parentTitle', None) if track_type and track_type.lower() == 'track' else ''
+
+            duration = getattr(item, 'duration', None)
+            if duration:
+                duration = int(duration)
+
+            track_number = getattr(item, 'index', None)
+            disc_number = getattr(item, 'parentIndex', None)
+
+            cover = None
+            thumb = getattr(item, 'thumb', None)
+            if thumb:
+                cover = f"{server_url.rstrip('/')}{thumb}"
+
+            rating_key_val = getattr(item, 'ratingKey', None)
+
+            tracks.append({
+                'id': str(rating_key_val) if rating_key_val else '',
+                'title': str(title),
+                'artist': str(artist) if artist else None,
+                'album': str(album) if album else None,
+                'duration': duration,
+                'track_number': int(track_number) if track_number else None,
+                'disc_number': int(disc_number) if disc_number else None,
+                'cover': cover
+            })
+
+        return jsonify({
+            'success': True,
+            'playlist': {
+                'id': str(rating_key),
+                'title': getattr(playlist, 'title', 'Playlist'),
+                'track_count': len(tracks)
+            },
+            'tracks': tracks
+        })
+
+    except Exception as e:
+        print(f"[PLEX] Failed to fetch playlist tracks: {str(e)}", flush=True)
+        return jsonify({'error': f'Failed to fetch playlist tracks: {str(e)}'}), 500
 
 @app.route('/api/plex/playlists', methods=['POST'])
 def create_plex_playlist_endpoint():

@@ -169,10 +169,10 @@ def _get_plex_server_for_user(server_url, api_token, user_id=None):
 
 
 def get_plex_music_playlists(server_url, api_token, user_id=None):
-    """Return list of non-smart audio playlists."""
+    """Return list of non-smart audio playlists with their ratingKeys."""
     try:
         plex = _get_plex_server_for_user(server_url, api_token, user_id)
-        playlist_titles = []
+        playlists = []
         for playlist in plex.playlists():
             playlist_type = (getattr(playlist, 'playlistType', None) or '').lower()
             if playlist_type and playlist_type != 'audio':
@@ -188,10 +188,14 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
                 continue
 
             title = getattr(playlist, 'title', None)
+            rating_key = getattr(playlist, 'ratingKey', None)
             if isinstance(title, str) and title.strip():
-                playlist_titles.append(title.strip())
+                playlists.append({
+                    'name': title.strip(),
+                    'ratingKey': str(rating_key) if rating_key else None
+                })
 
-        return True, sorted(set(playlist_titles), key=str.casefold), None
+        return True, sorted(playlists, key=lambda p: p['name'].casefold()), None
 
     except Exception as e:
         print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
