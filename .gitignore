@@ -52,6 +52,9 @@ squidly.db
 .classpath
 .settings/
 
+# OpenCode
+.opencode/
+
 # OS
 .DS_Store
 .DS_Store?
