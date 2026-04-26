@@ -2174,7 +2174,7 @@ class App {
     }
 
     private async navigateToLibraryPlaylistTracks(playlistRatingKey: string, playlistName: string): Promise<void> {
-        this.switchPage('library');
+        this.switchPage('library', false);
         await this.fetchPlexPlaylistTracks(playlistRatingKey, playlistName, true);
     }
 

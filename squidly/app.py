@@ -477,6 +477,7 @@ from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 
 from squidly.plex import (
+    _get_plex_server_for_user,
     add_tracks_to_plex_playlist,
     get_all_plex_users,
     get_plex_health_status,
