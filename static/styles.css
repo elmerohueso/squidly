@@ -94,6 +94,23 @@ body {
     z-index: 100;
 }
 
+.sidebar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+}
+
 .sidebar-header {
     padding: 0 1.5rem 2rem;
     border-bottom: 1px solid var(--border-color);
