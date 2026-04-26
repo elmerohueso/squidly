@@ -90,82 +90,88 @@ def test_plex_connection(server_url, api_token):
 
 
 def get_all_plex_users():
-    """Return a list of owned + managed Plex users."""
+    """Fetch all users (owner and managed) from MyPlexAccount."""
     config = get_plex_config()
-    token = config.get('api_token')
-    if not token:
-        return []
+    api_token = config.get('api_token')
+
+    if not api_token:
+        return False, [], "Plex API token not configured"
 
     try:
-        acc = MyPlexAccount(token=token)
-    except Exception as e:
-        print(f"[PLEX] Failed to create MyPlexAccount: {e}", flush=True)
-        return []
+        acc = MyPlexAccount(token=api_token)
+        owner = {
+            'id': str(acc.id),
+            'client_id': str(acc.id),
+            'title': acc.title or acc.username,
+            'username': acc.username,
+            'email': acc.email,
+            'is_owner': True,
+            'is_managed': False,
+            'thumb': getattr(acc, 'thumb', None)
+        }
+        users = [owner]
 
-    users = []
-    owner_id = str(getattr(acc, 'id', '') or '').strip() or str(getattr(acc, 'username', '') or '').strip() or str(getattr(acc, 'title', '') or '').strip()
-    users.append({
-        'client_id': owner_id,
-        'username': getattr(acc, 'username', None),
-        'title': getattr(acc, 'title', None),
-        'id': getattr(acc, 'id', None),
-        'is_owner': True,
-        'is_managed': False,
-        'user_obj': acc
-    })
-
-    try:
         for u in acc.users():
-            # Only include restricted managed users (not Plex friends) to match UI behavior.
-            if getattr(u, 'restricted', None) not in (True, 1, '1'):
+            # Only include restricted managed users (home users), not Plex friends.
+            is_restricted = getattr(u, 'restricted', None)
+            if is_restricted not in (True, 1, '1'):
                 continue
 
-            managed_id = str(getattr(u, 'id', '') or '').strip() or str(getattr(u, 'username', '') or '').strip() or str(getattr(u, 'title', '') or '').strip()
             users.append({
-                'client_id': managed_id,
-                'username': getattr(u, 'username', None),
-                'title': getattr(u, 'title', None),
-                'id': getattr(u, 'id', None),
+                'id': str(u.id),
+                'client_id': str(u.id),
+                'title': u.title,
+                'username': u.username,
+                'email': u.email,
                 'is_owner': False,
                 'is_managed': True,
-                'user_obj': u
+                'thumb': getattr(u, 'thumb', None)
             })
-    except Exception as e:
-        print(f"[PLEX] Failed to fetch managed users: {e}", flush=True)
 
-    return users
+        return True, users, None
+    except Exception as e:
+        print(f"[PLEX] Failed to fetch Plex users: {str(e)}", flush=True)
+        return False, [], str(e)
 
 
 def _get_plex_server_for_user(server_url, api_token, user_id=None):
     """Return a PlexServer instance for the owner or a managed user."""
-    server_url = server_url.rstrip('/')
-    plex = PlexServer(server_url, api_token, timeout=10)
-
-    if not user_id:
-        return plex
-
     try:
-        acc = MyPlexAccount(token=api_token)
-        users = list(acc.users())
-        user_id_str = str(user_id or '').strip().lower()
-        for u in users:
-            candidate_ids = [
-                str(getattr(u, 'id', '') or '').strip(),
-                str(getattr(u, 'username', '') or '').strip(),
-                str(getattr(u, 'title', '') or '').strip(),
-                str(getattr(u, 'uuid', '') or '').strip(),
-                str(getattr(u, 'client_id', '') or '').strip(),
-            ]
-            candidate_ids_lower = [c.lower() for c in candidate_ids if c]
-            if user_id_str and user_id_str in candidate_ids_lower:
-                try:
-                    return acc.user(user_id_str)
-                except Exception:
-                    break
-    except Exception as e:
-        print(f"[PLEX] Failed to fetch managed users for user selection {user_id}: {e}", flush=True)
+        server_url = server_url.rstrip('/')
+        plex = PlexServer(server_url, api_token, timeout=10)
+        if not user_id:
+            return plex
 
-    return plex
+        # Attempt to use managed user if specified
+        try:
+            acc = MyPlexAccount(token=api_token)
+            users = list(acc.users())
+            user_id_str = str(user_id or '').strip()
+            user_id_lower = user_id_str.lower()
+            
+            for u in users:
+                candidate_ids = [
+                    str(getattr(u, 'id', '') or '').strip(),
+                    str(getattr(u, 'username', '') or '').strip(),
+                    str(getattr(u, 'title', '') or '').strip(),
+                    str(getattr(u, 'uuid', '') or '').strip(),
+                    str(getattr(u, 'client_id', '') or '').strip(),
+                ]
+                candidate_ids_lower = [c.lower() for c in candidate_ids if c]
+                if user_id_lower and user_id_lower in candidate_ids_lower:
+                    try:
+                        # Use switchUser to get a PlexServer instance scoped to the managed user
+                        return plex.switchUser(u)
+                    except Exception as e:
+                        print(f"[PLEX] Failed to switch to managed user {user_id_str}: {e}", flush=True)
+                        continue
+        except Exception as e:
+            print(f"[PLEX] Failed to fetch managed users for user selection {user_id}: {e}", flush=True)
+
+        return plex
+    except Exception as e:
+        print(f"[PLEX] Failed to create PlexServer for user {user_id}: {e}", flush=True)
+        raise
 
 
 def get_plex_music_playlists(server_url, api_token, user_id=None):
@@ -205,8 +211,23 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
 def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_name, full_path, user_id=None):
     """Add a track to a Plex playlist, resolving it via local tracks table."""
     try:
+        # Robustness: extract name if playlist_name is a dictionary (from potential frontend bug)
+        if isinstance(playlist_name, dict) and 'name' in playlist_name:
+            playlist_name = playlist_name['name']
+        
+        playlist_name = str(playlist_name or '').strip()
+        if not playlist_name:
+            return False, 'playlist_name is required'
+
         server_url = server_url.rstrip('/')
+        token_len = len(api_token) if isinstance(api_token, str) else 0
+        print(
+            f"[PLEX] Add-to-playlist start: url={server_url}, library='{library_name}', playlist='{playlist_name}', token_len={token_len}, user_id={user_id}",
+            flush=True
+        )
+
         plex = _get_plex_server_for_user(server_url, api_token, user_id)
+        print("[PLEX] Connected to Plex server", flush=True)
 
         library = None
         for section in plex.library.sections():
@@ -230,6 +251,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
         normalized_file_path = '\\'.join(tail_parts)
         trailing_suffix = '/'.join(tail_parts)
+        print(f"[PLEX] Resolving ratingKey via tracks for file_path={normalized_file_path}", flush=True)
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -254,6 +276,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         ]
 
         if not rating_keys:
+            print(f"[PLEX] No library_id found in tracks for file_path={normalized_file_path}", flush=True)
             return False, (
                 f'file_path "{normalized_file_path}" was not found in tracks with a library_id. '
                 'Run a Plex library sync first.'
@@ -266,6 +289,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                 candidate = plex.fetchItem(metadata_key)
                 if candidate is not None:
                     track = candidate
+                    print(f"[PLEX] Resolved track using ratingKey={rating_key}", flush=True)
                     break
             except Exception as e:
                 print(f"[PLEX] Failed to fetch item for ratingKey={rating_key}: {str(e)}", flush=True)
@@ -276,26 +300,34 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                 'Run a Plex library sync to refresh the tracks table.'
             )
 
-        playlist = None
-        try:
-            playlists = plex.playlists()
-            for pl in playlists:
-                if pl.title == playlist_name:
-                    playlist = pl
-                    break
-        except Exception as e:
-            print(f"[PLEX] Error getting playlists: {str(e)}", flush=True)
-
-        if not playlist:
+        # Synchronize playlist operations to prevent duplicates during concurrent jobs
+        with _playlist_operation_lock:
+            playlist = None
             try:
-                playlist = plex.createPlaylist(playlist_name, items=[track])
-                return True, f'Created playlist "{playlist_name}" and added track'
+                playlists = plex.playlists()
+                print(f"[PLEX] Existing playlists found: {len(playlists)}", flush=True)
+                for pl in playlists:
+                    if pl.title == playlist_name:
+                        playlist = pl
+                        break
             except Exception as e:
-                print(f"[PLEX] Error creating playlist: {str(e)}", flush=True)
-                return False, f'Error creating playlist: {str(e)}'
-        else:
+                print(f"[PLEX] Error getting playlists: {str(e)}", flush=True)
+
+            if not playlist:
+                try:
+                    print(f"[PLEX] Creating playlist: {playlist_name}", flush=True)
+                    playlist = plex.createPlaylist(playlist_name, items=[track])
+                    print(f"[PLEX] Created new playlist: {playlist_name}", flush=True)
+                    return True, f'Created playlist "{playlist_name}" and added track'
+                except Exception as e:
+                    print(f"[PLEX] Error creating playlist: {str(e)}", flush=True)
+                    return False, f'Error creating playlist: {str(e)}'
+            else:
+                print(f"[PLEX] Using existing playlist: {playlist_name}", flush=True)
+            
             try:
                 playlist.addItems(track)
+                print(f"[PLEX] Added track to playlist: {playlist_name}", flush=True)
                 return True, f'Added track to playlist "{playlist_name}"'
             except Exception as e:
                 if 'already in' in str(e).lower():

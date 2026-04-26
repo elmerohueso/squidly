@@ -5740,7 +5740,7 @@ class App {
         // Plex playlist container has been removed; no-op.
     }
 
-    private populatePlexPlaylistOptions(playlists: string[], showEmptyPlaceholder: boolean = true): void {
+    private populatePlexPlaylistOptions(playlists: (string | { name: string, ratingKey?: string })[], showEmptyPlaceholder: boolean = true): void {
         const playlistNameInput = this.plexPlaylistNameInput;
         const playlistOptions = this.plexPlaylistOptions;
         if (!playlistNameInput || !playlistOptions) {
@@ -5764,7 +5764,8 @@ class App {
             playlistOptions.appendChild(emptyOption);
         }
 
-        playlists.forEach((playlistName) => {
+        playlists.forEach((playlist) => {
+            const playlistName = typeof playlist === 'string' ? playlist : playlist.name;
             const option = document.createElement('option');
             option.value = playlistName;
             option.textContent = playlistName;
@@ -8643,16 +8644,16 @@ class App {
             }, 3);
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                const errorMsg = errorData.error || `HTTP ${response.status}`;
-                console.error(`[PLAYLIST] Failed to fetch playlists: ${errorMsg}`);
-                throw new Error(errorMsg);
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
+                throw new Error(errorData.error || 'Failed to fetch Plex playlists');
             }
 
             const data = await response.json();
-            return data.playlists || [];
+            const playlists = data.playlists || [];
+            // Map objects to names if necessary
+            return playlists.map((p: any) => typeof p === 'string' ? p : p.name);
         } catch (error) {
-            console.error('[PLAYLIST] Error fetching playlists:', error);
+            console.error('[PLEX] Error fetching playlists:', error);
             throw error;
         }
     }
