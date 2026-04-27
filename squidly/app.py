@@ -7133,6 +7133,133 @@ def get_listenbrainz_playlist(playlist_mbid):
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Failed to fetch playlist from ListenBrainz: {str(e)}'}), 500
 
+@app.route('/api/listenbrainz/match', methods=['POST'])
+def match_listenbrainz_track():
+    """Match a ListenBrainz track to HiFi using MBID→ISRC lookup with text search fallback."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+
+    title = str(payload.get('title') or '').strip()
+    artist = str(payload.get('artist') or '').strip()
+    album = str(payload.get('album') or '').strip()
+    identifier = str(payload.get('identifier') or '').strip()
+
+    if not title or not artist:
+        return jsonify({'error': 'title and artist are required'}), 400
+
+    def normalize(s):
+        return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
+
+    def score_candidate(item):
+        score = 0.0
+        item_title = normalize(item.get('title') or '')
+        item_artist = normalize((item.get('artist') or {}).get('name') or '')
+        item_album = normalize((item.get('album') or {}).get('title') or '')
+        norm_title = normalize(title)
+        norm_artist = normalize(artist)
+        norm_album = normalize(album)
+
+        if item_title and norm_title:
+            if item_title == norm_title:
+                score += 0.50
+            elif norm_title in item_title or item_title in norm_title:
+                score += 0.30
+
+        if item_artist and norm_artist:
+            if item_artist == norm_artist:
+                score += 0.30
+            elif norm_artist in item_artist or item_artist in norm_artist:
+                score += 0.15
+
+        if norm_album and item_album:
+            if item_album == norm_album:
+                score += 0.20
+            elif norm_album in item_album or item_album in norm_album:
+                score += 0.10
+
+        return score
+
+    isrcs = []
+    mbid_match = re.search(r'recording/([a-f0-9-]+)', identifier, re.IGNORECASE)
+
+    if mbid_match:
+        mbid = mbid_match.group(1)
+        try:
+            mb_url = f'https://musicbrainz.org/ws/2/recording/{mbid}?inc=isrcs&fmt=json'
+            mb_resp = requests.get(
+                mb_url,
+                timeout=10,
+                headers={'User-Agent': 'Squidly/1.0 (https://github.com/brendan/squidly)'}
+            )
+            if mb_resp.ok:
+                mb_data = mb_resp.json()
+                isrcs = mb_data.get('isrcs') or []
+        except requests.exceptions.RequestException:
+            pass
+
+    def search_hifi(search_type, search_query, limit=25):
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/search/?{urlencode({search_type: search_query, 'limit': str(limit)})}",
+            SQUID_URLS,
+            method='GET',
+            timeout=10,
+            max_retries=3
+        )
+        if not response.ok:
+            return []
+        result = response.json()
+        return result.get('data', {}).get('items') or []
+
+    try:
+        best_match = None
+        best_score = 0.0
+        method = None
+
+        if isrcs:
+            seen_ids = set()
+            all_items = []
+            for isrc in isrcs:
+                items = search_hifi('i', isrc, limit=50)
+                for item in items:
+                    item_id = item.get('id')
+                    if item_id and item_id not in seen_ids:
+                        seen_ids.add(item_id)
+                        all_items.append(item)
+            for item in all_items:
+                s = score_candidate(item)
+                if s > best_score:
+                    best_score = s
+                    best_match = item
+            if best_match:
+                method = 'isrc'
+
+        if not best_match:
+            parts = [artist]
+            if album:
+                parts.append(album)
+            parts.append(title)
+            items = search_hifi('s', ' '.join(parts), limit=5)
+            for item in items:
+                s = score_candidate(item)
+                if s > best_score:
+                    best_score = s
+                    best_match = item
+            if best_match and not method:
+                method = 'text'
+
+        if best_match and best_score >= 0.50:
+            return jsonify({
+                'match': best_match,
+                'method': method,
+                'confidence': min(best_score, 1.0)
+            })
+
+        return jsonify({'match': None, 'method': None, 'confidence': 0.0})
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': 'Proxy error', 'details': str(e)}), 502
+
 @app.route('/api/plex/config', methods=['GET'])
 def get_plex_config_endpoint():
     """Get the current Plex configuration"""

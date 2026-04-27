@@ -6490,6 +6490,7 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
+                    <div id="lbMatchProgress" style="padding: 12px 16px; font-size: 14px; color: #888;"></div>
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
                             ${this.formatTrackGridHeader(false, true, false)}
@@ -6500,6 +6501,7 @@ class App {
             `;
 
             const resultsList = document.getElementById('listenbrainzResultsList');
+            const progressEl = document.getElementById('lbMatchProgress');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
@@ -6508,24 +6510,33 @@ class App {
             for (let i = 0; i < tracks.length; i++) {
                 const lbTrack = tracks[i];
                 const artists = lbTrack.creator || 'Unknown';
-                const searchQuery = `${lbTrack.title} ${artists}`;
+
+                if (progressEl) {
+                    progressEl.textContent = `Processing track ${i + 1} of ${tracks.length}`;
+                }
 
                 try {
-                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
+                    const matchResponse = await fetch('/api/listenbrainz/match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: lbTrack.title,
+                            artist: artists,
+                            album: lbTrack.album || '',
+                            identifier: lbTrack.identifier || ''
+                        }),
                         signal: this.pendingRequestController?.signal
                     });
 
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
+                    if (matchResponse.ok) {
+                        const matchData = await matchResponse.json();
 
-                        if (items.length > 0) {
-                            // Add the first match to results
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
+                        if (matchData.match) {
+                            const trackRow = this.formatTrackGridRow(matchData.match as Track, false, undefined, true, true);
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
-                            matchedTracks.push(items[0] as Track);
+                            matchedTracks.push(matchData.match as Track);
                             foundCount++;
                         } else {
                             notFoundTracks.push({
@@ -6540,13 +6551,17 @@ class App {
                         });
                     }
                 } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
+                    console.error(`Failed to match ${lbTrack.title} by ${artists}:`, error);
                     notFoundTracks.push({
                         artist: artists,
                         name: lbTrack.title || 'Unknown'
                     });
                 }
 
+            }
+
+            if (progressEl) {
+                progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
             }
 
             // Create and add Add All buttons after searching is complete
