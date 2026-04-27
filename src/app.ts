@@ -209,6 +209,12 @@ interface PlexPlaylist {
     ratingKey: string | null;
 }
 
+interface YtmPlaylist {
+    title: string;
+    playlistId: string;
+    count: number | string;
+}
+
 interface PlexPlaylistTracksResponse {
     success?: boolean;
     playlist?: {
@@ -513,6 +519,7 @@ interface AppRouteState {
     albumId?: number;
     trackId?: number;
     playlistId?: string;
+    playlistTitle?: string;
     username?: string;
     playlistUrl?: string;
     playlistType?: string;
@@ -583,6 +590,9 @@ class App {
     private listenbrainzUsernameInput: HTMLInputElement;
     private saveLbConfigButton: HTMLButtonElement;
     private lbConfigStatusEl: HTMLElement;
+    private ytmCookieInput: HTMLInputElement;
+    private saveYtmConfigButton: HTMLButtonElement;
+    private ytmConfigStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -750,7 +760,8 @@ class App {
         } else if (route.view === 'youtube_music_playlist') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'YouTube Music' });
-            crumbs.push({ label: this.exploreYoutubePlaylistName || 'Playlist' });
+            const title = route.playlistTitle || this.exploreYoutubePlaylistName || 'Playlist';
+            crumbs.push({ label: title });
         } else if (route.view === 'similar_tracks') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'Similar Tracks' });
@@ -854,6 +865,9 @@ class App {
         this.listenbrainzUsernameInput = document.getElementById('listenbrainzUsername') as HTMLInputElement;
         this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
+        this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
+        this.saveYtmConfigButton = document.getElementById('saveYtmConfig') as HTMLButtonElement;
+        this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -900,6 +914,7 @@ class App {
         this.initializeHistoryNavigation();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
+        void this.loadYtmConfig();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1088,6 +1103,9 @@ class App {
         }
         if (this.saveLbConfigButton) {
             this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
+        }
+        if (this.saveYtmConfigButton) {
+            this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2357,12 +2375,12 @@ class App {
             console.warn('Failed to load Plex playlists:', error);
         }
 
-        // Render Plex playlists first so it doesn't block while LB loads
-        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: null });
+        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: null, ytm: null });
 
         if (!userId) return;
 
         // Fetch LB playlists
+        let lbData: any = null;
         try {
             let username = this.listenbrainzUsernameInput.value.trim();
             if (!username) {
@@ -2374,7 +2392,7 @@ class App {
             }
 
             if (username) {
-                const lbData: any = { username, user: [], collaborator: [], createdfor: [] };
+                lbData = { username, user: [], collaborator: [], createdfor: [] };
                 const types = ['user', 'collaborator', 'createdfor'];
 
                 await Promise.all(types.map(async (type) => {
@@ -2394,12 +2412,30 @@ class App {
 
                 const createdForIds = new Set(lbData.createdfor.map((p: any) => p.identifier));
                 lbData.collaborator = lbData.collaborator.filter((p: any) => !createdForIds.has(p.identifier));
-
-                this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: lbData });
             }
         } catch (error) {
             console.warn('Failed to load ListenBrainz sidebar playlists', error);
         }
+
+        // Fetch YTM playlists
+        let ytmPlaylists: YtmPlaylist[] | null = null;
+        try {
+            const configResp = await fetch(`/api/youtube_music/config?user_id=${encodeURIComponent(userId)}`);
+            if (configResp.ok) {
+                const configData = await configResp.json();
+                if (configData.has_headers) {
+                    const plResp = await fetch(`/api/youtube_music/playlists?user_id=${encodeURIComponent(userId)}`);
+                    if (plResp.ok) {
+                        const plData = await plResp.json();
+                        ytmPlaylists = Array.isArray(plData.playlists) ? plData.playlists : [];
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load YouTube Music sidebar playlists', error);
+        }
+
+        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: lbData, ytm: ytmPlaylists });
     }
 
     private async initializeUserButton(): Promise<void> {
@@ -2479,7 +2515,7 @@ class App {
         }
     }
 
-    private populateSidebarPlaylists(data: { plex: PlexPlaylist[], listenbrainz: any | null }): void {
+    private populateSidebarPlaylists(data: { plex: PlexPlaylist[], listenbrainz: any | null, ytm: YtmPlaylist[] | null }): void {
         const playlistNavItems = document.getElementById('playlistNavItems');
         if (!playlistNavItems) {
             return;
@@ -2536,54 +2572,93 @@ class App {
             li.style.fontSize = '0.75rem';
             li.textContent = 'Loading or not configured...';
             playlistNavItems.appendChild(li);
-            return;
+        } else {
+            const renderLbSection = (title: string, items: any[], username: string) => {
+                if (!items || items.length === 0) return;
+                const subHeader = document.createElement('li');
+                subHeader.className = 'nav-section-title';
+                subHeader.style.fontSize = '0.5rem';
+                subHeader.style.color = 'var(--text-muted)';
+                subHeader.style.paddingLeft = '1.5rem';
+                subHeader.textContent = title;
+                playlistNavItems.appendChild(subHeader);
+
+                items.forEach((playlist: any) => {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'nav-item';
+                    a.textContent = playlist.title || 'Unknown';
+                    a.style.fontSize = '0.875rem';
+                    a.style.paddingLeft = '2.25rem';
+                    a.style.paddingTop = '0.25rem';
+                    a.style.paddingBottom = '0.25rem';
+                    a.addEventListener('click', (e: Event) => {
+                        e.preventDefault();
+                        if (playlist.identifier) {
+                            this.switchPage('explore');
+                            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId: playlist.identifier, username });
+                            void this.fetchListenbrainzPlaylistTracks(playlist.identifier, false, username);
+                        }
+                    });
+                    li.appendChild(a);
+                    playlistNavItems.appendChild(li);
+                });
+            };
+
+            renderLbSection('User Playlists', data.listenbrainz.user, data.listenbrainz.username);
+            renderLbSection('Collaborator Playlists', data.listenbrainz.collaborator, data.listenbrainz.username);
+            renderLbSection('Recommendation Playlists', data.listenbrainz.createdfor, data.listenbrainz.username);
+
+            const lbTotal = (data.listenbrainz.user?.length || 0) + (data.listenbrainz.collaborator?.length || 0) + (data.listenbrainz.createdfor?.length || 0);
+            if (lbTotal === 0) {
+                const li = document.createElement('li');
+                li.style.padding = '0.5rem 0.75rem';
+                li.style.color = 'var(--text-muted)';
+                li.style.fontSize = '0.875rem';
+                li.textContent = 'No playlists found';
+                playlistNavItems.appendChild(li);
+            }
         }
 
-        const renderLbSection = (title: string, items: any[], username: string) => {
-            if (!items || items.length === 0) return;
-            const subHeader = document.createElement('li');
-            subHeader.className = 'nav-section-title';
-            subHeader.style.fontSize = '0.5rem';
-            subHeader.style.color = 'var(--text-muted)';
-            subHeader.style.paddingLeft = '1.5rem';
-            subHeader.textContent = title;
-            playlistNavItems.appendChild(subHeader);
+        // --- YouTube Music Playlists ---
+        const ytmHeader = document.createElement('li');
+        ytmHeader.className = 'nav-section-title';
+        ytmHeader.style.fontSize = '0.5rem';
+        ytmHeader.textContent = 'YTM';
+        playlistNavItems.appendChild(ytmHeader);
 
-            items.forEach((playlist: any) => {
-                const li = document.createElement('li');
-                const a = document.createElement('a');
-                a.href = '#';
-                a.className = 'nav-item';
-                a.textContent = playlist.title || 'Unknown';
-                a.style.fontSize = '0.875rem';
-                a.style.paddingLeft = '2.25rem';
-                a.style.paddingTop = '0.25rem';
-                a.style.paddingBottom = '0.25rem';
-                a.addEventListener('click', (e: Event) => {
-                    e.preventDefault();
-                    if (playlist.identifier) {
-                        this.switchPage('explore');
-                        this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId: playlist.identifier, username });
-                        void this.fetchListenbrainzPlaylistTracks(playlist.identifier, false, username);
-                    }
-                });
-                li.appendChild(a);
-                playlistNavItems.appendChild(li);
-            });
-        };
-
-        renderLbSection('User Playlists', data.listenbrainz.user, data.listenbrainz.username);
-        renderLbSection('Collaborator Playlists', data.listenbrainz.collaborator, data.listenbrainz.username);
-        renderLbSection('Recommendation Playlists', data.listenbrainz.createdfor, data.listenbrainz.username);
-
-        const lbTotal = (data.listenbrainz.user?.length || 0) + (data.listenbrainz.collaborator?.length || 0) + (data.listenbrainz.createdfor?.length || 0);
-        if (lbTotal === 0) {
+        if (data.ytm === null) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Loading or not configured...';
+            playlistNavItems.appendChild(li);
+        } else if (data.ytm.length === 0) {
             const li = document.createElement('li');
             li.style.padding = '0.5rem 0.75rem';
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.875rem';
-            li.textContent = 'No playlists found';
+            li.textContent = 'No playlists';
             playlistNavItems.appendChild(li);
+        } else {
+            data.ytm.forEach((playlist: YtmPlaylist) => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'nav-item';
+                a.textContent = playlist.title;
+                a.style.fontSize = '0.875rem';
+                a.style.paddingTop = '0.25rem';
+                a.style.paddingBottom = '0.25rem';
+                a.addEventListener('click', (e: Event) => {
+                    e.preventDefault();
+                    void this.fetchYtmPlaylistTracks(playlist.playlistId, playlist.title);
+                });
+                li.appendChild(a);
+                playlistNavItems.appendChild(li);
+            });
         }
     }
 
@@ -2724,9 +2799,22 @@ class App {
             return playlistId ? { view, playlistId, username } : null;
         }
 
-        if (view === 'lastfm_playlist' || view === 'youtube_music_playlist') {
+        if (view === 'lastfm_playlist') {
             const playlistUrl = params.get('url') || '';
             return playlistUrl ? { view, playlistUrl } : null;
+        }
+
+        if (view === 'youtube_music_playlist') {
+            const playlistUrl = params.get('url') || '';
+            if (playlistUrl) {
+                return { view, playlistUrl };
+            }
+            const playlistId = params.get('id') || '';
+            const playlistTitle = params.get('title') || '';
+            if (playlistId && playlistTitle) {
+                return { view, playlistId, playlistTitle };
+            }
+            return null;
         }
 
         if (view === 'similar_tracks') {
@@ -2856,8 +2944,19 @@ class App {
                 params.set('username', route.username);
             }
 
-            if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
+            if (route.view === 'lastfm_playlist' && route.playlistUrl) {
                 params.set('url', route.playlistUrl);
+            }
+
+            if (route.view === 'youtube_music_playlist' && route.playlistUrl) {
+                params.set('url', route.playlistUrl);
+            }
+
+            if (route.view === 'youtube_music_playlist' && route.playlistId && !route.playlistUrl) {
+                params.set('id', route.playlistId);
+                if (route.playlistTitle) {
+                    params.set('title', route.playlistTitle);
+                }
             }
 
             if (route.view === 'similar_artists' && route.artistId) {
@@ -3075,6 +3174,11 @@ class App {
             this.searchInput.value = route.playlistUrl;
             this.updateSearchPlaceholder();
             await this.handleLastfmPlaylist(route.playlistUrl, updateHistory);
+            return;
+        }
+
+        if (route.view === 'youtube_music_playlist' && route.playlistId && route.playlistTitle) {
+            await this.fetchYtmPlaylistTracks(route.playlistId, route.playlistTitle, updateHistory);
             return;
         }
 
@@ -5186,6 +5290,63 @@ class App {
         }
     }
 
+    private async loadYtmConfig(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const response = await fetch(`/api/youtube_music/config${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.ytmConfigStatusEl.textContent = data.has_headers ? '✓ Cookie configured' : '';
+                this.ytmConfigStatusEl.style.color = data.has_headers ? 'var(--accent-primary)' : '';
+            }
+        } catch (error) {
+            console.warn('Failed to load YouTube Music config.', error);
+        }
+    }
+
+    private async saveYtmConfig(): Promise<void> {
+        const cookie = this.ytmCookieInput.value.trim();
+
+        if (!cookie) {
+            this.ytmConfigStatusEl.textContent = '⚠ Cookie is required';
+            this.ytmConfigStatusEl.style.color = 'var(--text-secondary)';
+            return;
+        }
+
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.ytmConfigStatusEl.textContent = '⚠ Select a Plex user before saving YouTube Music settings';
+                this.ytmConfigStatusEl.style.color = 'var(--text-secondary)';
+                return;
+            }
+
+            const response = await fetch('/api/youtube_music/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cookie, user_id: userId })
+            });
+
+            if (response.ok) {
+                this.ytmConfigStatusEl.textContent = '✓ Configuration saved';
+                this.ytmConfigStatusEl.style.color = 'var(--accent-primary)';
+                this.ytmCookieInput.value = '';
+                void this.updateSidebarPlaylists();
+                setTimeout(() => {
+                    this.ytmConfigStatusEl.textContent = '';
+                }, 3000);
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                this.ytmConfigStatusEl.textContent = `✗ ${errorData.error || 'Failed to save'}`;
+                this.ytmConfigStatusEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (error) {
+            console.error('Error saving YouTube Music config:', error);
+            this.ytmConfigStatusEl.textContent = '✗ Error saving configuration';
+            this.ytmConfigStatusEl.style.color = 'var(--text-secondary)';
+        }
+    }
+
     private async loadPlexConfig(): Promise<void> {
         try {
             const response = await fetch('/api/plex/config');
@@ -6490,6 +6651,121 @@ class App {
         } catch (error) {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlist'}`);
             console.error('ListenBrainz playlist error:', error);
+        }
+    }
+
+    private async fetchYtmPlaylistTracks(playlistId: string, playlistTitle: string, updateHistory: boolean = true): Promise<void> {
+        this.currentExploreRoute = { view: 'youtube_music_playlist', playlistId, playlistTitle };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'youtube_music_playlist', playlistId, playlistTitle });
+        }
+        this.stopPlayback();
+        this.displayMessage('Loading YouTube Music playlist tracks...');
+
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/youtube_music/playlist/${encodeURIComponent(playlistId)}${userIdQuery}`, {
+                signal: this.pendingRequestController?.signal
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlist' }));
+                throw new Error(errorData.error || 'Failed to fetch YouTube Music playlist');
+            }
+
+            const data = await response.json();
+            const tracks = data.tracks || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this playlist');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+
+            const resolvedTitle = data.title || playlistTitle;
+            const trackCount = data.trackCount || tracks.length;
+
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(resolvedTitle)}</h2>
+                        <p class="playlist-creator-display">${trackCount} tracks</p>
+                    </div>
+                </div>
+                <div class="results-list">
+                    <div id="ytmMatchProgress" style="padding: 12px 16px; font-size: 14px; color: #888;"></div>
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="ytmResultsList"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const resultsList = document.getElementById('ytmResultsList');
+            const progressEl = document.getElementById('ytmMatchProgress');
+            let foundCount = 0;
+            const matchedTracks: Track[] = [];
+
+            for (let i = 0; i < tracks.length; i++) {
+                const ytmTrack = tracks[i];
+                const artists = (ytmTrack.artists || []).map((a: any) => a.name).filter(Boolean).join(', ') || 'Unknown';
+                const albumName = (ytmTrack.album && ytmTrack.album.name) || '';
+
+                if (progressEl) {
+                    progressEl.textContent = `Processing track ${i + 1} of ${tracks.length}`;
+                }
+
+                try {
+                    const matchResponse = await fetch('/api/youtube_music/match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: ytmTrack.title,
+                            artist: artists,
+                            album: albumName
+                        }),
+                        signal: this.pendingRequestController?.signal
+                    });
+
+                    if (matchResponse.ok) {
+                        const matchData = await matchResponse.json();
+
+                        if (matchData.match) {
+                            const trackRow = this.formatTrackGridRow(this.normalizeTrack(matchData.match as Track), {
+                                viewMode: 'multi-album',
+                                showTrackNumber: false,
+                                showAlbumColumn: true,
+                                showArtwork: true,
+                            });
+                            if (resultsList) {
+                                resultsList.insertAdjacentHTML('beforeend', trackRow);
+                            }
+                            matchedTracks.push(matchData.match as Track);
+                            foundCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to match ${ytmTrack.title} by ${artists}:`, error);
+                }
+            }
+
+            if (progressEl) {
+                progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
+            }
+
+            this.createAddAllButtons();
+
+            if (matchedTracks.length > 0) {
+                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
+            }
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load YouTube Music playlist'}`);
+            console.error('YouTube Music playlist error:', error);
         }
     }
 

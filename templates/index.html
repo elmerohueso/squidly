@@ -266,6 +266,20 @@
                                 Config</button>
                             <p class="settings-note" id="lbConfigStatus"></p>
                         </div>
+                        <div class="settings-section" id="youtubeMusicSettings">
+                            <div class="settings-section-title">YouTube Music</div>
+                            <label class="settings-label" for="ytmCookie">Browser Cookie</label>
+                            <input type="text" id="ytmCookie" class="settings-input"
+                                placeholder="Paste your YouTube Music cookie here">
+                            <p class="settings-hint">
+                                Go to <a href="https://music.youtube.com" target="_blank"
+                                    style="color: var(--accent-primary); text-decoration: none;">music.youtube.com</a>,
+                                open DevTools (F12) → Network tab, filter for "browse", refresh the page,
+                                click a browse request, and copy the full Cookie header value.
+                            </p>
+                            <button id="saveYtmConfig" class="save-button" style="margin-top: 1rem;">Save YouTube Music Config</button>
+                            <p class="settings-note" id="ytmConfigStatus"></p>
+                        </div>
                         <div class="settings-section" id="plexSettings">
                             <div class="settings-section-title">Plex Integration</div>
                             <div id="plexConnectedStatus"

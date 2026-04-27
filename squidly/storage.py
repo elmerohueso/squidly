@@ -6,291 +6,10 @@ status).
 """
 
 from datetime import datetime
+import json
 
 from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.db import get_db_connection
-
-
-def init_db():
-    """Create required tables and schema migrations."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    # Drop plex_songs table (no longer used, all data comes from tracks/albums/artists)
-    cur.execute("DROP TABLE IF EXISTS plex_songs")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS download_settings (
-            id INTEGER PRIMARY KEY,
-            format TEXT NOT NULL,
-            parent_folder TEXT NOT NULL,
-            file_naming TEXT,
-            file_naming_loose TEXT,
-            file_naming_album TEXT,
-            jobs_refresh_interval_seconds INTEGER NOT NULL DEFAULT 30,
-            ignore_matches BOOLEAN NOT NULL DEFAULT FALSE,
-            updated_at TIMESTAMP NOT NULL,
-            CONSTRAINT check_single_row CHECK (id = 1)
-        )
-        """
-    )
-    # Check if columns exist (PostgreSQL version)
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'download_settings'
-        """
-    )
-    columns = {row['column_name'] for row in cur.fetchall()}
-
-    if 'file_naming' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming TEXT")
-    if 'file_naming_loose' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_loose TEXT")
-    if 'file_naming_album' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN file_naming_album TEXT")
-    if 'jobs_refresh_interval_seconds' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN jobs_refresh_interval_seconds INTEGER")
-    if 'ignore_matches' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN ignore_matches BOOLEAN NOT NULL DEFAULT FALSE")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS mirror_endpoints (
-            name TEXT PRIMARY KEY,
-            encoded_url TEXT NOT NULL,
-            online INTEGER NOT NULL,
-            response_time REAL,
-            last_checked TIMESTAMP
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS plex_config (
-            id INTEGER PRIMARY KEY,
-            server_url TEXT,
-            api_token TEXT,
-            library_name TEXT,
-            sync_interval_hours INTEGER NOT NULL DEFAULT 24,
-            update_playlist_name TEXT,
-            updated_at TIMESTAMP NOT NULL,
-            CONSTRAINT check_single_row_plex CHECK (id = 1)
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS user_settings (
-            id SERIAL PRIMARY KEY,
-            username TEXT,
-            plex_client_id TEXT UNIQUE,
-            plex_owner BOOLEAN NOT NULL DEFAULT FALSE,
-            listenbrainz_key TEXT,
-            listenbrainz_username TEXT
-        )
-        """
-    )
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'user_settings'
-        """
-    )
-    user_settings_columns = {row['column_name'] for row in cur.fetchall()}
-    if 'plex_owner' not in user_settings_columns:
-        cur.execute('ALTER TABLE user_settings ADD COLUMN plex_owner BOOLEAN NOT NULL DEFAULT FALSE')
-        user_settings_columns.add('plex_owner')
-    if 'listenbrainz_key' not in user_settings_columns:
-        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
-    if 'listenbrainz_username' not in user_settings_columns:
-        cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_username TEXT')
-
-    cur.execute(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.tables
-            WHERE table_name = 'listenbrainz_config'
-              AND table_schema = 'public'
-        )
-        """
-    )
-    table_exists_row = cur.fetchone()
-    if table_exists_row and table_exists_row.get('exists'):
-        cur.execute('SELECT user_token FROM listenbrainz_config WHERE id = 1')
-        lb_row = cur.fetchone()
-        if lb_row and lb_row.get('user_token'):
-            token = lb_row['user_token']
-            cur.execute(
-                """
-                SELECT plex_client_id
-                FROM user_settings
-                WHERE plex_owner = TRUE
-                ORDER BY id ASC
-                LIMIT 1
-                """
-            )
-            owner_row = cur.fetchone()
-            target_client_id = owner_row['plex_client_id'] if owner_row and owner_row.get('plex_client_id') else None
-            if not target_client_id:
-                cur.execute(
-                    """
-                    SELECT plex_client_id
-                    FROM user_settings
-                    ORDER BY id ASC
-                    LIMIT 1
-                    """
-                )
-                default_row = cur.fetchone()
-                target_client_id = default_row['plex_client_id'] if default_row and default_row.get('plex_client_id') else None
-            if target_client_id:
-                cur.execute(
-                    """
-                    UPDATE user_settings
-                    SET listenbrainz_key = %s
-                    WHERE plex_client_id = %s
-                    """,
-                    (token, target_client_id)
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO user_settings (username, plex_client_id, listenbrainz_key)
-                    VALUES (%s, %s, %s)
-                    """,
-                    ('listenbrainz', 'listenbrainz_default', token)
-                )
-        cur.execute('DROP TABLE IF EXISTS listenbrainz_config')
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'plex_config'
-        """
-    )
-    plex_columns = {row['column_name'] for row in cur.fetchall()}
-    if 'sync_interval_hours' not in plex_columns:
-        cur.execute("ALTER TABLE plex_config ADD COLUMN sync_interval_hours INTEGER NOT NULL DEFAULT 24")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS artists (
-            artist_id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            library_id TEXT UNIQUE,
-            hifi_id TEXT,
-            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
-            last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT artists_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT artists_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT artists_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
-        )
-        """
-    )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_artists_hifi_id ON artists (hifi_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_artists_match_status ON artists (match_status)")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS albums (
-            album_id SERIAL PRIMARY KEY,
-            artist_id INTEGER REFERENCES artists(artist_id) ON DELETE SET NULL,
-            title TEXT NOT NULL,
-            library_id TEXT UNIQUE,
-            hifi_id TEXT,
-            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
-            complete BOOLEAN NOT NULL DEFAULT FALSE,
-            matched_track_count INTEGER NOT NULL DEFAULT 0,
-            expected_track_count INTEGER NOT NULL DEFAULT 0,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
-            last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT albums_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT albums_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT albums_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
-        )
-        """
-    )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_artist_id ON albums (artist_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_hifi_id ON albums (hifi_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_albums_match_status ON albums (match_status)")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tracks (
-            track_id SERIAL PRIMARY KEY,
-            album_id INTEGER REFERENCES albums(album_id) ON DELETE SET NULL,
-            artist_id INTEGER REFERENCES artists(artist_id) ON DELETE SET NULL,
-            title TEXT NOT NULL,
-            library_id TEXT UNIQUE,
-            confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
-            hifi_id TEXT,
-            path TEXT NOT NULL UNIQUE,
-            format TEXT,
-            bitrate INTEGER,
-            disc_number INTEGER,
-            track_number INTEGER,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
-            last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT tracks_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT tracks_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT tracks_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
-        )
-        """
-    )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_album_id ON tracks (album_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_artist_id ON tracks (artist_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_hifi_id ON tracks (hifi_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_tracks_match_status ON tracks (match_status)")
-
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS jobs (
-            id SERIAL PRIMARY KEY,
-            job_type TEXT NOT NULL,
-            status TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            result_json TEXT,
-            error_message TEXT,
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            max_attempts INTEGER NOT NULL DEFAULT 20,
-            created_at TIMESTAMP NOT NULL,
-            updated_at TIMESTAMP NOT NULL,
-            run_after TIMESTAMP,
-            locked_at TIMESTAMP,
-            locked_by TEXT,
-            started_at TIMESTAMP,
-            finished_at TIMESTAMP,
-            priority INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-
-    # Backfill old job type name
-    cur.execute(
-        """
-        UPDATE jobs
-        SET job_type = %s
-        WHERE job_type = %s
-        """,
-        ('plex_playlist_add', 'plex_add')
-    )
-
-    conn.commit()
-    conn.close()
 
 
 def init_library_update_status():
@@ -579,6 +298,96 @@ def save_listenbrainz_config(user_token, user_id=None, listenbrainz_username=Non
             listenbrainz_username = excluded.listenbrainz_username
         """,
         (None, user_id, user_token, listenbrainz_username)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_ytm_config(user_id=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if user_id:
+        cur.execute(
+            """
+            SELECT ytm_headers
+            FROM user_settings
+            WHERE plex_client_id = %s
+            """,
+            (user_id,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT ytm_headers
+            FROM user_settings
+            WHERE ytm_headers IS NOT NULL
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+
+    row = cur.fetchone()
+    conn.close()
+
+    return {'has_headers': row is not None and row.get('ytm_headers') is not None}
+
+
+def save_ytm_config(cookie, user_id=None):
+    import hashlib
+    import time
+    from http.cookies import SimpleCookie
+
+    cookie = str(cookie or '').strip()
+    if not cookie:
+        return
+
+    if '__Secure-3PAPISID' not in cookie:
+        raise ValueError('Cookie is missing __Secure-3PAPISID')
+
+    c = SimpleCookie()
+    c.load(cookie.replace('"', ''))
+    sapisid = c['__Secure-3PAPISID'].value
+    timestamp = str(int(time.time()))
+    sha1 = hashlib.sha1()
+    sha1.update(f'{timestamp} {sapisid} https://music.youtube.com'.encode('utf-8'))
+    authorization = f'SAPISIDHASH {timestamp}_{sha1.hexdigest()}'
+
+    headers = {
+        'cookie': cookie,
+        'origin': 'https://music.youtube.com',
+        'authorization': authorization,
+    }
+    headers_json = json.dumps(headers)
+
+    user_id = str(user_id or '').strip()
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    if not user_id:
+        cur.execute(
+            """
+            SELECT plex_client_id
+            FROM user_settings
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        user_id = row['plex_client_id'] if row and row.get('plex_client_id') else None
+
+    if not user_id:
+        conn.close()
+        return
+
+    cur.execute(
+        """
+        INSERT INTO user_settings (username, plex_client_id, ytm_headers)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (plex_client_id) DO UPDATE SET
+            ytm_headers = excluded.ytm_headers
+        """,
+        (None, user_id, headers_json)
     )
     conn.commit()
     conn.close()

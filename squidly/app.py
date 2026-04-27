@@ -500,12 +500,13 @@ from squidly.storage import (
     get_listenbrainz_config,
     get_plex_config,
     get_plex_user_settings,
-    init_db,
+    get_ytm_config,
     init_library_update_status,
     save_download_settings,
     save_listenbrainz_config,
     save_plex_config,
     save_plex_user_setting,
+    save_ytm_config,
 )
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -811,6 +812,8 @@ def init_db():
         cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_key TEXT')
     if 'listenbrainz_username' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_username TEXT')
+    if 'ytm_headers' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN ytm_headers TEXT')
 
     cur.execute(
         """
@@ -7259,6 +7262,239 @@ def match_listenbrainz_track():
 
     except requests.exceptions.RequestException as e:
         return jsonify({'error': 'Proxy error', 'details': str(e)}), 502
+
+
+def _get_ytmusic(user_id):
+    """Load YTM headers from DB and return an authenticated YTMusic instance."""
+    from ytmusicapi import YTMusic
+    import hashlib
+    import time
+    from http.cookies import SimpleCookie
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    if user_id:
+        cur.execute(
+            "SELECT ytm_headers FROM user_settings WHERE plex_client_id = %s",
+            (user_id,)
+        )
+    else:
+        cur.execute(
+            "SELECT ytm_headers FROM user_settings WHERE ytm_headers IS NOT NULL ORDER BY id ASC LIMIT 1"
+        )
+    row = cur.fetchone()
+    conn.close()
+
+    if not row or not row.get('ytm_headers'):
+        return None
+
+    headers = json.loads(row['ytm_headers'])
+
+    # Regenerate SAPISIDHASH since the timestamp expires
+    cookie = headers.get('cookie', '')
+    if cookie:
+        c = SimpleCookie()
+        c.load(cookie.replace('"', ''))
+        sapisid = c['__Secure-3PAPISID'].value
+        timestamp = str(int(time.time()))
+        sha1 = hashlib.sha1()
+        sha1.update(f'{timestamp} {sapisid} https://music.youtube.com'.encode('utf-8'))
+        headers['authorization'] = f'SAPISIDHASH {timestamp}_{sha1.hexdigest()}'
+
+    return YTMusic(headers)
+
+
+@app.route('/api/youtube_music/config', methods=['GET'])
+def get_ytm_config_endpoint():
+    """Check if YouTube Music is configured for the user."""
+    user_id = request.args.get('user_id')
+    config = get_ytm_config(user_id)
+    return jsonify(config)
+
+
+@app.route('/api/youtube_music/config', methods=['POST'])
+def save_ytm_config_endpoint():
+    """Save YouTube Music cookie and generate auth headers."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+
+    cookie = payload.get('cookie', '').strip()
+    user_id = payload.get('user_id', '').strip()
+
+    if not cookie:
+        return jsonify({'error': 'cookie is required'}), 400
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    try:
+        save_ytm_config(cookie, user_id)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/youtube_music/playlists', methods=['GET'])
+def get_ytm_playlists():
+    """Fetch the user's YouTube Music library playlists, excluding video playlists."""
+    user_id = request.args.get('user_id')
+    ytmusic = _get_ytmusic(user_id)
+
+    if not ytmusic:
+        return jsonify({'error': 'YouTube Music not configured'}), 400
+
+    def _is_video_playlist(pl):
+        """Video playlists use i.ytimg.com thumbnails; music playlists use lh3.googleusercontent.com."""
+        for thumb in pl.get('thumbnails', []):
+            if 'i.ytimg.com' in thumb.get('url', ''):
+                return True
+        return False
+
+    try:
+        playlists = ytmusic.get_library_playlists(limit=None)
+
+        result = []
+        for pl in playlists:
+            playlist_id = pl.get('playlistId', '')
+            if playlist_id == 'LM':
+                continue
+            if _is_video_playlist(pl):
+                continue
+            result.append({
+                'title': pl.get('title', ''),
+                'playlistId': playlist_id,
+                'count': pl.get('count', '?'),
+            })
+
+        result.sort(key=lambda p: p['title'].casefold())
+
+        return jsonify({'playlists': result})
+
+    except Exception as e:
+        print(f"YouTube Music playlists error: {e}", flush=True)
+        return jsonify({'error': f'Failed to fetch playlists: {str(e)}'}), 500
+
+
+@app.route('/api/youtube_music/playlist/<playlist_id>', methods=['GET'])
+def get_ytm_playlist(playlist_id):
+    """Fetch tracks for a specific YouTube Music playlist."""
+    user_id = request.args.get('user_id')
+    ytmusic = _get_ytmusic(user_id)
+
+    if not ytmusic:
+        return jsonify({'error': 'YouTube Music not configured'}), 400
+
+    try:
+        pl_data = ytmusic.get_playlist(playlist_id, limit=None)
+
+        tracks = []
+        for t in pl_data.get('tracks', []):
+            tracks.append({
+                'title': t.get('title', ''),
+                'artists': t.get('artists') or [],
+                'album': t.get('album'),
+                'duration': t.get('duration', ''),
+                'duration_seconds': t.get('duration_seconds'),
+                'videoId': t.get('videoId', ''),
+            })
+
+        return jsonify({
+            'title': pl_data.get('title', ''),
+            'trackCount': pl_data.get('trackCount', len(tracks)),
+            'tracks': tracks,
+        })
+
+    except Exception as e:
+        print(f"YouTube Music playlist error: {e}", flush=True)
+        return jsonify({'error': f'Failed to fetch playlist: {str(e)}'}), 500
+
+
+@app.route('/api/youtube_music/match', methods=['POST'])
+def match_ytm_track():
+    """Match a YouTube Music track to Hi-Fi library by text search."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+
+    title = str(payload.get('title') or '').strip()
+    artist = str(payload.get('artist') or '').strip()
+    album = str(payload.get('album') or '').strip()
+
+    if not title or not artist:
+        return jsonify({'error': 'title and artist are required'}), 400
+
+    def normalize(s):
+        return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
+
+    def score_candidate(item):
+        score = 0.0
+        item_title = normalize(item.get('title') or '')
+        item_artist = normalize((item.get('artist') or {}).get('name') or '')
+        item_album = normalize((item.get('album') or {}).get('title') or '')
+        norm_title = normalize(title)
+        norm_artist = normalize(artist)
+        norm_album = normalize(album)
+
+        if item_title and norm_title:
+            if item_title == norm_title:
+                score += 0.50
+            elif norm_title in item_title or item_title in norm_title:
+                score += 0.30
+
+        if item_artist and norm_artist:
+            if item_artist == norm_artist:
+                score += 0.30
+            elif norm_artist in item_artist or item_artist in norm_artist:
+                score += 0.15
+
+        if norm_album and item_album:
+            if item_album == norm_album:
+                score += 0.20
+            elif norm_album in item_album or item_album in norm_album:
+                score += 0.10
+
+        return score
+
+    def search_hifi(search_type, search_query, limit=25):
+        response, target = make_request_with_retry_rotating_mirrors(
+            f"/search/?{urlencode({search_type: search_query, 'limit': str(limit)})}",
+            SQUID_URLS,
+            method='GET',
+            timeout=10,
+            max_retries=3,
+        )
+        if not response.ok:
+            return []
+        result = response.json()
+        return result.get('data', {}).get('items') or []
+
+    try:
+        best_match = None
+        best_score = 0.0
+
+        parts = [artist]
+        if album:
+            parts.append(album)
+        parts.append(title)
+        items = search_hifi('s', ' '.join(parts), limit=5)
+        for item in items:
+            s = score_candidate(item)
+            if s > best_score:
+                best_score = s
+                best_match = item
+
+        if best_match and best_score >= 0.50:
+            return jsonify({
+                'match': best_match,
+                'confidence': min(best_score, 1.0)
+            })
+
+        return jsonify({'match': None, 'confidence': 0.0})
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': 'Proxy error', 'details': str(e)}), 502
+
 
 @app.route('/api/plex/config', methods=['GET'])
 def get_plex_config_endpoint():
