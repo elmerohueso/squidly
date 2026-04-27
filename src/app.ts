@@ -117,6 +117,43 @@ interface AlbumGridOptions {
     emptyMessage?: string;
 }
 
+interface NormalizedTrack {
+    id: string;
+    title: string;
+    version?: string;
+    artist: string;
+    artistId?: number;
+    album: string;
+    albumId?: number;
+    albumCover?: string;
+    trackNumber: number | null;
+    volumeNumber: number;
+    duration: number | null;
+    quality: string;
+    explicit: boolean;
+    qualityFormat?: string;
+    qualityBitrate?: string;
+}
+
+interface TrackGridOptions {
+    viewMode: 'single-album' | 'multi-album' | 'library-tracks';
+    showTrackNumber?: boolean;
+    showAlbumColumn?: boolean;
+    showArtwork?: boolean;
+    numberOfVolumes?: number;
+    dataAttr?: string;
+    extraRowClass?: string;
+    actions?: 'full' | 'play-only';
+    qualityStyle?: 'tier' | 'format-bitrate';
+    rowDataAttrs?: (track: NormalizedTrack) => Record<string, string>;
+    emptyMessage?: string;
+}
+
+interface PlaylistTrackInput {
+    name: string;
+    artist: string;
+}
+
 interface PlexLibraryTrack {
     id: string;
     title: string;
@@ -1780,37 +1817,6 @@ class App {
         `;
     }
 
-    private formatLibraryTrackRow(track: PlexLibraryTrack, showDiscPrefix: boolean): string {
-        const title = this.escapeHtml(track.title || 'Unknown Track');
-        const artist = this.escapeHtml(track.artist || this.libraryCurrentArtist?.name || 'Unknown Artist');
-        const artistId = this.escapeHtml(track.artist_id || this.libraryCurrentArtist?.id || '');
-        const trackNumber = typeof track.track_number === 'number' ? track.track_number : null;
-        const discNumber = typeof track.disc_number === 'number' ? track.disc_number : 1;
-        const numberLabel = trackNumber !== null
-            ? (showDiscPrefix ? `${discNumber}-${String(trackNumber).padStart(2, '0')}` : String(trackNumber))
-            : '—';
-        const durationSeconds = typeof track.duration === 'number' ? Math.max(0, Math.round(track.duration / 1000)) : null;
-        const durationLabel = durationSeconds !== null ? this.formatDuration(durationSeconds) : '—';
-        const qualityFormat = (track.quality_format || '').trim().toUpperCase();
-        const qualityBitrate = typeof track.quality_bitrate_kbps === 'number' ? `${track.quality_bitrate_kbps} kbps` : '';
-        const qualityLabel = [qualityFormat, qualityBitrate].filter(Boolean).join(' • ') || '—';
-
-        return `
-            <div class="tracks-grid-row" data-plex-library-row="true" data-library-track-id="${this.escapeHtml(track.id)}">
-                <div class="grid-cell grid-col-track-number">${numberLabel}</div>
-                <div class="grid-cell grid-col-title"><div class="track-title-with-badge">${title}</div></div>
-                <div class="grid-cell grid-col-artist"><span class="track-artist-name library-track-artist-name" data-library-artist-id="${artistId}" data-library-artist-name="${artist}" title="View albums by ${artist}">${artist}</span></div>
-                <div class="grid-cell grid-col-quality">${durationLabel}</div>
-                <div class="grid-cell grid-col-quality">${qualityLabel}</div>
-                <div class="grid-cell grid-col-actions">
-                    <button class="grid-play-btn" title="Play" aria-label="Play" data-library-track-id="${this.escapeHtml(track.id)}">
-                        ${this.getPlayIconSvg()}
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
     private getLibraryArtistPageWindow(currentPage: number, totalPages: number): number[] {
         if (totalPages <= 1) {
             return [1];
@@ -1985,14 +1991,22 @@ class App {
                     <h2>Tracks</h2>
                 </div>
             </div>
-            <div class="tracks-grid-wrapper" data-view-mode="library-tracks">
-                <div class="tracks-grid">
-                    ${this.formatTrackGridHeader(true, false, false)}
-                    ${tracks.length > 0
-                ? tracks.map((track) => this.formatLibraryTrackRow(track, maxDisc > 1)).join('')
-                : '<div class="library-placeholder"><p>No tracks found for this album.</p></div>'}
-                </div>
-            </div>
+            ${this.renderTrackGrid(tracks, {
+                viewMode: 'library-tracks',
+                showTrackNumber: true,
+                numberOfVolumes: maxDisc > 1 ? maxDisc : undefined,
+                showAlbumColumn: false,
+                showArtwork: false,
+                dataAttr: 'data-library-track-id',
+                actions: 'play-only',
+                qualityStyle: 'format-bitrate',
+                rowDataAttrs: (track) => ({
+                    'data-plex-library-row': 'true',
+                    'data-library-artist-id': String(track.artistId || ''),
+                    'data-library-artist-name': track.artist,
+                }),
+                emptyMessage: '<div class="library-placeholder"><p>No tracks found for this album.</p></div>',
+            })}
         `;
     }
 
@@ -2211,13 +2225,32 @@ class App {
 
             const resolvedTitle = data.playlist?.title || playlistTitle;
             this.libraryCurrentPlaylist = resolvedTitle;
-            this.renderLibraryAlbumTracks(
-                resolvedTitle,
-                Array.isArray(data.tracks) ? data.tracks : [],
-                '',
-                undefined,
-                ''
-            );
+            this.libraryLoadedOnce = true;
+            this.renderLibraryBreadcrumb();
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+            this.libraryResultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(resolvedTitle)}</h2>
+                    </div>
+                </div>
+                ${this.renderTrackGrid(tracks, {
+                    viewMode: 'multi-album',
+                    showTrackNumber: false,
+                    showAlbumColumn: true,
+                    showArtwork: true,
+                    dataAttr: 'data-library-track-id',
+                    actions: 'play-only',
+                    qualityStyle: 'format-bitrate',
+                    rowDataAttrs: (track) => ({
+                        'data-plex-library-row': 'true',
+                        'data-library-artist-id': String(track.artistId || ''),
+                        'data-library-artist-name': track.artist,
+                    }),
+                    emptyMessage: '<div class="library-placeholder"><p>No tracks found in this playlist.</p></div>',
+                })}
+            `;
         } catch (error) {
             if (error instanceof DOMException && error.name === 'AbortError') {
                 return;
@@ -6084,7 +6117,6 @@ class App {
 
             this.updatePlexPlaylistContainerVisibility(true);
 
-            // Set up progress display with grid structure
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
@@ -6094,84 +6126,23 @@ class App {
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            ${this.formatTrackGridHeader(false, true, false)}
+                            ${this.formatTrackGridHeader(false, true, true)}
                             <div id="lastfmResultsList"></div>
                         </div>
                     </div>
                 </div>
             `;
 
-            const resultsList = document.getElementById('lastfmResultsList');
-            let foundCount = 0;
-            const matchedTracks: Track[] = [];
-            const notFoundTracks: Array<{ artist: string; name: string }> = [];
+            const { matched: matchedTracks, notFound: notFoundTracks } = await this.renderProgressiveTrackGrid(tracks, {
+                viewMode: 'multi-album',
+                showTrackNumber: false,
+                showAlbumColumn: true,
+                showArtwork: true,
+                resultsContainerId: 'lastfmResultsList',
+                playlistName,
+            });
 
-            // Search for each track progressively
-            for (let i = 0; i < tracks.length; i++) {
-                const track = tracks[i];
-                const searchQuery = `${track.name} ${track.artist}`;
-
-                try {
-                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
-                        signal: this.pendingRequestController?.signal
-                    });
-
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
-
-                        if (items.length > 0) {
-                            // Add the first match to results
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackRow);
-                            }
-                            matchedTracks.push(items[0] as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: track.artist,
-                                name: track.name
-                            });
-                        }
-                    } else {
-                        notFoundTracks.push({
-                            artist: track.artist,
-                            name: track.name
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
-                    notFoundTracks.push({
-                        artist: track.artist,
-                        name: track.name
-                    });
-                }
-
-            }
-
-            // Create and add Add All buttons after searching is complete
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.className = 'add-all-buttons-container';
-                const addPlaylistBtn = document.createElement('button');
-                addPlaylistBtn.id = 'addAllPlaylistBtn';
-                addPlaylistBtn.className = 'add-all-btn';
-                addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
-                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
-                buttonsContainer.appendChild(addPlaylistBtn);
-                const addLibraryBtn = document.createElement('button');
-                addLibraryBtn.id = 'addAllLibraryBtn';
-                addLibraryBtn.className = 'add-all-btn';
-                addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
-                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
-                buttonsContainer.appendChild(addLibraryBtn);
-                resultsHeaderTop.appendChild(buttonsContainer);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
+            this.createAddAllButtons();
 
             if (matchedTracks.length > 0) {
                 void this.annotateTrackCardsWithPlexStatus(matchedTracks);
@@ -6231,81 +6202,23 @@ class App {
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            ${this.formatTrackGridHeader(false, true, false)}
+                            ${this.formatTrackGridHeader(false, true, true)}
                             <div id="lastfmResultsList"></div>
                         </div>
                     </div>
                 </div>
             `;
 
-            const resultsList = document.getElementById('lastfmResultsList');
-            let foundCount = 0;
-            const matchedTracks: Track[] = [];
-            const notFoundTracks: Array<{ artist: string; name: string }> = [];
+            const { matched: matchedTracks, notFound: notFoundTracks } = await this.renderProgressiveTrackGrid(tracks, {
+                viewMode: 'multi-album',
+                showTrackNumber: false,
+                showAlbumColumn: true,
+                showArtwork: true,
+                resultsContainerId: 'lastfmResultsList',
+                playlistName,
+            });
 
-            for (let i = 0; i < tracks.length; i++) {
-                const track = tracks[i];
-                const searchQuery = `${track.name} ${track.artist}`;
-
-                try {
-                    const searchResponse = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
-                        signal: this.pendingRequestController?.signal
-                    });
-
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
-
-                        if (items.length > 0) {
-                            const trackRow = this.formatTrackGridRow(items[0] as Track, false, undefined, true, true);
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackRow);
-                            }
-                            matchedTracks.push(items[0] as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: track.artist,
-                                name: track.name
-                            });
-                        }
-                    } else {
-                        notFoundTracks.push({
-                            artist: track.artist,
-                            name: track.name
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
-                    notFoundTracks.push({
-                        artist: track.artist,
-                        name: track.name
-                    });
-                }
-
-            }
-
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.className = 'add-all-buttons-container';
-                const addPlaylistBtn = document.createElement('button');
-                addPlaylistBtn.id = 'addAllPlaylistBtn';
-                addPlaylistBtn.className = 'add-all-btn';
-                addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
-                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
-                buttonsContainer.appendChild(addPlaylistBtn);
-                const addLibraryBtn = document.createElement('button');
-                addLibraryBtn.id = 'addAllLibraryBtn';
-                addLibraryBtn.className = 'add-all-btn';
-                addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
-                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
-                buttonsContainer.appendChild(addLibraryBtn);
-                resultsHeaderTop.appendChild(buttonsContainer);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
+            this.createAddAllButtons();
 
             if (matchedTracks.length > 0) {
                 void this.annotateTrackCardsWithPlexStatus(matchedTracks);
@@ -6493,7 +6406,7 @@ class App {
                     <div id="lbMatchProgress" style="padding: 12px 16px; font-size: 14px; color: #888;"></div>
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
                         <div class="tracks-grid">
-                            ${this.formatTrackGridHeader(false, true, false)}
+                            ${this.formatTrackGridHeader(false, true, true)}
                             <div id="listenbrainzResultsList"></div>
                         </div>
                     </div>
@@ -6532,7 +6445,12 @@ class App {
                         const matchData = await matchResponse.json();
 
                         if (matchData.match) {
-                            const trackRow = this.formatTrackGridRow(matchData.match as Track, false, undefined, true, true);
+                            const trackRow = this.formatTrackGridRow(this.normalizeTrack(matchData.match as Track), {
+                                viewMode: 'multi-album',
+                                showTrackNumber: false,
+                                showAlbumColumn: true,
+                                showArtwork: true,
+                            });
                             if (resultsList) {
                                 resultsList.insertAdjacentHTML('beforeend', trackRow);
                             }
@@ -6564,28 +6482,7 @@ class App {
                 progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
             }
 
-            // Create and add Add All buttons after searching is complete
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const buttonsContainer = document.createElement('div');
-                buttonsContainer.className = 'add-all-buttons-container';
-                const addPlaylistBtn = document.createElement('button');
-                addPlaylistBtn.id = 'addAllPlaylistBtn';
-                addPlaylistBtn.className = 'add-all-btn';
-                addPlaylistBtn.title = 'Add all tracks to a playlist';
-                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
-                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
-                buttonsContainer.appendChild(addPlaylistBtn);
-                const addLibraryBtn = document.createElement('button');
-                addLibraryBtn.id = 'addAllLibraryBtn';
-                addLibraryBtn.className = 'add-all-btn';
-                addLibraryBtn.title = 'Add all tracks to library';
-                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
-                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
-                buttonsContainer.appendChild(addLibraryBtn);
-                resultsHeaderTop.appendChild(buttonsContainer);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
+            this.createAddAllButtons();
 
             if (matchedTracks.length > 0) {
                 void this.annotateTrackCardsWithPlexStatus(matchedTracks);
@@ -7425,10 +7322,70 @@ class App {
         `;
     }
 
+    private normalizeTrack(track: Track | PlexLibraryTrack): NormalizedTrack {
+        if ('artists' in track || 'artist' in track && typeof (track as Track).artist === 'object') {
+            const t = track as Track;
+            const artistNames = t.artists && t.artists.length > 0
+                ? t.artists.map(a => a.name).join(', ')
+                : (typeof t.artist === 'object' ? t.artist?.name : undefined) || 'Unknown Artist';
+            const primaryArtistId = t.artists?.[0]?.id ?? (typeof t.artist === 'object' ? t.artist?.id : undefined);
+            const quality = t.maxAudioQuality || t.audioQuality || t.quality || '';
+            return {
+                id: String(t.id),
+                title: t.title,
+                version: t.version,
+                artist: artistNames,
+                artistId: primaryArtistId,
+                album: t.album?.title || 'Unknown Album',
+                albumId: t.album?.id,
+                albumCover: t.album?.cover || t.cover,
+                trackNumber: t.trackNumber ?? null,
+                volumeNumber: t.volumeNumber || 1,
+                duration: t.duration ?? null,
+                quality,
+                explicit: t.explicit || false,
+            };
+        }
+        const p = track as PlexLibraryTrack;
+        const qualityFormat = (p.quality_format || '').trim().toUpperCase();
+        const qualityBitrate = typeof p.quality_bitrate_kbps === 'number' ? `${p.quality_bitrate_kbps} kbps` : undefined;
+        return {
+            id: p.id,
+            title: p.title || 'Unknown Track',
+            artist: p.artist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+            artistId: p.artist_id ? parseInt(p.artist_id, 10) : undefined,
+            album: p.album || 'Unknown Album',
+            albumCover: p.cover,
+            trackNumber: typeof p.track_number === 'number' ? p.track_number : null,
+            volumeNumber: typeof p.disc_number === 'number' ? p.disc_number : 1,
+            duration: typeof p.duration === 'number' ? Math.max(0, Math.round(p.duration / 1000)) : null,
+            quality: '',
+            explicit: false,
+            qualityFormat: qualityFormat || undefined,
+            qualityBitrate,
+        };
+    }
+
     private allTracksFromSameAlbum(tracks: Track[]): boolean {
         if (tracks.length <= 1) return true;
         const firstAlbumId = tracks[0].album?.id;
         return tracks.every(track => track.album?.id === firstAlbumId);
+    }
+
+    private renderTrackGrid(tracks: (Track | PlexLibraryTrack)[], options: TrackGridOptions): string {
+        const normalized = tracks.map(t => this.normalizeTrack(t));
+        const emptyMessage = options.emptyMessage || '<div class="library-placeholder"><p>No tracks found.</p></div>';
+
+        return `
+            <div class="tracks-grid-wrapper" data-view-mode="${options.viewMode}">
+                <div class="tracks-grid">
+                    ${this.formatTrackGridHeader(options.showTrackNumber || false, options.showAlbumColumn || false, options.showArtwork || false)}
+                    ${normalized.length > 0
+                ? normalized.map(track => this.formatTrackGridRow(track, options)).join('')
+                : emptyMessage}
+                </div>
+            </div>
+        `;
     }
 
     private formatTracksGrid(tracks: Track[], numberOfVolumes?: number, includeTrackNumbers: boolean = true): string {
@@ -7437,65 +7394,68 @@ class App {
         const showArtworkInSingleAlbum = !includeTrackNumbers && isSingleAlbum;
 
         if (isSingleAlbum) {
-            // Single album view - optionally show track number column or album artwork, hide album column
-            return `
-                <div class="tracks-grid-wrapper" data-view-mode="single-album">
-                    <div class="tracks-grid">
-                        ${this.formatTrackGridHeader(showTrackNumberColumn, false, showArtworkInSingleAlbum)}
-                        ${tracks.map((track) => this.formatTrackGridRow(track, showTrackNumberColumn, numberOfVolumes, false, showArtworkInSingleAlbum)).join('')}
-                    </div>
-                </div>
-            `;
+            return this.renderTrackGrid(tracks, {
+                viewMode: 'single-album',
+                showTrackNumber: showTrackNumberColumn,
+                numberOfVolumes,
+                showAlbumColumn: false,
+                showArtwork: showArtworkInSingleAlbum,
+            });
         } else {
-            // Multi-album view - hide track number column, show album column
-            return `
-                <div class="tracks-grid-wrapper" data-view-mode="multi-album">
-                    <div class="tracks-grid">
-                        ${this.formatTrackGridHeader(false, true, true)}
-                        ${tracks.map((track) => this.formatTrackGridRow(track, false, numberOfVolumes, true, true)).join('')}
-                    </div>
-                </div>
-            `;
+            return this.renderTrackGrid(tracks, {
+                viewMode: 'multi-album',
+                showTrackNumber: false,
+                showAlbumColumn: true,
+                showArtwork: true,
+            });
         }
     }
 
-    private formatTrackGridRow(track: Track, showTrackNumber: boolean, numberOfVolumes: number | undefined, showAlbumColumn: boolean, showArtwork: boolean): string {
-        // Get artist names and IDs
-        const artistNames = track.artists && track.artists.length > 0
-            ? track.artists.map(a => a.name).join(', ')
-            : track.artist?.name || 'Unknown Artist';
-        const primaryArtistId = track.artists?.[0]?.id || track.artist?.id;
+    private formatTrackGridRow(track: NormalizedTrack, options: TrackGridOptions): string {
+        const showTrackNumber = options.showTrackNumber || false;
+        const showAlbumColumn = options.showAlbumColumn || false;
+        const showArtwork = options.showArtwork || false;
+        const dataAttr = options.dataAttr || 'data-track-id';
+        const extraRowClass = options.extraRowClass || '';
+        const actions = options.actions || 'full';
+        const qualityStyle = options.qualityStyle || 'tier';
+        const rowClasses = ['tracks-grid-row', ...(extraRowClass ? [extraRowClass] : [])].join(' ');
+        const extraAttrs = options.rowDataAttrs
+            ? Object.entries(options.rowDataAttrs(track)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
+            : '';
 
-        // Get album info
-        const albumTitle = track.album?.title || 'Unknown Album';
-        const albumCover = track.album?.cover || track.cover;
-        const albumId = track.album?.id;
-
-        // Get quality info - prefer the normalized maxAudioQuality field
-        const quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
-        const qualityDisplay = this.formatQuality(quality);
-        const durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
-
-        // Format track title with optional version
         let trackTitle = this.escapeHtml(track.title);
         if (track.version && typeof track.version === 'string' && track.version.trim()) {
             trackTitle += ` (${this.escapeHtml(track.version)})`;
         }
 
-        // Format track number if needed
         let trackNumberDisplay = '';
         if (showTrackNumber && track.trackNumber) {
-            const volumeNumber = track.volumeNumber || 1;
-            trackNumberDisplay = numberOfVolumes && numberOfVolumes > 1
-                ? `${volumeNumber}-${String(track.trackNumber).padStart(2, '0')}`
+            const vn = track.volumeNumber || 1;
+            trackNumberDisplay = options.numberOfVolumes && options.numberOfVolumes > 1
+                ? `${vn}-${String(track.trackNumber).padStart(2, '0')}`
                 : String(track.trackNumber);
         }
 
+        const artworkSrc = track.albumCover
+            ? (track.albumCover.startsWith('http') ? track.albumCover : this.getHifiImageUrl(track.albumCover, 1280))
+            : null;
+
+        const durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
+
+        let qualityDisplay = '—';
+        if (qualityStyle === 'format-bitrate') {
+            const parts = [track.qualityFormat, track.qualityBitrate].filter(Boolean);
+            qualityDisplay = parts.length > 0 ? parts.join(' • ') : '—';
+        } else {
+            qualityDisplay = track.quality ? this.formatQuality(track.quality) : '—';
+        }
+
         return `
-            <div class="tracks-grid-row" data-track-id="${track.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} ${albumId ? `data-album-id="${albumId}"` : ''}>
+            <div class="${rowClasses}" ${dataAttr}="${track.id}" ${track.artistId ? `data-artist-id="${track.artistId}"` : ''} ${track.albumId ? `data-album-id="${track.albumId}"` : ''} ${extraAttrs}>
                 ${showArtwork ? `<div class="grid-cell grid-col-artwork">
-                    ${albumCover
-                    ? `<img src="${this.getHifiImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                    ${artworkSrc
+                    ? `<img src="${artworkSrc}" alt="${this.escapeHtml(track.title)}" loading="lazy">`
                     : `<div class="grid-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
@@ -7512,33 +7472,34 @@ class App {
                     </div>
                 </div>
                 <div class="grid-cell grid-col-artist">
-                    <span class="track-artist-name" ${primaryArtistId ? `title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
+                    <span class="track-artist-name" ${track.artistId ? `title="View albums by ${this.escapeHtml(track.artist)}"` : ''}>${this.escapeHtml(track.artist)}</span>
                 </div>
                 ${showAlbumColumn ? `<div class="grid-cell grid-col-album">
-                    <span class="track-album-name" ${albumId ? `title="View tracks on ${this.escapeHtml(albumTitle)}"` : ''}>${this.escapeHtml(albumTitle)}</span>
+                    <span class="track-album-name" ${track.albumId ? `title="View tracks on ${this.escapeHtml(track.album)}"` : ''}>${this.escapeHtml(track.album)}</span>
                 </div>` : ''}
                 <div class="grid-cell grid-col-duration">${durationDisplay}</div>
-                <div class="grid-cell grid-col-quality">${qualityDisplay || '—'}</div>
+                <div class="grid-cell grid-col-quality">${qualityDisplay}</div>
                 <div class="grid-cell grid-col-actions">
-                    <button class="grid-play-btn" title="Play" aria-label="Play" data-track-id="${track.id}">
+                    <button class="grid-play-btn" title="Play" aria-label="Play" ${dataAttr}="${track.id}">
                         ${this.getPlayIconSvg()}
                     </button>
+                    ${actions === 'full' ? `
                     <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
                         ${this.getMoreLikeIconSvg()}
                     </button>
-                    <button class="grid-add-playlist-btn" title="Add to Playlist" data-track-id="${track.id}">
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 5v14"></path>
                             <path d="M5 12h14"></path>
                         </svg>
                     </button>
-                    <button class="grid-add-library-btn" title="Add to Library" data-track-id="${track.id}">
+                    <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="5" rx="1"></rect>
                             <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
                             <rect x="8" y="12" width="8" height="1"></rect>
                         </svg>
-                    </button>
+                    </button>` : ''}
                 </div>
             </div>
         `;
@@ -7557,6 +7518,71 @@ class App {
                 <div class="grid-cell grid-col-actions">Actions</div>
             </div>
         `;
+    }
+
+    private async renderProgressiveTrackGrid(
+        tracks: PlaylistTrackInput[],
+        options: TrackGridOptions & { resultsContainerId: string; playlistName: string }
+    ): Promise<{ matched: Track[]; notFound: PlaylistTrackInput[] }> {
+        const resultsList = document.getElementById(options.resultsContainerId);
+        const matchedTracks: Track[] = [];
+        const notFoundTracks: PlaylistTrackInput[] = [];
+
+        for (const track of tracks) {
+            const searchQuery = `${track.name} ${track.artist}`;
+            try {
+                const response = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
+                    signal: this.pendingRequestController?.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const items = data.data?.items || [];
+                    if (items.length > 0) {
+                        const matched = items[0] as Track;
+                        const normalized = this.normalizeTrack(matched);
+                        const rowHtml = this.formatTrackGridRow(normalized, options);
+                        resultsList?.insertAdjacentHTML('beforeend', rowHtml);
+                        matchedTracks.push(matched);
+                    } else {
+                        notFoundTracks.push(track);
+                    }
+                } else {
+                    notFoundTracks.push(track);
+                }
+            } catch {
+                notFoundTracks.push(track);
+            }
+        }
+
+        return { matched: matchedTracks, notFound: notFoundTracks };
+    }
+
+    private createAddAllButtons(): void {
+        const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+        if (!resultsHeaderTop || resultsHeaderTop.querySelector('.add-all-buttons-container')) {
+            return;
+        }
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'add-all-buttons-container';
+
+        const addPlaylistBtn = document.createElement('button');
+        addPlaylistBtn.id = 'addAllPlaylistBtn';
+        addPlaylistBtn.className = 'add-all-btn';
+        addPlaylistBtn.title = 'Add all tracks to a playlist';
+        addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+        addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+        buttonsContainer.appendChild(addPlaylistBtn);
+
+        const addLibraryBtn = document.createElement('button');
+        addLibraryBtn.id = 'addAllLibraryBtn';
+        addLibraryBtn.className = 'add-all-btn';
+        addLibraryBtn.title = 'Add all tracks to library';
+        addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+        addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+        buttonsContainer.appendChild(addLibraryBtn);
+
+        resultsHeaderTop.appendChild(buttonsContainer);
+        this.movePlexPlaylistContainerBeneathDownloadAll();
     }
 
     private normalizeAlbum(album: AlbumSearchItem | PlexLibraryAlbum): NormalizedAlbum {

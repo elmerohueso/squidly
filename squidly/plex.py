@@ -20,6 +20,7 @@ _plex_health_status = {
     'timestamp': None
 }
 _plex_health_status_lock = threading.Lock()
+_playlist_operation_lock = threading.Lock()
 
 
 def set_plex_health_status(ok, value):

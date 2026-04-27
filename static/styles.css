@@ -1712,6 +1712,11 @@ body {
     grid-template-columns: 40px 2fr 2fr 0.6fr 1.2fr 160px;
 }
 
+.tracks-grid-wrapper[data-view-mode="library-tracks"] .grid-col-duration {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
 .tracks-grid-row {
     display: grid;
     gap: 1rem;
