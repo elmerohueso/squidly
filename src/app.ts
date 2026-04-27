@@ -5908,7 +5908,7 @@ class App {
         const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
         settingsSections.forEach(section => {
             const sectionEl = section as HTMLElement;
-            if (sectionEl.id === 'listenbrainzSettings') {
+            if (sectionEl.id === 'listenbrainzSettings' || sectionEl.id === 'youtubeMusicSettings') {
                 sectionEl.style.display = '';
             } else {
                 sectionEl.style.display = isOwner ? '' : 'none';
