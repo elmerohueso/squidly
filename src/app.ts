@@ -4826,21 +4826,20 @@ class App {
 
         const stageHtml = stageRows.map(stage => {
             const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
-            const stageLabel = this.formatStageStatus(status);
-            let stageDisplayLabel = stage.label;
             if (stage.key === 'converted' && status === 'skipped') {
-                stageDisplayLabel = 'Conversion not required';
+                return '';
             }
             if (stage.key === 'playlist_added' && status === 'skipped') {
-                stageDisplayLabel = 'Playlist add not requested';
+                return '';
             }
+            const stageLabel = this.formatStageStatus(status);
             return `
                 <div class="job-stage">
-                    <span>${stageDisplayLabel}</span>
+                    <span>${stage.label}</span>
                     <span class="job-stage-status status-${status}">${stageLabel}</span>
                 </div>
             `;
-        }).join('');
+        }).filter(Boolean).join('');
 
         return `
             <div class="job-item">
