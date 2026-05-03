@@ -333,7 +333,7 @@ interface EndpointStatus {
 
 interface JobStageMap {
     downloaded?: string;
-    id3_tagged?: string;
+    tagged?: string;
     converted?: string;
     written?: string;
     playlist_added?: string;
@@ -4814,7 +4814,7 @@ class App {
 
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
-            { key: 'id3_tagged', label: 'ID3 Tag Created' },
+            { key: 'tagged', label: 'Tagged' },
             { key: 'converted', label: 'Converted to MP3' },
             { key: 'written', label: 'Written to Disk' },
             ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),

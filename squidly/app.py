@@ -1038,7 +1038,15 @@ def init_db():
         """,
         ('plex_playlist_add', 'plex_add')
     )
-    
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET result_json = regexp_replace(result_json, '"id3_tagged"', '"tagged"', 'g')
+        WHERE result_json LIKE '%%id3_tagged%%'
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -3969,7 +3977,7 @@ def _download_track_all_stages_done(stages):
 
     required_stages = (
         'downloaded',
-        'id3_tagged',
+        'tagged',
         'written'
     )
     if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
@@ -4018,7 +4026,7 @@ def process_download_job(job_id, payload):
 
     stages = {
         'downloaded': 'pending',
-        'id3_tagged': 'pending',
+        'tagged': 'pending',
         'converted': 'pending',
         'written': 'pending',
         'playlist_added': 'pending'
@@ -4276,7 +4284,7 @@ def process_download_job(job_id, payload):
         )
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
         stages['downloaded'] = 'done'
-        stages['id3_tagged'] = 'done'
+        stages['tagged'] = 'done'
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
@@ -4423,7 +4431,7 @@ def process_download_job(job_id, payload):
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
     add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
-    stages['id3_tagged'] = 'done'
+    stages['tagged'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
     converted = False
