@@ -584,6 +584,7 @@ def _get_hifi_album_dedupe_key(album: Any) -> Any:
         number_of_tracks,
         number_of_discs,
         tuple(artists),
+        album.get('explicit'),
     )
 
 
@@ -608,11 +609,11 @@ def _get_hifi_track_dedupe_key(track: Any) -> Any:
             artists.append(key)
 
     if title and album_title:
-        return ('track', title, version, album_title, album_version, tuple(artists))
+        return ('track', title, version, album_title, album_version, tuple(artists), track.get('explicit'))
 
     isrc = str(track.get('isrc') or '').strip()
     if isrc:
-        return ('isrc', isrc, tuple(artists))
+        return ('isrc', isrc, tuple(artists), track.get('explicit'))
 
     return None
 
