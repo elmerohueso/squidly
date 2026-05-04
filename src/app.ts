@@ -4788,7 +4788,9 @@ class App {
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
                 { key: 'reading_plex_library', label: 'Reading Plex Library' },
-                { key: 'updating_local_index', label: 'Updating Local Index' }
+                { key: 'updating_local_index', label: 'Updating Local Index' },
+                { key: 'labeling_explicit_albums', label: 'Labeling Explicit Albums' },
+                { key: 'backfilling_track_ids_from_tags', label: 'Backfilling Track IDs from Tags' }
             ];
 
             const stageHtml = stageRows.map(stage => {
@@ -4802,14 +4804,17 @@ class App {
                 `;
             }).join('');
 
-            const progress = job.result?.progress || {};
+            const progress = job.result?.progress as Record<string, unknown> || {};
             const processed = Number(progress.processed_tracks || 0);
             const total = Number(progress.total_tracks || 0);
             const upserted = Number(progress.upserted_songs || 0);
             const deleted = Number(progress.deleted_songs || 0);
-            const progressText = total > 0
-                ? `${processed}/${total} tracks processed • ${upserted} songs upserted • ${deleted} removed`
-                : `${upserted} songs upserted • ${deleted} removed`;
+            const tagsRead = Number(progress.tags_read || 0);
+            const tagsUpdated = Number(progress.tags_updated || 0);
+            const syncText = total > 0
+                ? `${processed}/${total} tracks processed • ${upserted} upserted • ${deleted} removed`
+                : `${upserted} upserted • ${deleted} removed`;
+            const tagText = `${tagsRead} tags read • ${tagsUpdated} updated`;
 
             return `
                 <div class="job-item">
@@ -4821,7 +4826,8 @@ class App {
                             ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
                         </div>
                     </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-sync-progress">${this.escapeHtml(syncText)}</div>
+                    <div class="job-sync-progress">${this.escapeHtml(tagText)}</div>
                     <div class="job-stages">
                         ${stageHtml}
                     </div>

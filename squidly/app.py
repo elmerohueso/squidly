@@ -756,6 +756,7 @@ def process_plex_sync_job(job_id, payload):
     stages = {
         'reading_plex_library': 'in_progress',
         'updating_local_index': 'pending',
+        'labeling_explicit_albums': 'pending',
         'backfilling_track_ids_from_tags': 'pending',
     }
     progress = {
@@ -763,6 +764,7 @@ def process_plex_sync_job(job_id, payload):
         'total_tracks': 0,
         'upserted_songs': 0,
         'deleted_songs': 0,
+        'explicit_albums_labeled': 0,
         'tags_read': 0,
         'tags_updated': 0,
     }
@@ -1000,6 +1002,9 @@ def process_plex_sync_job(job_id, payload):
     stages['updating_local_index'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
+    stages['labeling_explicit_albums'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
     labeled_count = 0
     if explicit_album_keys:
         print(f"[PLEX_SYNC] Job {job_id}: Adding 'Explicit' label to {len(explicit_album_keys)} albums", flush=True)
@@ -1023,6 +1028,10 @@ def process_plex_sync_job(job_id, payload):
         if hasattr(plex, '_session'):
             plex._session.timeout = 20
         print(f"[PLEX_SYNC] Job {job_id}: Successfully labeled {labeled_count} albums as Explicit", flush=True)
+
+    progress['explicit_albums_labeled'] = labeled_count
+    stages['labeling_explicit_albums'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     stages['backfilling_track_ids_from_tags'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
