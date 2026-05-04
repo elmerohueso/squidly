@@ -334,7 +334,6 @@ interface EndpointStatus {
 interface JobStageMap {
     downloaded?: string;
     tagged?: string;
-    converted?: string;
     written?: string;
     playlist_added?: string;
     upgraded_existing?: string;
@@ -4917,23 +4916,16 @@ class App {
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'tagged', label: 'Tagged' },
-            { key: 'converted', label: 'Converted to MP3' },
             { key: 'written', label: 'Written to Disk' },
             ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
-            {
+            ...(playlistName ? [{
                 key: 'playlist_added',
-                label: playlistName ? `Added to Playlist "${this.escapeHtml(String(playlistName))}"` : 'Added to Playlist'
-            }
+                label: `Added to Playlist "${this.escapeHtml(String(playlistName))}"`
+            }] : []),
         ];
 
         const stageHtml = stageRows.map(stage => {
             const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
-            if (stage.key === 'converted' && status === 'skipped') {
-                return '';
-            }
-            if (stage.key === 'playlist_added' && status === 'skipped') {
-                return '';
-            }
             const stageLabel = this.formatStageStatus(status);
             return `
                 <div class="job-stage">
@@ -5025,11 +5017,7 @@ class App {
         }
 
         if (job.status === 'succeeded') {
-            if (key === 'converted') {
-                const requestedFormat = String(job.result?.format || job.payload?.format || 'original').toLowerCase();
-                return requestedFormat === 'mp3' ? 'done' : 'skipped';
-            }
-            return key === 'playlist_added' ? 'skipped' : 'done';
+            return 'done';
         }
 
         if (job.status === 'cancelled') {
