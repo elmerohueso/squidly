@@ -1101,6 +1101,9 @@ def process_plex_sync_job(job_id, payload):
 
         if tags_read % 50 == 0 or tags_read == len(tag_rows):
             conn.commit()
+            progress['tags_read'] = tags_read
+            progress['tags_updated'] = tags_updated
+            jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
             print(f"[PLEX_SYNC] Job {job_id}: Tag backfill progress: read={tags_read}, updated={tags_updated}, albums_backfilled={len(albums_backfilled)}", flush=True)
 
     conn.commit()
