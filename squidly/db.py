@@ -376,5 +376,31 @@ def init_db():
         """
     )
 
+    cur.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS library_update_status (
+            id INTEGER PRIMARY KEY,
+            last_update_time TIMESTAMP,
+            library_update_needed BOOLEAN NOT NULL DEFAULT FALSE,
+            last_job_finished_at TIMESTAMP,
+            last_download_activity_at TIMESTAMP
+        )
+        '''
+    )
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'library_update_status'
+          AND column_name = 'last_download_activity_at'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute('ALTER TABLE library_update_status ADD COLUMN last_download_activity_at TIMESTAMP')
+
+    cur.execute('SELECT id FROM library_update_status WHERE id = 1')
+    if not cur.fetchone():
+        cur.execute('INSERT INTO library_update_status (id, library_update_needed) VALUES (1, FALSE)')
+
     conn.commit()
     conn.close()

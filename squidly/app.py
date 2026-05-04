@@ -75,7 +75,6 @@ from squidly.storage import (
     get_plex_config,
     get_plex_user_settings,
     get_ytm_config,
-    init_library_update_status,
     normalize_db_timestamp,
     save_download_settings,
     save_listenbrainz_config,
@@ -3847,9 +3846,8 @@ def test_plex_connection(server_url, api_token):
         print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
         return False, f'Failed to connect to Plex: {error_msg}', None
 
-# Initialize SQLite and mirror data
+# Initialize database and mirror data
 init_db()
-init_library_update_status()
 jobs.recover_stale_in_progress_jobs(stale_after_minutes=15)
 downloads.seed_mirrors_from_json()
 
