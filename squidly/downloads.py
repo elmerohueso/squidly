@@ -806,8 +806,22 @@ def cleanup_file(path: str) -> None:
         print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
 
 
-def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
-    """Add metadata tags to FLAC, M4A, or MP3 files."""
+def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
+    """
+    Add ID3 tags to an audio file (handles FLAC, MP3, and M4A/AAC).
+
+    Args:
+        file_path: Path to the audio file
+        metadata: Dict with keys: artist, title, album, year, track_number, disc_number
+        cover_image_data: Binary image data to embed as cover art
+        tag_settings: Dict of tagging toggle settings (defaults to all True)
+    """
+    if tag_settings is None:
+        tag_settings = {}
+
+    def tag_enabled(key, default=True):
+        return bool(tag_settings.get(key, default))
+
     try:
         artist = metadata.get('artist', 'Unknown Artist')
         title = metadata.get('title', 'Unknown Track')
@@ -815,35 +829,62 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         year = metadata.get('year', '')
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
-        copyright_text = metadata.get('copyright', '')
-        tidal_track_id = metadata.get('tidal_track_id', None)
-        tidal_album_id = metadata.get('tidal_album_id', None)
+        file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
+        print(
+            f"[ID3_DEBUG] Writing tags for '{file_path}' type='{file_type}'",
+            flush=True
+        )
+        print(
+            f"[ID3_DEBUG] tag payload artist={artist!r} track_artists={metadata.get('track_artists')!r} album_artist={metadata.get('album_artist')!r} album_artists={metadata.get('album_artists')!r} title={title!r} album={album!r} year={year!r} track_number={track_num!r} disc_number={disc_num!r} version={metadata.get('version')!r} isrc={metadata.get('isrc')!r} audio_quality={metadata.get('audio_quality')!r}",
+            flush=True
+        )
 
         # Handle FLAC files
         if file_path.lower().endswith('.flac'):
             try:
                 audio = FLAC(file_path)
-                audio['TITLE'] = title
-                audio['ARTIST'] = artist
-                audio['ALBUM'] = album
-                if year:
+                if tag_enabled('tag_title'):
+                    audio['TITLE'] = title
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['ARTIST'] = metadata.get('track_artists')
+                    else:
+                        audio['ARTIST'] = artist
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['ALBUMARTIST'] = metadata.get('album_artists')
+                    elif metadata.get('album_artist'):
+                        audio['ALBUMARTIST'] = metadata.get('album_artist')
+                if tag_enabled('tag_album'):
+                    audio['ALBUM'] = album
+                if tag_enabled('tag_year') and year:
                     audio['DATE'] = str(year)
-                if copyright_text:
-                    audio['COPYRIGHT'] = copyright_text
-                if tidal_track_id:
-                    audio['TIDAL_TRACK_ID'] = str(tidal_track_id)
-                if tidal_album_id:
-                    audio['TIDAL_ALBUM_ID'] = str(tidal_album_id)
-                audio['TRACKNUMBER'] = str(track_num)
-                if disc_num:
+                if tag_enabled('tag_track_number'):
+                    audio['TRACKNUMBER'] = str(track_num)
+                if tag_enabled('tag_track_total') and metadata.get('track_total') is not None:
+                    audio['TRACKTOTAL'] = str(metadata.get('track_total'))
+                if tag_enabled('tag_disc_number') and disc_num:
                     audio['DISCNUMBER'] = str(disc_num)
-
-                # Add cover art if available
-                if cover_image_data:
+                if tag_enabled('tag_disc_total') and metadata.get('disc_total') is not None:
+                    audio['DISCTOTAL'] = str(metadata.get('disc_total'))
+                if tag_enabled('tag_version') and metadata.get('version'):
+                    audio['VERSION'] = str(metadata.get('version'))
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
+                    audio['COPYRIGHT'] = str(metadata.get('copyright'))
+                if tag_enabled('tag_explicit') and metadata.get('explicit'):
+                    audio['EXPLICIT'] = '1'
+                    audio['RATING'] = 'explicit'
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
+                    audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
+                    audio['TIDAL_ALBUM_ID'] = str(metadata.get('tidal_album_id'))
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
+                    audio['ISRC'] = str(metadata.get('isrc'))
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     from mutagen.flac import Picture
                     pic = Picture()
                     pic.data = cover_image_data
-                    pic.type = 3  # Cover (front)
+                    pic.type = 3
                     pic.mime = 'image/jpeg'
                     audio.add_picture(pic)
 
@@ -856,36 +897,61 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         elif file_path.lower().endswith('.m4a'):
             try:
                 audio = MP4(file_path)
-                audio['\xa9nam'] = title
-                audio['\xa9ART'] = artist
-                audio['\xa9alb'] = album
+                if tag_enabled('tag_title'):
+                    audio['\xa9nam'] = title
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['\xa9ART'] = metadata.get('track_artists')
+                    else:
+                        audio['\xa9ART'] = [artist]
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['aART'] = metadata.get('album_artists')
+                    elif metadata.get('album_artist'):
+                        audio['aART'] = [metadata.get('album_artist')]
+                if tag_enabled('tag_album'):
+                    audio['\xa9alb'] = album
 
-                if year:
+                if tag_enabled('tag_year') and year:
                     audio['\xa9day'] = str(year)
 
-                if copyright_text:
-                    audio['\xa9c'] = str(copyright_text)
-
-                if tidal_track_id:
-                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(tidal_track_id).encode('utf-8')]
-                if tidal_album_id:
-                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(tidal_album_id).encode('utf-8')]
-
-                if track_num:
+                if tag_enabled('tag_track_number') and track_num:
                     try:
                         track_number = int(track_num)
-                        audio['trkn'] = [(track_number, 0)]
+                        track_total = metadata.get('track_total')
+                        if isinstance(track_total, int):
+                            audio['trkn'] = [(track_number, track_total)]
+                        else:
+                            audio['trkn'] = [(track_number, 0)]
                     except ValueError:
                         pass
 
-                if disc_num:
+                if tag_enabled('tag_disc_number') and disc_num:
                     try:
                         disc_number = int(disc_num)
-                        audio['disk'] = [(disc_number, 0)]
+                        disc_total = metadata.get('disc_total')
+                        if isinstance(disc_total, int):
+                            audio['disk'] = [(disc_number, disc_total)]
+                        else:
+                            audio['disk'] = [(disc_number, 0)]
                     except ValueError:
                         pass
 
-                if cover_image_data:
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
+                    audio['\xa9cpy'] = str(metadata.get('copyright'))
+                if tag_enabled('tag_explicit') and metadata.get('explicit'):
+                    audio['rtng'] = [1]
+                    audio['----:com.apple.iTunes:explicit'] = [b'1']
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
+                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
+                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(metadata.get('tidal_album_id')).encode('utf-8')]
+                if tag_enabled('tag_version') and metadata.get('version'):
+                    audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
+                    audio['----:com.apple.iTunes:isrc'] = [str(metadata.get('isrc')).encode('utf-8')]
+
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
                 audio.save()
@@ -898,40 +964,59 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
             try:
                 try:
                     audio = MP3(file_path, ID3=ID3)
-                except:
+                except Exception:
                     audio = MP3(file_path)
                     audio.add_tags()
 
-                # Remove existing tags to ensure clean slate
                 audio.delete()
                 audio = MP3(file_path)
                 audio.add_tags()
 
-                # Add text tags
-                audio['TIT2'] = TIT2(encoding=3, text=title)
-                audio['TPE1'] = TPE1(encoding=3, text=artist)
-                audio['TALB'] = TALB(encoding=3, text=album)
-                if year:
+                if tag_enabled('tag_title'):
+                    audio['TIT2'] = TIT2(encoding=3, text=title)
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
+                    else:
+                        audio['TPE1'] = TPE1(encoding=3, text=artist)
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
+                    elif metadata.get('album_artist'):
+                        audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
+                if tag_enabled('tag_album'):
+                    audio['TALB'] = TALB(encoding=3, text=album)
+                if tag_enabled('tag_year') and year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
-                if copyright_text:
-                    audio['TCOP'] = TCOP(encoding=3, text=copyright_text)
-                if tidal_track_id:
-                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(tidal_track_id))
-                if tidal_album_id:
-                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(tidal_album_id))
-                audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
-                if disc_num:
-                    audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
+                if tag_enabled('tag_track_number'):
+                    if metadata.get('track_total') is not None:
+                        audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
+                    else:
+                        audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
+                if tag_enabled('tag_disc_number') and disc_num:
+                    if metadata.get('disc_total') is not None:
+                        audio['TPOS'] = TPOS(encoding=3, text=f"{disc_num}/{metadata.get('disc_total')}")
+                    else:
+                        audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
+                    audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
+                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(metadata.get('tidal_track_id')))
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
+                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
+                if tag_enabled('tag_version') and metadata.get('version'):
+                    audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
+                    audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
 
-                # Add cover art if available
-                if cover_image_data:
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     audio['APIC'] = APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data)
 
                 audio.save(v2_version=4)
                 print(f"[ID3] Successfully added MP3 metadata to {file_path}", flush=True)
             except Exception as e:
                 print(f"[ID3] Warning: Could not write MP3 tags: {str(e)}", flush=True)
-                
+
     except Exception as e:
         print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
 

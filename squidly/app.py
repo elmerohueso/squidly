@@ -1436,7 +1436,7 @@ def process_download_job(job_id, payload):
 
     print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
-    add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
+    downloads.add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
     stages['tagged'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
@@ -1452,7 +1452,7 @@ def process_download_job(job_id, payload):
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
-        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
+        downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
         print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
         converted = True
     elif output_format == 'flac' and audio_format != 'flac':
@@ -1465,7 +1465,7 @@ def process_download_job(job_id, payload):
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
-        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
+        downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
         print(f"[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='{full_path}'", flush=True)
         converted = True
     else:
@@ -1534,58 +1534,6 @@ def process_download_job(job_id, payload):
 
 
 # Plex Functions
-def test_plex_connection(server_url, api_token):
-    """
-    Test connection to Plex server by making a direct API request.
-    Returns tuple: (success: bool, message: str, libraries: list or None)
-    """
-    try:
-        # Remove trailing slash if present
-        server_url = server_url.rstrip('/')
-        
-        # Validate URL format
-        if not server_url.startswith('http://') and not server_url.startswith('https://'):
-            return False, 'Server URL must start with http:// or https://', None
-        
-        # Test connection with a direct HTTP request to validate token
-        test_url = f"{server_url}/library/sections"
-        headers = {'X-Plex-Token': api_token}
-        
-        print(f"[PLEX] Testing connection to {test_url}", flush=True)
-        response = requests.get(test_url, headers=headers, timeout=10, verify=False)
-        
-        if response.status_code == 401:
-            return False, 'Invalid API token or unauthorized access', None
-        elif response.status_code == 404:
-            return False, 'Server not found at URL', None
-        elif not response.ok:
-            return False, f'Server returned status {response.status_code}', None
-        
-        # If we got here, connection is valid. Now try with plexapi to get libraries
-        try:
-            plex = PlexServer(server_url, api_token, timeout=10)
-            
-            # Get music libraries
-            libraries = []
-            for section in plex.library.sections():
-                if section.type == 'artist':  # Music library
-                    libraries.append(section.title)
-            
-            return True, 'Successfully connected to Plex server', libraries
-        except Exception as e:
-            # Connection works but plexapi failed - still report success with libraries from HTTP response
-            print(f"[PLEX] Warning: PlexAPI failed but HTTP connection worked: {str(e)}", flush=True)
-            return True, 'Connected successfully (could not retrieve libraries)', []
-    
-    except requests.exceptions.Timeout:
-        return False, 'Connection timeout - server not responding', None
-    except requests.exceptions.ConnectionError:
-        return False, 'Cannot connect to server - check URL and network', None
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
-        return False, f'Failed to connect to Plex: {error_msg}', None
-
 # Initialize database and mirror data (skip during testing)
 if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
@@ -2678,221 +2626,6 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
     exists = any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
     # print(f"[PLEX_EXISTS_CHECK] Result: exists={exists}, found {len(rows)} rows with matching format={requested_format}", flush=True)
     return exists
-
-def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
-    """
-    Add ID3 tags to an audio file (handles FLAC, MP3, and M4A/AAC).
-    
-    Args:
-        file_path: Path to the audio file
-        metadata: Dict with keys: artist, title, album, year, track_number, disc_number
-        cover_image_data: Binary image data to embed as cover art
-        tag_settings: Dict of tagging toggle settings (defaults to all True)
-    """
-    if tag_settings is None:
-        tag_settings = {}
-
-    def tag_enabled(key, default=True):
-        return bool(tag_settings.get(key, default))
-
-    try:
-        artist = metadata.get('artist', 'Unknown Artist')
-        title = metadata.get('title', 'Unknown Track')
-        album = metadata.get('album', 'Unknown Album')
-        year = metadata.get('year', '')
-        track_num = metadata.get('track_number', '1')
-        disc_num = metadata.get('disc_number', '')
-        file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
-        print(
-            f"[ID3_DEBUG] Writing tags for '{file_path}' type='{file_type}'",
-            flush=True
-        )
-        print(
-            f"[ID3_DEBUG] tag payload artist={artist!r} track_artists={metadata.get('track_artists')!r} album_artist={metadata.get('album_artist')!r} album_artists={metadata.get('album_artists')!r} title={title!r} album={album!r} year={year!r} track_number={track_num!r} disc_number={disc_num!r} version={metadata.get('version')!r} isrc={metadata.get('isrc')!r} audio_quality={metadata.get('audio_quality')!r}",
-            flush=True
-        )
-        
-        # Handle FLAC files
-        if file_path.lower().endswith('.flac'):
-            try:
-                audio = FLAC(file_path)
-                if tag_enabled('tag_title'):
-                    audio['TITLE'] = title
-                if tag_enabled('tag_artist'):
-                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                        audio['ARTIST'] = metadata.get('track_artists')
-                    else:
-                        audio['ARTIST'] = artist
-                if tag_enabled('tag_album_artist'):
-                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                        audio['ALBUMARTIST'] = metadata.get('album_artists')
-                    elif metadata.get('album_artist'):
-                        audio['ALBUMARTIST'] = metadata.get('album_artist')
-                if tag_enabled('tag_album'):
-                    audio['ALBUM'] = album
-                if tag_enabled('tag_year') and year:
-                    audio['DATE'] = str(year)
-                if tag_enabled('tag_track_number'):
-                    audio['TRACKNUMBER'] = str(track_num)
-                if tag_enabled('tag_track_total') and metadata.get('track_total') is not None:
-                    audio['TRACKTOTAL'] = str(metadata.get('track_total'))
-                if tag_enabled('tag_disc_number') and disc_num:
-                    audio['DISCNUMBER'] = str(disc_num)
-                if tag_enabled('tag_disc_total') and metadata.get('disc_total') is not None:
-                    audio['DISCTOTAL'] = str(metadata.get('disc_total'))
-                if tag_enabled('tag_version') and metadata.get('version'):
-                    audio['VERSION'] = str(metadata.get('version'))
-                if tag_enabled('tag_copyright') and metadata.get('copyright'):
-                    audio['COPYRIGHT'] = str(metadata.get('copyright'))
-                if tag_enabled('tag_explicit') and metadata.get('explicit'):
-                    audio['EXPLICIT'] = '1'
-                    audio['RATING'] = 'explicit'
-                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
-                    audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
-                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
-                    audio['TIDAL_ALBUM_ID'] = str(metadata.get('tidal_album_id'))
-                if tag_enabled('tag_isrc') and metadata.get('isrc'):
-                    audio['ISRC'] = str(metadata.get('isrc'))
-                if tag_enabled('tag_cover_art') and cover_image_data:
-                    from mutagen.flac import Picture
-                    pic = Picture()
-                    pic.data = cover_image_data
-                    pic.type = 3
-                    pic.mime = 'image/jpeg'
-                    audio.add_picture(pic)
-                
-                audio.save()
-                print(f"[ID3] Successfully added FLAC metadata to {file_path}", flush=True)
-            except Exception as e:
-                print(f"[ID3] Warning: Could not write FLAC tags: {str(e)}", flush=True)
-        
-        # Handle M4A/AAC files
-        elif file_path.lower().endswith('.m4a'):
-            try:
-                audio = MP4(file_path)
-                if tag_enabled('tag_title'):
-                    audio['\xa9nam'] = title
-                if tag_enabled('tag_artist'):
-                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                        audio['\xa9ART'] = metadata.get('track_artists')
-                    else:
-                        audio['\xa9ART'] = [artist]
-                if tag_enabled('tag_album_artist'):
-                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                        audio['aART'] = metadata.get('album_artists')
-                    elif metadata.get('album_artist'):
-                        audio['aART'] = [metadata.get('album_artist')]
-                if tag_enabled('tag_album'):
-                    audio['\xa9alb'] = album
-                
-                if tag_enabled('tag_year') and year:
-                    audio['\xa9day'] = str(year)
-                
-                if tag_enabled('tag_track_number') and track_num:
-                    try:
-                        track_number = int(track_num)
-                        track_total = metadata.get('track_total')
-                        if isinstance(track_total, int):
-                            audio['trkn'] = [(track_number, track_total)]
-                        else:
-                            audio['trkn'] = [(track_number, 0)]
-                    except ValueError:
-                        pass
-
-                if tag_enabled('tag_disc_number') and disc_num:
-                    try:
-                        disc_number = int(disc_num)
-                        disc_total = metadata.get('disc_total')
-                        if isinstance(disc_total, int):
-                            audio['disk'] = [(disc_number, disc_total)]
-                        else:
-                            audio['disk'] = [(disc_number, 0)]
-                    except ValueError:
-                        pass
-
-                if tag_enabled('tag_copyright') and metadata.get('copyright'):
-                    audio['©cpy'] = str(metadata.get('copyright'))
-                if tag_enabled('tag_explicit') and metadata.get('explicit'):
-                    audio['rtng'] = [1]
-                    audio['----:com.apple.iTunes:explicit'] = [b'1']
-                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
-                    audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
-                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
-                    audio['----:com.apple.iTunes:tidal_album_id'] = [str(metadata.get('tidal_album_id')).encode('utf-8')]
-                if tag_enabled('tag_version') and metadata.get('version'):
-                    audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
-                if tag_enabled('tag_isrc') and metadata.get('isrc'):
-                    audio['----:com.apple.iTunes:isrc'] = [str(metadata.get('isrc')).encode('utf-8')]
-                
-                if tag_enabled('tag_cover_art') and cover_image_data:
-                    audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
-                
-                audio.save()
-                print(f"[ID3] Successfully added M4A metadata to {file_path}", flush=True)
-            except Exception as e:
-                print(f"[ID3] Warning: Could not write M4A tags: {str(e)}", flush=True)
-        
-        # Handle MP3 files
-        elif file_path.lower().endswith('.mp3'):
-            try:
-                try:
-                    audio = MP3(file_path, ID3=ID3)
-                except:
-                    audio = MP3(file_path)
-                    audio.add_tags()
-                
-                audio.delete()
-                audio = MP3(file_path)
-                audio.add_tags()
-                
-                if tag_enabled('tag_title'):
-                    audio['TIT2'] = TIT2(encoding=3, text=title)
-                if tag_enabled('tag_artist'):
-                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                        audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
-                    else:
-                        audio['TPE1'] = TPE1(encoding=3, text=artist)
-                if tag_enabled('tag_album_artist'):
-                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                        audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
-                    elif metadata.get('album_artist'):
-                        audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
-                if tag_enabled('tag_album'):
-                    audio['TALB'] = TALB(encoding=3, text=album)
-                if tag_enabled('tag_year') and year:
-                    audio['TDRC'] = TDRC(encoding=3, text=str(year))
-                if tag_enabled('tag_track_number'):
-                    if metadata.get('track_total') is not None:
-                        audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
-                    else:
-                        audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
-                if tag_enabled('tag_disc_number') and disc_num:
-                    if metadata.get('disc_total') is not None:
-                        audio['TPOS'] = TPOS(encoding=3, text=f"{disc_num}/{metadata.get('disc_total')}")
-                    else:
-                        audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
-                if tag_enabled('tag_copyright') and metadata.get('copyright'):
-                    audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
-                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
-                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(metadata.get('tidal_track_id')))
-                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
-                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
-                if tag_enabled('tag_version') and metadata.get('version'):
-                    audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
-                if tag_enabled('tag_isrc') and metadata.get('isrc'):
-                    audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
-                
-                if tag_enabled('tag_cover_art') and cover_image_data:
-                    audio['APIC'] = APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data)
-                
-                audio.save(v2_version=4)
-                print(f"[ID3] Successfully added MP3 metadata to {file_path}", flush=True)
-            except Exception as e:
-                print(f"[ID3] Warning: Could not write MP3 tags: {str(e)}", flush=True)
-                
-    except Exception as e:
-        print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
-
 
 @app.route('/api/downloads', methods=['POST'])
 def download_track():
@@ -5025,16 +4758,6 @@ def get_plex_library_track_stream_endpoint(track_id):
     except Exception as e:
         print(f"[PLEX_LIBRARY] Failed to fetch track stream {track_id}: {str(e)}", flush=True)
         return jsonify({'error': f'Failed to fetch Plex track stream URL: {str(e)}'}), 500
-
-def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
-    text = str(value or '').strip().lower()
-    if strip_trailing_parenthetical:
-        # Strip trailing parentheses and square brackets: "(xxx)" or "[xxx]"
-        # Match from the first opening bracket to the end, removing all trailing qualifiers
-        text = re.sub(r'\s*[\(\[].*[\)\]]\s*$', '', text)
-    text = re.sub(r'[^a-z0-9]+', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
 
 @app.route('/api/plex/songs/match', methods=['POST'])
 def match_plex_songs_endpoint():
