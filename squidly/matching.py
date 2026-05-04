@@ -604,7 +604,7 @@ def _get_track_row_by_path(cur, path):
         """
         SELECT track_id, album_id, artist_id, title, library_id, confidence, hifi_id, path,
                format, bitrate, disc_number, track_number, match_status, match_source,
-               matched_at, confirmed_at, last_seen_at
+               matched_at, confirmed_at, last_seen_at, isrc, duration
         FROM tracks
         WHERE path = %s
         """,
@@ -786,14 +786,14 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
     return existing['album_id']
 
 
-def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hifi_id=None, confidence=0.0, match_status='unmatched', match_source=None, matched_at=None, confirmed_at=None, last_seen_at=None, audio_format=None, bitrate=None, disc_number=None, track_number=None):
+def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hifi_id=None, confidence=0.0, match_status='unmatched', match_source=None, matched_at=None, confirmed_at=None, last_seen_at=None, audio_format=None, bitrate=None, disc_number=None, track_number=None, isrc=None, duration=None):
     existing = None
     if library_id:
         cur.execute(
             """
             SELECT track_id, album_id, artist_id, title, library_id, confidence, hifi_id, path,
                    format, bitrate, disc_number, track_number, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at
+                   matched_at, confirmed_at, last_seen_at, isrc, duration
             FROM tracks
             WHERE library_id = %s
             """,
@@ -808,9 +808,9 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             INSERT INTO tracks (
                 album_id, artist_id, title, library_id, confidence, hifi_id, path,
                 format, bitrate, disc_number, track_number, match_status, match_source,
-                matched_at, confirmed_at, last_seen_at
+                matched_at, confirmed_at, last_seen_at, isrc, duration
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING track_id
             """,
             (
@@ -830,6 +830,8 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
                 matched_at,
                 confirmed_at,
                 last_seen_at or _now_utc(),
+                isrc,
+                duration,
             )
         )
         return cur.fetchone()['track_id']
@@ -853,7 +855,9 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             match_source = %s,
             matched_at = %s,
             confirmed_at = %s,
-            last_seen_at = %s
+            last_seen_at = %s,
+            isrc = COALESCE(%s, isrc),
+            duration = COALESCE(%s, duration)
         WHERE track_id = %s
         """,
         (
@@ -873,10 +877,79 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             match_state['matched_at'],
             match_state['confirmed_at'],
             last_seen_at or existing.get('last_seen_at') or _now_utc(),
+            isrc,
+            duration,
             existing['track_id'],
         )
     )
     return existing['track_id']
+
+
+def upsert_download_match_hint(track_title, track_artist_name, album_title, album_artist_name, full_path, audio_format, hifi_track_id=None, hifi_album_id=None, track_hifi_artist_id=None, album_hifi_artist_id=None, isrc=None, duration=None):
+    from squidly.app import _normalize_library_track_path
+
+    relative_path = _normalize_library_track_path(full_path)
+    if not relative_path:
+        return
+
+    now = _now_utc()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        album_artist_row_id = _upsert_artist_row(
+            cur,
+            name=album_artist_name or track_artist_name or 'Unknown Artist',
+            hifi_id=album_hifi_artist_id,
+            confidence=0.99 if album_hifi_artist_id else 0.0,
+            match_status='confirmed' if album_hifi_artist_id else 'unmatched',
+            match_source='tags' if album_hifi_artist_id else None,
+            matched_at=now if album_hifi_artist_id else None,
+            confirmed_at=now if album_hifi_artist_id else None,
+            last_seen_at=now,
+        )
+        track_artist_row_id = _upsert_artist_row(
+            cur,
+            name=track_artist_name or album_artist_name or 'Unknown Artist',
+            hifi_id=track_hifi_artist_id,
+            confidence=0.99 if track_hifi_artist_id else 0.0,
+            match_status='confirmed' if track_hifi_artist_id else 'unmatched',
+            match_source='tags' if track_hifi_artist_id else None,
+            matched_at=now if track_hifi_artist_id else None,
+            confirmed_at=now if track_hifi_artist_id else None,
+            last_seen_at=now,
+        )
+        album_row_id = _upsert_album_row(
+            cur,
+            artist_id=album_artist_row_id,
+            title=album_title or 'Unknown Album',
+            hifi_id=hifi_album_id,
+            confidence=0.99 if hifi_album_id else 0.0,
+            match_status='confirmed' if hifi_album_id else 'unmatched',
+            match_source='tags' if hifi_album_id else None,
+            matched_at=now if hifi_album_id else None,
+            confirmed_at=now if hifi_album_id else None,
+            last_seen_at=now,
+        )
+        _upsert_track_row(
+            cur,
+            album_id=album_row_id,
+            artist_id=track_artist_row_id,
+            title=track_title or 'Unknown Track',
+            path=relative_path,
+            hifi_id=hifi_track_id,
+            confidence=0.99 if hifi_track_id else 0.0,
+            match_status='confirmed' if hifi_track_id else 'unmatched',
+            match_source='tags' if hifi_track_id else None,
+            matched_at=now if hifi_track_id else None,
+            confirmed_at=now if hifi_track_id else None,
+            last_seen_at=now,
+            audio_format=audio_format,
+            isrc=isrc,
+            duration=duration,
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _fetch_source_album_track_rows_map(cur, album_ids):
@@ -1044,6 +1117,7 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
             bitrate=_safe_int(track_row.get('bitrate')),
             disc_number=_safe_int(track_row.get('disc_number')),
             track_number=_safe_int(track_row.get('track_number')),
+            isrc=candidate.get('isrc'),
         )
         tracks_matched += 1
 
@@ -1051,25 +1125,6 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
 
 
 def _find_hifi_match_for_album(album_row, source_track_rows):
-    from squidly.app import _read_embedded_hifi_ids
-
-    first_track_row = next((row for row in (source_track_rows or []) if str(row.get('path') or '').strip()), None)
-    if first_track_row:
-        first_track_tags = _read_embedded_hifi_ids(first_track_row.get('path'))
-        first_album_hifi_id = str(first_track_tags.get('album_id') or '').strip()
-        first_track_hifi_id = str(first_track_tags.get('track_id') or '').strip()
-        if first_album_hifi_id and first_track_hifi_id:
-            album_payload = _fetch_hifi_album_payload(first_album_hifi_id)
-            confidence = _evaluate_album_payload_match(album_row, source_track_rows, album_payload)
-            if confidence >= 0.90:
-                tagged_track_ids_by_path = {}
-                for track_row in source_track_rows or []:
-                    track_tags = _read_embedded_hifi_ids(track_row.get('path'))
-                    track_hifi_id = str(track_tags.get('track_id') or '').strip()
-                    if track_hifi_id:
-                        tagged_track_ids_by_path[str(track_row.get('path') or '').strip()] = track_hifi_id
-                return album_payload, 'tags', 0.99, tagged_track_ids_by_path
-
     search_query = ' '.join(part for part in [str(album_row.get('artist_name') or '').strip(), str(album_row.get('title') or '').strip()] if part).strip()
     if not search_query:
         return None, None, 0.0, {}
@@ -1245,6 +1300,8 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
         bitrate=_safe_int(track_row.get('bitrate')),
         disc_number=_safe_int(track_row.get('disc_number')),
         track_number=_safe_int(track_row.get('track_number')),
+        isrc=track_data.get('isrc'),
+        duration=track_data.get('duration'),
     )
 
     return album_row_id
@@ -1488,7 +1545,7 @@ def _fetch_match_review_row(cur, entity_type, entity_id):
             SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                    tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
                    tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at,
+                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at, tracks.isrc, tracks.duration,
                    albums.title AS album_title,
                    albums.hifi_id AS album_hifi_id,
                    artists.name AS artist_name

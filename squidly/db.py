@@ -338,6 +338,26 @@ def init_db():
 
     cur.execute(
         """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'tracks' AND column_name = 'isrc'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE tracks ADD COLUMN isrc TEXT")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'tracks' AND column_name = 'duration'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE tracks ADD COLUMN duration INTEGER")
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS jobs (
             id SERIAL PRIMARY KEY,
             job_type TEXT NOT NULL,

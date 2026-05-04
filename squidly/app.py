@@ -100,6 +100,7 @@ from squidly.matching import (
     _upsert_artist_row,
     _upsert_album_row,
     _upsert_track_row,
+    upsert_download_match_hint,
     _fetch_source_album_track_rows_map,
     _fetch_source_album_track_titles_map,
     _apply_hifi_album_payload_match,
@@ -428,11 +429,12 @@ def _resolve_library_file_path(file_path):
 def _read_embedded_hifi_ids(file_path):
     track_id = None
     album_id = None
+    isrc = None
     raw_path = _resolve_library_file_path(file_path)
 
     if not raw_path or not os.path.exists(raw_path):
         print(f"[MATCH] Path does not exist after resolution: {file_path}", flush=True)
-        return {'track_id': None, 'album_id': None}
+        return {'track_id': None, 'album_id': None, 'isrc': None}
 
     try:
         lower_path = raw_path.lower()
@@ -440,37 +442,49 @@ def _read_embedded_hifi_ids(file_path):
             audio = FLAC(raw_path)
             track_values = audio.get('TIDAL_TRACK_ID') or audio.get('tidal_track_id') or []
             album_values = audio.get('TIDAL_ALBUM_ID') or audio.get('tidal_album_id') or []
+            isrc_values = audio.get('ISRC') or audio.get('isrc') or []
             track_id = str(track_values[0]).strip() if track_values else None
             album_id = str(album_values[0]).strip() if album_values else None
+            isrc = str(isrc_values[0]).strip() if isrc_values else None
         elif lower_path.endswith('.m4a'):
             audio = MP4(raw_path)
             track_values = audio.get('----:com.apple.iTunes:tidal_track_id') or []
             album_values = audio.get('----:com.apple.iTunes:tidal_album_id') or []
+            isrc_values = audio.get('----:com.apple.iTunes:isrc') or []
             if track_values:
                 first_value = track_values[0]
                 track_id = first_value.decode('utf-8', errors='ignore').strip() if isinstance(first_value, bytes) else str(first_value).strip()
             if album_values:
                 first_value = album_values[0]
                 album_id = first_value.decode('utf-8', errors='ignore').strip() if isinstance(first_value, bytes) else str(first_value).strip()
+            if isrc_values:
+                first_value = isrc_values[0]
+                isrc = first_value.decode('utf-8', errors='ignore').strip() if isinstance(first_value, bytes) else str(first_value).strip()
         elif lower_path.endswith('.mp3'):
             audio = MP3(raw_path, ID3=ID3)
             track_frame = audio.tags.get('TXXX:tidal_track_id') if audio.tags else None
             album_frame = audio.tags.get('TXXX:tidal_album_id') if audio.tags else None
+            isrc_frame = audio.tags.get('ISRC') if audio.tags else None
+            if not isrc_frame:
+                isrc_frame = audio.tags.get('TXXX:isrc') if audio.tags else None
             if track_frame and getattr(track_frame, 'text', None):
                 track_id = str(track_frame.text[0]).strip()
             if album_frame and getattr(album_frame, 'text', None):
                 album_id = str(album_frame.text[0]).strip()
+            if isrc_frame and getattr(isrc_frame, 'text', None):
+                isrc = str(isrc_frame.text[0]).strip()
         
-        if track_id or album_id:
-            print(f"[MATCH] Found embedded IDs: track={track_id}, album={album_id}", flush=True)
+        if track_id or album_id or isrc:
+            print(f"[MATCH] Found embedded IDs: track={track_id}, album={album_id}, isrc={isrc}", flush=True)
         else:
-            print(f"[MATCH] No embedded Tidal IDs found in file", flush=True)
+            print(f"[MATCH] No embedded Tidal IDs or ISRC found in file", flush=True)
     except Exception as e:
         print(f"[MATCH] Failed to read embedded hifi IDs from {raw_path}: {str(e)}", flush=True)
 
     return {
         'track_id': track_id or None,
         'album_id': album_id or None,
+        'isrc': isrc or None,
     }
 
 
@@ -560,7 +574,7 @@ def process_hifi_match_job(job_id, payload):
             SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                    tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
                    tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at,
+                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at, tracks.isrc,
                    albums.hifi_id AS album_hifi_id,
                    track_artist.hifi_id AS track_artist_hifi_id,
                    album_artist.hifi_id AS album_artist_hifi_id
@@ -741,13 +755,16 @@ def process_plex_sync_job(job_id, payload):
 
     stages = {
         'reading_plex_library': 'in_progress',
-        'updating_local_index': 'pending'
+        'updating_local_index': 'pending',
+        'backfilling_track_ids_from_tags': 'pending',
     }
     progress = {
         'processed_tracks': 0,
         'total_tracks': 0,
         'upserted_songs': 0,
-        'deleted_songs': 0
+        'deleted_songs': 0,
+        'tags_read': 0,
+        'tags_updated': 0,
     }
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
@@ -1007,9 +1024,87 @@ def process_plex_sync_job(job_id, payload):
             plex._session.timeout = 20
         print(f"[PLEX_SYNC] Job {job_id}: Successfully labeled {labeled_count} albums as Explicit", flush=True)
 
+    stages['backfilling_track_ids_from_tags'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    cur.execute(
+        """
+        SELECT tracks.track_id, tracks.album_id, tracks.path, tracks.hifi_id, tracks.isrc,
+               albums.hifi_id AS album_hifi_id
+        FROM tracks
+        LEFT JOIN albums ON albums.album_id = tracks.album_id
+        WHERE tracks.library_id IS NOT NULL
+          AND (
+                tracks.hifi_id IS NULL
+             OR tracks.isrc IS NULL
+             OR albums.hifi_id IS NULL
+          )
+        ORDER BY tracks.track_id ASC
+        """
+    )
+    tag_rows = cur.fetchall() or []
+    tags_read = 0
+    tags_updated = 0
+    albums_backfilled = set()
+
+    for tag_row in tag_rows:
+        _raise_if_job_cancelled(job_id)
+        file_path = str(tag_row.get('path') or '').strip()
+        if not file_path:
+            continue
+
+        embedded = _read_embedded_hifi_ids(file_path)
+        embedded_track_id = str(embedded.get('track_id') or '').strip() or None
+        embedded_album_id = str(embedded.get('album_id') or '').strip() or None
+        embedded_isrc = str(embedded.get('isrc') or '').strip() or None
+
+        if not embedded_track_id and not embedded_album_id and not embedded_isrc:
+            continue
+
+        tags_read += 1
+        update_fields = []
+        update_values = []
+
+        if embedded_track_id and not tag_row.get('hifi_id'):
+            update_fields.append('hifi_id = %s')
+            update_values.append(embedded_track_id)
+
+        if embedded_isrc and not tag_row.get('isrc'):
+            update_fields.append('isrc = %s')
+            update_values.append(embedded_isrc)
+
+        if update_fields:
+            update_values.append(tag_row['track_id'])
+            cur.execute(
+                f"UPDATE tracks SET {', '.join(update_fields)} WHERE track_id = %s",
+                update_values
+            )
+            tags_updated += 1
+
+        if embedded_album_id and not tag_row.get('album_hifi_id'):
+            album_id_val = int(tag_row.get('album_id') or 0)
+            if album_id_val and album_id_val not in albums_backfilled:
+                cur.execute(
+                    "UPDATE albums SET hifi_id = %s WHERE album_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
+                    (embedded_album_id, album_id_val)
+                )
+                albums_backfilled.add(album_id_val)
+
+        if tags_read % 50 == 0 or tags_read == len(tag_rows):
+            conn.commit()
+            print(f"[PLEX_SYNC] Job {job_id}: Tag backfill progress: read={tags_read}, updated={tags_updated}, albums_backfilled={len(albums_backfilled)}", flush=True)
+
+    conn.commit()
+    print(f"[PLEX_SYNC] Job {job_id}: Tag backfill complete: read={tags_read}, updated={tags_updated}, albums_backfilled={len(albums_backfilled)}", flush=True)
+
+    stages['backfilling_track_ids_from_tags'] = 'done'
+    progress['tags_read'] = tags_read
+    progress['tags_updated'] = tags_updated
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     print(
-        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted} explicit_albums_labeled={labeled_count}",
+        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted} explicit_albums_labeled={labeled_count} tags_read={tags_read} tags_updated={tags_updated}",
         flush=True
     )
 
@@ -1020,7 +1115,9 @@ def process_plex_sync_job(job_id, payload):
         'total_tracks': progress['total_tracks'],
         'upserted_songs': upserted,
         'deleted_songs': deleted,
-        'explicit_albums_labeled': labeled_count
+        'explicit_albums_labeled': labeled_count,
+        'tags_read': tags_read,
+        'tags_updated': tags_updated,
     }
 
 def process_download_job(job_id, payload):
@@ -1332,6 +1429,8 @@ def process_download_job(job_id, payload):
             hifi_album_id=str(album_id) if album_id else None,
             track_hifi_artist_id=track_artist_id,
             album_hifi_artist_id=album_artist_id or track_artist_id,
+            isrc=track_data.get('isrc'),
+            duration=track_data.get('duration'),
         )
 
         return {
@@ -1519,6 +1618,8 @@ def process_download_job(job_id, payload):
         hifi_album_id=str(album_id) if album_id else None,
         track_hifi_artist_id=track_artist_id,
         album_hifi_artist_id=album_artist_id or track_artist_id,
+        isrc=track_data.get('isrc'),
+        duration=track_data.get('duration'),
     )
 
     result = {
@@ -3912,7 +4013,7 @@ def get_hifi_match_review_endpoint():
                 SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                        tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
                        tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                       tracks.matched_at, tracks.confirmed_at,
+                       tracks.matched_at, tracks.confirmed_at, tracks.isrc, tracks.duration,
                        albums.title AS album_title,
                        albums.library_id AS album_library_id,
                        artists.name AS artist_name,

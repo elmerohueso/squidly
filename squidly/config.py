@@ -9,7 +9,7 @@ import socket
 from urllib.parse import quote_plus
 
 # PostgreSQL configuration (required)
-postgres_host = (os.environ.get('POSTGRES_HOST') or os.environ.get('PORTGRES_HOST') or '').strip()
+postgres_host = (os.environ.get('POSTGRES_HOST') or '').strip()
 postgres_db = (os.environ.get('POSTGRES_DB') or '').strip()
 postgres_user = (os.environ.get('POSTGRES_USER') or '').strip()
 postgres_password = (os.environ.get('POSTGRES_PASSWORD') or '').strip()
