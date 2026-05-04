@@ -235,7 +235,7 @@
                                 <span>Force re-download (ignore existing library matches)</span>
                             </label>
                         </div>
-                        <div class="settings-section">
+                        <div class="settings-section" id="fileNamingSettings">
                             <h3>File Naming</h3>
                             <label class="settings-label" for="fileNamingAlbum">File Naming</label>
                             <input type="text" id="fileNamingAlbum" class="settings-input"
@@ -248,6 +248,144 @@
                             <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1"
                                 value="30" placeholder="30">
                             <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
+                        </div>
+                        <div class="settings-section" id="taggingSettings">
+                            <h3>Tagging</h3>
+
+                            <div class="tag-group">
+                                <div class="tag-group-title">Core Metadata</div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Title</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagTitle">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Artist</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagArtist">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Album Artist</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagAlbumArtist">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Album</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagAlbum">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Year</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagYear">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="tag-group">
+                                <div class="tag-group-title">Track Information</div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Track Number</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagTrackNumber">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Track Total</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagTrackTotal">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Disc Number</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagDiscNumber">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Disc Total</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagDiscTotal">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Version</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagVersion">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="tag-group">
+                                <div class="tag-group-title">Identifiers</div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Tidal Track ID</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagTidalTrackId">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Tidal Album ID</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagTidalAlbumId">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">ISRC</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagIsrc">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="tag-group">
+                                <div class="tag-group-title">Additional</div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Copyright</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagCopyright">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Cover Art</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagCoverArt">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Explicit Tag</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagExplicit">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Append [Explicit] suffix to titles</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="tagExplicitSuffix">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                         <div class="settings-section" id="listenbrainzSettings">
                             <div class="settings-section-title">ListenBrainz</div>

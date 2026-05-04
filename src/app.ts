@@ -509,6 +509,23 @@ interface DownloadSettings {
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
     ignoreMatches: boolean;
+    tagTitle: boolean;
+    tagArtist: boolean;
+    tagAlbumArtist: boolean;
+    tagAlbum: boolean;
+    tagYear: boolean;
+    tagTrackNumber: boolean;
+    tagTrackTotal: boolean;
+    tagDiscNumber: boolean;
+    tagDiscTotal: boolean;
+    tagVersion: boolean;
+    tagTidalTrackId: boolean;
+    tagTidalAlbumId: boolean;
+    tagIsrc: boolean;
+    tagCopyright: boolean;
+    tagCoverArt: boolean;
+    tagExplicit: boolean;
+    tagExplicitSuffix: boolean;
 }
 
 interface AppRouteState {
@@ -621,6 +638,23 @@ class App {
     private plexClearCredentialsButton: HTMLButtonElement;
     private plexUserDropdownContainer: HTMLElement;
     private ignoreMatchesCheckbox: HTMLInputElement;
+    private tagTitleCheckbox: HTMLInputElement;
+    private tagArtistCheckbox: HTMLInputElement;
+    private tagAlbumArtistCheckbox: HTMLInputElement;
+    private tagAlbumCheckbox: HTMLInputElement;
+    private tagYearCheckbox: HTMLInputElement;
+    private tagTrackNumberCheckbox: HTMLInputElement;
+    private tagTrackTotalCheckbox: HTMLInputElement;
+    private tagDiscNumberCheckbox: HTMLInputElement;
+    private tagDiscTotalCheckbox: HTMLInputElement;
+    private tagVersionCheckbox: HTMLInputElement;
+    private tagTidalTrackIdCheckbox: HTMLInputElement;
+    private tagTidalAlbumIdCheckbox: HTMLInputElement;
+    private tagIsrcCheckbox: HTMLInputElement;
+    private tagCopyrightCheckbox: HTMLInputElement;
+    private tagCoverArtCheckbox: HTMLInputElement;
+    private tagExplicitCheckbox: HTMLInputElement;
+    private tagExplicitSuffixCheckbox: HTMLInputElement;
     private userButton: HTMLButtonElement;
     private userDropdownModal: HTMLElement;
     private userDropdownOverlay: HTMLElement;
@@ -896,6 +930,23 @@ class App {
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
         this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
+        this.tagTitleCheckbox = document.getElementById('tagTitle') as HTMLInputElement;
+        this.tagArtistCheckbox = document.getElementById('tagArtist') as HTMLInputElement;
+        this.tagAlbumArtistCheckbox = document.getElementById('tagAlbumArtist') as HTMLInputElement;
+        this.tagAlbumCheckbox = document.getElementById('tagAlbum') as HTMLInputElement;
+        this.tagYearCheckbox = document.getElementById('tagYear') as HTMLInputElement;
+        this.tagTrackNumberCheckbox = document.getElementById('tagTrackNumber') as HTMLInputElement;
+        this.tagTrackTotalCheckbox = document.getElementById('tagTrackTotal') as HTMLInputElement;
+        this.tagDiscNumberCheckbox = document.getElementById('tagDiscNumber') as HTMLInputElement;
+        this.tagDiscTotalCheckbox = document.getElementById('tagDiscTotal') as HTMLInputElement;
+        this.tagVersionCheckbox = document.getElementById('tagVersion') as HTMLInputElement;
+        this.tagTidalTrackIdCheckbox = document.getElementById('tagTidalTrackId') as HTMLInputElement;
+        this.tagTidalAlbumIdCheckbox = document.getElementById('tagTidalAlbumId') as HTMLInputElement;
+        this.tagIsrcCheckbox = document.getElementById('tagIsrc') as HTMLInputElement;
+        this.tagCopyrightCheckbox = document.getElementById('tagCopyright') as HTMLInputElement;
+        this.tagCoverArtCheckbox = document.getElementById('tagCoverArt') as HTMLInputElement;
+        this.tagExplicitCheckbox = document.getElementById('tagExplicit') as HTMLInputElement;
+        this.tagExplicitSuffixCheckbox = document.getElementById('tagExplicitSuffix') as HTMLInputElement;
 
         // User dropdown for top bar
         this.userButton = document.getElementById('userButton') as HTMLButtonElement;
@@ -1100,6 +1151,57 @@ class App {
         }
         if (this.ignoreMatchesCheckbox) {
             this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagTitleCheckbox) {
+            this.tagTitleCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagArtistCheckbox) {
+            this.tagArtistCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagAlbumArtistCheckbox) {
+            this.tagAlbumArtistCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagAlbumCheckbox) {
+            this.tagAlbumCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagYearCheckbox) {
+            this.tagYearCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagTrackNumberCheckbox) {
+            this.tagTrackNumberCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagTrackTotalCheckbox) {
+            this.tagTrackTotalCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagDiscNumberCheckbox) {
+            this.tagDiscNumberCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagDiscTotalCheckbox) {
+            this.tagDiscTotalCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagVersionCheckbox) {
+            this.tagVersionCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagTidalTrackIdCheckbox) {
+            this.tagTidalTrackIdCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagTidalAlbumIdCheckbox) {
+            this.tagTidalAlbumIdCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagIsrcCheckbox) {
+            this.tagIsrcCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagCopyrightCheckbox) {
+            this.tagCopyrightCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagCoverArtCheckbox) {
+            this.tagCoverArtCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagExplicitCheckbox) {
+            this.tagExplicitCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.tagExplicitSuffixCheckbox) {
+            this.tagExplicitSuffixCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
         }
         if (this.saveLbConfigButton) {
             this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
@@ -4996,7 +5098,24 @@ class App {
             quality: 'LOSSLESS',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
             jobsRefreshIntervalSeconds: 30,
-            ignoreMatches: false
+            ignoreMatches: false,
+            tagTitle: true,
+            tagArtist: true,
+            tagAlbumArtist: true,
+            tagAlbum: true,
+            tagYear: true,
+            tagTrackNumber: true,
+            tagTrackTotal: true,
+            tagDiscNumber: true,
+            tagDiscTotal: true,
+            tagVersion: true,
+            tagTidalTrackId: true,
+            tagTidalAlbumId: true,
+            tagIsrc: true,
+            tagCopyright: true,
+            tagCoverArt: true,
+            tagExplicit: true,
+            tagExplicitSuffix: true,
         };
     }
 
@@ -5035,7 +5154,24 @@ class App {
             jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds,
             ignoreMatches: typeof (raw as DownloadSettings).ignoreMatches === 'boolean'
                 ? (raw as DownloadSettings).ignoreMatches
-                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches)
+                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches),
+            tagTitle: typeof (raw as DownloadSettings).tagTitle === 'boolean' ? (raw as DownloadSettings).tagTitle : fallback.tagTitle,
+            tagArtist: typeof (raw as DownloadSettings).tagArtist === 'boolean' ? (raw as DownloadSettings).tagArtist : fallback.tagArtist,
+            tagAlbumArtist: typeof (raw as DownloadSettings).tagAlbumArtist === 'boolean' ? (raw as DownloadSettings).tagAlbumArtist : fallback.tagAlbumArtist,
+            tagAlbum: typeof (raw as DownloadSettings).tagAlbum === 'boolean' ? (raw as DownloadSettings).tagAlbum : fallback.tagAlbum,
+            tagYear: typeof (raw as DownloadSettings).tagYear === 'boolean' ? (raw as DownloadSettings).tagYear : fallback.tagYear,
+            tagTrackNumber: typeof (raw as DownloadSettings).tagTrackNumber === 'boolean' ? (raw as DownloadSettings).tagTrackNumber : fallback.tagTrackNumber,
+            tagTrackTotal: typeof (raw as DownloadSettings).tagTrackTotal === 'boolean' ? (raw as DownloadSettings).tagTrackTotal : fallback.tagTrackTotal,
+            tagDiscNumber: typeof (raw as DownloadSettings).tagDiscNumber === 'boolean' ? (raw as DownloadSettings).tagDiscNumber : fallback.tagDiscNumber,
+            tagDiscTotal: typeof (raw as DownloadSettings).tagDiscTotal === 'boolean' ? (raw as DownloadSettings).tagDiscTotal : fallback.tagDiscTotal,
+            tagVersion: typeof (raw as DownloadSettings).tagVersion === 'boolean' ? (raw as DownloadSettings).tagVersion : fallback.tagVersion,
+            tagTidalTrackId: typeof (raw as DownloadSettings).tagTidalTrackId === 'boolean' ? (raw as DownloadSettings).tagTidalTrackId : fallback.tagTidalTrackId,
+            tagTidalAlbumId: typeof (raw as DownloadSettings).tagTidalAlbumId === 'boolean' ? (raw as DownloadSettings).tagTidalAlbumId : fallback.tagTidalAlbumId,
+            tagIsrc: typeof (raw as DownloadSettings).tagIsrc === 'boolean' ? (raw as DownloadSettings).tagIsrc : fallback.tagIsrc,
+            tagCopyright: typeof (raw as DownloadSettings).tagCopyright === 'boolean' ? (raw as DownloadSettings).tagCopyright : fallback.tagCopyright,
+            tagCoverArt: typeof (raw as DownloadSettings).tagCoverArt === 'boolean' ? (raw as DownloadSettings).tagCoverArt : fallback.tagCoverArt,
+            tagExplicit: typeof (raw as DownloadSettings).tagExplicit === 'boolean' ? (raw as DownloadSettings).tagExplicit : fallback.tagExplicit,
+            tagExplicitSuffix: typeof (raw as DownloadSettings).tagExplicitSuffix === 'boolean' ? (raw as DownloadSettings).tagExplicitSuffix : fallback.tagExplicitSuffix,
         };
     }
 
@@ -5061,6 +5197,23 @@ class App {
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
+        this.tagTitleCheckbox.checked = settings.tagTitle;
+        this.tagArtistCheckbox.checked = settings.tagArtist;
+        this.tagAlbumArtistCheckbox.checked = settings.tagAlbumArtist;
+        this.tagAlbumCheckbox.checked = settings.tagAlbum;
+        this.tagYearCheckbox.checked = settings.tagYear;
+        this.tagTrackNumberCheckbox.checked = settings.tagTrackNumber;
+        this.tagTrackTotalCheckbox.checked = settings.tagTrackTotal;
+        this.tagDiscNumberCheckbox.checked = settings.tagDiscNumber;
+        this.tagDiscTotalCheckbox.checked = settings.tagDiscTotal;
+        this.tagVersionCheckbox.checked = settings.tagVersion;
+        this.tagTidalTrackIdCheckbox.checked = settings.tagTidalTrackId;
+        this.tagTidalAlbumIdCheckbox.checked = settings.tagTidalAlbumId;
+        this.tagIsrcCheckbox.checked = settings.tagIsrc;
+        this.tagCopyrightCheckbox.checked = settings.tagCopyright;
+        this.tagCoverArtCheckbox.checked = settings.tagCoverArt;
+        this.tagExplicitCheckbox.checked = settings.tagExplicit;
+        this.tagExplicitSuffixCheckbox.checked = settings.tagExplicitSuffix;
         this.syncQualityToggleStyles();
     }
 
@@ -5079,7 +5232,24 @@ class App {
             quality,
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
-            ignoreMatches: this.ignoreMatchesCheckbox.checked
+            ignoreMatches: this.ignoreMatchesCheckbox.checked,
+            tagTitle: this.tagTitleCheckbox.checked,
+            tagArtist: this.tagArtistCheckbox.checked,
+            tagAlbumArtist: this.tagAlbumArtistCheckbox.checked,
+            tagAlbum: this.tagAlbumCheckbox.checked,
+            tagYear: this.tagYearCheckbox.checked,
+            tagTrackNumber: this.tagTrackNumberCheckbox.checked,
+            tagTrackTotal: this.tagTrackTotalCheckbox.checked,
+            tagDiscNumber: this.tagDiscNumberCheckbox.checked,
+            tagDiscTotal: this.tagDiscTotalCheckbox.checked,
+            tagVersion: this.tagVersionCheckbox.checked,
+            tagTidalTrackId: this.tagTidalTrackIdCheckbox.checked,
+            tagTidalAlbumId: this.tagTidalAlbumIdCheckbox.checked,
+            tagIsrc: this.tagIsrcCheckbox.checked,
+            tagCopyright: this.tagCopyrightCheckbox.checked,
+            tagCoverArt: this.tagCoverArtCheckbox.checked,
+            tagExplicit: this.tagExplicitCheckbox.checked,
+            tagExplicitSuffix: this.tagExplicitSuffixCheckbox.checked,
         };
     }
 
@@ -5089,7 +5259,7 @@ class App {
         this.queueSettingsSave();
         this.syncQualityToggleStyles();
 
-        if (this.jobsFlyout.classList.contains('active')) {
+        if (this.jobsFlyout?.classList.contains('active')) {
             this.startJobsPollingInterval();
         }
     }
