@@ -3,107 +3,6 @@ from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
 
 
-def init_library_update_status():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        '''
-        CREATE TABLE IF NOT EXISTS library_update_status (
-            id INTEGER PRIMARY KEY,
-            last_update_time TIMESTAMP,
-            library_update_needed BOOLEAN NOT NULL DEFAULT FALSE,
-            last_job_finished_at TIMESTAMP,
-            last_download_activity_at TIMESTAMP
-        )
-        '''
-    )
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'library_update_status'
-          AND column_name = 'last_download_activity_at'
-        """
-    )
-    if not cur.fetchone():
-        cur.execute('ALTER TABLE library_update_status ADD COLUMN last_download_activity_at TIMESTAMP')
-
-    # Ensure a single row exists
-    cur.execute('SELECT id FROM library_update_status WHERE id = 1')
-    if not cur.fetchone():
-        cur.execute('INSERT INTO library_update_status (id, library_update_needed) VALUES (1, FALSE)')
-    conn.commit()
-    conn.close()
-
-def get_library_update_status():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        '''
-        SELECT last_update_time, library_update_needed, last_job_finished_at, last_download_activity_at
-        FROM library_update_status
-        WHERE id = 1
-        '''
-    )
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-def normalize_db_timestamp(value):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        raw = str(value).strip()
-        if not raw:
-            return None
-        if raw.endswith('Z'):
-            raw = raw[:-1] + '+00:00'
-        try:
-            dt = datetime.fromisoformat(raw)
-        except Exception:
-            return None
-    if hasattr(dt, 'replace'):
-        dt = dt.replace(tzinfo=None)
-    return dt
-
-def set_library_update_needed(value: bool):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE library_update_status SET library_update_needed = %s WHERE id = 1', (value,))
-    conn.commit()
-    conn.close()
-
-def set_last_library_update_time(ts):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE library_update_status SET last_update_time = %s WHERE id = 1', (ts,))
-    conn.commit()
-    conn.close()
-
-def set_last_job_finished_at(ts):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE library_update_status SET last_job_finished_at = %s WHERE id = 1', (ts,))
-    conn.commit()
-    conn.close()
-
-def set_last_download_activity_at(ts):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE library_update_status SET last_download_activity_at = %s WHERE id = 1', (ts,))
-    conn.commit()
-    conn.close()
-
-def get_last_download_activity_at():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT last_download_activity_at FROM library_update_status WHERE id = 1')
-    row = cur.fetchone() or {}
-    conn.close()
-    return normalize_db_timestamp(row.get('last_download_activity_at'))
-
 def get_download_write_gate_state():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -253,9 +152,6 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
 
         time.sleep(max(1, poll_interval_seconds))
 
-def start_plex_sync_job(trigger='manual'):
-    return jobs.start_plex_sync_job(trigger=trigger)
-
 def any_plex_library_update_jobs_running_or_queued():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -279,7 +175,7 @@ def queue_plex_library_update(trigger='scheduled'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('plex_library_update', payload, max_attempts=5)
+    return jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
 
 def start_plex_library_update_job(trigger='scheduled'):
     """Queue a Plex library update job if one is not already queued/in progress."""
@@ -317,7 +213,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         'sync_job_id': None,
         'sync_queue_status': 'pending'
     }
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     gate = gate_snapshot or can_start_plex_library_update(required_idle_seconds=180)
     gate_state = gate.get('gate_state') or {}
@@ -327,10 +223,10 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     progress['download_gate_required_idle_seconds'] = gate.get('required_idle_seconds') or 180
     progress['download_gate_last_activity_at'] = gate.get('last_activity_at')
     progress['download_gate_status'] = 'ready'
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     stages['scanning_plex_library'] = 'in_progress'
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
@@ -358,19 +254,19 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     progress['scan_detected'] = bool(saw_active)
     progress['scan_completed'] = bool(completed)
     stages['scanning_plex_library'] = 'done'
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    sync_result = start_plex_sync_job(trigger='post_library_update')
+    sync_result = jobs.start_plex_sync_job(trigger='post_library_update')
     if sync_result.get('ok'):
         progress['sync_job_id'] = sync_result.get('job_id')
         progress['sync_queue_status'] = 'queued'
     elif sync_result.get('status_code') == 409:
         progress['sync_queue_status'] = 'already_queued'
     else:
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
         raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
 
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
     set_last_library_update_time(datetime.utcnow())
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
@@ -409,7 +305,7 @@ def plex_library_update_job_worker():
                 time.sleep(gate_poll_seconds)
                 continue
 
-            job = claim_next_job('plex_library_update')
+            job = jobs.claim_next_job('plex_library_update')
             if not job:
                 time.sleep(5)
                 continue
@@ -422,7 +318,7 @@ def plex_library_update_job_worker():
             try:
                 gate_after_claim = can_start_plex_library_update(required_idle_seconds=180)
                 if not gate_after_claim.get('can_start'):
-                    requeue_claimed_job(
+                    jobs.requeue_claimed_job(
                         job['id'],
                         delay_seconds=gate_poll_seconds,
                         error_message='Waiting for downloads gate before starting Plex library update'
@@ -432,11 +328,11 @@ def plex_library_update_job_worker():
                     continue
 
                 result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
-                mark_job_succeeded(job['id'], result)
+                jobs.mark_job_succeeded(job['id'], result)
                 print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} completed", flush=True)
             except Exception as e:
                 print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
             print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -497,16 +393,23 @@ from squidly.storage import (
     clear_plex_config,
     clear_plex_user_settings,
     get_download_settings,
+    get_last_download_activity_at,
+    get_library_update_status,
     get_listenbrainz_config,
     get_plex_config,
     get_plex_user_settings,
     get_ytm_config,
     init_library_update_status,
+    normalize_db_timestamp,
     save_download_settings,
     save_listenbrainz_config,
     save_plex_config,
     save_plex_user_setting,
     save_ytm_config,
+    set_last_download_activity_at,
+    set_last_job_finished_at,
+    set_last_library_update_time,
+    set_library_update_needed,
 )
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -703,14 +606,6 @@ elif not os.access(DOWNLOADS_ROOT, os.W_OK):
     print(f"Error: Downloads directory is not writable: {DOWNLOADS_ROOT}", file=sys.stderr)
 else:
     print(f"Downloads directory ready: {DOWNLOADS_ROOT}", flush=True)
-
-def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
-    return downloads.make_request_with_retry(url, method=method, timeout=timeout, max_retries=max_retries, backoff_factor=backoff_factor, **kwargs)
-
-def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
-    return downloads.make_request_with_retry_rotating_mirrors(
-        url_base, url_list, method=method, timeout=timeout, max_retries=max_retries, backoff_factor=backoff_factor, **kwargs
-    )
 
 from squidly.db import get_db_connection
 
@@ -1084,9 +979,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-def any_plex_sync_jobs_running_or_queued():
-    return jobs.any_plex_sync_jobs_running_or_queued()
 
 def get_last_successful_plex_sync_finished_at():
     conn = get_db_connection()
@@ -1963,7 +1855,7 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
 
 
 def _fetch_hifi_search_results(search_type, query, limit=10):
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/search/?{urlencode({search_type: query, 'limit': str(limit)})}",
         SQUID_URLS,
         method='GET',
@@ -2034,7 +1926,7 @@ def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
     if skip_tracks:
         params['skip_tracks'] = 'true'
 
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/artist/?{urlencode(params)}",
         SQUID_URLS,
         method='GET',
@@ -2047,7 +1939,7 @@ def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
 
 
 def _fetch_hifi_album_payload(album_id):
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/album/?{urlencode({'id': str(album_id)})}",
         SQUID_URLS,
         method='GET',
@@ -2060,7 +1952,7 @@ def _fetch_hifi_album_payload(album_id):
 
 
 def _fetch_hifi_track_payload(track_id, quality='LOW'):
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/track/?{urlencode({'id': str(track_id), 'quality': str(quality)})}",
         SQUID_URLS,
         method='GET',
@@ -2083,7 +1975,7 @@ def _fetch_hifi_track_manifests_payload(track_id, formats=None):
     if formats:
         params['formats'] = ','.join(formats)
 
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/trackManifests/?{urlencode(params)}",
         SQUID_URLS,
         method='GET',
@@ -2096,7 +1988,7 @@ def _fetch_hifi_track_manifests_payload(track_id, formats=None):
 
 
 def _fetch_hifi_track_info_payload(track_id):
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, _target = downloads.make_request_with_retry_rotating_mirrors(
         f"/info/?{urlencode({'id': str(track_id)})}",
         SQUID_URLS,
         method='GET',
@@ -2347,7 +2239,7 @@ def _format_hifi_image_value(image_id_or_url, size=640):
         normalized_value = normalized_value.strip('/')
 
     try:
-        return format_tidal_image_url(normalized_value, size)
+        return downloads.format_tidal_image_url(normalized_value, size)
     except Exception:
         return None
 
@@ -3226,9 +3118,6 @@ def _build_track_match_candidates(row, limit=10, query_override=None):
     candidates.sort(key=lambda candidate: (-candidate['confidence'], candidate['title'].lower()))
     return candidates[:limit]
 
-def queue_plex_library_sync(trigger='manual'):
-    return jobs.queue_plex_library_sync(trigger=trigger)
-
 
 def any_hifi_match_jobs_running_or_queued():
     conn = get_db_connection()
@@ -3269,7 +3158,7 @@ def queue_hifi_match_job(trigger='manual'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('hifi_match', payload, max_attempts=3)
+    return jobs.enqueue_job('hifi_match', payload, max_attempts=3)
 
 
 def start_hifi_match_job(trigger='manual'):
@@ -3352,7 +3241,7 @@ def process_hifi_match_job(job_id, payload):
         'tracks_matched': 0,
         'albums_completed': 0,
     }
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3367,11 +3256,11 @@ def process_hifi_match_job(job_id, payload):
         progress['albums_missing_start'] = coverage_counts['albums_missing']
         progress['tracks_missing_start'] = coverage_counts['tracks_missing']
         _refresh_hifi_match_coverage_progress(cur, progress)
-        update_job_progress(job_id, {'progress': progress})
+        jobs.update_job_progress(job_id, {'progress': progress})
 
         _raise_if_job_cancelled(job_id)
         stages['backfilling_track_seed_ids'] = 'in_progress'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         cur.execute(
             """
@@ -3418,16 +3307,16 @@ def process_hifi_match_job(job_id, payload):
             if progress['track_seed_rows_processed'] % 25 == 0 or progress['track_seed_rows_processed'] == len(track_seed_rows):
                 conn.commit()
                 _refresh_hifi_match_coverage_progress(cur, progress)
-                update_job_progress(job_id, {'progress': progress})
+                jobs.update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
         _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['backfilling_track_seed_ids'] = 'done'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         stages['matching_albums'] = 'in_progress'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         cur.execute(
             """
@@ -3496,17 +3385,17 @@ def process_hifi_match_job(job_id, payload):
             if progress['albums_processed'] % 25 == 0 or progress['albums_processed'] == len(album_rows):
                 conn.commit()
                 _refresh_hifi_match_coverage_progress(cur, progress)
-                update_job_progress(job_id, {'progress': progress})
+                jobs.update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
         _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['matching_albums'] = 'done'
         print(f"[HIFI_MATCH] Job {job_id}: Albums matching complete - {progress['albums_matched']}/{progress['albums_processed']} matched", flush=True)
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         stages['updating_album_completeness'] = 'in_progress'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
         cur.execute(
             """
@@ -3529,13 +3418,13 @@ def process_hifi_match_job(job_id, payload):
             progress['albums_completed'] += 1
             if progress['albums_completed'] % 25 == 0 or progress['albums_completed'] == len(completeness_rows):
                 _refresh_hifi_match_coverage_progress(cur, progress)
-                update_job_progress(job_id, {'progress': progress})
+                jobs.update_job_progress(job_id, {'progress': progress})
 
         conn.commit()
         _refresh_hifi_match_coverage_progress(cur, progress)
         _raise_if_job_cancelled(job_id)
         stages['updating_album_completeness'] = 'done'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
     finally:
         conn.close()
 
@@ -3553,7 +3442,7 @@ def hifi_match_job_worker():
 
     while True:
         try:
-            job = claim_next_job('hifi_match')
+            job = jobs.claim_next_job('hifi_match')
             if not job:
                 time.sleep(5)
                 continue
@@ -3563,8 +3452,8 @@ def hifi_match_job_worker():
             except (TypeError, ValueError):
                 payload = {}
 
-            if any_plex_sync_jobs_running_or_queued() or any_plex_library_update_jobs_running_or_queued():
-                requeue_claimed_job(
+            if jobs.any_plex_sync_jobs_running_or_queued() or any_plex_library_update_jobs_running_or_queued():
+                jobs.requeue_claimed_job(
                     job['id'],
                     delay_seconds=20,
                     error_message='Waiting for Plex sync and update jobs to finish before hifi matching'
@@ -3575,7 +3464,7 @@ def hifi_match_job_worker():
 
             try:
                 result = process_hifi_match_job(job['id'], payload)
-                mark_job_succeeded(job['id'], result)
+                jobs.mark_job_succeeded(job['id'], result)
                 print(f"[HIFI_MATCH_WORKER] Job {job['id']} completed", flush=True)
             except JobCancelledError:
                 jobs.mark_job_cancelled(job['id'])
@@ -3583,7 +3472,7 @@ def hifi_match_job_worker():
                 time.sleep(1)
             except Exception as e:
                 print(f"[HIFI_MATCH_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
             print(f"[HIFI_MATCH_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -3608,11 +3497,11 @@ def process_plex_sync_job(job_id, payload):
         'upserted_songs': 0,
         'deleted_songs': 0
     }
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     print(f"[PLEX_SYNC] Job {job_id} connecting to Plex at {server_url}", flush=True)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     library = None
     for section in plex.library.sections():
@@ -3636,7 +3525,7 @@ def process_plex_sync_job(job_id, payload):
     progress['total_tracks'] = len(tracks)
     stages['reading_plex_library'] = 'done'
     stages['updating_local_index'] = 'in_progress'
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -3785,10 +3674,10 @@ def process_plex_sync_job(job_id, payload):
         progress['processed_tracks'] = idx
         progress['upserted_songs'] = upserted
         if idx % 25 == 0 or idx == len(tracks):
-            update_job_progress(job_id, {'progress': progress})
+            jobs.update_job_progress(job_id, {'progress': progress})
 
     conn.commit()
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     deleted = 0
     if seen_paths:
@@ -3840,7 +3729,7 @@ def process_plex_sync_job(job_id, payload):
 
     progress['deleted_songs'] = deleted
     stages['updating_local_index'] = 'done'
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     labeled_count = 0
     if explicit_album_keys:
@@ -3887,7 +3776,7 @@ def plex_sync_job_worker():
 
     while True:
         try:
-            job = claim_next_job('plex_library_sync')
+            job = jobs.claim_next_job('plex_library_sync')
             if not job:
                 time.sleep(5)
                 continue
@@ -3898,7 +3787,7 @@ def plex_sync_job_worker():
                 payload = {}
 
             if any_plex_library_update_jobs_running_or_queued():
-                requeue_claimed_job(
+                jobs.requeue_claimed_job(
                     job['id'],
                     delay_seconds=20,
                     error_message='Waiting for plex_library_update jobs to finish before sync'
@@ -3909,11 +3798,11 @@ def plex_sync_job_worker():
 
             try:
                 result = process_plex_sync_job(job['id'], payload)
-                mark_job_succeeded(job['id'], result)
+                jobs.mark_job_succeeded(job['id'], result)
                 print(f"[PLEX_SYNC_WORKER] Job {job['id']} completed", flush=True)
             except Exception as e:
                 print(f"[PLEX_SYNC_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
             print(f"[PLEX_SYNC_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -3941,7 +3830,7 @@ def plex_sync_scheduler_worker():
             if interval_hours < 1:
                 interval_hours = 1
 
-            if any_plex_sync_jobs_running_or_queued():
+            if jobs.any_plex_sync_jobs_running_or_queued():
                 time.sleep(60)
                 continue
 
@@ -3954,7 +3843,7 @@ def plex_sync_scheduler_worker():
                 should_enqueue = now - last_finished >= timedelta(hours=interval_hours)
 
             if should_enqueue:
-                queued = queue_plex_library_sync(trigger='interval')
+                queued = jobs.queue_plex_library_sync(trigger='interval')
                 if queued:
                     print(f"[PLEX_SYNC_SCHEDULER] Queued interval sync job {queued}", flush=True)
 
@@ -3963,93 +3852,13 @@ def plex_sync_scheduler_worker():
 
         time.sleep(60)
 
-def serialize_job_payload(payload):
-    return jobs.serialize_job_payload(payload)
-
-def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
-    return jobs.enqueue_job(job_type, payload, status=status, priority=priority, run_after=run_after, max_attempts=max_attempts)
-
-def queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=None, plex_user_id=None):
-    return jobs.queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=parent_job_id, plex_user_id=plex_user_id)
-
-def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
-    return jobs.update_parent_playlist_stage(parent_job_id, playlist_stage_status)
-
-def backfill_plex_playlist_add_parent_links():
-    return jobs.backfill_plex_playlist_add_parent_links()
-
-def get_pending_playlist_additions():
-    return jobs.get_pending_playlist_additions()
-
-def update_pending_addition_attempt(addition_id, error_message=None):
-    return jobs.update_pending_addition_attempt(addition_id, error_message)
-
-def remove_pending_addition(addition_id):
-    return jobs.remove_pending_addition(addition_id)
-
-def compute_job_backoff_seconds(attempt_count):
-    return jobs.compute_job_backoff_seconds(attempt_count)
-
-class ManifestDownloadError(Exception):
-    pass
-
-class TransientDownloadError(Exception):
-    pass
-
-class PermanentDownloadError(Exception):
-    pass
-
-def claim_next_job(job_type):
-    return jobs.claim_next_job(job_type)
-
-def mark_job_succeeded(job_id, result):
-    return jobs.mark_job_succeeded(job_id, result)
-
-def _download_track_all_stages_done(stages):
-    if not isinstance(stages, dict):
-        return False
-
-    required_stages = (
-        'downloaded',
-        'tagged',
-        'written'
-    )
-    if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
-        return False
-
-    if stages.get('converted') not in ('done', 'skipped'):
-        return False
-
-    return stages.get('playlist_added') in ('done', 'skipped')
-
-def mark_job_in_progress(job_id):
-    return jobs.mark_job_in_progress(job_id)
-
-def requeue_claimed_job(job_id, delay_seconds=30, error_message=None):
-    return jobs.requeue_claimed_job(job_id, delay_seconds=delay_seconds, error_message=error_message)
-
-def recover_stale_in_progress_jobs(stale_after_minutes=15):
-    return jobs.recover_stale_in_progress_jobs(stale_after_minutes=stale_after_minutes)
-
-def is_job_cancelled(job_id):
-    return jobs.is_job_cancelled(job_id)
-
-def update_job_progress(job_id, updates):
-    return jobs.update_job_progress(job_id, updates)
-
-def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
-    return jobs.mark_job_failed(job_id, attempt_count, max_attempts, error_message)
-
-def mark_job_retrying(job_id, attempt_count, error_message):
-    return jobs.mark_job_retrying(job_id, attempt_count, error_message)
-
 
 class JobCancelledError(Exception):
     pass
 
 
 def _raise_if_job_cancelled(job_id):
-    if is_job_cancelled(job_id):
+    if jobs.is_job_cancelled(job_id):
         raise JobCancelledError(f'Job {job_id} was cancelled')
 
 def process_download_job(job_id, payload):
@@ -4078,10 +3887,10 @@ def process_download_job(job_id, payload):
             audio_quality=quality_choice
         )
     except Exception as e:
-        raise TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
+        raise jobs.TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
 
     if not isinstance(track_object, dict):
-        raise TransientDownloadError("Failed to build normalized track object")
+        raise jobs.TransientDownloadError("Failed to build normalized track object")
 
     file_naming = payload.get('fileNaming')
     if not file_naming:
@@ -4115,10 +3924,10 @@ def process_download_job(job_id, payload):
             usage='DOWNLOAD'
         )
     except Exception as e:
-        raise TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+        raise jobs.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
 
     with open(temp_source_path, 'rb') as tmp_file:
-        audio_format = detect_audio_format(tmp_file.read(32))
+        audio_format = downloads.detect_audio_format(tmp_file.read(32))
 
     print(f"[DOWNLOAD] Detected downloaded audio format: {audio_format}", flush=True)
     if audio_format == 'unknown':
@@ -4248,7 +4057,7 @@ def process_download_job(job_id, payload):
         release_year = extract_year_from_text(copyright_text)
 
     if not cover_url and album_id:
-        cover_url = format_tidal_image_url(str(album_id), 1280)
+        cover_url = downloads.format_tidal_image_url(str(album_id), 1280)
 
     if not album_artist_name:
         album_artist_name = track_artist_name
@@ -4324,7 +4133,7 @@ def process_download_job(job_id, payload):
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
-        update_job_progress(job_id, {
+        jobs.update_job_progress(job_id, {
             'artist': artist_name,
             'album': album_name,
             'title': track_title,
@@ -4334,7 +4143,7 @@ def process_download_job(job_id, payload):
 
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
-            queue_pending_playlist_addition(
+            jobs.queue_pending_playlist_addition(
                 artist_name,
                 album_name,
                 track_title,
@@ -4348,7 +4157,7 @@ def process_download_job(job_id, payload):
         else:
             print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
             stages['playlist_added'] = 'skipped'
-        update_job_progress(job_id, {'stages': stages})
+        jobs.update_job_progress(job_id, {'stages': stages})
 
         upsert_download_match_hint(
             track_title=track_title,
@@ -4379,7 +4188,7 @@ def process_download_job(job_id, payload):
         flush=True
     )
 
-    update_job_progress(job_id, {
+    jobs.update_job_progress(job_id, {
         'artist': artist_name,
         'album': album_name,
         'title': track_title,
@@ -4412,7 +4221,7 @@ def process_download_job(job_id, payload):
 
     cover_image_data = None
     if cover_url:
-        cover_image_data = download_cover_image(cover_url)
+        cover_image_data = downloads.download_cover_image(cover_url)
 
     album_track_count = None
     if isinstance(album_data.get('numberOfTracks'), int):
@@ -4461,22 +4270,22 @@ def process_download_job(job_id, payload):
 
     stages['downloaded'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
     add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
     stages['tagged'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     converted = False
     if output_format == 'm4a' and audio_format != 'm4a':
         print(f"[DOWNLOAD] Output format is AAC - converting staged {audio_format.upper()} to M4A", flush=True)
         success = convert_to_aac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
-            cleanup_file(temp_source_path)
-            cleanup_file(temp_target_path)
+            downloads.cleanup_file(temp_source_path)
+            downloads.cleanup_file(temp_target_path)
             raise Exception(f"Failed to convert {audio_format.upper()} to M4A")
 
         shutil.move(temp_target_path, full_path)
@@ -4488,8 +4297,8 @@ def process_download_job(job_id, payload):
         print(f"[DOWNLOAD] Output format is FLAC - converting staged {audio_format.upper()} to FLAC", flush=True)
         success = convert_to_flac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
-            cleanup_file(temp_source_path)
-            cleanup_file(temp_target_path)
+            downloads.cleanup_file(temp_source_path)
+            downloads.cleanup_file(temp_target_path)
             raise Exception(f"Failed to convert {audio_format.upper()} to FLAC")
 
         shutil.move(temp_target_path, full_path)
@@ -4508,19 +4317,19 @@ def process_download_job(job_id, payload):
     stages['converted'] = 'done' if converted else 'skipped'
     stages['written'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     if converted:
-        cleanup_file(temp_source_path)
-        cleanup_file(temp_target_path)
+        downloads.cleanup_file(temp_source_path)
+        downloads.cleanup_file(temp_target_path)
     else:
-        cleanup_file(temp_source_path)
+        downloads.cleanup_file(temp_source_path)
 
     print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
-        queue_pending_playlist_addition(
+        jobs.queue_pending_playlist_addition(
             artist_name,
             album_name,
             track_title,
@@ -4534,7 +4343,7 @@ def process_download_job(job_id, payload):
     else:
         print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
         stages['playlist_added'] = 'skipped'
-    update_job_progress(job_id, {'stages': stages})
+    jobs.update_job_progress(job_id, {'stages': stages})
 
     final_audio_format = output_format
     upsert_download_match_hint(
@@ -4566,7 +4375,7 @@ def download_job_worker():
 
     while True:
         try:
-            job = claim_next_job('download_track')
+            job = jobs.claim_next_job('download_track')
             if not job:
                 time.sleep(2)
                 continue
@@ -4580,32 +4389,32 @@ def download_job_worker():
                 result = process_download_job(job['id'], payload)
                 stages = result.get('stages') if isinstance(result, dict) else {}
 
-                if _download_track_all_stages_done(stages):
-                    mark_job_succeeded(job['id'], result)
+                if jobs._download_track_all_stages_done(stages):
+                    jobs.mark_job_succeeded(job['id'], result)
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} completed", flush=True)
                 elif isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                    mark_job_in_progress(job['id'])
+                    jobs.mark_job_in_progress(job['id'])
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} waiting for playlist_add completion", flush=True)
                 else:
                     stage_state = stages if isinstance(stages, dict) else {}
-                    error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
+                    error_message = f"Download stages incomplete: {jobs.serialize_job_payload(stage_state)}"
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_message}", flush=True)
-                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
-            except PermanentDownloadError as e:
+                    jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
+            except jobs.PermanentDownloadError as e:
                 print(f"[DOWNLOAD_WORKER] Job {job['id']} failed (permanent): {str(e)}", flush=True)
-                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
-            except (ManifestDownloadError, TransientDownloadError) as e:
+            except (jobs.ManifestDownloadError, jobs.TransientDownloadError) as e:
                 if job['attempt_count'] + 1 >= job['max_attempts']:
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                    mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                    jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 else:
                     print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying (manifest fetch): {str(e)}", flush=True)
-                    mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                    jobs.mark_job_retrying(job['id'], job['attempt_count'], str(e))
                 time.sleep(1)
             except Exception as e:
                 print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
-                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
             print(f"[DOWNLOAD_WORKER] Error in background worker: {str(e)}", flush=True)
@@ -4626,7 +4435,7 @@ def retry_pending_playlist_additions():
             if not (plex_config['server_url'] and plex_config['api_token']):
                 continue
             
-            pending = get_pending_playlist_additions()
+            pending = jobs.get_pending_playlist_additions()
             
             if not pending:
                 continue
@@ -4654,12 +4463,12 @@ def retry_pending_playlist_additions():
                     
                     if success:
                         print(f"[PLEX_WORKER] Successfully added: {artist} - {title}", flush=True)
-                        remove_pending_addition(addition['id'])
-                        update_parent_playlist_stage(parent_job_id, 'done')
+                        jobs.remove_pending_addition(addition['id'])
+                        jobs.update_parent_playlist_stage(parent_job_id, 'done')
                     else:
-                        update_pending_addition_attempt(addition['id'], message)
+                        jobs.update_pending_addition_attempt(addition['id'], message)
                         if addition['attempt_count'] + 1 >= addition['max_attempts']:
-                            update_parent_playlist_stage(parent_job_id, 'failed')
+                            jobs.update_parent_playlist_stage(parent_job_id, 'failed')
                             print(f"[PLEX_WORKER] Max attempts reached for: {artist} - {title}", flush=True)
                         else:
                             print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
@@ -4669,44 +4478,15 @@ def retry_pending_playlist_additions():
                     
                 except Exception as e:
                     print(f"[PLEX_WORKER] Error processing addition {addition['id']}: {str(e)}", flush=True)
-                    update_pending_addition_attempt(addition['id'], str(e))
+                    jobs.update_pending_addition_attempt(addition['id'], str(e))
                     if addition['attempt_count'] + 1 >= addition['max_attempts']:
-                        update_parent_playlist_stage(parent_job_id, 'failed')
+                        jobs.update_parent_playlist_stage(parent_job_id, 'failed')
         
         except Exception as e:
             print(f"[PLEX_WORKER] Error in background worker: {str(e)}", flush=True)
             # Continue running even if there's an error
             time.sleep(60)
 
-
-def seed_mirrors_from_json():
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Clear existing entries
-    cur.execute("DELETE FROM mirror_endpoints")
-    
-    # Insert fresh data from JSON with initial values
-    for entry in urls_data:
-        cur.execute(
-            """
-            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                entry.get('name'),
-                entry.get('encodedUrl'),
-                0,
-                None,
-                None
-            )
-        )
-    
-    conn.commit()
-    conn.close()
 
 def get_download_settings():
     conn = get_db_connection()
@@ -4965,160 +4745,21 @@ def test_plex_connection(server_url, api_token):
         print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
         return False, f'Failed to connect to Plex: {error_msg}', None
 
-# Validation Functions
-def validate_endpoint(url, name, timeout=5):
-    """
-    Validate a single endpoint using the upstream health check (GET /).
-    Records response time and whether the mirror is reachable and returning valid JSON.
-
-    Args:
-        url: Base URL of the endpoint
-        name: Name of the endpoint
-        timeout: Request timeout in seconds
-
-    Returns:
-        Dict with validation results including online status and response time
-    """
-    timestamp = datetime.utcnow().isoformat() + 'Z'
-
-    try:
-        start_time = time.time()
-        response = requests.get(f"{url}/", timeout=timeout)
-        response_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-
-        online = False
-        error = None
-
-        if response.status_code == 200:
-            try:
-                response.json()
-                online = True
-            except json.JSONDecodeError:
-                error = 'Invalid JSON response'
-        else:
-            error = f'HTTP {response.status_code}'
-
-        return {
-            'online': online,
-            'responseTime': round(response_time, 2) if online else None,
-            'lastChecked': timestamp,
-            'error': error
-        }
-
-    except requests.exceptions.Timeout:
-        return {
-            'online': False,
-            'responseTime': None,
-            'lastChecked': timestamp,
-            'error': 'Timeout'
-        }
-    except requests.exceptions.RequestException as e:
-        return {
-            'online': False,
-            'responseTime': None,
-            'lastChecked': timestamp,
-            'error': str(e)
-        }
-
-def validate_all_endpoints():
-    """
-    Validate all squid endpoints on startup.
-    Returns validation summary.
-    """
-    print("\n" + "="*60, flush=True)
-    print("Starting Squid URL Validation", flush=True)
-    print("="*60, flush=True)
-    
-    # Load current URLs
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-    
-    online_count = 0
-    offline_count = 0
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    # Validate each endpoint
-    for entry in urls_data:
-        name = entry['name']
-        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-
-        print(f"\n[{name}] Checking {decoded_url}...", flush=True)
-
-        result = validate_endpoint(decoded_url, name, timeout=5)
-
-        # Update database with results
-        cur.execute(
-            """
-            UPDATE mirror_endpoints
-            SET online = %s, response_time = %s, last_checked = %s
-            WHERE name = %s
-            """,
-            (
-                1 if result['online'] else 0,
-                result['responseTime'],
-                result['lastChecked'],
-                name
-            )
-        )
-
-        if result['online']:
-            online_count += 1
-            print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
-        else:
-            offline_count += 1
-            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
-
-    conn.commit()
-    conn.close()
-
-    # Print summary
-    print("\n" + "="*60, flush=True)
-    print("Validation Complete", flush=True)
-    print("="*60, flush=True)
-    print(f"Total endpoints: {len(urls_data)}", flush=True)
-    print(f"Online: {online_count}", flush=True)
-    print(f"Offline: {offline_count}", flush=True)
-    print("="*60 + "\n", flush=True)
-
-    return {
-        'total': len(urls_data),
-        'online': online_count,
-        'offline': offline_count
-    }
-
-# Load squid URLs and set up round-robin
-def load_squid_urls():
-    """Load and decode squid URLs from JSON file"""
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-    
-    decoded_urls = []
-    for entry in urls_data:
-        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-        decoded_urls.append({
-            'name': entry['name'],
-            'url': decoded_url
-        })
-    
-    return decoded_urls
-
 # Initialize SQLite and mirror data
 init_db()
 init_library_update_status()
-recover_stale_in_progress_jobs(stale_after_minutes=15)
-seed_mirrors_from_json()
+jobs.recover_stale_in_progress_jobs(stale_after_minutes=15)
+downloads.seed_mirrors_from_json()
 
 # Initialize URL list and round-robin iterator
-SQUID_URLS = load_squid_urls()
+SQUID_URLS = downloads.load_squid_urls()
 url_iterator = cycle(SQUID_URLS)
 
 # Run validation on startup
 # With gunicorn --preload, this runs once before workers are forked
 print("Squidly starting up...", flush=True)
-validate_all_endpoints()
-backfill_plex_playlist_add_parent_links()
+downloads.validate_all_endpoints()
+jobs.backfill_plex_playlist_add_parent_links()
 plex_healthcheck()
 
 # Start background worker for retrying failed Plex playlist additions
@@ -5268,7 +4909,7 @@ def search():
             return jsonify({'error': 'Track ID must be numeric'}), 400
 
         try:
-            response, target = make_request_with_retry_rotating_mirrors(
+            response, target = downloads.make_request_with_retry_rotating_mirrors(
                 f"/info/?{urlencode({'id': query})}",
                 SQUID_URLS,
                 method='GET',
@@ -5331,7 +4972,7 @@ def search():
     upstream_query = urlencode(upstream_params)
     
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/search/?{upstream_query}",
                 SQUID_URLS,
             max_retries=3
@@ -5458,7 +5099,7 @@ def track_info(track_id=None):
     upstream_query = urlencode({'id': track_id})
     
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/info/?{upstream_query}",
             SQUID_URLS,
             method='GET',
@@ -5678,7 +5319,7 @@ def playlist_info(playlist_id=None):
         params['offset'] = offset
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/playlist/?{urlencode(params)}",
             SQUID_URLS,
             method='GET',
@@ -5733,7 +5374,7 @@ def track_download(track_id=None):
         return jsonify({'error': 'Invalid quality. Must be one of: ' + ', '.join(sorted(valid_qualities))}), 400
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/track/?{urlencode({'id': track_id, 'quality': quality})}",
             SQUID_URLS,
             method='GET',
@@ -5776,7 +5417,7 @@ def track_similar(track_id=None):
     params = {'id': track_id}
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/recommendations/?{urlencode(params)}",
             SQUID_URLS,
             method='GET',
@@ -5823,7 +5464,7 @@ def artist_similar(artist_id=None):
         params['cursor'] = cursor
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/artist/similar/?{urlencode(params)}",
             SQUID_URLS,
             method='GET',
@@ -5870,7 +5511,7 @@ def album_similar(album_id=None):
         params['cursor'] = cursor
 
     try:
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/album/similar/?{urlencode(params)}",
             SQUID_URLS,
             method='GET',
@@ -6054,22 +5695,6 @@ def youtube_music_playlist():
             'details': str(e)
         }), 500
 
-def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
-    """
-    Format a Tidal CDN image URL from a UUID/path and requested square size.
-
-    Args:
-        image_id_or_path: Tidal image UUID/path (may contain dashes)
-        size: Square image size in pixels
-
-    Returns:
-        Full URL to the image
-    """
-    if not image_id_or_path:
-        return ''
-
-    image_path = image_id_or_path.replace('-', '/')
-    return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
 
 def sanitize_filename_component(value: str) -> str:
     """
@@ -6285,38 +5910,6 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
     # print(f"[PLEX_EXISTS_CHECK] Result: exists={exists}, found {len(rows)} rows with matching format={requested_format}", flush=True)
     return exists
 
-def cleanup_file(path: str) -> None:
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-            print(f"[DOWNLOAD] Cleaned up temporary file", flush=True)
-    except Exception as e:
-        print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
-
-def detect_audio_format(data: bytes) -> str:
-    """
-    Detect the audio format from the file's magic bytes.
-    Returns: 'flac', 'm4a', 'mp3', or 'unknown'
-    """
-    if len(data) < 12:
-        return 'unknown'
-    
-    # Check for FLAC (starts with 'fLaC')
-    if data[:4] == b'fLaC':
-        return 'flac'
-    
-    # Check for M4A/MP4 (has 'ftyp' at offset 4, and typically 'M4A ' or 'mp42' after)
-    if len(data) >= 12 and data[4:8] == b'ftyp':
-        # Check common M4A/AAC signatures
-        if data[8:12] in [b'M4A ', b'mp42', b'isom', b'iso2']:
-            return 'm4a'
-    
-    # Check for MP3 (ID3v2 tag or MPEG sync word)
-    if data[:3] == b'ID3' or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
-        return 'mp3'
-    
-    return 'unknown'
-
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
     """
     Add ID3 tags to an audio file (handles FLAC, MP3, and M4A/AAC).
@@ -6531,81 +6124,6 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
     except Exception as e:
         print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
 
-def download_cover_image(cover_url):
-    """
-    Download album cover image from URL.
-    Returns binary image data or None if download fails.
-    """
-    if not cover_url:
-        print(f"[COVER] No cover URL provided", flush=True)
-        return None
-    
-    try:
-        print(f"[COVER] Downloading cover image from: {cover_url}", flush=True)
-        response = requests.get(cover_url, timeout=10)
-        
-        if response.ok:
-            print(f"[COVER] Successfully downloaded cover image ({len(response.content)} bytes)", flush=True)
-            return response.content
-        else:
-            print(f"[COVER] Failed to download cover image. Status: {response.status_code}", flush=True)
-            return None
-    except requests.exceptions.Timeout:
-        print(f"[COVER] ERROR: Timeout downloading cover image from {cover_url}", flush=True)
-        return None
-    except Exception as e:
-        print(f"[COVER] Error downloading cover image: {str(e)}", flush=True)
-        return None
-
-def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio') -> bool:
-    """
-    Convert an audio file (e.g., FLAC or M4A/AAC) to highest VBR quality MP3 using ffmpeg.
-
-    Args:
-        source_path: Path to the source audio file
-        mp3_path: Path where the MP3 should be saved
-        source_format: Source format label for logging
-
-    Returns:
-        True on success, False on failure
-    """
-    try:
-        print(
-            f"[FFMPEG] Converting {source_format.upper()} to MP3 (highest VBR quality): {source_path} -> {mp3_path}",
-            flush=True
-        )
-
-        mp3_dir = os.path.dirname(mp3_path)
-        if mp3_dir:
-            os.makedirs(mp3_dir, exist_ok=True)
-
-        cmd = [
-            'ffmpeg',
-            '-i', source_path,
-            '-c:a', 'libmp3lame',
-            '-q:a', '0',
-            '-y',
-            mp3_path
-        ]
-
-        print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-        if result.returncode == 0:
-            print(f"[FFMPEG] SUCCESS: Converted to {mp3_path}", flush=True)
-            return True
-
-        print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
-        print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
-        return False
-
-    except subprocess.TimeoutExpired:
-        print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
-        return False
-    except Exception as e:
-        print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
-        return False
 
 @app.route('/api/downloads', methods=['POST'])
 def download_track():
@@ -6644,7 +6162,7 @@ def download_track():
         'ignore_matches': ignore_matches
     }
 
-    job_id = enqueue_job('download_track', job_payload)
+    job_id = jobs.enqueue_job('download_track', job_payload)
     set_last_download_activity_at(datetime.utcnow())
 
     update_job_id = queue_plex_library_update(trigger='download_enqueue')
@@ -6653,7 +6171,7 @@ def download_track():
     else:
         print("[DOWNLOAD] plex_library_update already queued/in progress; not queueing another", flush=True)
 
-    sync_job_id = queue_plex_library_sync(trigger='download_enqueue')
+    sync_job_id = jobs.queue_plex_library_sync(trigger='download_enqueue')
     if sync_job_id:
         print(f"[DOWNLOAD] Queued plex_library_sync job {sync_job_id} (download enqueue)", flush=True)
     else:
@@ -7374,7 +6892,7 @@ def match_listenbrainz_track():
             pass
 
     def search_hifi(search_type, search_query, limit=25):
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/search/?{urlencode({search_type: search_query, 'limit': str(limit)})}",
             SQUID_URLS,
             method='GET',
@@ -7629,7 +7147,7 @@ def match_ytm_track():
         return score
 
     def search_hifi(search_type, search_query, limit=25):
-        response, target = make_request_with_retry_rotating_mirrors(
+        response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/search/?{urlencode({search_type: search_query, 'limit': str(limit)})}",
             SQUID_URLS,
             method='GET',
@@ -7715,7 +7233,7 @@ def save_plex_config_endpoint():
 @app.route('/api/plex/syncs', methods=['POST'])
 def start_plex_sync_endpoint():
     """Queue a manual Plex library sync job."""
-    result = start_plex_sync_job(trigger='manual')
+    result = jobs.start_plex_sync_job(trigger='manual')
     if not result.get('ok'):
         status_code = result.get('status_code', 500)
         return jsonify({'error': result.get('error')}), int(status_code)
