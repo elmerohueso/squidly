@@ -3846,64 +3846,65 @@ def test_plex_connection(server_url, api_token):
         print(f"[PLEX] Connection test failed: {error_msg}", flush=True)
         return False, f'Failed to connect to Plex: {error_msg}', None
 
-# Initialize database and mirror data
-init_db()
-jobs.recover_stale_in_progress_jobs(stale_after_minutes=15)
-downloads.seed_mirrors_from_json()
+# Initialize database and mirror data (skip during testing)
+if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
+    init_db()
+    jobs.recover_stale_in_progress_jobs(stale_after_minutes=15)
+    downloads.seed_mirrors_from_json()
 
-# Initialize URL list and round-robin iterator
-SQUID_URLS = downloads.load_squid_urls()
-url_iterator = cycle(SQUID_URLS)
+    # Initialize URL list and round-robin iterator
+    SQUID_URLS = downloads.load_squid_urls()
+    url_iterator = cycle(SQUID_URLS)
 
-# Run validation on startup
-# With gunicorn --preload, this runs once before workers are forked
-print("Squidly starting up...", flush=True)
-downloads.validate_all_endpoints()
-jobs.backfill_plex_playlist_add_parent_links()
-plex_healthcheck()
+    # Run validation on startup
+    # With gunicorn --preload, this runs once before workers are forked
+    print("Squidly starting up...", flush=True)
+    downloads.validate_all_endpoints()
+    jobs.backfill_plex_playlist_add_parent_links()
+    plex_healthcheck()
 
-# Start background worker for retrying failed Plex playlist additions
-plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
-plex_retry_thread.start()
-print("Plex playlist retry worker started\n", flush=True)
+    # Start background worker for retrying failed Plex playlist additions
+    plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
+    plex_retry_thread.start()
+    print("Plex playlist retry worker started\n", flush=True)
 
-# Start background worker for processing download jobs
+    # Start background worker for processing download jobs
 
-# Start background worker for processing download jobs
-download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
-download_worker_thread.start()
-print("Download job worker started\n", flush=True)
+    # Start background worker for processing download jobs
+    download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
+    download_worker_thread.start()
+    print("Download job worker started\n", flush=True)
 
-# Start background worker for Plex library sync jobs
-plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
-plex_sync_worker_thread.start()
-print("Plex library sync job worker started\n", flush=True)
+    # Start background worker for Plex library sync jobs
+    plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
+    plex_sync_worker_thread.start()
+    print("Plex library sync job worker started\n", flush=True)
 
-# Start background worker for Plex library update jobs
-plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
-plex_library_update_worker_thread.start()
-print("Plex library update job worker started\n", flush=True)
+    # Start background worker for Plex library update jobs
+    plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
+    plex_library_update_worker_thread.start()
+    print("Plex library update job worker started\n", flush=True)
 
-# Start background worker for hifi matching jobs
-hifi_match_worker_thread = threading.Thread(target=hifi_match_job_worker, daemon=True)
-hifi_match_worker_thread.start()
-print("Hifi match job worker started\n", flush=True)
+    # Start background worker for hifi matching jobs
+    hifi_match_worker_thread = threading.Thread(target=hifi_match_job_worker, daemon=True)
+    hifi_match_worker_thread.start()
+    print("Hifi match job worker started\n", flush=True)
 
-# Start scheduler for interval-based Plex sync jobs
-plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)
-plex_sync_scheduler_thread.start()
-print("Plex library sync scheduler started\n", flush=True)
+    # Start scheduler for interval-based Plex sync jobs
+    plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)
+    plex_sync_scheduler_thread.start()
+    print("Plex library sync scheduler started\n", flush=True)
 
-# Legacy timed library update worker is intentionally disabled.
-# Updates are now queued on download enqueue and gated in process_plex_library_update_job.
+    # Legacy timed library update worker is intentionally disabled.
+    # Updates are now queued on download enqueue and gated in process_plex_library_update_job.
 
-# Download folders already created and validated at module level above
+    # Download folders already created and validated at module level above
 
-try:
-    os.makedirs('/app/temp', exist_ok=True)
-    print("Temp folder ready (/app/temp)", flush=True)
-except Exception as e:
-    print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
+    try:
+        os.makedirs('/app/temp', exist_ok=True)
+        print("Temp folder ready (/app/temp)", flush=True)
+    except Exception as e:
+        print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
 
 
 # Helper to check if Plex credentials are valid
