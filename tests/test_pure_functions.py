@@ -9,10 +9,12 @@ from squidly.jobs import (
     serialize_job_payload,
 )
 from squidly.downloads import (
-    clean_path_components,
     detect_audio_format,
-    extract_year_from_text,
     format_tidal_image_url,
+)
+from squidly.utils import (
+    clean_path_components,
+    extract_year_from_text,
     sanitize_filename_component,
 )
 from squidly.storage import normalize_db_timestamp
@@ -169,7 +171,7 @@ class TestSanitizeFilenameComponent:
 
     def test_returns_empty_for_empty_input(self):
         assert sanitize_filename_component("") == ""
-        assert sanitize_filename_component(None) == ""
+        assert sanitize_filename_component(None) is None
 
 
 class TestCleanPathComponents:
@@ -185,9 +187,13 @@ class TestCleanPathComponents:
         result = clean_path_components("Artist/Album/Track.flac")
         assert result == "Artist/Album/Track.flac"
 
-    def test_handles_trailing_slash(self):
-        result = clean_path_components("Artist/Album/")
-        assert result == "Artist/Album"
+    def test_strips_trailing_period(self):
+        result = clean_path_components("Artist./Album./Track.")
+        assert result == "Artist/Album/Track"
+
+    def test_strips_trailing_space(self):
+        result = clean_path_components("Artist /Album /Track ")
+        assert result == "Artist/Album/Track"
 
 
 class TestExtractYearFromText:

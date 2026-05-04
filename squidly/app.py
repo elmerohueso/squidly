@@ -12,6 +12,14 @@ import base64
 import requests
 import psycopg2
 import psycopg2.extras
+from squidly.utils import (
+    _now_utc,
+    _safe_float,
+    _safe_int,
+    clean_path_components,
+    extract_year_from_text,
+    sanitize_filename_component,
+)
 from squidly.hifi import (
     get_hifi_album_object,
     get_hifi_artist_object,
@@ -313,28 +321,6 @@ def get_last_successful_plex_sync_finished_at():
     if finished_at and hasattr(finished_at, 'replace'):
         finished_at = finished_at.replace(tzinfo=None)
     return finished_at
-
-
-def _safe_int(value):
-    try:
-        if value is None or value == '':
-            return None
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_float(value, default=0.0):
-    try:
-        if value is None or value == '':
-            return float(default)
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _now_utc():
-    return datetime.utcnow()
 
 
 def _normalize_library_track_path(file_path):
@@ -4796,78 +4782,6 @@ def youtube_music_playlist():
             'details': str(e)
         }), 500
 
-
-def sanitize_filename_component(value: str) -> str:
-    """
-    Sanitize a single filename or folder name component by removing/replacing invalid characters.
-    This should be called on individual metadata values (artist, album, title) before substituting
-    them into path templates.
-    
-    Args:
-        value: A single component value (artist name, track title, etc.)
-    
-    Returns:
-        Sanitized component safe for use in filenames
-    """
-    if not value:
-        return value
-    
-    # Replace slashes (both forward and back) to prevent unintended subdirectories
-    sanitized = value.replace('/', '-').replace('\\', '-')
-    
-    # Remove or replace other invalid characters on Windows: < > : " | ? *
-    sanitized = sanitized.replace('<', '').replace('>', '')
-    sanitized = sanitized.replace(':', '-').replace('"', "'")
-    sanitized = sanitized.replace('|', '-').replace('?', '')
-    sanitized = sanitized.replace('*', '')
-    
-    # Replace various Unicode apostrophes and quotes with ASCII equivalents
-    sanitized = sanitized.replace('\u2018', "'").replace('\u2019', "'")  # ' '
-    sanitized = sanitized.replace('\u201c', '"').replace('\u201d', '"')  # " "
-    sanitized = sanitized.replace('\u2013', '-').replace('\u2014', '-')  # – —
-    
-    # Remove control characters (ASCII 0-31)
-    sanitized = ''.join(char for char in sanitized if ord(char) >= 32)
-    
-    # Strip trailing periods and spaces (invalid on Windows)
-    sanitized = sanitized.rstrip('. ')
-    
-    # Strip leading spaces
-    sanitized = sanitized.lstrip(' ')
-    
-    # If the entire component was invalid, use a placeholder
-    if not sanitized:
-        sanitized = '_'
-    
-    return sanitized
-
-def clean_path_components(file_path: str) -> str:
-    """
-    Clean file path by removing trailing periods and spaces from each directory component.
-    This is a final cleanup after template substitution.
-    
-    Args:
-        file_path: File path with potential trailing periods/spaces in components
-    
-    Returns:
-        Cleaned file path
-    """
-    # Split path into components
-    parts = file_path.replace('\\', '/').split('/')
-    # Strip trailing periods and spaces from each component
-    cleaned_parts = [part.rstrip('. ') if part else part for part in parts]
-    # Rejoin with forward slashes
-    return '/'.join(cleaned_parts)
-
-def extract_year_from_text(text: str) -> str:
-    """
-    Extract a 4-digit year from a string like a copyright notice.
-    Returns empty string if none found.
-    """
-    if not text or not isinstance(text, str):
-        return ''
-    match = re.search(r"\b(19|20)\d{2}\b", text)
-    return match.group(0) if match else ''
 
 def _requested_download_format(file_format):
     normalized = str(file_format or '').strip().lower()

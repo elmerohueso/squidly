@@ -100,6 +100,17 @@ def test_import_downloads():
     )
 
 
+def test_import_utils():
+    from squidly.utils import (
+        _now_utc,
+        _safe_float,
+        _safe_int,
+        clean_path_components,
+        extract_year_from_text,
+        sanitize_filename_component,
+    )
+
+
 def test_import_app_no_circular():
     """Importing app.py should not raise ImportError from circular deps."""
     from squidly.app import app
