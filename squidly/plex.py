@@ -3,12 +3,19 @@
 import json
 import re
 import threading
+import time
 from datetime import datetime
 import requests
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
+from squidly import jobs
 from squidly.db import get_db_connection
-from squidly.storage import get_plex_config, save_plex_config
+from squidly.storage import (
+    can_start_plex_library_update,
+    get_plex_config,
+    save_plex_config,
+    set_last_library_update_time,
+)
 
 # For PIN login state (in-memory, per-process; production should use persistent store)
 plex_pin_sessions = {}
@@ -339,3 +346,267 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
     except Exception as e:
         print(f"[PLEX] Unexpected error: {str(e)}", flush=True)
         return False, f'Unexpected error: {str(e)}'
+
+
+def _is_plex_library_scan_active(plex, library):
+    """Best-effort check for whether the target Plex library is actively scanning."""
+    try:
+        library.reload()
+        if bool(getattr(library, 'refreshing', False)):
+            return True
+    except Exception:
+        pass
+
+    section_id = str(getattr(library, 'key', '') or '').strip('/')
+
+    try:
+        activities = plex.activities() or []
+    except Exception:
+        activities = []
+
+    for activity in activities:
+        title = str(getattr(activity, 'title', '') or '').lower()
+        activity_type = str(getattr(activity, 'type', '') or '').lower()
+        activity_context = str(getattr(activity, 'context', '') or '').lower()
+
+        data = getattr(activity, '_data', None)
+        data_text = ''
+        if data is not None:
+            try:
+                data_text = json.dumps(data).lower()
+            except Exception:
+                data_text = str(data).lower()
+
+        mentions_scan = ('scan' in title) or ('scan' in activity_type) or ('scan' in activity_context) or ('scan' in data_text)
+        if not mentions_scan:
+            continue
+
+        if section_id:
+            if section_id in data_text or section_id in activity_context:
+                return True
+        else:
+            return True
+
+    return False
+
+
+def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, poll_interval_seconds=5, startup_grace_seconds=30):
+    """
+    Poll Plex until the library scan appears to finish.
+
+    Returns:
+        tuple[bool, bool]: (completed, saw_scan_active)
+    """
+    start = time.monotonic()
+    saw_active = False
+
+    while True:
+        elapsed = time.monotonic() - start
+        active = _is_plex_library_scan_active(plex, library)
+
+        if active:
+            saw_active = True
+            print('[LIBRARY_UPDATE] Plex scan still in progress...', flush=True)
+        elif saw_active:
+            print('[LIBRARY_UPDATE] Plex scan appears complete.', flush=True)
+            return True, True
+        elif elapsed >= startup_grace_seconds:
+            print('[LIBRARY_UPDATE] Did not observe an active scan during startup grace window.', flush=True)
+            return False, False
+
+        if elapsed >= timeout_seconds:
+            print('[LIBRARY_UPDATE] Timed out waiting for Plex scan completion.', flush=True)
+            return False, saw_active
+
+        time.sleep(max(1, poll_interval_seconds))
+
+
+def any_plex_library_update_jobs_running_or_queued():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM jobs
+        WHERE job_type = 'plex_library_update'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return (row.get('count') or 0) > 0
+
+
+def queue_plex_library_update(trigger='scheduled'):
+    if any_plex_library_update_jobs_running_or_queued():
+        return None
+
+    payload = {
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
+
+
+def start_plex_library_update_job(trigger='scheduled'):
+    """Queue a Plex library update job if one is not already queued/in progress."""
+    config = get_plex_config()
+    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
+        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
+
+    job_id = queue_plex_library_update(trigger=trigger)
+    if job_id is None:
+        return {'ok': False, 'status_code': 409, 'error': 'A Plex library update job is already queued or in progress'}
+
+    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
+
+
+def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+    library_name = (config.get('library_name') or '').strip()
+
+    if not server_url or not api_token or not library_name:
+        raise ValueError('Plex server_url, api_token, and library_name must be configured before updating library')
+
+    stages = {
+        'scanning_plex_library': 'pending'
+    }
+    progress = {
+        'download_gate_status': 'pending',
+        'download_gate_checks': 0,
+        'download_gate_blocking_count': 0,
+        'download_gate_idle_seconds': 0,
+        'download_gate_required_idle_seconds': 180,
+        'download_gate_last_activity_at': None,
+        'scan_detected': False,
+        'scan_completed': False,
+        'sync_job_id': None,
+        'sync_queue_status': 'pending'
+    }
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    gate = gate_snapshot or can_start_plex_library_update(required_idle_seconds=180)
+    gate_state = gate.get('gate_state') or {}
+    progress['download_gate_checks'] = 1
+    progress['download_gate_blocking_count'] = gate_state.get('blocking_count') or 0
+    progress['download_gate_idle_seconds'] = gate.get('idle_seconds') or 0
+    progress['download_gate_required_idle_seconds'] = gate.get('required_idle_seconds') or 180
+    progress['download_gate_last_activity_at'] = gate.get('last_activity_at')
+    progress['download_gate_status'] = 'ready'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    stages['scanning_plex_library'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+
+    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
+    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
+
+    library = None
+    for section in plex.library.sections():
+        if section.title == library_name and section.type == 'artist':
+            library = section
+            break
+
+    if not library:
+        raise ValueError(f'Plex music library "{library_name}" not found')
+
+    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} triggering scan on library '{library_name}'", flush=True)
+    library.update()
+
+    completed, saw_active = wait_for_plex_library_scan_completion(
+        plex,
+        library,
+        timeout_seconds=600,
+        poll_interval_seconds=5,
+        startup_grace_seconds=30
+    )
+
+    progress['scan_detected'] = bool(saw_active)
+    progress['scan_completed'] = bool(completed)
+    stages['scanning_plex_library'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    sync_result = jobs.start_plex_sync_job(trigger='post_library_update')
+    if sync_result.get('ok'):
+        progress['sync_job_id'] = sync_result.get('job_id')
+        progress['sync_queue_status'] = 'queued'
+    elif sync_result.get('status_code') == 409:
+        progress['sync_queue_status'] = 'already_queued'
+    else:
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
+
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    set_last_library_update_time(datetime.utcnow())
+
+    trigger = payload.get('trigger') if isinstance(payload, dict) else None
+    scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
+    print(
+        f"[LIBRARY_UPDATE_JOB] Job {job_id} finished. scan_outcome={scan_outcome} sync_queue_status={progress['sync_queue_status']}",
+        flush=True
+    )
+
+    return {
+        'trigger': trigger or 'unknown',
+        'stages': stages,
+        'progress': progress,
+        'scan_outcome': scan_outcome,
+        'sync_job_id': progress.get('sync_job_id'),
+        'sync_queue_status': progress.get('sync_queue_status')
+    }
+
+
+def plex_library_update_job_worker():
+    print("[LIBRARY_UPDATE_JOB_WORKER] Background worker started", flush=True)
+    gate_poll_seconds = 15
+
+    while True:
+        try:
+            gate = can_start_plex_library_update(required_idle_seconds=180)
+            if not gate.get('can_start'):
+                if any_plex_library_update_jobs_running_or_queued():
+                    gate_state = gate.get('gate_state') or {}
+                    blocking_count = gate_state.get('blocking_count') or 0
+                    idle_seconds = gate.get('idle_seconds')
+                    required_idle = gate.get('required_idle_seconds') or 180
+                    print(
+                        f"[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking={blocking_count} idle_seconds={idle_seconds} required_idle={required_idle}",
+                        flush=True
+                    )
+                time.sleep(gate_poll_seconds)
+                continue
+
+            job = jobs.claim_next_job('plex_library_update')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                gate_after_claim = can_start_plex_library_update(required_idle_seconds=180)
+                if not gate_after_claim.get('can_start'):
+                    jobs.requeue_claimed_job(
+                        job['id'],
+                        delay_seconds=gate_poll_seconds,
+                        error_message='Waiting for downloads gate before starting Plex library update'
+                    )
+                    print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} deferred until downloads gate is ready", flush=True)
+                    time.sleep(1)
+                    continue
+
+                result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
+                jobs.mark_job_succeeded(job['id'], result)
+                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} completed", flush=True)
+            except Exception as e:
+                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
