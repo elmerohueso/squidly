@@ -23,7 +23,6 @@ from squidly.downloads import (
     sanitize_filename_component,
     extract_year_from_text,
 )
-from squidly.plex import add_tracks_to_plex_playlist
 from squidly.storage import (
     normalize_db_timestamp,
     set_last_download_activity_at,

@@ -18,6 +18,7 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 import requests
 from squidly.db import get_db_connection
+from squidly.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
 
 
 def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
@@ -776,51 +777,6 @@ def validate_all_endpoints():
         'online': online_count,
         'offline': offline_count
     }
-
-
-def sanitize_filename_component(value: str) -> str:
-    """Sanitize a single component used in filesystem paths."""
-    if not value:
-        return ''
-
-    sanitized = value.replace('/', '-').replace('\\', '-')
-    sanitized = sanitized.replace('<', '').replace('>', '')
-    sanitized = sanitized.replace(':', '-').replace('"', "'")
-    sanitized = sanitized.replace('|', '-')
-    sanitized = sanitized.replace('?', '')
-    sanitized = sanitized.replace('*', '')
-
-    # Replace Unicode quotes and apostrophes with ASCII equivalents
-    for src, dst in [
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-        ('', '-'),
-    ]:
-        sanitized = sanitized.replace(src, dst)
-
-    return sanitized
-
-
-def clean_path_components(file_path: str) -> str:
-    """Ensure each path component is clean and no unsafe traversal is possible."""
-    parts = [p for p in file_path.split('/') if p and p not in ('.', '..')]
-    return '/'.join(parts)
-
-
-def extract_year_from_text(text: str) -> str:
-    """Extract a four-digit year from arbitrary text."""
-    if not text or not isinstance(text, str):
-        return ''
-    m = re.search(r'(19|20)\d{2}', text)
-    return m.group(0) if m else ''
 
 
 def detect_audio_format(data: bytes) -> str:

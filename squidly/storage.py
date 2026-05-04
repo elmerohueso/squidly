@@ -12,39 +12,6 @@ from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.db import get_db_connection
 
 
-def init_library_update_status():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        '''
-        CREATE TABLE IF NOT EXISTS library_update_status (
-            id INTEGER PRIMARY KEY,
-            last_update_time TIMESTAMP,
-            library_update_needed BOOLEAN NOT NULL DEFAULT FALSE,
-            last_job_finished_at TIMESTAMP,
-            last_download_activity_at TIMESTAMP
-        )
-        '''
-    )
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_name = 'library_update_status'
-          AND column_name = 'last_download_activity_at'
-        """
-    )
-    if not cur.fetchone():
-        cur.execute('ALTER TABLE library_update_status ADD COLUMN last_download_activity_at TIMESTAMP')
-
-    # Ensure a single row exists
-    cur.execute('SELECT id FROM library_update_status WHERE id = 1')
-    if not cur.fetchone():
-        cur.execute('INSERT INTO library_update_status (id, library_update_needed) VALUES (1, FALSE)')
-    conn.commit()
-    conn.close()
-
-
 def get_library_update_status():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -119,6 +86,87 @@ def get_last_download_activity_at():
     row = cur.fetchone() or {}
     conn.close()
     return normalize_db_timestamp(row.get('last_download_activity_at'))
+
+
+def get_download_write_gate_state():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, status, result_json
+        FROM jobs
+        WHERE job_type = 'download_track'
+          AND status IN ('queued', 'in_progress')
+        ORDER BY created_at ASC
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+
+    blocking_jobs = []
+    ready_count = 0
+
+    for row in rows:
+        job_id = row.get('id')
+        status = str(row.get('status') or '').strip().lower()
+
+        if status == 'queued':
+            blocking_jobs.append(job_id)
+            continue
+
+        stages = {}
+        try:
+            parsed = json.loads(row.get('result_json')) if row.get('result_json') else {}
+            if isinstance(parsed, dict) and isinstance(parsed.get('stages'), dict):
+                stages = parsed.get('stages')
+        except (TypeError, ValueError):
+            stages = {}
+
+        written_stage = str(stages.get('written') or '').strip().lower()
+        if written_stage in ('done', 'skipped'):
+            ready_count += 1
+            continue
+
+        blocking_jobs.append(job_id)
+
+    return {
+        'total_current_jobs': len(rows),
+        'written_ready_jobs': ready_count,
+        'blocking_count': len(blocking_jobs),
+        'blocking_job_ids': blocking_jobs,
+        'all_written_ready': len(blocking_jobs) == 0
+    }
+
+
+def can_start_plex_library_update(required_idle_seconds=180):
+    gate_state = get_download_write_gate_state()
+    last_activity_at = get_last_download_activity_at()
+    now = datetime.utcnow()
+
+    idle_seconds = None
+    if last_activity_at:
+        idle_seconds = max(0, int((now - last_activity_at).total_seconds()))
+
+    is_idle = idle_seconds is not None and idle_seconds >= required_idle_seconds
+    can_start = gate_state['all_written_ready'] and is_idle
+
+    return {
+        'can_start': can_start,
+        'gate_state': gate_state,
+        'idle_seconds': idle_seconds,
+        'required_idle_seconds': required_idle_seconds,
+        'last_activity_at': last_activity_at.isoformat() + 'Z' if last_activity_at else None
+    }
+
+
+def any_download_jobs_running():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS count FROM jobs WHERE job_type = 'download_track' AND status IN ('queued', 'in_progress')")
+    row = cur.fetchone() or {}
+    count = row.get('count', 0)
+    conn.close()
+    return count > 0
 
 
 def get_plex_config():
@@ -398,7 +446,11 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+        SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+               tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+               tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+               tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+               tag_explicit, tag_explicit_suffix
         FROM download_settings
         WHERE id = 1
         """
@@ -410,35 +462,66 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+                id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+                tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+                tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+                tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+                tag_explicit, tag_explicit_suffix,
+                updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
+                DEFAULT_DOWNLOAD_SETTINGS['quality'],
                 DEFAULT_DOWNLOAD_SETTINGS['parent_folder'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'],
                 DEFAULT_DOWNLOAD_SETTINGS['ignore_matches'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_title'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_artist'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_album'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_year'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_version'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'],
                 now
             )
         )
         conn.commit()
         cur.execute(
             """
-            SELECT format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+            SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+                   tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+                   tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+                   tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+                   tag_explicit, tag_explicit_suffix
             FROM download_settings
             WHERE id = 1
             """
         )
         row = cur.fetchone()
 
-    file_naming_album = row['file_naming_album'] or row['file_naming']
+    file_naming_album = row['file_naming_album'] or row['file_naming'] or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
     jobs_refresh_interval_seconds = row['jobs_refresh_interval_seconds']
     if not isinstance(jobs_refresh_interval_seconds, int) or jobs_refresh_interval_seconds < 1:
-        jobs_refresh_interval_seconds = None
-    
+        jobs_refresh_interval_seconds = DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']
+
     ignore_matches = bool(row['ignore_matches'])
 
     if row['file_naming_album'] is None or row['jobs_refresh_interval_seconds'] is None:
@@ -460,11 +543,29 @@ def get_download_settings():
     conn.close()
     return {
         'format': row['format'],
+        'quality': row.get('quality') or DEFAULT_DOWNLOAD_SETTINGS['quality'],
         'parent_folder': row['parent_folder'],
         'file_naming': file_naming_album,
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds,
-        'ignore_matches': ignore_matches
+        'ignore_matches': ignore_matches,
+        'tag_title': bool(row.get('tag_title', DEFAULT_DOWNLOAD_SETTINGS['tag_title'])),
+        'tag_artist': bool(row.get('tag_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_artist'])),
+        'tag_album_artist': bool(row.get('tag_album_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'])),
+        'tag_album': bool(row.get('tag_album', DEFAULT_DOWNLOAD_SETTINGS['tag_album'])),
+        'tag_year': bool(row.get('tag_year', DEFAULT_DOWNLOAD_SETTINGS['tag_year'])),
+        'tag_track_number': bool(row.get('tag_track_number', DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'])),
+        'tag_track_total': bool(row.get('tag_track_total', DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'])),
+        'tag_disc_number': bool(row.get('tag_disc_number', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'])),
+        'tag_disc_total': bool(row.get('tag_disc_total', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'])),
+        'tag_version': bool(row.get('tag_version', DEFAULT_DOWNLOAD_SETTINGS['tag_version'])),
+        'tag_tidal_track_id': bool(row.get('tag_tidal_track_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'])),
+        'tag_tidal_album_id': bool(row.get('tag_tidal_album_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'])),
+        'tag_isrc': bool(row.get('tag_isrc', DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'])),
+        'tag_copyright': bool(row.get('tag_copyright', DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'])),
+        'tag_cover_art': bool(row.get('tag_cover_art', DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'])),
+        'tag_explicit': bool(row.get('tag_explicit', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'])),
+        'tag_explicit_suffix': bool(row.get('tag_explicit_suffix', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'])),
     }
 
 
@@ -475,25 +576,70 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+            id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+            tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+            tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+            tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+            tag_explicit, tag_explicit_suffix,
+            updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
+            quality = excluded.quality,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
             file_naming_album = excluded.file_naming_album,
             jobs_refresh_interval_seconds = excluded.jobs_refresh_interval_seconds,
             ignore_matches = excluded.ignore_matches,
+            tag_title = excluded.tag_title,
+            tag_artist = excluded.tag_artist,
+            tag_album_artist = excluded.tag_album_artist,
+            tag_album = excluded.tag_album,
+            tag_year = excluded.tag_year,
+            tag_track_number = excluded.tag_track_number,
+            tag_track_total = excluded.tag_track_total,
+            tag_disc_number = excluded.tag_disc_number,
+            tag_disc_total = excluded.tag_disc_total,
+            tag_version = excluded.tag_version,
+            tag_tidal_track_id = excluded.tag_tidal_track_id,
+            tag_tidal_album_id = excluded.tag_tidal_album_id,
+            tag_isrc = excluded.tag_isrc,
+            tag_copyright = excluded.tag_copyright,
+            tag_cover_art = excluded.tag_cover_art,
+            tag_explicit = excluded.tag_explicit,
+            tag_explicit_suffix = excluded.tag_explicit_suffix,
             updated_at = excluded.updated_at
         """,
         (
             settings['format'],
+            settings.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality']),
             settings['parent_folder'],
             settings['file_naming_album'],
             settings['file_naming_album'],
             settings['jobs_refresh_interval_seconds'],
             bool(settings.get('ignore_matches', False)),
+            bool(settings.get('tag_title', DEFAULT_DOWNLOAD_SETTINGS['tag_title'])),
+            bool(settings.get('tag_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_artist'])),
+            bool(settings.get('tag_album_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'])),
+            bool(settings.get('tag_album', DEFAULT_DOWNLOAD_SETTINGS['tag_album'])),
+            bool(settings.get('tag_year', DEFAULT_DOWNLOAD_SETTINGS['tag_year'])),
+            bool(settings.get('tag_track_number', DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'])),
+            bool(settings.get('tag_track_total', DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'])),
+            bool(settings.get('tag_disc_number', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'])),
+            bool(settings.get('tag_disc_total', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'])),
+            bool(settings.get('tag_version', DEFAULT_DOWNLOAD_SETTINGS['tag_version'])),
+            bool(settings.get('tag_tidal_track_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'])),
+            bool(settings.get('tag_tidal_album_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'])),
+            bool(settings.get('tag_isrc', DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'])),
+            bool(settings.get('tag_copyright', DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'])),
+            bool(settings.get('tag_cover_art', DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'])),
+            bool(settings.get('tag_explicit', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'])),
+            bool(settings.get('tag_explicit_suffix', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'])),
             now
         )
     )
