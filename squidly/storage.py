@@ -147,7 +147,7 @@ def can_start_plex_library_update(required_idle_seconds=180):
     if last_activity_at:
         idle_seconds = max(0, int((now - last_activity_at).total_seconds()))
 
-    is_idle = idle_seconds is not None and idle_seconds >= required_idle_seconds
+    is_idle = idle_seconds is None or idle_seconds >= required_idle_seconds
     can_start = gate_state['all_written_ready'] and is_idle
 
     return {
