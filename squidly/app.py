@@ -759,6 +759,40 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN ignore_matches BOOLEAN NOT NULL DEFAULT FALSE")
     if 'quality' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN quality TEXT NOT NULL DEFAULT 'LOSSLESS'")
+    if 'tag_title' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_title BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_artist' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_artist BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_album_artist' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_album_artist BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_album' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_album BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_year' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_year BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_track_number' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_track_number BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_track_total' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_track_total BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_disc_number' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_disc_number BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_disc_total' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_disc_total BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_version' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_version BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_tidal_track_id' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_tidal_track_id BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_tidal_album_id' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_tidal_album_id BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_isrc' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_isrc BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_copyright' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_copyright BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_cover_art' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_cover_art BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_explicit' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_explicit BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'tag_explicit_suffix' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN tag_explicit_suffix BOOLEAN NOT NULL DEFAULT TRUE")
     
     cur.execute(
         """
@@ -1038,7 +1072,15 @@ def init_db():
         """,
         ('plex_playlist_add', 'plex_add')
     )
-    
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET result_json = regexp_replace(result_json, '"id3_tagged"', '"tagged"', 'g')
+        WHERE result_json LIKE '%%id3_tagged%%'
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -3969,7 +4011,7 @@ def _download_track_all_stages_done(stages):
 
     required_stages = (
         'downloaded',
-        'id3_tagged',
+        'tagged',
         'written'
     )
     if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
@@ -4018,7 +4060,7 @@ def process_download_job(job_id, payload):
 
     stages = {
         'downloaded': 'pending',
-        'id3_tagged': 'pending',
+        'tagged': 'pending',
         'converted': 'pending',
         'written': 'pending',
         'playlist_added': 'pending'
@@ -4044,6 +4086,8 @@ def process_download_job(job_id, payload):
     file_naming = payload.get('fileNaming')
     if not file_naming:
         file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
+
+    tag_settings = get_download_settings()
 
     downloads_folder = DOWNLOADS_ROOT
 
@@ -4135,7 +4179,7 @@ def process_download_job(job_id, payload):
 
         track_title = str(track_data.get('title') or track_title)
         track_version = str(track_data.get('version') or '').strip()
-        if track_data.get('explicit') and '[Explicit]' not in track_title:
+        if track_data.get('explicit') and tag_settings.get('tag_explicit_suffix', True) and '[Explicit]' not in track_title:
             track_title += ' [Explicit]'
         if track_version:
             track_title = f"{track_title} ({track_version})"
@@ -4162,7 +4206,7 @@ def process_download_job(job_id, payload):
         album_name = str(album_data.get('title') or album_name)
         album_id = str(album_data.get('id')) if album_data.get('id') is not None else ''
         cover_url = str(album_data.get('cover') or '')
-        if album_data.get('explicit') and '[Explicit]' not in album_name:
+        if album_data.get('explicit') and tag_settings.get('tag_explicit_suffix', True) and '[Explicit]' not in album_name:
             album_name += ' [Explicit]'
 
         if isinstance(album_data.get('releaseDate'), str) and len(album_data.get('releaseDate')) >= 4:
@@ -4276,7 +4320,7 @@ def process_download_job(job_id, payload):
         )
         print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
         stages['downloaded'] = 'done'
-        stages['id3_tagged'] = 'done'
+        stages['tagged'] = 'done'
         stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
@@ -4421,9 +4465,9 @@ def process_download_job(job_id, payload):
 
     print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
     print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
-    add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data)
+    add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
     print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
-    stages['id3_tagged'] = 'done'
+    stages['tagged'] = 'done'
     update_job_progress(job_id, {'stages': stages})
 
     converted = False
@@ -4437,7 +4481,7 @@ def process_download_job(job_id, payload):
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
-        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
         print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
         converted = True
     elif output_format == 'flac' and audio_format != 'flac':
@@ -4450,7 +4494,7 @@ def process_download_job(job_id, payload):
 
         shutil.move(temp_target_path, full_path)
         print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
-        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data)
+        add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
         print(f"[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='{full_path}'", flush=True)
         converted = True
     else:
@@ -4669,7 +4713,11 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+        SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+               tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+               tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+               tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+               tag_explicit, tag_explicit_suffix
         FROM download_settings
         WHERE id = 1
         """
@@ -4681,9 +4729,18 @@ def get_download_settings():
         cur.execute(
             """
             INSERT INTO download_settings (
-                id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+                id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+                tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+                tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+                tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+                tag_explicit, tag_explicit_suffix,
+                updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
@@ -4693,13 +4750,34 @@ def get_download_settings():
                 DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'],
                 DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds'],
                 DEFAULT_DOWNLOAD_SETTINGS['ignore_matches'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_title'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_artist'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_album'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_year'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_version'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'],
+                DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'],
                 now
             )
         )
         conn.commit()
         cur.execute(
             """
-            SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches
+            SELECT format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+                   tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+                   tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+                   tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+                   tag_explicit, tag_explicit_suffix
             FROM download_settings
             WHERE id = 1
             """
@@ -4737,7 +4815,24 @@ def get_download_settings():
         'file_naming': file_naming_album,
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': jobs_refresh_interval_seconds,
-        'ignore_matches': ignore_matches
+        'ignore_matches': ignore_matches,
+        'tag_title': bool(row.get('tag_title', DEFAULT_DOWNLOAD_SETTINGS['tag_title'])),
+        'tag_artist': bool(row.get('tag_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_artist'])),
+        'tag_album_artist': bool(row.get('tag_album_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'])),
+        'tag_album': bool(row.get('tag_album', DEFAULT_DOWNLOAD_SETTINGS['tag_album'])),
+        'tag_year': bool(row.get('tag_year', DEFAULT_DOWNLOAD_SETTINGS['tag_year'])),
+        'tag_track_number': bool(row.get('tag_track_number', DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'])),
+        'tag_track_total': bool(row.get('tag_track_total', DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'])),
+        'tag_disc_number': bool(row.get('tag_disc_number', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'])),
+        'tag_disc_total': bool(row.get('tag_disc_total', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'])),
+        'tag_version': bool(row.get('tag_version', DEFAULT_DOWNLOAD_SETTINGS['tag_version'])),
+        'tag_tidal_track_id': bool(row.get('tag_tidal_track_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'])),
+        'tag_tidal_album_id': bool(row.get('tag_tidal_album_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'])),
+        'tag_isrc': bool(row.get('tag_isrc', DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'])),
+        'tag_copyright': bool(row.get('tag_copyright', DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'])),
+        'tag_cover_art': bool(row.get('tag_cover_art', DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'])),
+        'tag_explicit': bool(row.get('tag_explicit', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'])),
+        'tag_explicit_suffix': bool(row.get('tag_explicit_suffix', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'])),
     }
 
 def save_download_settings(settings):
@@ -4747,9 +4842,18 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches, updated_at
+            id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+            tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+            tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+            tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+            tag_explicit, tag_explicit_suffix,
+            updated_at
         )
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (1, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             quality = excluded.quality,
@@ -4758,6 +4862,23 @@ def save_download_settings(settings):
             file_naming_album = excluded.file_naming_album,
             jobs_refresh_interval_seconds = excluded.jobs_refresh_interval_seconds,
             ignore_matches = excluded.ignore_matches,
+            tag_title = excluded.tag_title,
+            tag_artist = excluded.tag_artist,
+            tag_album_artist = excluded.tag_album_artist,
+            tag_album = excluded.tag_album,
+            tag_year = excluded.tag_year,
+            tag_track_number = excluded.tag_track_number,
+            tag_track_total = excluded.tag_track_total,
+            tag_disc_number = excluded.tag_disc_number,
+            tag_disc_total = excluded.tag_disc_total,
+            tag_version = excluded.tag_version,
+            tag_tidal_track_id = excluded.tag_tidal_track_id,
+            tag_tidal_album_id = excluded.tag_tidal_album_id,
+            tag_isrc = excluded.tag_isrc,
+            tag_copyright = excluded.tag_copyright,
+            tag_cover_art = excluded.tag_cover_art,
+            tag_explicit = excluded.tag_explicit,
+            tag_explicit_suffix = excluded.tag_explicit_suffix,
             updated_at = excluded.updated_at
         """,
         (
@@ -4768,6 +4889,23 @@ def save_download_settings(settings):
             settings['file_naming_album'],
             settings['jobs_refresh_interval_seconds'],
             bool(settings.get('ignore_matches', False)),
+            bool(settings.get('tag_title', DEFAULT_DOWNLOAD_SETTINGS['tag_title'])),
+            bool(settings.get('tag_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_artist'])),
+            bool(settings.get('tag_album_artist', DEFAULT_DOWNLOAD_SETTINGS['tag_album_artist'])),
+            bool(settings.get('tag_album', DEFAULT_DOWNLOAD_SETTINGS['tag_album'])),
+            bool(settings.get('tag_year', DEFAULT_DOWNLOAD_SETTINGS['tag_year'])),
+            bool(settings.get('tag_track_number', DEFAULT_DOWNLOAD_SETTINGS['tag_track_number'])),
+            bool(settings.get('tag_track_total', DEFAULT_DOWNLOAD_SETTINGS['tag_track_total'])),
+            bool(settings.get('tag_disc_number', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_number'])),
+            bool(settings.get('tag_disc_total', DEFAULT_DOWNLOAD_SETTINGS['tag_disc_total'])),
+            bool(settings.get('tag_version', DEFAULT_DOWNLOAD_SETTINGS['tag_version'])),
+            bool(settings.get('tag_tidal_track_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_track_id'])),
+            bool(settings.get('tag_tidal_album_id', DEFAULT_DOWNLOAD_SETTINGS['tag_tidal_album_id'])),
+            bool(settings.get('tag_isrc', DEFAULT_DOWNLOAD_SETTINGS['tag_isrc'])),
+            bool(settings.get('tag_copyright', DEFAULT_DOWNLOAD_SETTINGS['tag_copyright'])),
+            bool(settings.get('tag_cover_art', DEFAULT_DOWNLOAD_SETTINGS['tag_cover_art'])),
+            bool(settings.get('tag_explicit', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit'])),
+            bool(settings.get('tag_explicit_suffix', DEFAULT_DOWNLOAD_SETTINGS['tag_explicit_suffix'])),
             now
         )
     )
@@ -6179,7 +6317,7 @@ def detect_audio_format(data: bytes) -> str:
     
     return 'unknown'
 
-def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
+def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
     """
     Add ID3 tags to an audio file (handles FLAC, MP3, and M4A/AAC).
     
@@ -6187,7 +6325,14 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         file_path: Path to the audio file
         metadata: Dict with keys: artist, title, album, year, track_number, disc_number
         cover_image_data: Binary image data to embed as cover art
+        tag_settings: Dict of tagging toggle settings (defaults to all True)
     """
+    if tag_settings is None:
+        tag_settings = {}
+
+    def tag_enabled(key, default=True):
+        return bool(tag_settings.get(key, default))
+
     try:
         artist = metadata.get('artist', 'Unknown Artist')
         title = metadata.get('title', 'Unknown Track')
@@ -6209,44 +6354,48 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         if file_path.lower().endswith('.flac'):
             try:
                 audio = FLAC(file_path)
-                audio['TITLE'] = title
-                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                    audio['ARTIST'] = metadata.get('track_artists')
-                else:
-                    audio['ARTIST'] = artist
-                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                    audio['ALBUMARTIST'] = metadata.get('album_artists')
-                elif metadata.get('album_artist'):
-                    audio['ALBUMARTIST'] = metadata.get('album_artist')
-                audio['ALBUM'] = album
-                if year:
+                if tag_enabled('tag_title'):
+                    audio['TITLE'] = title
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['ARTIST'] = metadata.get('track_artists')
+                    else:
+                        audio['ARTIST'] = artist
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['ALBUMARTIST'] = metadata.get('album_artists')
+                    elif metadata.get('album_artist'):
+                        audio['ALBUMARTIST'] = metadata.get('album_artist')
+                if tag_enabled('tag_album'):
+                    audio['ALBUM'] = album
+                if tag_enabled('tag_year') and year:
                     audio['DATE'] = str(year)
-                audio['TRACKNUMBER'] = str(track_num)
-                if metadata.get('track_total') is not None:
+                if tag_enabled('tag_track_number'):
+                    audio['TRACKNUMBER'] = str(track_num)
+                if tag_enabled('tag_track_total') and metadata.get('track_total') is not None:
                     audio['TRACKTOTAL'] = str(metadata.get('track_total'))
-                if disc_num:
+                if tag_enabled('tag_disc_number') and disc_num:
                     audio['DISCNUMBER'] = str(disc_num)
-                if metadata.get('disc_total') is not None:
+                if tag_enabled('tag_disc_total') and metadata.get('disc_total') is not None:
                     audio['DISCTOTAL'] = str(metadata.get('disc_total'))
-                if metadata.get('copyright'):
+                if tag_enabled('tag_version') and metadata.get('version'):
+                    audio['VERSION'] = str(metadata.get('version'))
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
                     audio['COPYRIGHT'] = str(metadata.get('copyright'))
-                if metadata.get('explicit'):
+                if tag_enabled('tag_explicit') and metadata.get('explicit'):
                     audio['EXPLICIT'] = '1'
                     audio['RATING'] = 'explicit'
-                if metadata.get('tidal_track_id'):
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
                     audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
-                if metadata.get('tidal_album_id'):
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
                     audio['TIDAL_ALBUM_ID'] = str(metadata.get('tidal_album_id'))
-                if metadata.get('version'):
-                    audio['VERSION'] = str(metadata.get('version'))
-                if metadata.get('isrc'):
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
                     audio['ISRC'] = str(metadata.get('isrc'))
-                # Add cover art if available
-                if cover_image_data:
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     from mutagen.flac import Picture
                     pic = Picture()
                     pic.data = cover_image_data
-                    pic.type = 3  # Cover (front)
+                    pic.type = 3
                     pic.mime = 'image/jpeg'
                     audio.add_picture(pic)
                 
@@ -6259,21 +6408,25 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
         elif file_path.lower().endswith('.m4a'):
             try:
                 audio = MP4(file_path)
-                audio['\xa9nam'] = title
-                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                    audio['\xa9ART'] = metadata.get('track_artists')
-                else:
-                    audio['\xa9ART'] = [artist]
-                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                    audio['aART'] = metadata.get('album_artists')
-                elif metadata.get('album_artist'):
-                    audio['aART'] = [metadata.get('album_artist')]
-                audio['\xa9alb'] = album
+                if tag_enabled('tag_title'):
+                    audio['\xa9nam'] = title
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['\xa9ART'] = metadata.get('track_artists')
+                    else:
+                        audio['\xa9ART'] = [artist]
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['aART'] = metadata.get('album_artists')
+                    elif metadata.get('album_artist'):
+                        audio['aART'] = [metadata.get('album_artist')]
+                if tag_enabled('tag_album'):
+                    audio['\xa9alb'] = album
                 
-                if year:
+                if tag_enabled('tag_year') and year:
                     audio['\xa9day'] = str(year)
                 
-                if track_num:
+                if tag_enabled('tag_track_number') and track_num:
                     try:
                         track_number = int(track_num)
                         track_total = metadata.get('track_total')
@@ -6284,7 +6437,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     except ValueError:
                         pass
 
-                if disc_num:
+                if tag_enabled('tag_disc_number') and disc_num:
                     try:
                         disc_number = int(disc_num)
                         disc_total = metadata.get('disc_total')
@@ -6295,21 +6448,21 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     except ValueError:
                         pass
 
-                if metadata.get('copyright'):
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
                     audio['©cpy'] = str(metadata.get('copyright'))
-                if metadata.get('explicit'):
+                if tag_enabled('tag_explicit') and metadata.get('explicit'):
                     audio['rtng'] = [1]
                     audio['----:com.apple.iTunes:explicit'] = [b'1']
-                if metadata.get('tidal_track_id'):
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
                     audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
-                if metadata.get('tidal_album_id'):
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
                     audio['----:com.apple.iTunes:tidal_album_id'] = [str(metadata.get('tidal_album_id')).encode('utf-8')]
-                if metadata.get('version'):
+                if tag_enabled('tag_version') and metadata.get('version'):
                     audio['----:com.apple.iTunes:version'] = [str(metadata.get('version')).encode('utf-8')]
-                if metadata.get('isrc'):
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
                     audio['----:com.apple.iTunes:isrc'] = [str(metadata.get('isrc')).encode('utf-8')]
                 
-                if cover_image_data:
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 
                 audio.save()
@@ -6326,46 +6479,48 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None):
                     audio = MP3(file_path)
                     audio.add_tags()
                 
-                # Remove existing tags to ensure clean slate
                 audio.delete()
                 audio = MP3(file_path)
                 audio.add_tags()
                 
-                # Add text tags
-                audio['TIT2'] = TIT2(encoding=3, text=title)
-                if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                    audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
-                else:
-                    audio['TPE1'] = TPE1(encoding=3, text=artist)
-                if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                    audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
-                elif metadata.get('album_artist'):
-                    audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
-                audio['TALB'] = TALB(encoding=3, text=album)
-                if year:
+                if tag_enabled('tag_title'):
+                    audio['TIT2'] = TIT2(encoding=3, text=title)
+                if tag_enabled('tag_artist'):
+                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
+                        audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
+                    else:
+                        audio['TPE1'] = TPE1(encoding=3, text=artist)
+                if tag_enabled('tag_album_artist'):
+                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
+                        audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
+                    elif metadata.get('album_artist'):
+                        audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
+                if tag_enabled('tag_album'):
+                    audio['TALB'] = TALB(encoding=3, text=album)
+                if tag_enabled('tag_year') and year:
                     audio['TDRC'] = TDRC(encoding=3, text=str(year))
-                if metadata.get('track_total') is not None:
-                    audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
-                else:
-                    audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
-                if disc_num:
+                if tag_enabled('tag_track_number'):
+                    if metadata.get('track_total') is not None:
+                        audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
+                    else:
+                        audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
+                if tag_enabled('tag_disc_number') and disc_num:
                     if metadata.get('disc_total') is not None:
                         audio['TPOS'] = TPOS(encoding=3, text=f"{disc_num}/{metadata.get('disc_total')}")
                     else:
                         audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
-                if metadata.get('copyright'):
+                if tag_enabled('tag_copyright') and metadata.get('copyright'):
                     audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
-                if metadata.get('tidal_track_id'):
+                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
                     audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(metadata.get('tidal_track_id')))
-                if metadata.get('tidal_album_id'):
+                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
                     audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
-                if metadata.get('version'):
+                if tag_enabled('tag_version') and metadata.get('version'):
                     audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
-                if metadata.get('isrc'):
+                if tag_enabled('tag_isrc') and metadata.get('isrc'):
                     audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
                 
-                # Add cover art if available
-                if cover_image_data:
+                if tag_enabled('tag_cover_art') and cover_image_data:
                     audio['APIC'] = APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data)
                 
                 audio.save(v2_version=4)
@@ -6927,14 +7082,24 @@ def download_settings():
         or current['file_naming_album']
     )
 
+    tag_keys = [
+        'tag_title', 'tag_artist', 'tag_album_artist', 'tag_album', 'tag_year',
+        'tag_track_number', 'tag_track_total', 'tag_disc_number', 'tag_disc_total',
+        'tag_version', 'tag_tidal_track_id', 'tag_tidal_album_id', 'tag_isrc',
+        'tag_copyright', 'tag_cover_art', 'tag_explicit', 'tag_explicit_suffix',
+    ]
+
     updated = {
         'format': current['format'],
         'quality': payload.get('quality', current.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])),
-        'parent_folder': current['parent_folder'],  # Keep existing value (no longer editable)
+        'parent_folder': current['parent_folder'],
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
-        'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))))
+        'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
     }
+
+    for key in tag_keys:
+        updated[key] = payload.get(key, current.get(key, DEFAULT_DOWNLOAD_SETTINGS.get(key, True)))
 
     if updated['quality'] not in ('LOSSLESS', 'HIGH', 'LOW'):
         return jsonify({'error': 'Invalid quality value'}), 400
@@ -6951,16 +7116,23 @@ def download_settings():
         return jsonify({'error': 'Jobs refresh interval must be at least 1 second'}), 400
 
     updated['ignore_matches'] = bool(updated['ignore_matches'])
+    for key in tag_keys:
+        updated[key] = bool(updated[key])
 
     save_download_settings(updated)
-    return jsonify({
+
+    result = {
         'format': updated['format'],
         'quality': updated['quality'],
         'file_naming': updated['file_naming_album'],
         'file_naming_album': updated['file_naming_album'],
         'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
-        'ignore_matches': updated['ignore_matches']
-    })
+        'ignore_matches': updated['ignore_matches'],
+    }
+    for key in tag_keys:
+        result[key] = updated[key]
+
+    return jsonify(result)
 
 @app.route('/api/endpoints/status', methods=['GET'])
 def endpoints_status():

@@ -47,7 +47,24 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'parent_folder': '',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
     'jobs_refresh_interval_seconds': 30,
-    'ignore_matches': False
+    'ignore_matches': False,
+    'tag_title': True,
+    'tag_artist': True,
+    'tag_album_artist': True,
+    'tag_album': True,
+    'tag_year': True,
+    'tag_track_number': True,
+    'tag_track_total': True,
+    'tag_disc_number': True,
+    'tag_disc_total': True,
+    'tag_version': True,
+    'tag_tidal_track_id': True,
+    'tag_tidal_album_id': True,
+    'tag_isrc': True,
+    'tag_copyright': True,
+    'tag_cover_art': True,
+    'tag_explicit': True,
+    'tag_explicit_suffix': True,
 }
 
 # Temporary scratch directory used during downloads

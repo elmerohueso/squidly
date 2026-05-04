@@ -706,7 +706,7 @@ def _download_track_all_stages_done(stages):
 
     required_stages = (
         'downloaded',
-        'id3_tagged',
+        'tagged',
         'written'
     )
     if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
