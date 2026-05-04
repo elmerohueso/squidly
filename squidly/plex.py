@@ -610,3 +610,33 @@ def plex_library_update_job_worker():
         except Exception as e:
             print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
             time.sleep(5)
+
+
+def get_last_successful_plex_sync_finished_at():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT finished_at
+        FROM jobs
+        WHERE job_type = 'plex_library_sync'
+          AND status = 'succeeded'
+        ORDER BY finished_at DESC
+        LIMIT 1
+        """
+    )
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    finished_at = row.get('finished_at')
+    if finished_at and not isinstance(finished_at, datetime):
+        try:
+            finished_at = datetime.fromisoformat(str(finished_at))
+        except Exception:
+            finished_at = None
+    if finished_at and hasattr(finished_at, 'replace'):
+        finished_at = finished_at.replace(tzinfo=None)
+    return finished_at

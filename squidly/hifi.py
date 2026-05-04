@@ -7,8 +7,20 @@ download flow and match flow can share the same extraction behavior.
 import base64
 import json
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, List, Optional
+
+from squidly.downloads import make_request_with_retry_rotating_mirrors, load_squid_urls
+
+
+_SQUID_URLS_CACHE = None
+
+
+def _get_squid_urls():
+    global _SQUID_URLS_CACHE
+    if _SQUID_URLS_CACHE is None:
+        _SQUID_URLS_CACHE = load_squid_urls()
+    return _SQUID_URLS_CACHE
 
 
 def _extract_hifi_image_string(value: Any) -> str:
@@ -737,11 +749,6 @@ def _extract_hifi_artist_top_track_items(artist_response: Any) -> List[Dict[str,
 
 def get_hifi_artist_object(artist_id: Any, include_tracks: bool = True, include_albums: bool = True) -> Dict[str, Any]:
     """Build a normalized artist object using the HiFi artist endpoint."""
-    try:
-        from .app import _fetch_hifi_artist_payload
-    except ImportError:
-        from squidly.app import _fetch_hifi_artist_payload
-
     artist_response = _fetch_hifi_artist_payload(artist_id, skip_tracks=True)
     artist_info = extract_hifi_artist_info(artist_response)
     if not artist_info:
@@ -840,11 +847,6 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
         include_album: If True, include nested album metadata in the returned track.
         audio_quality: Optional requested audio quality for the manifest fetch.
     """
-    try:
-        from .app import _fetch_hifi_track_info_payload, _fetch_hifi_album_payload, _fetch_hifi_artist_payload
-    except ImportError:
-        from squidly.app import _fetch_hifi_track_info_payload, _fetch_hifi_album_payload, _fetch_hifi_artist_payload
-
     track_response = _fetch_hifi_track_info_payload(track_id)
     track_info = extract_hifi_track_info(track_response)
 
@@ -972,11 +974,6 @@ def get_hifi_album_object(album_id: Any, include_streams: bool = False, audio_qu
         include_streams: If True, include `track_streams` for each track.
         audio_quality: Optional requested audio quality for the manifest fetch.
     """
-    try:
-        from .app import _fetch_hifi_album_payload, _fetch_hifi_artist_payload
-    except ImportError:
-        from squidly.app import _fetch_hifi_album_payload, _fetch_hifi_artist_payload
-
     album_response = _fetch_hifi_album_payload(album_id)
     album_info = extract_hifi_album_info(album_response)
     if not album_info:
@@ -1088,11 +1085,6 @@ def fetch_hifi_track_manifest(track_id: Any, audio_quality: Any = None) -> Dict[
 
     Use the legacy /track/ quality endpoint to return a direct stream URL.
     """
-    try:
-        from .app import _fetch_hifi_track_payload
-    except ImportError:
-        from squidly.app import _fetch_hifi_track_payload
-
     if not audio_quality:
         return {'track_streams': {}}
 
@@ -1147,3 +1139,149 @@ def fetch_hifi_track_manifest(track_id: Any, audio_quality: Any = None) -> Dict[
     track_streams[key] = stream_entry
 
     return {'track_streams': track_streams}
+
+
+def _fetch_hifi_search_results(search_type, query, limit=10):
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/search/?{urlencode({search_type: query, 'limit': str(limit)})}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3
+    )
+    if not response.ok:
+        return []
+
+    result = response.json()
+    data = result.get('data') if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        return []
+    if search_type == 'a':
+        return data.get('artists', {}).get('items', []) or []
+    if search_type == 'al':
+        return data.get('albums', {}).get('items', []) or []
+    return data.get('items', []) or []
+
+
+def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
+    params = {'f': str(artist_id)}
+    if skip_tracks:
+        params['skip_tracks'] = 'true'
+
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/artist/?{urlencode(params)}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _fetch_hifi_album_payload(album_id):
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/album/?{urlencode({'id': str(album_id)})}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _fetch_hifi_track_payload(track_id, quality='LOW'):
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/track/?{urlencode({'id': str(track_id), 'quality': str(quality)})}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _fetch_hifi_track_manifests_payload(track_id, formats=None):
+    params = {
+        'id': str(track_id),
+        'adaptive': 'true',
+        'manifestType': 'MPEG_DASH',
+        'uriScheme': 'HTTPS',
+        'usage': 'PLAYBACK',
+    }
+    if formats:
+        params['formats'] = ','.join(formats)
+
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/trackManifests/?{urlencode(params)}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _fetch_hifi_track_info_payload(track_id):
+    response, _target = make_request_with_retry_rotating_mirrors(
+        f"/info/?{urlencode({'id': str(track_id)})}",
+        _get_squid_urls(),
+        method='GET',
+        timeout=10,
+        max_retries=3,
+    )
+    if not response.ok:
+        return {}
+    return response.json() or {}
+
+
+def _normalize_hifi_playlist_items(items):
+    if not isinstance(items, list):
+        return items or []
+
+    best_by_key = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized = _build_normalized_hifi_track_object(item)
+        key = _get_hifi_track_dedupe_key(normalized)
+        if key is None:
+            continue
+        existing = best_by_key.get(key)
+        if existing is None:
+            best_by_key[key] = normalized
+            continue
+        current_rank = _get_hifi_audio_quality_rank(normalized.get('maxAudioQuality'))
+        existing_rank = _get_hifi_audio_quality_rank(existing.get('maxAudioQuality'))
+        if current_rank > existing_rank:
+            best_by_key[key] = normalized
+
+    deduped_items = []
+    seen_keys = set()
+    for item in items:
+        if not isinstance(item, dict):
+            deduped_items.append(item)
+            continue
+        normalized = _build_normalized_hifi_track_object(item)
+        key = _get_hifi_track_dedupe_key(normalized)
+        if key is None:
+            deduped_items.append(normalized)
+            continue
+        if key in seen_keys:
+            continue
+        chosen = best_by_key.get(key)
+        if chosen is not None:
+            deduped_items.append(chosen)
+            seen_keys.add(key)
+        else:
+            deduped_items.append(normalized)
+            seen_keys.add(key)
+
+    return deduped_items
