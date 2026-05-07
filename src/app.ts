@@ -2624,12 +2624,56 @@ class App {
 
         playlistNavItems.innerHTML = '';
 
+        const getCollapsedState = (key: string): boolean => {
+            const stored = localStorage.getItem(key);
+            return stored !== null ? stored === 'true' : true;
+        };
+
+        const createSection = (title: string, storageKey: string): { header: HTMLLIElement, container: HTMLUListElement, toggle: () => void } => {
+            const isCollapsed = getCollapsedState(storageKey);
+
+            const header = document.createElement('li');
+            header.className = 'nav-section-header collapsible';
+            header.style.fontSize = '0.5rem';
+
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'nav-section-title';
+            titleSpan.textContent = title;
+
+            const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            chevron.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            chevron.setAttribute('width', '16');
+            chevron.setAttribute('height', '16');
+            chevron.setAttribute('viewBox', '0 0 24 24');
+            chevron.setAttribute('fill', 'none');
+            chevron.setAttribute('stroke', 'currentColor');
+            chevron.setAttribute('stroke-width', '2');
+            chevron.setAttribute('stroke-linecap', 'round');
+            chevron.setAttribute('stroke-linejoin', 'round');
+            chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            chevron.setAttribute('class', 'section-chevron' + (isCollapsed ? ' collapsed' : ''));
+
+            header.appendChild(titleSpan);
+            header.appendChild(chevron);
+
+            const container = document.createElement('ul');
+            container.className = 'section-items' + (isCollapsed ? ' collapsed' : '');
+
+            const toggle = () => {
+                const newState = !container.classList.contains('collapsed');
+                container.classList.toggle('collapsed');
+                chevron.classList.toggle('collapsed');
+                localStorage.setItem(storageKey, String(newState));
+            };
+
+            header.addEventListener('click', toggle);
+
+            return { header, container, toggle };
+        };
+
         // --- Plex Playlists ---
-        const plexHeader = document.createElement('li');
-        plexHeader.className = 'nav-section-title';
-        plexHeader.style.fontSize = '0.5rem';
-        plexHeader.textContent = 'Plex';
-        playlistNavItems.appendChild(plexHeader);
+        const plexSection = createSection('Plex', 'sidebar_section_plex');
+        playlistNavItems.appendChild(plexSection.header);
 
         if (data.plex.length === 0) {
             const li = document.createElement('li');
@@ -2637,7 +2681,7 @@ class App {
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.875rem';
             li.textContent = 'No playlists';
-            playlistNavItems.appendChild(li);
+            plexSection.container.appendChild(li);
         } else {
             data.plex.forEach((playlist: PlexPlaylist) => {
                 const li = document.createElement('li');
@@ -2655,16 +2699,14 @@ class App {
                     }
                 });
                 li.appendChild(a);
-                playlistNavItems.appendChild(li);
+                plexSection.container.appendChild(li);
             });
         }
+        playlistNavItems.appendChild(plexSection.container);
 
         // --- ListenBrainz Playlists ---
-        const lbHeader = document.createElement('li');
-        lbHeader.className = 'nav-section-title';
-        lbHeader.style.fontSize = '0.5rem';
-        lbHeader.textContent = 'ListenBrainz';
-        playlistNavItems.appendChild(lbHeader);
+        const lbSection = createSection('ListenBrainz', 'sidebar_section_listenbrainz');
+        playlistNavItems.appendChild(lbSection.header);
 
         if (!data.listenbrainz) {
             const li = document.createElement('li');
@@ -2672,7 +2714,7 @@ class App {
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.75rem';
             li.textContent = 'Loading or not configured...';
-            playlistNavItems.appendChild(li);
+            lbSection.container.appendChild(li);
         } else {
             const renderLbSection = (title: string, items: any[], username: string) => {
                 if (!items || items.length === 0) return;
@@ -2682,7 +2724,7 @@ class App {
                 subHeader.style.color = 'var(--text-muted)';
                 subHeader.style.paddingLeft = '1.5rem';
                 subHeader.textContent = title;
-                playlistNavItems.appendChild(subHeader);
+                lbSection.container.appendChild(subHeader);
 
                 items.forEach((playlist: any) => {
                     const li = document.createElement('li');
@@ -2703,7 +2745,7 @@ class App {
                         }
                     });
                     li.appendChild(a);
-                    playlistNavItems.appendChild(li);
+                    lbSection.container.appendChild(li);
                 });
             };
 
@@ -2718,16 +2760,14 @@ class App {
                 li.style.color = 'var(--text-muted)';
                 li.style.fontSize = '0.875rem';
                 li.textContent = 'No playlists found';
-                playlistNavItems.appendChild(li);
+                lbSection.container.appendChild(li);
             }
         }
+        playlistNavItems.appendChild(lbSection.container);
 
         // --- YouTube Music Playlists ---
-        const ytmHeader = document.createElement('li');
-        ytmHeader.className = 'nav-section-title';
-        ytmHeader.style.fontSize = '0.5rem';
-        ytmHeader.textContent = 'YTM';
-        playlistNavItems.appendChild(ytmHeader);
+        const ytmSection = createSection('YTM', 'sidebar_section_ytm');
+        playlistNavItems.appendChild(ytmSection.header);
 
         if (data.ytm === null) {
             const li = document.createElement('li');
@@ -2735,14 +2775,14 @@ class App {
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.75rem';
             li.textContent = 'Loading or not configured...';
-            playlistNavItems.appendChild(li);
+            ytmSection.container.appendChild(li);
         } else if (data.ytm.length === 0) {
             const li = document.createElement('li');
             li.style.padding = '0.5rem 0.75rem';
             li.style.color = 'var(--text-muted)';
             li.style.fontSize = '0.875rem';
             li.textContent = 'No playlists';
-            playlistNavItems.appendChild(li);
+            ytmSection.container.appendChild(li);
         } else {
             data.ytm.forEach((playlist: YtmPlaylist) => {
                 const li = document.createElement('li');
@@ -2758,9 +2798,10 @@ class App {
                     void this.fetchYtmPlaylistTracks(playlist.playlistId, playlist.title);
                 });
                 li.appendChild(a);
-                playlistNavItems.appendChild(li);
+                ytmSection.container.appendChild(li);
             });
         }
+        playlistNavItems.appendChild(ytmSection.container);
     }
 
     private initializeHistoryNavigation(): void {

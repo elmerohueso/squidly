@@ -168,6 +168,42 @@ body {
     padding: 0 0.75rem;
 }
 
+.nav-section-header.collapsible {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color var(--transition-fast);
+    border-radius: var(--radius-md);
+    margin: 0 0.25rem;
+}
+
+.nav-section-header.collapsible:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.section-chevron {
+    width: 16px;
+    height: 16px;
+    transition: transform var(--transition-fast);
+    color: var(--text-muted);
+}
+
+.section-chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.section-items {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+}
+
+.section-items.collapsed {
+    display: none;
+}
+
 .nav-items {
     list-style: none;
     display: flex;
