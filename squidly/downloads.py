@@ -841,6 +841,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
         if file_path.lower().endswith('.flac'):
             try:
                 audio = FLAC(file_path)
+                audio.clear()
                 if tag_enabled('tag_title'):
                     audio['TITLE'] = title
                 if tag_enabled('tag_artist'):
@@ -938,7 +939,6 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     audio['\xa9cpy'] = str(metadata.get('copyright'))
                 if tag_enabled('tag_explicit') and metadata.get('explicit'):
                     audio['rtng'] = [1]
-                    audio['----:com.apple.iTunes:explicit'] = [b'1']
                 if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
                     audio['----:com.apple.iTunes:tidal_track_id'] = [str(metadata.get('tidal_track_id')).encode('utf-8')]
                 if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
