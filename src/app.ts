@@ -6385,6 +6385,8 @@ class App {
         const searchType = this.searchTypeSelect.value;
         const query = this.searchInput.value.trim();
 
+        this.switchPage('explore', false);
+
         if (searchType === 'listenbrainz') {
             // Handle ListenBrainz playlists without requiring query
             await this.handleListenbrainzPlaylists(undefined, updateHistory);
