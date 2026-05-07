@@ -13,8 +13,6 @@ import time
 from itertools import cycle
 from urllib.parse import urljoin, urlencode
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3, APIC, TIT2, TPE1, TPE2, TALB, TDRC, TRCK, TPOS, TCOP, TXXX
-from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 import requests
 from squidly.db import get_db_connection
@@ -959,63 +957,8 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
             except Exception as e:
                 print(f"[ID3] Warning: Could not write M4A tags: {str(e)}", flush=True)
 
-        # Handle MP3 files
-        elif file_path.lower().endswith('.mp3'):
-            try:
-                try:
-                    audio = MP3(file_path, ID3=ID3)
-                except Exception:
-                    audio = MP3(file_path)
-                    audio.add_tags()
+        # MP3 tagging is not supported
 
-                audio.delete()
-                audio = MP3(file_path)
-                audio.add_tags()
-
-                if tag_enabled('tag_title'):
-                    audio['TIT2'] = TIT2(encoding=3, text=title)
-                if tag_enabled('tag_artist'):
-                    if isinstance(metadata.get('track_artists'), list) and metadata.get('track_artists'):
-                        audio['TPE1'] = TPE1(encoding=3, text=metadata.get('track_artists'))
-                    else:
-                        audio['TPE1'] = TPE1(encoding=3, text=artist)
-                if tag_enabled('tag_album_artist'):
-                    if isinstance(metadata.get('album_artists'), list) and metadata.get('album_artists'):
-                        audio['TPE2'] = TPE2(encoding=3, text=metadata.get('album_artists'))
-                    elif metadata.get('album_artist'):
-                        audio['TPE2'] = TPE2(encoding=3, text=str(metadata.get('album_artist')))
-                if tag_enabled('tag_album'):
-                    audio['TALB'] = TALB(encoding=3, text=album)
-                if tag_enabled('tag_year') and year:
-                    audio['TDRC'] = TDRC(encoding=3, text=str(year))
-                if tag_enabled('tag_track_number'):
-                    if metadata.get('track_total') is not None:
-                        audio['TRCK'] = TRCK(encoding=3, text=f"{track_num}/{metadata.get('track_total')}")
-                    else:
-                        audio['TRCK'] = TRCK(encoding=3, text=str(track_num))
-                if tag_enabled('tag_disc_number') and disc_num:
-                    if metadata.get('disc_total') is not None:
-                        audio['TPOS'] = TPOS(encoding=3, text=f"{disc_num}/{metadata.get('disc_total')}")
-                    else:
-                        audio['TPOS'] = TPOS(encoding=3, text=str(disc_num))
-                if tag_enabled('tag_copyright') and metadata.get('copyright'):
-                    audio['TCOP'] = TCOP(encoding=3, text=str(metadata.get('copyright')))
-                if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
-                    audio['TXXX:tidal_track_id'] = TXXX(encoding=3, desc='tidal_track_id', text=str(metadata.get('tidal_track_id')))
-                if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
-                    audio['TXXX:tidal_album_id'] = TXXX(encoding=3, desc='tidal_album_id', text=str(metadata.get('tidal_album_id')))
-                if tag_enabled('tag_version') and metadata.get('version'):
-                    audio['TXXX:version'] = TXXX(encoding=3, desc='version', text=str(metadata.get('version')))
-                if tag_enabled('tag_isrc') and metadata.get('isrc'):
-                    audio['TXXX:isrc'] = TXXX(encoding=3, desc='isrc', text=str(metadata.get('isrc')))
-
-                if tag_enabled('tag_cover_art') and cover_image_data:
-                    audio['APIC'] = APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data)
-
-                audio.save(v2_version=4)
-                print(f"[ID3] Successfully added MP3 metadata to {file_path}", flush=True)
-            except Exception as e:
-                print(f"[ID3] Warning: Could not write MP3 tags: {str(e)}", flush=True)
 
     except Exception as e:
         print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
