@@ -870,8 +870,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                 if tag_enabled('tag_copyright') and metadata.get('copyright'):
                     audio['COPYRIGHT'] = str(metadata.get('copyright'))
                 if tag_enabled('tag_explicit') and metadata.get('explicit'):
-                    audio['EXPLICIT'] = '1'
-                    audio['RATING'] = 'explicit'
+                    audio['ITUNESADVISORY'] = '1'
                 if tag_enabled('tag_tidal_track_id') and metadata.get('tidal_track_id'):
                     audio['TIDAL_TRACK_ID'] = str(metadata.get('tidal_track_id'))
                 if tag_enabled('tag_tidal_album_id') and metadata.get('tidal_album_id'):
