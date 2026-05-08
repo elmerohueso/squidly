@@ -2795,6 +2795,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.switchPage('explore');
                     void this.fetchYtmPlaylistTracks(playlist.playlistId, playlist.title);
                 });
                 li.appendChild(a);
