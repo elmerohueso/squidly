@@ -249,6 +249,33 @@
                                 value="30" placeholder="30">
                             <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
                         </div>
+                        <div class="settings-section" id="playlistMatchingSettings">
+                            <h3>Playlist Matching</h3>
+                            <p class="settings-hint" style="margin-top: 0; margin-bottom: 1rem;">Apply score penalties to deprioritize these matches when better options exist</p>
+                            <div class="tag-group">
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Compilations (Various Artists)</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="penaltyCompilation">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Karaoke / Instrumental tracks</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="penaltyKaraoke">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="tag-toggle-row">
+                                    <span class="tag-toggle-label">Live tracks</span>
+                                    <label class="tag-switch">
+                                        <input type="checkbox" id="penaltyLive">
+                                        <span class="tag-switch-slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
                         <div class="settings-section" id="taggingSettings">
                             <h3>Tagging</h3>
 

@@ -88,6 +88,14 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN tag_explicit BOOLEAN NOT NULL DEFAULT TRUE")
     if 'tag_explicit_suffix' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN tag_explicit_suffix BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'penalty_compilation' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_compilation BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'penalty_single' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_single BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'penalty_karaoke' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_karaoke BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'penalty_live' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_live BOOLEAN NOT NULL DEFAULT TRUE")
 
     cur.execute(
         """

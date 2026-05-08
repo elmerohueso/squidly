@@ -525,6 +525,9 @@ interface DownloadSettings {
     tagCoverArt: boolean;
     tagExplicit: boolean;
     tagExplicitSuffix: boolean;
+    penaltyCompilation: boolean;
+    penaltyKaraoke: boolean;
+    penaltyLive: boolean;
 }
 
 interface AppRouteState {
@@ -654,6 +657,9 @@ class App {
     private tagCoverArtCheckbox: HTMLInputElement;
     private tagExplicitCheckbox: HTMLInputElement;
     private tagExplicitSuffixCheckbox: HTMLInputElement;
+    private penaltyCompilationCheckbox: HTMLInputElement;
+    private penaltyKaraokeCheckbox: HTMLInputElement;
+    private penaltyLiveCheckbox: HTMLInputElement;
     private userButton: HTMLButtonElement;
     private userDropdownModal: HTMLElement;
     private userDropdownOverlay: HTMLElement;
@@ -946,6 +952,9 @@ class App {
         this.tagCoverArtCheckbox = document.getElementById('tagCoverArt') as HTMLInputElement;
         this.tagExplicitCheckbox = document.getElementById('tagExplicit') as HTMLInputElement;
         this.tagExplicitSuffixCheckbox = document.getElementById('tagExplicitSuffix') as HTMLInputElement;
+        this.penaltyCompilationCheckbox = document.getElementById('penaltyCompilation') as HTMLInputElement;
+        this.penaltyKaraokeCheckbox = document.getElementById('penaltyKaraoke') as HTMLInputElement;
+        this.penaltyLiveCheckbox = document.getElementById('penaltyLive') as HTMLInputElement;
 
         // User dropdown for top bar
         this.userButton = document.getElementById('userButton') as HTMLButtonElement;
@@ -5152,6 +5161,9 @@ class App {
             tagCoverArt: true,
             tagExplicit: true,
             tagExplicitSuffix: true,
+            penaltyCompilation: true,
+            penaltyKaraoke: true,
+            penaltyLive: true,
         };
     }
 
@@ -5208,6 +5220,9 @@ class App {
             tagCoverArt: typeof (raw as DownloadSettings).tagCoverArt === 'boolean' ? (raw as DownloadSettings).tagCoverArt : fallback.tagCoverArt,
             tagExplicit: typeof (raw as DownloadSettings).tagExplicit === 'boolean' ? (raw as DownloadSettings).tagExplicit : fallback.tagExplicit,
             tagExplicitSuffix: typeof (raw as DownloadSettings).tagExplicitSuffix === 'boolean' ? (raw as DownloadSettings).tagExplicitSuffix : fallback.tagExplicitSuffix,
+            penaltyCompilation: typeof (raw as DownloadSettings).penaltyCompilation === 'boolean' ? (raw as DownloadSettings).penaltyCompilation : fallback.penaltyCompilation,
+            penaltyKaraoke: typeof (raw as DownloadSettings).penaltyKaraoke === 'boolean' ? (raw as DownloadSettings).penaltyKaraoke : fallback.penaltyKaraoke,
+            penaltyLive: typeof (raw as DownloadSettings).penaltyLive === 'boolean' ? (raw as DownloadSettings).penaltyLive : fallback.penaltyLive,
         };
     }
 
@@ -5250,6 +5265,9 @@ class App {
         this.tagCoverArtCheckbox.checked = settings.tagCoverArt;
         this.tagExplicitCheckbox.checked = settings.tagExplicit;
         this.tagExplicitSuffixCheckbox.checked = settings.tagExplicitSuffix;
+        this.penaltyCompilationCheckbox.checked = settings.penaltyCompilation;
+        this.penaltyKaraokeCheckbox.checked = settings.penaltyKaraoke;
+        this.penaltyLiveCheckbox.checked = settings.penaltyLive;
         this.syncQualityToggleStyles();
     }
 
@@ -5286,6 +5304,9 @@ class App {
             tagCoverArt: this.tagCoverArtCheckbox.checked,
             tagExplicit: this.tagExplicitCheckbox.checked,
             tagExplicitSuffix: this.tagExplicitSuffixCheckbox.checked,
+            penaltyCompilation: this.penaltyCompilationCheckbox.checked,
+            penaltyKaraoke: this.penaltyKaraokeCheckbox.checked,
+            penaltyLive: this.penaltyLiveCheckbox.checked,
         };
     }
 

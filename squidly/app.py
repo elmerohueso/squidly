@@ -121,6 +121,7 @@ from squidly.matching import (
     has_hifi_match_seed_data,
     queue_hifi_match_job,
     start_hifi_match_job,
+    compute_playlist_match_penalty,
 )
 
 from squidly.hifi import (
@@ -3221,6 +3222,9 @@ def download_settings():
         'tag_version', 'tag_tidal_track_id', 'tag_tidal_album_id', 'tag_isrc',
         'tag_copyright', 'tag_cover_art', 'tag_explicit', 'tag_explicit_suffix',
     ]
+    penalty_keys = [
+        'penalty_compilation', 'penalty_karaoke', 'penalty_live',
+    ]
 
     updated = {
         'format': current['format'],
@@ -3232,6 +3236,9 @@ def download_settings():
     }
 
     for key in tag_keys:
+        updated[key] = payload.get(key, current.get(key, DEFAULT_DOWNLOAD_SETTINGS.get(key, True)))
+
+    for key in penalty_keys:
         updated[key] = payload.get(key, current.get(key, DEFAULT_DOWNLOAD_SETTINGS.get(key, True)))
 
     if updated['quality'] not in ('LOSSLESS', 'HIGH', 'LOW'):
@@ -3251,6 +3258,8 @@ def download_settings():
     updated['ignore_matches'] = bool(updated['ignore_matches'])
     for key in tag_keys:
         updated[key] = bool(updated[key])
+    for key in penalty_keys:
+        updated[key] = bool(updated[key])
 
     save_download_settings(updated)
 
@@ -3263,6 +3272,8 @@ def download_settings():
         'ignore_matches': updated['ignore_matches'],
     }
     for key in tag_keys:
+        result[key] = updated[key]
+    for key in penalty_keys:
         result[key] = updated[key]
 
     return jsonify(result)
@@ -3456,6 +3467,8 @@ def match_listenbrainz_track():
     if not title or not artist:
         return jsonify({'error': 'title and artist are required'}), 400
 
+    settings = get_download_settings()
+
     def normalize(s):
         return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
 
@@ -3486,6 +3499,7 @@ def match_listenbrainz_track():
             elif norm_album in item_album or item_album in norm_album:
                 score += 0.10
 
+        score -= compute_playlist_match_penalty(item, settings)
         return score
 
     isrcs = []
@@ -3729,6 +3743,8 @@ def match_ytm_track():
     if not title or not artist:
         return jsonify({'error': 'title and artist are required'}), 400
 
+    settings = get_download_settings()
+
     def normalize(s):
         return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
 
@@ -3759,6 +3775,7 @@ def match_ytm_track():
             elif norm_album in item_album or item_album in norm_album:
                 score += 0.10
 
+        score -= compute_playlist_match_penalty(item, settings)
         return score
 
     def search_hifi(search_type, search_query, limit=25):

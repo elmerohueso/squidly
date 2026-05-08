@@ -65,6 +65,9 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'tag_cover_art': True,
     'tag_explicit': True,
     'tag_explicit_suffix': True,
+    'penalty_compilation': True,
+    'penalty_karaoke': True,
+    'penalty_live': True,
 }
 
 # Temporary scratch directory used during downloads
