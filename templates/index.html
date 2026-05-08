@@ -213,8 +213,8 @@
                 <div class="page" id="settingsPage" data-page="settings">
                     <h2>Settings</h2>
                     <div class="settings-content">
-                        <div class="settings-section">
-                            <h3>Quality</h3>
+                        <div class="settings-section" id="downloadsSettings">
+                            <h3>Downloads</h3>
                             <div class="format-toggle" role="radiogroup" aria-label="Download quality">
                                 <label class="toggle-option">
                                     <input type="radio" name="downloadQuality" value="LOSSLESS" id="qualityLossless">
@@ -229,55 +229,47 @@
                                     <span>LOW</span>
                                 </label>
                             </div>
-                            <label class="settings-label" for="ignoreMatchesCheckbox"
-                                style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
-                                <input type="checkbox" id="ignoreMatchesCheckbox">
-                                <span>Force re-download (ignore existing library matches)</span>
-                            </label>
-                        </div>
-                        <div class="settings-section" id="fileNamingSettings">
-                            <h3>File Naming</h3>
-                            <label class="settings-label" for="fileNamingAlbum">File Naming</label>
+                            <label class="settings-label" for="fileNamingAlbum" style="margin-top: 1rem;">File Naming</label>
                             <input type="text" id="fileNamingAlbum" class="settings-input"
                                 placeholder="{artist}/{album}/{track} - {title}.{ext}">
                             <p class="settings-hint">Folder: /downloads</p>
                             <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
+                            <label class="settings-label" for="ignoreMatchesCheckbox"
+                                style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <input type="checkbox" id="ignoreMatchesCheckbox">
+                                <span>Force re-download (ignore existing library matches)</span>
+                            </label>
 
-                            <label class="settings-label" for="jobsRefreshIntervalSeconds"
-                                style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
-                            <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1"
-                                value="30" placeholder="30">
-                            <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
-                        </div>
-                        <div class="settings-section" id="playlistMatchingSettings">
-                            <h3>Playlist Matching</h3>
-                            <p class="settings-hint" style="margin-top: 0; margin-bottom: 1rem;">Apply score penalties to deprioritize these matches when better options exist</p>
-                            <div class="tag-group">
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Compilations (Various Artists)</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="penaltyCompilation">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Karaoke / Instrumental tracks</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="penaltyKaraoke">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Live tracks</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="penaltyLive">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
+                            <div class="playlist-matching-group" style="margin-top: 1.25rem;">
+                                <div class="playlist-matching-title">Playlist Matching Penalties</div>
+                                <p class="settings-hint" style="margin-top: 0; margin-bottom: 0.75rem;">Apply score penalties to deprioritize these matches when better options exist</p>
+                                <div class="tag-group" style="margin-bottom: 0;">
+                                    <div class="tag-toggle-row">
+                                        <span class="tag-toggle-label">Compilations (Various Artists)</span>
+                                        <label class="tag-switch">
+                                            <input type="checkbox" id="penaltyCompilation">
+                                            <span class="tag-switch-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="tag-toggle-row">
+                                        <span class="tag-toggle-label">Karaoke / Instrumental tracks</span>
+                                        <label class="tag-switch">
+                                            <input type="checkbox" id="penaltyKaraoke">
+                                            <span class="tag-switch-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="tag-toggle-row">
+                                        <span class="tag-toggle-label">Live tracks</span>
+                                        <label class="tag-switch">
+                                            <input type="checkbox" id="penaltyLive">
+                                            <span class="tag-switch-slider"></span>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                         <div class="settings-section" id="taggingSettings">
-                            <h3>Tagging</h3>
+                            <h3>Metadata Tagging</h3>
 
                             <div class="tag-group">
                                 <div class="tag-group-title">Core Metadata</div>
@@ -414,56 +406,66 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="settings-section" id="listenbrainzSettings">
-                            <div class="settings-section-title">ListenBrainz</div>
-                            <label class="settings-label" for="listenbrainzUsername">Username</label>
-                            <input type="text" id="listenbrainzUsername" class="settings-input"
-                                placeholder="Your ListenBrainz username">
-                            <label class="settings-label" for="listenbrainzToken" style="margin-top: 1rem;">User
-                                Token</label>
-                            <input type="password" id="listenbrainzToken" class="settings-input"
-                                placeholder="Your ListenBrainz user token">
-                            <p class="settings-hint">Get your token from your <a
-                                    href="https://listenbrainz.org/profile/" target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;">ListenBrainz
-                                    profile</a></p>
-                            <button id="saveLbConfig" class="save-button" style="margin-top: 1rem;">Save ListenBrainz
-                                Config</button>
-                            <p class="settings-note" id="lbConfigStatus"></p>
-                        </div>
-                        <div class="settings-section" id="youtubeMusicSettings">
-                            <div class="settings-section-title">YouTube Music</div>
-                            <label class="settings-label" for="ytmCookie">Browser Cookie</label>
-                            <input type="text" id="ytmCookie" class="settings-input"
-                                placeholder="Paste your YouTube Music cookie here">
-                            <p class="settings-hint">
-                                Go to <a href="https://music.youtube.com" target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;">music.youtube.com</a>,
-                                open DevTools (F12) → Network tab, filter for "browse", refresh the page,
-                                click a browse request, and copy the full Cookie header value.
-                            </p>
-                            <button id="saveYtmConfig" class="save-button" style="margin-top: 1rem;">Save YouTube Music Config</button>
-                            <p class="settings-note" id="ytmConfigStatus"></p>
-                        </div>
-                        <div class="settings-section" id="plexSettings">
-                            <div class="settings-section-title">Plex Integration</div>
-                            <div id="plexConnectedStatus"
-                                style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                        <div class="settings-section" id="integrationsSettings">
+                            <h3>Integrations</h3>
+
+                            <div class="integration-group" id="plexSettings">
+                                <div class="integration-group-title">Plex</div>
+                                <div id="plexConnectedStatus"
+                                    style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                                </div>
+                                <label class="settings-label" for="plexSyncIntervalHours">Library Sync Interval (hours)</label>
+                                <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1"
+                                    value="24" placeholder="24">
+                                <p class="settings-hint">Default: 24 hours</p>
+                                <p class="settings-note" id="plexConfigStatus"></p>
+                                <button id="startPlexSync" class="save-button" style="margin-top: 0.5rem;">Start Plex Library
+                                    Sync Now</button>
+                                <p class="settings-note" id="plexSyncStatus"></p>
                             </div>
 
-                            <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library
-                                Sync Interval (hours)</label>
-                            <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1"
-                                value="24" placeholder="24">
-                            <p class="settings-hint">Default: 24 hours</p>
-                            <p class="settings-note" id="plexConfigStatus"></p>
-                            <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library
-                                Sync Now</button>
-                            <p class="settings-note" id="plexSyncStatus"></p>
+                            <div class="integration-group" id="listenbrainzSettings">
+                                <div class="integration-group-title">ListenBrainz</div>
+                                <label class="settings-label" for="listenbrainzUsername">Username</label>
+                                <input type="text" id="listenbrainzUsername" class="settings-input"
+                                    placeholder="Your ListenBrainz username">
+                                <label class="settings-label" for="listenbrainzToken" style="margin-top: 0.75rem;">User
+                                    Token</label>
+                                <input type="password" id="listenbrainzToken" class="settings-input"
+                                    placeholder="Your ListenBrainz user token">
+                                <p class="settings-hint">Get your token from your <a
+                                        href="https://listenbrainz.org/profile/" target="_blank"
+                                        style="color: var(--accent-primary); text-decoration: none;">ListenBrainz
+                                        profile</a></p>
+                                <button id="saveLbConfig" class="save-button" style="margin-top: 0.5rem;">Save ListenBrainz
+                                    Config</button>
+                                <p class="settings-note" id="lbConfigStatus"></p>
+                            </div>
+
+                            <div class="integration-group" id="youtubeMusicSettings">
+                                <div class="integration-group-title">YouTube Music</div>
+                                <label class="settings-label" for="ytmCookie">Browser Cookie</label>
+                                <input type="text" id="ytmCookie" class="settings-input"
+                                    placeholder="Paste your YouTube Music cookie here">
+                                <p class="settings-hint">
+                                    Go to <a href="https://music.youtube.com" target="_blank"
+                                        style="color: var(--accent-primary); text-decoration: none;">music.youtube.com</a>,
+                                    open DevTools (F12) → Network tab, filter for "browse", refresh the page,
+                                    click a browse request, and copy the full Cookie header value.
+                                </p>
+                                <button id="saveYtmConfig" class="save-button" style="margin-top: 0.5rem;">Save YouTube Music Config</button>
+                                <p class="settings-note" id="ytmConfigStatus"></p>
+                            </div>
                         </div>
-                        <div id="plexDangerZone" class="settings-section settings-danger-zone"
-                            style="margin-top: 1rem;">
-                            <div class="settings-section-title">DANGER ZONE</div>
+                        <div class="settings-section" id="uiPreferencesSettings">
+                            <h3>UI Preferences</h3>
+                            <label class="settings-label" for="jobsRefreshIntervalSeconds">Jobs Refresh Interval (seconds)</label>
+                            <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1"
+                                value="30" placeholder="30">
+                            <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
+                        </div>
+                        <div id="plexDangerZone" class="settings-section settings-danger-zone">
+                            <h3>Danger Zone</h3>
                             <p class="settings-note">Disconnecting from Plex will clear all user data from Squidly.</p>
                             <button id="plexClearCredentialsButton" class="save-button"
                                 style="background: #b00020; color: #fff; width: 100%;">Disconnect From Plex and
