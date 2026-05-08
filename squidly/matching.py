@@ -103,19 +103,18 @@ def _extract_primary_hifi_artist(item):
 def _track_needs_hifi_match(track_row):
     if not isinstance(track_row, dict):
         return False
-
     hifi_id = str(track_row.get('hifi_id') or '').strip()
-    match_status = str(track_row.get('match_status') or '').strip() or 'unmatched'
-    return not hifi_id or match_status == 'unmatched'
+    confidence = _safe_float(track_row.get('confidence'))
+    return not hifi_id or confidence < 0.95
 
 
 def _is_manual_match(row):
     if not isinstance(row, dict):
         return False
-    return str(row.get('match_source') or '').strip() == 'manual'
+    return _safe_float(row.get('confidence')) == 1.0
 
 
-def _merge_match_state(existing_row, hifi_id=None, confidence=None, match_status=None, match_source=None, matched_at=None, confirmed_at=None):
+def _merge_match_state(existing_row, hifi_id=None, confidence=None):
     if not isinstance(existing_row, dict):
         existing_row = {}
 
@@ -123,55 +122,35 @@ def _merge_match_state(existing_row, hifi_id=None, confidence=None, match_status
         return {
             'hifi_id': existing_row.get('hifi_id'),
             'confidence': _safe_float(existing_row.get('confidence')),
-            'match_status': existing_row.get('match_status') or 'confirmed',
-            'match_source': existing_row.get('match_source') or 'manual',
-            'matched_at': existing_row.get('matched_at'),
-            'confirmed_at': existing_row.get('confirmed_at'),
         }
 
     existing_confidence = _safe_float(existing_row.get('confidence'))
-    existing_status = str(existing_row.get('match_status') or 'unmatched').strip() or 'unmatched'
-    existing_source = str(existing_row.get('match_source') or '').strip() or None
     existing_hifi_id = str(existing_row.get('hifi_id') or '').strip() or None
-    effective_hifi_id = existing_hifi_id
-    effective_confidence = existing_confidence
-    effective_status = existing_status
-    effective_source = existing_source
-    effective_matched_at = existing_row.get('matched_at')
-    effective_confirmed_at = existing_row.get('confirmed_at')
+
+    if not hifi_id:
+        return {
+            'hifi_id': existing_hifi_id,
+            'confidence': existing_confidence,
+        }
 
     incoming_confidence = _safe_float(confidence, default=0.0)
     should_apply = False
-    if hifi_id:
-        if not existing_hifi_id:
-            should_apply = True
-        elif existing_hifi_id == hifi_id:
-            should_apply = True
-        elif existing_status in ('unmatched', 'rejected'):
-            should_apply = True
-        elif incoming_confidence >= existing_confidence:
-            should_apply = True
+    if not existing_hifi_id:
+        should_apply = True
+    elif existing_hifi_id == hifi_id:
+        should_apply = True
+    elif incoming_confidence >= existing_confidence:
+        should_apply = True
 
     if should_apply:
-        effective_hifi_id = str(hifi_id).strip() if hifi_id else None
-        effective_confidence = incoming_confidence
-        effective_status = match_status or ('confirmed' if incoming_confidence >= 0.95 else 'proposed')
-        effective_source = match_source or effective_source
-        effective_matched_at = matched_at or effective_matched_at or _now_utc()
-        if effective_status == 'confirmed':
-            effective_confirmed_at = confirmed_at or effective_confirmed_at or _now_utc()
-        elif effective_status != 'confirmed':
-            effective_confirmed_at = None
-    elif existing_hifi_id:
-        effective_hifi_id = existing_hifi_id
+        return {
+            'hifi_id': str(hifi_id).strip() if hifi_id else None,
+            'confidence': incoming_confidence,
+        }
 
     return {
-        'hifi_id': effective_hifi_id,
-        'confidence': effective_confidence,
-        'match_status': effective_status,
-        'match_source': effective_source,
-        'matched_at': effective_matched_at,
-        'confirmed_at': effective_confirmed_at,
+        'hifi_id': existing_hifi_id,
+        'confidence': existing_confidence,
     }
 
 
@@ -416,7 +395,7 @@ def _match_source_track_to_album_payload(track_row, album_payload, preferred_hif
         for candidate in track_items:
             candidate_id = str(candidate.get('id') or '').strip()
             if candidate_id and candidate_id == preferred_id:
-                return candidate, 0.99, 'tags'
+                return candidate, 0.99
 
     best_candidate = None
     best_confidence = 0.0
@@ -428,8 +407,8 @@ def _match_source_track_to_album_payload(track_row, album_payload, preferred_hif
         best_confidence = confidence
 
     if best_candidate and best_confidence >= 0.90:
-        return best_candidate, best_confidence, 'auto_album'
-    return None, 0.0, None
+        return best_candidate, best_confidence
+    return None, 0.0
 
 
 def _serialize_match_variants(rows):
@@ -611,7 +590,7 @@ def _choose_track_candidate(track_row, album_payload):
 def _get_artist_row(cur, artist_id):
     cur.execute(
         """
-        SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at, last_seen_at
+        SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
         FROM artists
         WHERE artist_id = %s
         """,
@@ -624,8 +603,7 @@ def _get_album_row(cur, album_id):
     cur.execute(
         """
         SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-               matched_track_count, expected_track_count, match_status, match_source,
-               matched_at, confirmed_at, last_seen_at
+               matched_track_count, expected_track_count, last_seen_at
         FROM albums
         WHERE album_id = %s
         """,
@@ -638,8 +616,7 @@ def _get_track_row_by_path(cur, path):
     cur.execute(
         """
         SELECT track_id, album_id, artist_id, title, library_id, confidence, hifi_id, path,
-               format, bitrate, disc_number, track_number, match_status, match_source,
-               matched_at, confirmed_at, last_seen_at, isrc, duration
+               format, bitrate, disc_number, track_number, last_seen_at, isrc, duration
         FROM tracks
         WHERE path = %s
         """,
@@ -648,12 +625,12 @@ def _get_track_row_by_path(cur, path):
     return cur.fetchone()
 
 
-def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0, match_status='unmatched', match_source=None, matched_at=None, confirmed_at=None, last_seen_at=None):
+def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0, last_seen_at=None):
     existing = None
     if library_id:
         cur.execute(
             """
-            SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at, last_seen_at
+            SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
             FROM artists
             WHERE library_id = %s
             """,
@@ -663,10 +640,10 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
     if not existing and hifi_id:
         cur.execute(
             """
-            SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at, last_seen_at
+            SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
             FROM artists
             WHERE hifi_id = %s
-            ORDER BY confirmed_at DESC NULLS LAST, artist_id ASC
+            ORDER BY artist_id ASC
             LIMIT 1
             """,
             (hifi_id,)
@@ -675,8 +652,8 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
     if not existing:
         cur.execute(
             """
-            INSERT INTO artists (name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at, last_seen_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO artists (name, library_id, hifi_id, confidence, last_seen_at)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING artist_id
             """,
             (
@@ -684,16 +661,12 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
                 library_id,
                 hifi_id,
                 confidence,
-                match_status,
-                match_source,
-                matched_at,
-                confirmed_at,
                 last_seen_at or _now_utc(),
             )
         )
         return cur.fetchone()['artist_id']
 
-    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence, match_status=match_status, match_source=match_source, matched_at=matched_at, confirmed_at=confirmed_at)
+    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence)
     cur.execute(
         """
         UPDATE artists
@@ -701,10 +674,6 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
             library_id = COALESCE(%s, library_id),
             hifi_id = %s,
             confidence = %s,
-            match_status = %s,
-            match_source = %s,
-            matched_at = %s,
-            confirmed_at = %s,
             last_seen_at = %s
         WHERE artist_id = %s
         """,
@@ -713,10 +682,6 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
             library_id,
             match_state['hifi_id'],
             match_state['confidence'],
-            match_state['match_status'],
-            match_state['match_source'],
-            match_state['matched_at'],
-            match_state['confirmed_at'],
             last_seen_at or existing.get('last_seen_at') or _now_utc(),
             existing['artist_id'],
         )
@@ -724,14 +689,13 @@ def _upsert_artist_row(cur, name, library_id=None, hifi_id=None, confidence=0.0,
     return existing['artist_id']
 
 
-def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, confidence=0.0, complete=False, match_status='unmatched', match_source=None, matched_at=None, confirmed_at=None, last_seen_at=None, matched_track_count=None, expected_track_count=None):
+def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, confidence=0.0, complete=False, last_seen_at=None, matched_track_count=None, expected_track_count=None):
     existing = None
     if library_id:
         cur.execute(
             """
             SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-                   matched_track_count, expected_track_count, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at
+                   matched_track_count, expected_track_count, last_seen_at
             FROM albums
             WHERE library_id = %s
             """,
@@ -742,12 +706,11 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
         cur.execute(
             """
             SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-                   matched_track_count, expected_track_count, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at
+                   matched_track_count, expected_track_count, last_seen_at
             FROM albums
             WHERE hifi_id = %s
               AND (%s IS NULL OR artist_id = %s)
-            ORDER BY confirmed_at DESC NULLS LAST, album_id ASC
+            ORDER BY album_id ASC
             LIMIT 1
             """,
             (hifi_id, artist_id, artist_id)
@@ -758,10 +721,9 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
             """
             INSERT INTO albums (
                 artist_id, title, library_id, hifi_id, confidence, complete,
-                matched_track_count, expected_track_count, match_status, match_source,
-                matched_at, confirmed_at, last_seen_at
+                matched_track_count, expected_track_count, last_seen_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING album_id
             """,
             (
@@ -773,16 +735,12 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
                 complete,
                 matched_track_count or 0,
                 expected_track_count or 0,
-                match_status,
-                match_source,
-                matched_at,
-                confirmed_at,
                 last_seen_at or _now_utc(),
             )
         )
         return cur.fetchone()['album_id']
 
-    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence, match_status=match_status, match_source=match_source, matched_at=matched_at, confirmed_at=confirmed_at)
+    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence)
     cur.execute(
         """
         UPDATE albums
@@ -794,10 +752,6 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
             complete = %s,
             matched_track_count = %s,
             expected_track_count = %s,
-            match_status = %s,
-            match_source = %s,
-            matched_at = %s,
-            confirmed_at = %s,
             last_seen_at = %s
         WHERE album_id = %s
         """,
@@ -810,10 +764,6 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
             complete if complete is not None else existing.get('complete') or False,
             matched_track_count if matched_track_count is not None else existing.get('matched_track_count') or 0,
             expected_track_count if expected_track_count is not None else existing.get('expected_track_count') or 0,
-            match_state['match_status'],
-            match_state['match_source'],
-            match_state['matched_at'],
-            match_state['confirmed_at'],
             last_seen_at or existing.get('last_seen_at') or _now_utc(),
             existing['album_id'],
         )
@@ -821,14 +771,13 @@ def _upsert_album_row(cur, artist_id, title, library_id=None, hifi_id=None, conf
     return existing['album_id']
 
 
-def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hifi_id=None, confidence=0.0, match_status='unmatched', match_source=None, matched_at=None, confirmed_at=None, last_seen_at=None, audio_format=None, bitrate=None, disc_number=None, track_number=None, isrc=None, duration=None):
+def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hifi_id=None, confidence=0.0, last_seen_at=None, audio_format=None, bitrate=None, disc_number=None, track_number=None, isrc=None, duration=None):
     existing = None
     if library_id:
         cur.execute(
             """
             SELECT track_id, album_id, artist_id, title, library_id, confidence, hifi_id, path,
-                   format, bitrate, disc_number, track_number, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at, isrc, duration
+                   format, bitrate, disc_number, track_number, last_seen_at, isrc, duration
             FROM tracks
             WHERE library_id = %s
             """,
@@ -842,10 +791,9 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             """
             INSERT INTO tracks (
                 album_id, artist_id, title, library_id, confidence, hifi_id, path,
-                format, bitrate, disc_number, track_number, match_status, match_source,
-                matched_at, confirmed_at, last_seen_at, isrc, duration
+                format, bitrate, disc_number, track_number, last_seen_at, isrc, duration
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING track_id
             """,
             (
@@ -860,10 +808,6 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
                 bitrate,
                 disc_number,
                 track_number,
-                match_status,
-                match_source,
-                matched_at,
-                confirmed_at,
                 last_seen_at or _now_utc(),
                 isrc,
                 duration,
@@ -871,7 +815,7 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
         )
         return cur.fetchone()['track_id']
 
-    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence, match_status=match_status, match_source=match_source, matched_at=matched_at, confirmed_at=confirmed_at)
+    match_state = _merge_match_state(existing, hifi_id=hifi_id, confidence=confidence)
     cur.execute(
         """
         UPDATE tracks
@@ -886,10 +830,6 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             bitrate = COALESCE(%s, bitrate),
             disc_number = COALESCE(%s, disc_number),
             track_number = COALESCE(%s, track_number),
-            match_status = %s,
-            match_source = %s,
-            matched_at = %s,
-            confirmed_at = %s,
             last_seen_at = %s,
             isrc = COALESCE(%s, isrc),
             duration = COALESCE(%s, duration)
@@ -907,10 +847,6 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
             bitrate,
             disc_number,
             track_number,
-            match_state['match_status'],
-            match_state['match_source'],
-            match_state['matched_at'],
-            match_state['confirmed_at'],
             last_seen_at or existing.get('last_seen_at') or _now_utc(),
             isrc,
             duration,
@@ -936,10 +872,6 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
             name=album_artist_name or track_artist_name or 'Unknown Artist',
             hifi_id=album_hifi_artist_id,
             confidence=0.99 if album_hifi_artist_id else 0.0,
-            match_status='confirmed' if album_hifi_artist_id else 'unmatched',
-            match_source='tags' if album_hifi_artist_id else None,
-            matched_at=now if album_hifi_artist_id else None,
-            confirmed_at=now if album_hifi_artist_id else None,
             last_seen_at=now,
         )
         track_artist_row_id = _upsert_artist_row(
@@ -947,10 +879,6 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
             name=track_artist_name or album_artist_name or 'Unknown Artist',
             hifi_id=track_hifi_artist_id,
             confidence=0.99 if track_hifi_artist_id else 0.0,
-            match_status='confirmed' if track_hifi_artist_id else 'unmatched',
-            match_source='tags' if track_hifi_artist_id else None,
-            matched_at=now if track_hifi_artist_id else None,
-            confirmed_at=now if track_hifi_artist_id else None,
             last_seen_at=now,
         )
         album_row_id = _upsert_album_row(
@@ -959,10 +887,6 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
             title=album_title or 'Unknown Album',
             hifi_id=hifi_album_id,
             confidence=0.99 if hifi_album_id else 0.0,
-            match_status='confirmed' if hifi_album_id else 'unmatched',
-            match_source='tags' if hifi_album_id else None,
-            matched_at=now if hifi_album_id else None,
-            confirmed_at=now if hifi_album_id else None,
             last_seen_at=now,
         )
         _upsert_track_row(
@@ -973,10 +897,6 @@ def upsert_download_match_hint(track_title, track_artist_name, album_title, albu
             path=relative_path,
             hifi_id=hifi_track_id,
             confidence=0.99 if hifi_track_id else 0.0,
-            match_status='confirmed' if hifi_track_id else 'unmatched',
-            match_source='tags' if hifi_track_id else None,
-            matched_at=now if hifi_track_id else None,
-            confirmed_at=now if hifi_track_id else None,
             last_seen_at=now,
             audio_format=audio_format,
             isrc=isrc,
@@ -1063,7 +983,7 @@ def _fetch_source_album_track_titles_map(cur, album_ids):
     return results
 
 
-def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_payload, now_dt, match_source, album_confidence, tagged_track_ids_by_path=None):
+def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_payload, now_dt, album_confidence, tagged_track_ids_by_path=None):
     album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
     album_hifi_id = str(album_data.get('id') or '').strip() or None
     if not album_hifi_id:
@@ -1071,8 +991,6 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
 
     album_artist_info = _extract_primary_hifi_artist(album_data)
     existing_album_artist_row = _get_artist_row(cur, album_row.get('artist_id')) if album_row.get('artist_id') else None
-    album_match_status = 'confirmed' if match_source == 'tags' or album_confidence >= 0.95 else 'proposed'
-    album_confirmed_at = now_dt if album_match_status == 'confirmed' else None
 
     album_artist_row_id = album_row.get('artist_id')
     if album_artist_info or existing_album_artist_row:
@@ -1081,11 +999,7 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
             name=(album_artist_info or {}).get('name') or (existing_album_artist_row or {}).get('name') or album_row.get('artist_name') or 'Unknown Artist',
             library_id=(existing_album_artist_row or {}).get('library_id'),
             hifi_id=(album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id'),
-            confidence=0.99 if match_source == 'tags' else album_confidence,
-            match_status=album_match_status,
-            match_source=match_source,
-            matched_at=now_dt,
-            confirmed_at=album_confirmed_at,
+            confidence=album_confidence,
             last_seen_at=(existing_album_artist_row or {}).get('last_seen_at') or now_dt,
         )
 
@@ -1095,12 +1009,8 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
         title=album_row.get('title') or 'Unknown Album',
         library_id=album_row.get('library_id'),
         hifi_id=album_hifi_id,
-        confidence=0.99 if match_source == 'tags' else album_confidence,
+        confidence=album_confidence,
         complete=bool(album_row.get('complete')),
-        match_status=album_match_status,
-        match_source=match_source,
-        matched_at=now_dt,
-        confirmed_at=album_confirmed_at,
         last_seen_at=album_row.get('last_seen_at') or now_dt,
         matched_track_count=_safe_int(album_row.get('matched_track_count')) or 0,
         expected_track_count=_safe_int(album_row.get('expected_track_count')) or 0,
@@ -1111,12 +1021,10 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
     pending_track_rows = [track_row for track_row in (source_track_rows or []) if _track_needs_hifi_match(track_row)]
     for track_row in pending_track_rows:
         preferred_hifi_id = tagged_track_ids_by_path.get(str(track_row.get('path') or '').strip())
-        candidate, track_confidence, track_source = _match_source_track_to_album_payload(track_row, album_payload, preferred_hifi_id=preferred_hifi_id)
+        candidate, track_confidence = _match_source_track_to_album_payload(track_row, album_payload, preferred_hifi_id=preferred_hifi_id)
         if not candidate:
             continue
 
-        track_match_status = 'confirmed' if track_source == 'tags' or track_confidence >= 0.95 else 'proposed'
-        track_confirmed_at = now_dt if track_match_status == 'confirmed' else None
         track_artist_info = _extract_primary_hifi_artist(candidate) or album_artist_info
         existing_track_artist_row = _get_artist_row(cur, track_row.get('artist_id')) if track_row.get('artist_id') else None
         track_artist_row_id = album_artist_row_id
@@ -1126,11 +1034,7 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
                 name=(track_artist_info or {}).get('name') or (existing_track_artist_row or {}).get('name') or album_row.get('artist_name') or 'Unknown Artist',
                 library_id=(existing_track_artist_row or {}).get('library_id'),
                 hifi_id=(track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id'),
-                confidence=0.99 if track_source == 'tags' else track_confidence,
-                match_status=track_match_status,
-                match_source=track_source,
-                matched_at=now_dt,
-                confirmed_at=track_confirmed_at,
+                confidence=track_confidence,
                 last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
             )
 
@@ -1142,11 +1046,7 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
             path=track_row.get('path') or '',
             library_id=track_row.get('library_id'),
             hifi_id=str(candidate.get('id') or '').strip() or track_row.get('hifi_id'),
-            confidence=0.99 if track_source == 'tags' else track_confidence,
-            match_status=track_match_status,
-            match_source=track_source,
-            matched_at=now_dt,
-            confirmed_at=track_confirmed_at,
+            confidence=track_confidence,
             last_seen_at=track_row.get('last_seen_at') or now_dt,
             audio_format=track_row.get('format'),
             bitrate=_safe_int(track_row.get('bitrate')),
@@ -1162,7 +1062,7 @@ def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_pay
 def _find_hifi_match_for_album(album_row, source_track_rows):
     search_query = ' '.join(part for part in [str(album_row.get('artist_name') or '').strip(), str(album_row.get('title') or '').strip()] if part).strip()
     if not search_query:
-        return None, None, 0.0, {}
+        return None, 0.0, {}
 
     best_payload = None
     best_confidence = 0.0
@@ -1177,9 +1077,9 @@ def _find_hifi_match_for_album(album_row, source_track_rows):
             best_confidence = confidence
 
     if best_payload and best_confidence >= 0.90:
-        return best_payload, 'auto_album', best_confidence, {}
+        return best_payload, best_confidence, {}
 
-    return None, None, 0.0, {}
+    return None, 0.0, {}
 
 
 def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
@@ -1228,7 +1128,7 @@ def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
     return None
 
 
-def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_source='manual', match_status='confirmed', confidence=1.0):
+def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence=1.0):
     from squidly.app import _fetch_hifi_track_info_payload as _app_fetch_track_info
 
     if not isinstance(track_row, dict):
@@ -1249,10 +1149,6 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
             library_id=(existing_track_artist_row or {}).get('library_id'),
             hifi_id=(track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id'),
             confidence=confidence,
-            match_status=match_status,
-            match_source=match_source,
-            matched_at=now_dt,
-            confirmed_at=now_dt,
             last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
         )
 
@@ -1291,10 +1187,6 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
             library_id=(existing_album_artist_row or {}).get('library_id'),
             hifi_id=(album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id'),
             confidence=confidence,
-            match_status=match_status,
-            match_source=match_source,
-            matched_at=now_dt,
-            confirmed_at=now_dt,
             last_seen_at=(existing_album_artist_row or {}).get('last_seen_at') or now_dt,
         )
 
@@ -1308,10 +1200,6 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
             hifi_id=album_hifi_id or (existing_album_row or {}).get('hifi_id'),
             confidence=confidence,
             complete=bool((existing_album_row or {}).get('complete')),
-            match_status=match_status,
-            match_source=match_source,
-            matched_at=now_dt,
-            confirmed_at=now_dt,
             last_seen_at=(existing_album_row or {}).get('last_seen_at') or now_dt,
             matched_track_count=_safe_int((existing_album_row or {}).get('matched_track_count')) or 0,
             expected_track_count=_safe_int((existing_album_row or {}).get('expected_track_count')) or 0,
@@ -1326,10 +1214,6 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, match_sour
         library_id=track_row.get('library_id'),
         hifi_id=track_hifi_id,
         confidence=confidence,
-        match_status=match_status,
-        match_source=match_source,
-        matched_at=now_dt,
-        confirmed_at=now_dt,
         last_seen_at=track_row.get('last_seen_at') or now_dt,
         audio_format=track_row.get('format'),
         bitrate=_safe_int(track_row.get('bitrate')),
@@ -1379,7 +1263,7 @@ def _refresh_album_completeness(cur, album_row):
             FROM tracks
             WHERE album_id = %s
               AND hifi_id = ANY(%s)
-              AND match_status IN ('proposed', 'confirmed')
+              AND hifi_id IS NOT NULL
             """,
             (album_row['album_id'], expected_track_ids)
         )
@@ -1408,7 +1292,7 @@ def _build_stored_track_match_lookup(cur, track_ids):
 
     cur.execute(
         """
-        SELECT hifi_id, confidence, match_status, format, bitrate, path
+        SELECT hifi_id, confidence, format, bitrate, path
         FROM tracks
         WHERE hifi_id = ANY(%s)
           AND library_id IS NOT NULL
@@ -1435,7 +1319,6 @@ def _build_stored_track_match_lookup(cur, track_ids):
         results.append({
             'track_id': requested_id,
             'exists': bool(matched_rows),
-            'match_status': best_row.get('match_status') if best_row else None,
             'confidence': _safe_float(best_row.get('confidence')) if best_row else None,
             'variants': _serialize_match_variants(matched_rows),
         })
@@ -1454,7 +1337,6 @@ def _build_stored_album_match_lookup(cur, album_ids):
                albums.complete,
                albums.matched_track_count,
                albums.expected_track_count,
-               albums.match_status,
                albums.confidence,
                tracks.format,
                tracks.bitrate,
@@ -1489,7 +1371,6 @@ def _build_stored_album_match_lookup(cur, album_ids):
             'album_id': requested_id,
             'exists': bool(matched_rows),
             'complete': complete,
-            'match_status': best_row.get('match_status') if best_row else None,
             'confidence': _safe_float(best_row.get('confidence')) if best_row else None,
             'matched_track_count': max((_safe_int(row.get('matched_track_count')) or 0) for row in matched_rows) if matched_rows else 0,
             'expected_track_count': max((_safe_int(row.get('expected_track_count')) or 0) for row in matched_rows) if matched_rows else 0,
@@ -1533,7 +1414,6 @@ def _build_stored_artist_match_lookup(cur, artist_ids):
             'artist_id': requested_id,
             'exists': bool(row),
             'complete': bool(row.get('complete')) if row else False,
-            'match_status': None,
             'confidence': None,
             'variants': []
         })
@@ -1545,8 +1425,7 @@ def _fetch_match_review_row(cur, entity_type, entity_id):
     if entity_type == 'artist':
         cur.execute(
             """
-            SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at
+            SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
             FROM artists
             WHERE artist_id = %s
             """,
@@ -1559,8 +1438,7 @@ def _fetch_match_review_row(cur, entity_type, entity_id):
             """
             SELECT albums.album_id, albums.artist_id, albums.title, albums.library_id, albums.hifi_id,
                    albums.confidence, albums.complete, albums.matched_track_count,
-                   albums.expected_track_count, albums.match_status, albums.match_source,
-                   albums.matched_at, albums.confirmed_at, albums.last_seen_at,
+                   albums.expected_track_count, albums.last_seen_at,
                    artists.name AS artist_name,
                    artists.hifi_id AS artist_hifi_id,
                    COUNT(tracks.track_id) AS library_track_count
@@ -1579,8 +1457,7 @@ def _fetch_match_review_row(cur, entity_type, entity_id):
             """
             SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                    tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
-                   tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at, tracks.isrc, tracks.duration,
+                   tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc, tracks.duration,
                    albums.title AS album_title,
                    albums.hifi_id AS album_hifi_id,
                    artists.name AS artist_name
@@ -1756,7 +1633,7 @@ def _fetch_hifi_match_coverage_counts(cur):
                 COUNT(*) AS total,
                 SUM(
                     CASE
-                        WHEN COALESCE(hifi_id, '') = '' OR match_status = 'unmatched' THEN 1
+                        WHEN hifi_id IS NULL OR confidence < 0.95 THEN 1
                         ELSE 0
                     END
                 ) AS missing

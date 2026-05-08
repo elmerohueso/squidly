@@ -364,7 +364,6 @@ interface PlexSongVariant {
 interface PlexTrackMatch {
     exists: boolean;
     variants?: PlexSongVariant[];
-    match_status?: string;
     confidence?: number | null;
 }
 
@@ -376,7 +375,6 @@ interface HifiAlbumLookupMatch {
     album_id: string;
     exists: boolean;
     complete: boolean;
-    match_status?: string;
     confidence?: number | null;
     matched_track_count?: number;
     expected_track_count?: number;
@@ -387,7 +385,6 @@ interface HifiArtistLookupMatch {
     artist_id: string;
     exists: boolean;
     complete: boolean;
-    match_status?: string;
     confidence?: number | null;
     variants?: PlexSongVariant[];
 }
@@ -407,10 +404,6 @@ interface HifiReviewArtist {
     hifi_id?: string;
     picture?: string;
     confidence?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiReviewAlbum {
@@ -426,10 +419,6 @@ interface HifiReviewAlbum {
     complete?: boolean;
     matched_track_count?: number;
     expected_track_count?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiReviewTrack {
@@ -450,10 +439,6 @@ interface HifiReviewTrack {
     bitrate?: number;
     disc_number?: number;
     track_number?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiMatchReviewResponse {
@@ -3921,16 +3906,13 @@ class App {
         return `${Math.round(confidence * 100)}%`;
     }
 
-    private formatMatchStatusLabel(status?: string | null): string {
-        const normalized = String(status || 'unmatched').trim().toLowerCase();
-        if (normalized === 'confirmed') {
-            return 'Confirmed';
+    private formatMatchStatusLabel(confidence?: number | null): string {
+        const c = typeof confidence === 'number' ? confidence : 0;
+        if (c >= 0.95) {
+            return 'Matched';
         }
-        if (normalized === 'proposed') {
+        if (c > 0) {
             return 'Needs Review';
-        }
-        if (normalized === 'rejected') {
-            return 'Rejected';
         }
         return 'Unmatched';
     }
@@ -4123,13 +4105,14 @@ class App {
         entityLabel: string,
         title: string,
         subtitle: string,
-        status: string | undefined,
+        confidence: number | undefined,
         summaryHtml: string,
         sourcePaneHtml: string,
         candidatePaneHtml: string,
         actionsHtml: string,
     ): string {
-        const normalizedStatus = String(status || 'unmatched');
+        const statusLabel = this.formatMatchStatusLabel(confidence);
+        const normalizedStatus = confidence && confidence >= 0.95 ? 'confirmed' : confidence && confidence > 0 ? 'proposed' : 'unmatched';
 
         return `
             <div class="match-review-card" data-entity-type="${entityType}" data-review-id="${reviewId}">
@@ -4143,7 +4126,7 @@ class App {
                         <div class="match-review-meta">${summaryHtml}</div>
                     </div>
                     <div class="match-review-card-controls">
-                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.formatMatchStatusLabel(status)}</span>
+                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.escapeHtml(statusLabel)}</span>
                         <button
                             type="button"
                             class="match-review-toggle"
@@ -4296,11 +4279,8 @@ class App {
             'Artist',
             item.name || 'Unknown Artist',
             'Compare the Plex library artist against Explore artist candidates.',
-            item.match_status,
-            [
-                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
-                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
-            ].join(''),
+            item.confidence,
+            `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
@@ -4342,11 +4322,10 @@ class App {
             'Album',
             item.title || 'Unknown Album',
             `${item.artist_name || 'Unknown Artist'} • Review the library album against Explore releases.`,
-            item.match_status,
+            item.confidence,
             [
                 `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
-                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`,
-                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
+                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`
             ].join(''),
             `
                 <section class="match-review-pane source-pane">
@@ -4393,7 +4372,7 @@ class App {
             'Track',
             item.title || 'Unknown Track',
             `${subtitleParts.join(' • ') || 'Unknown'} • Compare the library file against Explore tracks.`,
-            item.match_status,
+            item.confidence,
             [
                 `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
                 `<span class="match-review-meta-item">Format ${this.escapeHtml((item.format || '—').toUpperCase())}</span>`,
@@ -7201,26 +7180,7 @@ class App {
             );
     }
 
-    private buildStoredMatchTooltip(matchStatus?: string | null, confidence?: number | null, variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
-        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
-
-        if (!Array.isArray(variants) || variants.length === 0) {
-            return heading;
-        }
-
-        const details = variants.map((variant) => {
-            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? ` (${variant.bitrate} kbps)`
-                : '';
-            return variant.file_path
-                ? `  ${variant.file_path}${bitrate}`
-                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
-        });
-
-        return `${heading}\n${details.join('\n')}`;
-    }
-
-    private createPlexMatchChip(match: { [key: string]: any; match_status?: string | null; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
+    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
         const chip = document.createElement('span');
         const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
         const incomplete = options?.incomplete === true;
@@ -7248,8 +7208,27 @@ class App {
             label += ' · low quality';
         }
         chip.textContent = label;
-        chip.title = this.buildStoredMatchTooltip(match.match_status, match.confidence, match.variants || [], incomplete);
+        chip.title = this.buildStoredMatchTooltip(match.variants || [], incomplete);
         return chip;
+    }
+
+    private buildStoredMatchTooltip(variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
+        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
+
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return heading;
+        }
+
+        const details = variants.map((variant) => {
+            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            return variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+        });
+
+        return `${heading}\n${details.join('\n')}`;
     }
 
     private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {

@@ -543,7 +543,6 @@ def process_hifi_match_job(job_id, payload):
         'track_seed_rows_updated': 0,
         'albums_processed': 0,
         'albums_matched': 0,
-        'albums_matched_from_tags': 0,
         'albums_matched_from_search': 0,
         'tracks_processed': 0,
         'tracks_matched': 0,
@@ -574,8 +573,7 @@ def process_hifi_match_job(job_id, payload):
             """
             SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                    tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
-                   tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                   tracks.matched_at, tracks.confirmed_at, tracks.last_seen_at, tracks.isrc,
+                   tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc,
                    albums.hifi_id AS album_hifi_id,
                    track_artist.hifi_id AS track_artist_hifi_id,
                    album_artist.hifi_id AS album_artist_hifi_id
@@ -605,8 +603,6 @@ def process_hifi_match_job(job_id, payload):
                 track_row,
                 track_hifi_id,
                 now_dt,
-                match_source='auto_track',
-                match_status='confirmed',
                 confidence=0.99,
             )
             progress['track_seed_rows_processed'] += 1
@@ -630,8 +626,7 @@ def process_hifi_match_job(job_id, payload):
             """
             SELECT albums.album_id, albums.artist_id, albums.title, albums.library_id, albums.hifi_id,
                    albums.confidence, albums.complete, albums.matched_track_count,
-                   albums.expected_track_count, albums.match_status, albums.match_source,
-                   albums.matched_at, albums.confirmed_at, albums.last_seen_at,
+                   albums.expected_track_count, albums.last_seen_at,
                    artists.name AS artist_name,
                    artists.library_id AS artist_library_id,
                    artists.hifi_id AS artist_hifi_id
@@ -640,7 +635,7 @@ def process_hifi_match_job(job_id, payload):
             WHERE albums.library_id IS NOT NULL
               AND (
                     albums.hifi_id IS NULL
-                 OR albums.match_status = 'unmatched'
+                 OR albums.confidence < 0.95
                  OR EXISTS (
                         SELECT 1
                         FROM tracks pending_tracks
@@ -648,9 +643,9 @@ def process_hifi_match_job(job_id, payload):
                           AND pending_tracks.library_id IS NOT NULL
                           AND (
                                 pending_tracks.hifi_id IS NULL
-                             OR pending_tracks.match_status = 'unmatched'
+                             OR pending_tracks.confidence < 0.95
                           )
-                    )
+                     )
               )
             ORDER BY albums.album_id ASC
             """
@@ -665,7 +660,7 @@ def process_hifi_match_job(job_id, payload):
             pending_track_rows = [track_row for track_row in source_track_rows if _track_needs_hifi_match(track_row)]
             progress['tracks_processed'] += len(pending_track_rows)
 
-            album_payload, match_source, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_rows)
+            album_payload, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_rows)
             if album_payload:
                 apply_result = _apply_hifi_album_payload_match(
                     cur,
@@ -673,20 +668,16 @@ def process_hifi_match_job(job_id, payload):
                     source_track_rows,
                     album_payload,
                     now_dt,
-                    match_source,
                     album_confidence,
                     tagged_track_ids_by_path=tagged_track_ids_by_path,
                 )
                 if apply_result.get('album_matched'):
                     print(
-                        f"[HIFI_MATCH] Job {job_id}: Matched album '{album_row.get('title')}' (id={album_row.get('album_id')}) via {match_source} confidence={album_confidence:.2f}",
+                        f"[HIFI_MATCH] Job {job_id}: Matched album '{album_row.get('title')}' (id={album_row.get('album_id')}) confidence={album_confidence:.2f}",
                         flush=True,
                     )
                     progress['tracks_matched'] += apply_result.get('tracks_matched') or 0
-                    if match_source == 'tags':
-                        progress['albums_matched_from_tags'] += 1
-                    else:
-                        progress['albums_matched_from_search'] += 1
+                    progress['albums_matched_from_search'] += 1
                     progress['albums_matched'] += 1
 
             progress['albums_processed'] += 1
@@ -708,8 +699,7 @@ def process_hifi_match_job(job_id, payload):
         cur.execute(
             """
             SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-                   matched_track_count, expected_track_count, match_status, match_source,
-                   matched_at, confirmed_at, last_seen_at
+                   matched_track_count, expected_track_count, last_seen_at
             FROM albums
             WHERE hifi_id IS NOT NULL
               AND (
@@ -736,7 +726,7 @@ def process_hifi_match_job(job_id, payload):
     finally:
         conn.close()
 
-    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: track_seeded={progress['track_seed_rows_updated']}/{progress['track_seed_rows_processed']}, albums_matched={progress['albums_matched']}/{progress['albums_processed']}, tag_albums={progress['albums_matched_from_tags']}, search_albums={progress['albums_matched_from_search']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
+    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: track_seeded={progress['track_seed_rows_updated']}/{progress['track_seed_rows_processed']}, albums_matched={progress['albums_matched']}/{progress['albums_processed']}, search_albums={progress['albums_matched_from_search']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     return {
         'trigger': trigger or 'unknown',
@@ -856,10 +846,6 @@ def process_plex_sync_job(job_id, payload):
                         library_id=artist_key,
                         hifi_id=album_artist_row.get('hifi_id'),
                         confidence=_safe_float(album_artist_row.get('confidence')),
-                        match_status=album_artist_row.get('match_status') or 'unmatched',
-                        match_source=album_artist_row.get('match_source'),
-                        matched_at=album_artist_row.get('matched_at'),
-                        confirmed_at=album_artist_row.get('confirmed_at'),
                         last_seen_at=now_dt,
                     )
                 else:
@@ -868,7 +854,6 @@ def process_plex_sync_job(job_id, payload):
                         name=artist or 'Unknown Artist',
                         library_id=artist_key,
                         confidence=0.0,
-                        match_status='unmatched',
                         last_seen_at=now_dt,
                     )
 
@@ -882,19 +867,11 @@ def process_plex_sync_job(job_id, payload):
                             library_id=track_artist_row.get('library_id'),
                             hifi_id=track_artist_row.get('hifi_id'),
                             confidence=_safe_float(track_artist_row.get('confidence')),
-                            match_status=track_artist_row.get('match_status') or 'unmatched',
-                            match_source=track_artist_row.get('match_source'),
-                            matched_at=track_artist_row.get('matched_at'),
-                            confirmed_at=track_artist_row.get('confirmed_at'),
                             last_seen_at=now_dt,
                         )
 
                 existing_album_hifi_id = album_row.get('hifi_id') if album_row else None
                 existing_album_confidence = _safe_float(album_row.get('confidence')) if album_row else 0.0
-                existing_album_status = album_row.get('match_status') if album_row else 'unmatched'
-                existing_album_source = album_row.get('match_source') if album_row else None
-                existing_album_matched_at = album_row.get('matched_at') if album_row else None
-                existing_album_confirmed_at = album_row.get('confirmed_at') if album_row else None
                 existing_album_complete = album_row.get('complete') if album_row else False
                 existing_album_matched_track_count = album_row.get('matched_track_count') if album_row else 0
                 existing_album_expected_track_count = album_row.get('expected_track_count') if album_row else 0
@@ -907,10 +884,6 @@ def process_plex_sync_job(job_id, payload):
                     hifi_id=existing_album_hifi_id,
                     confidence=existing_album_confidence,
                     complete=existing_album_complete,
-                    match_status=existing_album_status,
-                    match_source=existing_album_source,
-                    matched_at=existing_album_matched_at,
-                    confirmed_at=existing_album_confirmed_at,
                     last_seen_at=now_dt,
                     matched_track_count=existing_album_matched_track_count,
                     expected_track_count=existing_album_expected_track_count,
@@ -918,10 +891,6 @@ def process_plex_sync_job(job_id, payload):
 
                 existing_track_hifi_id = existing_track_row.get('hifi_id') if existing_track_row else None
                 existing_track_confidence = _safe_float(existing_track_row.get('confidence')) if existing_track_row else 0.0
-                existing_track_status = existing_track_row.get('match_status') if existing_track_row else 'unmatched'
-                existing_track_source = existing_track_row.get('match_source') if existing_track_row else None
-                existing_track_matched_at = existing_track_row.get('matched_at') if existing_track_row else None
-                existing_track_confirmed_at = existing_track_row.get('confirmed_at') if existing_track_row else None
 
                 _upsert_track_row(
                     cur,
@@ -932,10 +901,6 @@ def process_plex_sync_job(job_id, payload):
                     library_id=rating_key,
                     hifi_id=existing_track_hifi_id,
                     confidence=existing_track_confidence,
-                    match_status=existing_track_status,
-                    match_source=existing_track_source,
-                    matched_at=existing_track_matched_at,
-                    confirmed_at=existing_track_confirmed_at,
                     last_seen_at=now_dt,
                     audio_format=media_format,
                     bitrate=bitrate,
@@ -1078,6 +1043,7 @@ def process_plex_sync_job(job_id, payload):
         if embedded_track_id and not tag_row.get('hifi_id'):
             update_fields.append('hifi_id = %s')
             update_values.append(embedded_track_id)
+            update_fields.append('confidence = 0.99')
 
         if embedded_isrc and not tag_row.get('isrc'):
             update_fields.append('isrc = %s')
@@ -1095,7 +1061,7 @@ def process_plex_sync_job(job_id, payload):
             album_id_val = int(tag_row.get('album_id') or 0)
             if album_id_val and album_id_val not in albums_backfilled:
                 cur.execute(
-                    "UPDATE albums SET hifi_id = %s WHERE album_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
+                    "UPDATE albums SET hifi_id = %s, confidence = 0.99 WHERE album_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
                     (embedded_album_id, album_id_val)
                 )
                 albums_backfilled.add(album_id_val)
@@ -3953,8 +3919,9 @@ def get_hifi_match_review_endpoint():
                 """
                 SELECT COUNT(*) AS count
                 FROM artists
-                WHERE (match_status = 'proposed' AND confidence <= %s)
-                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                WHERE library_id IS NOT NULL
+                  AND hifi_id IS NOT NULL
+                  AND confidence < %s
                 """,
                 (max_confidence,)
             )
@@ -3962,10 +3929,11 @@ def get_hifi_match_review_endpoint():
 
             cur.execute(
                 """
-                SELECT artist_id, name, library_id, hifi_id, confidence, match_status, match_source, matched_at, confirmed_at
+                SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
                 FROM artists
-                WHERE (match_status = 'proposed' AND confidence <= %s)
-                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                WHERE library_id IS NOT NULL
+                  AND hifi_id IS NOT NULL
+                  AND confidence < %s
                 ORDER BY confidence ASC, artist_id ASC
                 LIMIT %s
                 """,
@@ -3988,8 +3956,9 @@ def get_hifi_match_review_endpoint():
                 """
                 SELECT COUNT(*) AS count
                 FROM albums
-                WHERE (match_status = 'proposed' AND confidence <= %s)
-                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                WHERE library_id IS NOT NULL
+                  AND hifi_id IS NOT NULL
+                  AND confidence < %s
                 """,
                 (max_confidence,)
             )
@@ -3999,13 +3968,13 @@ def get_hifi_match_review_endpoint():
                 """
                 SELECT albums.album_id, albums.artist_id, albums.title, albums.library_id, albums.hifi_id,
                        albums.confidence, albums.complete, albums.matched_track_count,
-                       albums.expected_track_count, albums.match_status, albums.match_source,
-                       albums.matched_at, albums.confirmed_at,
+                       albums.expected_track_count, albums.last_seen_at,
                        artists.name AS artist_name
                 FROM albums
                 LEFT JOIN artists ON artists.artist_id = albums.artist_id
-                WHERE (albums.match_status = 'proposed' AND albums.confidence <= %s)
-                   OR (albums.match_status = 'unmatched' AND albums.library_id IS NOT NULL)
+                WHERE albums.library_id IS NOT NULL
+                  AND albums.hifi_id IS NOT NULL
+                  AND albums.confidence < %s
                 ORDER BY albums.confidence ASC, albums.album_id ASC
                 LIMIT %s
                 """,
@@ -4030,8 +3999,9 @@ def get_hifi_match_review_endpoint():
                 """
                 SELECT COUNT(*) AS count
                 FROM tracks
-                WHERE (match_status = 'proposed' AND confidence <= %s)
-                   OR (match_status = 'unmatched' AND library_id IS NOT NULL)
+                WHERE library_id IS NOT NULL
+                  AND hifi_id IS NOT NULL
+                  AND confidence < %s
                 """,
                 (max_confidence,)
             )
@@ -4041,8 +4011,7 @@ def get_hifi_match_review_endpoint():
                 """
                 SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                        tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
-                       tracks.disc_number, tracks.track_number, tracks.match_status, tracks.match_source,
-                       tracks.matched_at, tracks.confirmed_at, tracks.isrc, tracks.duration,
+                       tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc, tracks.duration,
                        albums.title AS album_title,
                        albums.library_id AS album_library_id,
                        artists.name AS artist_name,
@@ -4050,8 +4019,9 @@ def get_hifi_match_review_endpoint():
                 FROM tracks
                 LEFT JOIN albums ON albums.album_id = tracks.album_id
                 LEFT JOIN artists ON artists.artist_id = tracks.artist_id
-                WHERE (tracks.match_status = 'proposed' AND tracks.confidence <= %s)
-                   OR (tracks.match_status = 'unmatched' AND tracks.library_id IS NOT NULL)
+                WHERE tracks.library_id IS NOT NULL
+                  AND tracks.hifi_id IS NOT NULL
+                  AND tracks.confidence < %s
                 ORDER BY tracks.confidence ASC, tracks.track_id ASC
                 LIMIT %s
                 """,
@@ -4198,14 +4168,10 @@ def update_hifi_match_review_endpoint():
                     f"""
                     UPDATE {table_name}
                     SET hifi_id = %s,
-                        confidence = 1.0,
-                        match_status = 'confirmed',
-                        match_source = 'manual',
-                        matched_at = %s,
-                        confirmed_at = %s
+                        confidence = 1.0
                     WHERE {id_column} = %s
                     """,
-                    (effective_hifi_id, now_dt, now_dt, entity_id)
+                    (effective_hifi_id, entity_id)
                 )
         else:
             if entity_type == 'album':
@@ -4214,44 +4180,26 @@ def update_hifi_match_review_endpoint():
                     UPDATE {table_name}
                     SET hifi_id = NULL,
                         confidence = 0,
-                        match_status = 'rejected',
-                        match_source = 'manual',
-                        matched_at = %s,
-                        confirmed_at = NULL,
                         complete = FALSE,
                         matched_track_count = 0,
                         expected_track_count = 0
                     WHERE {id_column} = %s
                     """,
-                    (now_dt, entity_id)
+                    (entity_id,)
                 )
             else:
                 cur.execute(
                     f"""
                     UPDATE {table_name}
                     SET hifi_id = NULL,
-                        confidence = 0,
-                        match_status = 'rejected',
-                        match_source = 'manual',
-                        matched_at = %s,
-                        confirmed_at = NULL
+                        confidence = 0
                     WHERE {id_column} = %s
                     """,
-                    (now_dt, entity_id)
+                    (entity_id,)
                 )
 
         if entity_type == 'album':
-            cur.execute(
-                """
-                SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-                       matched_track_count, expected_track_count, match_status, match_source,
-                       matched_at, confirmed_at, last_seen_at
-                FROM albums
-                WHERE album_id = %s
-                """,
-                (entity_id,)
-            )
-            album_row = cur.fetchone()
+            album_row = _get_album_row(cur, entity_id)
             if album_row:
                 _refresh_album_completeness(cur, album_row)
         elif entity_type == 'track':
