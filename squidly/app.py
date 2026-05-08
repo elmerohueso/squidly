@@ -1453,6 +1453,8 @@ def process_download_job(job_id, payload):
             album_hifi_artist_id=album_artist_id or track_artist_id,
             isrc=track_data.get('isrc'),
             duration=track_data.get('duration'),
+            track_number=track_number,
+            disc_number=_safe_int(disc_num) if disc_num else None,
         )
 
         return {
@@ -1642,6 +1644,8 @@ def process_download_job(job_id, payload):
         album_hifi_artist_id=album_artist_id or track_artist_id,
         isrc=track_data.get('isrc'),
         duration=track_data.get('duration'),
+        track_number=track_number,
+        disc_number=_safe_int(disc_num) if disc_num else None,
     )
 
     result = {
