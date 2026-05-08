@@ -665,6 +665,8 @@ class App {
     private userDropdownOverlay: HTMLElement;
     private userDropdownList: HTMLElement;
     private userButtonText: HTMLElement;
+    private mobileMenuToggle: HTMLButtonElement | null;
+    private mobileMenuOverlay: HTMLElement | null;
     private downloadSettings: DownloadSettings;
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
@@ -856,6 +858,7 @@ class App {
                 const page = (item as HTMLElement).getAttribute('data-page');
                 if (page) {
                     this.switchPage(page);
+                    this.closeMobileMenu();
                 }
             });
         });
@@ -963,6 +966,10 @@ class App {
         this.userDropdownList = document.getElementById('userDropdownList') as HTMLElement;
         this.userButtonText = document.getElementById('userButtonText') as HTMLElement;
 
+        // Mobile menu
+        this.mobileMenuToggle = document.getElementById('mobileMenuToggle') as HTMLButtonElement | null;
+        this.mobileMenuOverlay = document.getElementById('mobileMenuOverlay') as HTMLElement | null;
+
         this.initializeEventListeners();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
@@ -1051,6 +1058,14 @@ class App {
         const userDropdownClose = document.getElementById('userDropdownClose');
         if (userDropdownClose) {
             userDropdownClose.addEventListener('click', () => this.closeUserDropdown());
+        }
+
+        // Mobile menu listeners
+        if (this.mobileMenuToggle) {
+            this.mobileMenuToggle.addEventListener('click', () => this.toggleMobileMenu());
+        }
+        if (this.mobileMenuOverlay) {
+            this.mobileMenuOverlay.addEventListener('click', () => this.closeMobileMenu());
         }
 
         // Old flyout listeners (safe if elements don't exist)
@@ -2409,6 +2424,35 @@ class App {
 
         this.userDropdownModal.style.display = 'none';
         this.userDropdownOverlay.style.display = 'none';
+    }
+
+    private toggleMobileMenu(): void {
+        const sidebar = document.getElementById('leftSidebar');
+        if (!sidebar) {
+            return;
+        }
+
+        const isOpen = sidebar.classList.contains('mobile-menu-open');
+        if (isOpen) {
+            this.closeMobileMenu();
+        } else {
+            sidebar.classList.add('mobile-menu-open');
+            if (this.mobileMenuOverlay) {
+                this.mobileMenuOverlay.classList.add('active');
+            }
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    private closeMobileMenu(): void {
+        const sidebar = document.getElementById('leftSidebar');
+        if (sidebar) {
+            sidebar.classList.remove('mobile-menu-open');
+        }
+        if (this.mobileMenuOverlay) {
+            this.mobileMenuOverlay.classList.remove('active');
+        }
+        document.body.style.overflow = '';
     }
 
     private logoutPlexUser(): void {
