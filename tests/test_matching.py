@@ -86,13 +86,13 @@ class TestExtractPrimaryHifiArtist:
 
 class TestTrackNeedsHifiMatch:
     def test_needs_match_when_no_hifi_id(self):
-        assert _track_needs_hifi_match({"hifi_id": "", "match_status": "unmatched"}) is True
+        assert _track_needs_hifi_match({"hifi_id": "", "confidence": 0.0}) is True
 
     def test_needs_match_when_unmatched(self):
-        assert _track_needs_hifi_match({"hifi_id": "123", "match_status": "unmatched"}) is True
+        assert _track_needs_hifi_match({"hifi_id": "123", "confidence": 0.5}) is True
 
     def test_does_not_need_match_when_confirmed(self):
-        assert _track_needs_hifi_match({"hifi_id": "123", "match_status": "confirmed"}) is False
+        assert _track_needs_hifi_match({"hifi_id": "123", "confidence": 0.99}) is False
 
     def test_not_a_dict(self):
         assert _track_needs_hifi_match(None) is False
@@ -100,10 +100,10 @@ class TestTrackNeedsHifiMatch:
 
 class TestIsManualMatch:
     def test_manual_match(self):
-        assert _is_manual_match({"match_source": "manual"}) is True
+        assert _is_manual_match({"confidence": 1.0, "hifi_id": "456"}) is True
 
     def test_not_manual(self):
-        assert _is_manual_match({"match_source": "auto_album"}) is False
+        assert _is_manual_match({"confidence": 0.99, "hifi_id": "456"}) is False
 
     def test_not_a_dict(self):
         assert _is_manual_match(None) is False
@@ -111,16 +111,22 @@ class TestIsManualMatch:
 
 class TestMergeMatchState:
     def test_preserves_manual_match(self):
-        existing = {"match_source": "manual", "hifi_id": "456", "confidence": 1.0}
+        existing = {"confidence": 1.0, "hifi_id": "456"}
         result = _merge_match_state(existing, hifi_id="789", confidence=0.5)
         assert result["hifi_id"] == "456"
-        assert result["match_source"] == "manual"
+        assert result["confidence"] == 1.0
 
     def test_applies_new_hifi_id(self):
-        existing = {"match_status": "unmatched", "confidence": 0.0}
+        existing = {"confidence": 0.0}
         result = _merge_match_state(existing, hifi_id="123", confidence=0.9)
         assert result["hifi_id"] == "123"
         assert result["confidence"] == 0.9
+
+    def test_preserves_existing_confidence_when_same_hifi_id(self):
+        existing = {"confidence": 0.99, "hifi_id": "123"}
+        result = _merge_match_state(existing, hifi_id="123")
+        assert result["hifi_id"] == "123"
+        assert result["confidence"] == 0.99
 
     def test_not_a_dict_existing(self):
         result = _merge_match_state(None, hifi_id="123", confidence=0.8)

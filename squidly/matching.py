@@ -139,13 +139,13 @@ def _merge_match_state(existing_row, hifi_id=None, confidence=None):
         should_apply = True
     elif existing_hifi_id == hifi_id:
         should_apply = True
-    elif incoming_confidence >= existing_confidence:
+    elif confidence is not None and incoming_confidence >= existing_confidence:
         should_apply = True
 
     if should_apply:
         return {
             'hifi_id': str(hifi_id).strip() if hifi_id else None,
-            'confidence': incoming_confidence,
+            'confidence': _safe_float(confidence, default=existing_confidence),
         }
 
     return {
