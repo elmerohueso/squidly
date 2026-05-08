@@ -1426,6 +1426,31 @@ class App {
                     return;
                 }
 
+                // Check for Plex existing chip clicks (re-download prompt)
+                const plexChip = target.closest('.plex-existing-chip');
+                if (plexChip) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const trackRow = plexChip.closest('.tracks-grid-row') as HTMLElement;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleRedownloadTrack(parseInt(trackId, 10), trackRow, plexChip as HTMLElement);
+                        }
+                        return;
+                    }
+
+                    const albumRow = plexChip.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleRedownloadAlbum(parseInt(albumId, 10), albumRow, plexChip as HTMLElement);
+                        }
+                        return;
+                    }
+                }
+
                 // Check for grid add to library button clicks
                 const gridAddLibraryBtn = target.closest('.grid-add-library-btn');
                 if (gridAddLibraryBtn) {
@@ -9175,6 +9200,126 @@ class App {
         } catch (error) {
             this.displayMessage('Error loading similar artists. Please try again.', () => this.fetchSimilarArtists(artistId));
             console.error('Similar artists fetch error:', error);
+        }
+    }
+
+    private async withRedownloadContext(
+        chip: HTMLElement,
+        message: string,
+        action: () => Promise<void>
+    ): Promise<void> {
+        if (!window.confirm(message)) {
+            return;
+        }
+
+        const originalContent = chip.textContent;
+        const originalClassName = chip.className;
+        const originalTitle = chip.title;
+
+        chip.innerHTML = this.getSpinnerIconSvg();
+        chip.title = 'Re-downloading...';
+
+        const originalIgnoreMatches = this.downloadSettings.ignoreMatches;
+        this.downloadSettings.ignoreMatches = true;
+
+        const restoreChip = (): void => {
+            chip.textContent = originalContent || 'In Plex';
+            chip.className = originalClassName;
+            chip.title = originalTitle;
+        };
+
+        try {
+            await action();
+        } catch (error) {
+            console.error('[RE-DOWNLOAD] Error:', error);
+            restoreChip();
+            throw error;
+        } finally {
+            this.downloadSettings.ignoreMatches = originalIgnoreMatches;
+        }
+    }
+
+    private async handleRedownloadTrack(
+        trackId: number,
+        trackRow: HTMLElement,
+        chip: HTMLElement
+    ): Promise<void> {
+        console.log(`[RE-DOWNLOAD] Re-downloading track ${trackId}`);
+
+        await this.withRedownloadContext(chip, 'This track is already in your Plex library. Re-download it?', async () => {
+            const jobId = await this.downloadTrackToLibrary(trackId, 'loose');
+            console.log(`[RE-DOWNLOAD] Job queued: ${jobId}`);
+
+            chip.innerHTML = this.getSpinnerIconSvg();
+            chip.classList.add('plex-existing-chip--downloading');
+
+            const pollJob = async (): Promise<void> => {
+                try {
+                    const resp = await fetch(`/api/jobs/${jobId}`);
+                    if (!resp.ok) {
+                        chip.textContent = 'In Plex';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        return;
+                    }
+                    const job = await resp.json();
+                    if (job.status === 'succeeded') {
+                        chip.textContent = 'In Plex';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        chip.title = 'Re-downloaded successfully';
+                    } else if (job.status === 'failed') {
+                        chip.textContent = 'Failed';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        chip.title = 'Re-download failed';
+                    } else {
+                        setTimeout(pollJob, 2000);
+                    }
+                } catch {
+                    chip.textContent = 'In Plex';
+                    chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                }
+            };
+
+            setTimeout(pollJob, 2000);
+        });
+    }
+
+    private async handleRedownloadAlbum(
+        albumId: number,
+        albumRow: HTMLElement,
+        chip: HTMLElement
+    ): Promise<void> {
+        console.log(`[RE-DOWNLOAD] Re-downloading album ${albumId}`);
+
+        try {
+            await this.withRedownloadContext(chip, 'This album is already in your Plex library. Re-download it?', async () => {
+                const albumData = await this.fetchAlbumObject(albumId);
+                const tracks = albumData.tracks || [];
+
+                if (tracks.length === 0) {
+                    this.displayMessage('No tracks found in this album');
+                    throw new Error('No tracks found');
+                }
+
+                const jobIds: number[] = [];
+                for (const track of tracks) {
+                    try {
+                        const jobId = await this.downloadTrackToLibrary(track.id, 'album');
+                        jobIds.push(jobId);
+                    } catch (error) {
+                        console.error(`[RE-DOWNLOAD] Failed to queue track ${track.id}:`, error);
+                    }
+                }
+
+                if (jobIds.length === 0) {
+                    throw new Error('No jobs were queued');
+                }
+
+                console.log(`[RE-DOWNLOAD] Queued ${jobIds.length} tracks`);
+                chip.textContent = 'In Plex';
+                chip.title = `Re-downloading ${jobIds.length} tracks...`;
+            });
+        } catch {
+            this.displayMessage('Error re-downloading album. Please try again.');
         }
     }
 

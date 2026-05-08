@@ -1277,7 +1277,7 @@ body {
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    cursor: help;
+    cursor: pointer;
 }
 
 .plex-existing-chip--low-quality {
@@ -1299,7 +1299,7 @@ body {
     border: none;
     text-transform: uppercase;
     letter-spacing: 0.01em;
-    cursor: help;
+    cursor: pointer;
     margin: 0;
     transition: all var(--transition-fast);
     line-height: 1;
@@ -1361,6 +1361,20 @@ body {
     min-height: 40px;
     padding: 0 0.9rem;
     border-radius: var(--radius-md);
+}
+
+.plex-existing-chip--downloading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.plex-existing-chip--downloading svg {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .explicit-badge {
