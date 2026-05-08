@@ -489,6 +489,38 @@ def _read_embedded_hifi_ids(file_path):
     }
 
 
+def _get_file_audio_info(file_path):
+    raw_path = _resolve_library_file_path(file_path)
+    if not raw_path or not os.path.exists(raw_path):
+        return {'duration': None, 'isrc': None}
+
+    try:
+        lower_path = raw_path.lower()
+        if lower_path.endswith('.flac'):
+            audio = FLAC(raw_path)
+            isrc_values = audio.get('ISRC') or audio.get('isrc') or []
+            isrc = str(isrc_values[0]).strip() if isrc_values else None
+            duration = int(audio.info.length) if audio.info and audio.info.length else None
+        elif lower_path.endswith('.m4a'):
+            audio = MP4(raw_path)
+            isrc_values = audio.get('----:com.apple.iTunes:isrc') or []
+            isrc = isrc_values[0].decode('utf-8', errors='ignore').strip() if isrc_values else None
+            duration = int(audio.info.length) if audio.info and audio.info.length else None
+        elif lower_path.endswith('.mp3'):
+            audio = MP3(raw_path, ID3=ID3)
+            isrc_frame = audio.tags.get('ISRC') if audio.tags else None
+            if not isrc_frame:
+                isrc_frame = audio.tags.get('TXXX:isrc') if audio.tags else None
+            isrc = str(isrc_frame.text[0]).strip() if isrc_frame and getattr(isrc_frame, 'text', None) else None
+            duration = int(audio.info.length) if audio.info and audio.info.length else None
+        else:
+            return {'duration': None, 'isrc': None}
+
+        return {'duration': duration, 'isrc': isrc or None}
+    except Exception:
+        return {'duration': None, 'isrc': None}
+
+
 def _get_match_review_plex_context():
     try:
         config = get_plex_config()
@@ -573,7 +605,7 @@ def process_hifi_match_job(job_id, payload):
             """
             SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
                    tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
-                   tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc,
+                   tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc, tracks.duration,
                    albums.hifi_id AS album_hifi_id,
                    track_artist.hifi_id AS track_artist_hifi_id,
                    album_artist.hifi_id AS album_artist_hifi_id
@@ -592,6 +624,7 @@ def process_hifi_match_job(job_id, payload):
             """
         )
         track_seed_rows = cur.fetchall() or []
+        album_payload_cache = {}
         for track_row in track_seed_rows:
             _raise_if_job_cancelled(job_id)
             track_hifi_id = str(track_row.get('hifi_id') or '').strip()
@@ -604,6 +637,9 @@ def process_hifi_match_job(job_id, payload):
                 track_hifi_id,
                 now_dt,
                 confidence=0.99,
+                track_artist_hifi_id=track_row.get('track_artist_hifi_id'),
+                album_artist_hifi_id=track_row.get('album_artist_hifi_id'),
+                album_payload_cache=album_payload_cache,
             )
             progress['track_seed_rows_processed'] += 1
             progress['track_seed_rows_updated'] += 1
@@ -892,6 +928,12 @@ def process_plex_sync_job(job_id, payload):
                 existing_track_hifi_id = existing_track_row.get('hifi_id') if existing_track_row else None
                 existing_track_confidence = _safe_float(existing_track_row.get('confidence')) if existing_track_row else 0.0
 
+                track_duration = getattr(track, 'duration', None)
+                try:
+                    track_duration = int(track_duration) if track_duration is not None else None
+                except Exception:
+                    track_duration = None
+
                 _upsert_track_row(
                     cur,
                     album_id=album_row_id,
@@ -906,6 +948,7 @@ def process_plex_sync_job(job_id, payload):
                     bitrate=bitrate,
                     disc_number=disc_number,
                     track_number=track_number,
+                    duration=track_duration,
                 )
 
         progress['processed_tracks'] = idx
@@ -3920,8 +3963,7 @@ def get_hifi_match_review_endpoint():
                 SELECT COUNT(*) AS count
                 FROM artists
                 WHERE library_id IS NOT NULL
-                  AND hifi_id IS NOT NULL
-                  AND confidence < %s
+                  AND (hifi_id IS NULL OR confidence < %s)
                 """,
                 (max_confidence,)
             )
@@ -3932,8 +3974,7 @@ def get_hifi_match_review_endpoint():
                 SELECT artist_id, name, library_id, hifi_id, confidence, last_seen_at
                 FROM artists
                 WHERE library_id IS NOT NULL
-                  AND hifi_id IS NOT NULL
-                  AND confidence < %s
+                  AND (hifi_id IS NULL OR confidence < %s)
                 ORDER BY confidence ASC, artist_id ASC
                 LIMIT %s
                 """,
@@ -3957,8 +3998,7 @@ def get_hifi_match_review_endpoint():
                 SELECT COUNT(*) AS count
                 FROM albums
                 WHERE library_id IS NOT NULL
-                  AND hifi_id IS NOT NULL
-                  AND confidence < %s
+                  AND (hifi_id IS NULL OR confidence < %s)
                 """,
                 (max_confidence,)
             )
@@ -3973,8 +4013,7 @@ def get_hifi_match_review_endpoint():
                 FROM albums
                 LEFT JOIN artists ON artists.artist_id = albums.artist_id
                 WHERE albums.library_id IS NOT NULL
-                  AND albums.hifi_id IS NOT NULL
-                  AND albums.confidence < %s
+                  AND (albums.hifi_id IS NULL OR albums.confidence < %s)
                 ORDER BY albums.confidence ASC, albums.album_id ASC
                 LIMIT %s
                 """,
@@ -4000,8 +4039,7 @@ def get_hifi_match_review_endpoint():
                 SELECT COUNT(*) AS count
                 FROM tracks
                 WHERE library_id IS NOT NULL
-                  AND hifi_id IS NOT NULL
-                  AND confidence < %s
+                  AND (hifi_id IS NULL OR confidence < %s)
                 """,
                 (max_confidence,)
             )
@@ -4020,8 +4058,7 @@ def get_hifi_match_review_endpoint():
                 LEFT JOIN albums ON albums.album_id = tracks.album_id
                 LEFT JOIN artists ON artists.artist_id = tracks.artist_id
                 WHERE tracks.library_id IS NOT NULL
-                  AND tracks.hifi_id IS NOT NULL
-                  AND tracks.confidence < %s
+                  AND (tracks.hifi_id IS NULL OR tracks.confidence < %s)
                 ORDER BY tracks.confidence ASC, tracks.track_id ASC
                 LIMIT %s
                 """,

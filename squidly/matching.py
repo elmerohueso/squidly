@@ -1128,36 +1128,36 @@ def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
     return None
 
 
-def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence=1.0):
+def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence=1.0, track_artist_hifi_id=None, album_artist_hifi_id=None, album_payload_cache=None):
     from squidly.app import _fetch_hifi_track_info_payload as _app_fetch_track_info
 
     if not isinstance(track_row, dict):
         return track_row.get('album_id') if isinstance(track_row, dict) else None
 
-    track_payload = _app_fetch_track_info(track_hifi_id)
-    track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
-    if not isinstance(track_data, dict):
-        track_data = {}
-
+    existing_album_row = _get_album_row(cur, track_row.get('album_id')) if track_row.get('album_id') else None
     existing_track_artist_row = _get_artist_row(cur, track_row.get('artist_id')) if track_row.get('artist_id') else None
-    track_artist_info = _extract_primary_hifi_artist(track_data)
-    track_artist_row_id = track_row.get('artist_id')
-    if track_artist_info or existing_track_artist_row:
-        track_artist_row_id = _upsert_artist_row(
-            cur,
-            name=(track_artist_info or {}).get('name') or (existing_track_artist_row or {}).get('name') or 'Unknown Artist',
-            library_id=(existing_track_artist_row or {}).get('library_id'),
-            hifi_id=(track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id'),
-            confidence=confidence,
-            last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
-        )
+    existing_album_artist_row = _get_artist_row(cur, existing_album_row.get('artist_id')) if existing_album_row and existing_album_row.get('artist_id') else None
 
-    album_hifi_id = None
-    album_title = None
-    album_item = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
-    if isinstance(album_item, dict):
-        album_hifi_id = str(album_item.get('id') or '').strip() or None
-        album_title = str(album_item.get('title') or '').strip() or None
+    album_hifi_id = (existing_album_row or {}).get('hifi_id')
+    album_title = (existing_album_row or {}).get('title')
+    existing_isrc = track_row.get('isrc')
+    existing_duration = track_row.get('duration')
+
+    needs_track_api = not track_artist_hifi_id or not album_hifi_id or not existing_isrc or not existing_duration
+
+    track_data = {}
+    track_artist_info = None
+    if needs_track_api:
+        track_payload = _app_fetch_track_info(track_hifi_id)
+        track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
+        if not isinstance(track_data, dict):
+            track_data = {}
+        track_artist_info = _extract_primary_hifi_artist(track_data)
+        if not album_hifi_id:
+            album_item = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+            if isinstance(album_item, dict):
+                album_hifi_id = str(album_item.get('id') or '').strip() or None
+                album_title = str(album_item.get('title') or '').strip() or None
 
     if not album_hifi_id:
         candidate = _find_hifi_track_search_candidate(cur, track_row, track_hifi_id)
@@ -1169,23 +1169,38 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence
             if not track_artist_info:
                 track_artist_info = _extract_primary_hifi_artist(candidate)
 
-    existing_album_row = _get_album_row(cur, track_row.get('album_id')) if track_row.get('album_id') else None
-    existing_album_artist_row = _get_artist_row(cur, existing_album_row.get('artist_id')) if existing_album_row and existing_album_row.get('artist_id') else None
+    track_artist_row_id = track_row.get('artist_id')
+    if track_artist_info or existing_track_artist_row:
+        effective_track_artist_hifi_id = (track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id') or track_artist_hifi_id
+        track_artist_row_id = _upsert_artist_row(
+            cur,
+            name=(track_artist_info or {}).get('name') or (existing_track_artist_row or {}).get('name') or 'Unknown Artist',
+            library_id=(existing_track_artist_row or {}).get('library_id'),
+            hifi_id=effective_track_artist_hifi_id,
+            confidence=confidence,
+            last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
+        )
 
     album_artist_info = None
-    if album_hifi_id:
-        album_payload = _fetch_hifi_album_payload(album_hifi_id)
+    if album_hifi_id and not album_artist_hifi_id:
+        if album_payload_cache is not None and album_hifi_id in album_payload_cache:
+            album_payload = album_payload_cache[album_hifi_id]
+        else:
+            album_payload = _fetch_hifi_album_payload(album_hifi_id)
+            if album_payload_cache is not None:
+                album_payload_cache[album_hifi_id] = album_payload
         album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
         if isinstance(album_data, dict):
             album_artist_info = _extract_primary_hifi_artist(album_data)
 
     album_artist_row_id = existing_album_row.get('artist_id') if existing_album_row else track_artist_row_id
     if album_artist_info or existing_album_artist_row:
+        effective_album_artist_hifi_id = (album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id') or album_artist_hifi_id
         album_artist_row_id = _upsert_artist_row(
             cur,
             name=(album_artist_info or {}).get('name') or (existing_album_artist_row or {}).get('name') or (track_artist_info or {}).get('name') or 'Unknown Artist',
             library_id=(existing_album_artist_row or {}).get('library_id'),
-            hifi_id=(album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id'),
+            hifi_id=effective_album_artist_hifi_id,
             confidence=confidence,
             last_seen_at=(existing_album_artist_row or {}).get('last_seen_at') or now_dt,
         )
@@ -1219,8 +1234,8 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence
         bitrate=_safe_int(track_row.get('bitrate')),
         disc_number=_safe_int(track_row.get('disc_number')),
         track_number=_safe_int(track_row.get('track_number')),
-        isrc=track_data.get('isrc'),
-        duration=track_data.get('duration'),
+        isrc=track_data.get('isrc') or existing_isrc,
+        duration=track_data.get('duration') or existing_duration,
     )
 
     return album_row_id

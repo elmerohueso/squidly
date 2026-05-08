@@ -253,13 +253,14 @@ def test_db_does_not_import_app():
 
 
 def test_matching_does_not_import_app():
-    """matching.py must not import from app to avoid circular deps (except _read_embedded_hifi_ids and _fetch_hifi_track_info_payload via lazy import)."""
+    """matching.py must not import from app at top level to avoid circular deps (lazy imports inside functions are allowed)."""
     import squidly.matching as matching_module
     import inspect
 
     source = inspect.getsource(matching_module)
-    assert "from squidly.app import" not in source or "_read_embedded_hifi_ids" in source
-    assert "import squidly.app" not in source
+    lines = source.split('\n')
+    top_level_imports = [l for l in lines if l.startswith('from squidly.app') or l.startswith('import squidly.app')]
+    assert len(top_level_imports) == 0, f"matching.py has top-level app imports: {top_level_imports}"
 
 
 def test_workers_does_not_import_app_directly():
