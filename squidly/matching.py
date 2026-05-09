@@ -56,14 +56,6 @@ def _extract_primary_hifi_artist(item):
     return artists[0] if artists else None
 
 
-def _track_needs_hifi_match(track_row):
-    if not isinstance(track_row, dict):
-        return False
-    hifi_id = str(track_row.get('hifi_id') or '').strip()
-    confidence = _safe_float(track_row.get('confidence'))
-    return not hifi_id or confidence < 0.95
-
-
 def _is_manual_match(row):
     if not isinstance(row, dict):
         return False
@@ -315,56 +307,6 @@ def _score_track_candidate_payload(track_row, candidate):
     confidence += _score_explicit_alignment(_has_explicit_marker(track_row.get('title')), _is_hifi_explicit(candidate))
 
     return min(confidence, 0.99)
-
-
-def _evaluate_album_payload_match(album_row, source_track_rows, album_payload):
-    album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
-    if not isinstance(album_data, dict):
-        return 0.0
-
-    source_track_titles = [
-        str(track_row.get('title') or '').strip()
-        for track_row in (source_track_rows or [])
-        if str(track_row.get('title') or '').strip()
-    ]
-    candidate_track_titles = _extract_hifi_album_track_titles(album_payload)
-    candidate_artist_names = [artist.get('name') for artist in _extract_hifi_item_artists(album_data) if artist.get('name')]
-
-    confidence = _score_album_candidate_title(
-        album_row.get('title'),
-        album_data.get('title'),
-        library_track_count=len(source_track_rows or []),
-        candidate_track_count=_safe_int(album_data.get('numberOfTracks')) or len(candidate_track_titles),
-        source_is_explicit=_has_explicit_marker(album_row.get('title')),
-        candidate_is_explicit=_is_hifi_explicit(album_data),
-    )
-    confidence += _score_album_candidate_artist_alignment(album_row.get('artist_name'), candidate_artist_names)
-    confidence += _score_album_track_title_alignment(source_track_titles, candidate_track_titles)
-    return min(confidence, 0.99)
-
-
-def _match_source_track_to_album_payload(track_row, album_payload, preferred_hifi_id=None):
-    track_items = _extract_hifi_album_track_items(album_payload)
-
-    preferred_id = str(preferred_hifi_id or '').strip()
-    if preferred_id:
-        for candidate in track_items:
-            candidate_id = str(candidate.get('id') or '').strip()
-            if candidate_id and candidate_id == preferred_id:
-                return candidate, 0.99
-
-    best_candidate = None
-    best_confidence = 0.0
-    for candidate in track_items:
-        confidence = _score_track_candidate_payload(track_row, candidate)
-        if confidence <= best_confidence:
-            continue
-        best_candidate = candidate
-        best_confidence = confidence
-
-    if best_candidate and best_confidence >= 0.90:
-        return best_candidate, best_confidence
-    return None, 0.0
 
 
 def _serialize_match_variants(rows):
@@ -797,105 +739,6 @@ def _fetch_source_album_track_titles_map(cur, album_ids):
             if str(title or '').strip()
         ]
     return results
-
-
-def _apply_hifi_album_payload_match(cur, album_row, source_track_rows, album_payload, now_dt, album_confidence, tagged_track_ids_by_path=None):
-    album_data = album_payload.get('data') if isinstance(album_payload, dict) else {}
-    album_hifi_id = str(album_data.get('id') or '').strip() or None
-    if not album_hifi_id:
-        return {'album_matched': False, 'tracks_matched': 0}
-
-    album_artist_info = _extract_primary_hifi_artist(album_data)
-    existing_album_artist_row = _get_artist_row(cur, album_row.get('artist_id')) if album_row.get('artist_id') else None
-
-    album_artist_row_id = album_row.get('artist_id')
-    if album_artist_info or existing_album_artist_row:
-        album_artist_row_id = _upsert_artist_row(
-            cur,
-            name=(album_artist_info or {}).get('name') or (existing_album_artist_row or {}).get('name') or album_row.get('artist_name') or 'Unknown Artist',
-            library_id=(existing_album_artist_row or {}).get('library_id'),
-            hifi_id=(album_artist_info or {}).get('hifi_id') or (existing_album_artist_row or {}).get('hifi_id'),
-            confidence=album_confidence,
-            last_seen_at=(existing_album_artist_row or {}).get('last_seen_at') or now_dt,
-        )
-
-    album_row_id = _upsert_album_row(
-        cur,
-        artist_id=album_artist_row_id,
-        title=album_row.get('title') or 'Unknown Album',
-        library_id=album_row.get('library_id'),
-        hifi_id=album_hifi_id,
-        confidence=album_confidence,
-        complete=bool(album_row.get('complete')),
-        last_seen_at=album_row.get('last_seen_at') or now_dt,
-        matched_track_count=_safe_int(album_row.get('matched_track_count')) or 0,
-        expected_track_count=_safe_int(album_row.get('expected_track_count')) or 0,
-    )
-
-    tracks_matched = 0
-    tagged_track_ids_by_path = tagged_track_ids_by_path or {}
-    pending_track_rows = [track_row for track_row in (source_track_rows or []) if _track_needs_hifi_match(track_row)]
-    for track_row in pending_track_rows:
-        preferred_hifi_id = tagged_track_ids_by_path.get(str(track_row.get('path') or '').strip())
-        candidate, track_confidence = _match_source_track_to_album_payload(track_row, album_payload, preferred_hifi_id=preferred_hifi_id)
-        if not candidate:
-            continue
-
-        track_artist_info = _extract_primary_hifi_artist(candidate) or album_artist_info
-        existing_track_artist_row = _get_artist_row(cur, track_row.get('artist_id')) if track_row.get('artist_id') else None
-        track_artist_row_id = album_artist_row_id
-        if track_artist_info or existing_track_artist_row:
-            track_artist_row_id = _upsert_artist_row(
-                cur,
-                name=(track_artist_info or {}).get('name') or (existing_track_artist_row or {}).get('name') or album_row.get('artist_name') or 'Unknown Artist',
-                library_id=(existing_track_artist_row or {}).get('library_id'),
-                hifi_id=(track_artist_info or {}).get('hifi_id') or (existing_track_artist_row or {}).get('hifi_id'),
-                confidence=track_confidence,
-                last_seen_at=(existing_track_artist_row or {}).get('last_seen_at') or now_dt,
-            )
-
-        _upsert_track_row(
-            cur,
-            album_id=album_row_id,
-            artist_id=track_artist_row_id,
-            title=track_row.get('title') or 'Unknown Track',
-            path=track_row.get('path') or '',
-            library_id=track_row.get('library_id'),
-            hifi_id=str(candidate.get('id') or '').strip() or track_row.get('hifi_id'),
-            confidence=track_confidence,
-            last_seen_at=track_row.get('last_seen_at') or now_dt,
-            audio_format=track_row.get('format'),
-            bitrate=_safe_int(track_row.get('bitrate')),
-            disc_number=_safe_int(track_row.get('disc_number')),
-            track_number=_safe_int(track_row.get('track_number')),
-            isrc=candidate.get('isrc'),
-        )
-        tracks_matched += 1
-
-    return {'album_matched': True, 'tracks_matched': tracks_matched}
-
-
-def _find_hifi_match_for_album(album_row, source_track_rows):
-    search_query = ' '.join(part for part in [str(album_row.get('artist_name') or '').strip(), str(album_row.get('title') or '').strip()] if part).strip()
-    if not search_query:
-        return None, 0.0, {}
-
-    best_payload = None
-    best_confidence = 0.0
-    for candidate in _fetch_hifi_search_results('al', search_query, limit=5):
-        candidate_id = str(candidate.get('id') or '').strip()
-        if not candidate_id:
-            continue
-        album_payload = _fetch_hifi_album_payload(candidate_id)
-        confidence = _evaluate_album_payload_match(album_row, source_track_rows, album_payload)
-        if confidence > best_confidence:
-            best_payload = album_payload
-            best_confidence = confidence
-
-    if best_payload and best_confidence >= 0.90:
-        return best_payload, best_confidence, {}
-
-    return None, 0.0, {}
 
 
 def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):

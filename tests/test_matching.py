@@ -4,7 +4,6 @@ from squidly.utils import normalize_match_text
 from squidly.matching import (
     _extract_hifi_item_artists,
     _extract_primary_hifi_artist,
-    _track_needs_hifi_match,
     _is_manual_match,
     _merge_match_state,
     _is_hifi_explicit,
@@ -80,20 +79,6 @@ class TestExtractPrimaryHifiArtist:
 
     def test_returns_none_for_empty(self):
         assert _extract_primary_hifi_artist({}) is None
-
-
-class TestTrackNeedsHifiMatch:
-    def test_needs_match_when_no_hifi_id(self):
-        assert _track_needs_hifi_match({"hifi_id": "", "confidence": 0.0}) is True
-
-    def test_needs_match_when_unmatched(self):
-        assert _track_needs_hifi_match({"hifi_id": "123", "confidence": 0.5}) is True
-
-    def test_does_not_need_match_when_confirmed(self):
-        assert _track_needs_hifi_match({"hifi_id": "123", "confidence": 0.99}) is False
-
-    def test_not_a_dict(self):
-        assert _track_needs_hifi_match(None) is False
 
 
 class TestIsManualMatch:

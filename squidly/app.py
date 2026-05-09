@@ -73,8 +73,6 @@ from squidly.matching import (
     MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
     _extract_hifi_item_artists,
     _extract_primary_hifi_artist,
-    _track_needs_hifi_match,
-    _is_manual_match,
     _merge_match_state,
     _is_hifi_explicit,
     _format_hifi_track_title,
@@ -87,8 +85,6 @@ from squidly.matching import (
     _score_album_candidate_artist_alignment,
     _score_album_candidate_title,
     _score_track_candidate_payload,
-    _evaluate_album_payload_match,
-    _match_source_track_to_album_payload,
     _serialize_match_variants,
     _evaluate_album_candidate,
     _get_artist_row,
@@ -99,8 +95,6 @@ from squidly.matching import (
     _upsert_track_row,
     upsert_download_match_hint,
     _fetch_source_album_track_titles_map,
-    _apply_hifi_album_payload_match,
-    _find_hifi_match_for_album,
     _find_hifi_track_search_candidate,
     _cascade_track_confirm_ids,
     _refresh_album_completeness,
@@ -142,7 +136,6 @@ from squidly.workers import (
     _raise_if_job_cancelled,
     download_job_worker,
     plex_sync_job_worker,
-    hifi_match_job_worker,
     automatic_matching_job_worker,
     retry_pending_playlist_additions,
     plex_sync_scheduler_worker,
@@ -565,213 +558,6 @@ def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, imag
             image_map[normalized_id] = None
 
     return image_map
-
-
-def process_hifi_match_job(job_id, payload):
-    stages = {
-        'backfilling_track_seed_ids': 'pending',
-        'matching_albums': 'pending',
-        'updating_album_completeness': 'pending',
-    }
-    progress = {
-        'track_seed_rows_processed': 0,
-        'track_seed_rows_updated': 0,
-        'albums_processed': 0,
-        'albums_matched': 0,
-        'albums_matched_from_search': 0,
-        'tracks_processed': 0,
-        'tracks_matched': 0,
-        'albums_completed': 0,
-    }
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    now_dt = _now_utc()
-
-    try:
-        coverage_counts = _fetch_hifi_match_coverage_counts(cur)
-        progress['artists_total'] = coverage_counts['artists_total']
-        progress['albums_total'] = coverage_counts['albums_total']
-        progress['tracks_total'] = coverage_counts['tracks_total']
-        progress['artists_missing_start'] = coverage_counts['artists_missing']
-        progress['albums_missing_start'] = coverage_counts['albums_missing']
-        progress['tracks_missing_start'] = coverage_counts['tracks_missing']
-        _refresh_hifi_match_coverage_progress(cur, progress)
-        jobs.update_job_progress(job_id, {'progress': progress})
-
-        _raise_if_job_cancelled(job_id)
-        stages['backfilling_track_seed_ids'] = 'in_progress'
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-        cur.execute(
-            """
-            SELECT tracks.track_id, tracks.album_id, tracks.artist_id, tracks.title, tracks.library_id,
-                   tracks.hifi_id, tracks.confidence, tracks.path, tracks.format, tracks.bitrate,
-                   tracks.disc_number, tracks.track_number, tracks.last_seen_at, tracks.isrc, tracks.duration,
-                   albums.hifi_id AS album_hifi_id,
-                   track_artist.hifi_id AS track_artist_hifi_id,
-                   album_artist.hifi_id AS album_artist_hifi_id
-            FROM tracks
-            LEFT JOIN albums ON albums.album_id = tracks.album_id
-            LEFT JOIN artists AS track_artist ON track_artist.artist_id = tracks.artist_id
-            LEFT JOIN artists AS album_artist ON album_artist.artist_id = albums.artist_id
-            WHERE tracks.library_id IS NOT NULL
-              AND COALESCE(tracks.hifi_id, '') <> ''
-              AND (
-                    COALESCE(albums.hifi_id, '') = ''
-                 OR COALESCE(track_artist.hifi_id, '') = ''
-                 OR COALESCE(album_artist.hifi_id, '') = ''
-              )
-            ORDER BY tracks.track_id ASC
-            """
-        )
-        track_seed_rows = cur.fetchall() or []
-        album_payload_cache = {}
-        for track_row in track_seed_rows:
-            _raise_if_job_cancelled(job_id)
-            track_hifi_id = str(track_row.get('hifi_id') or '').strip()
-            if not track_hifi_id:
-                continue
-
-            _cascade_track_confirm_ids(
-                cur,
-                track_row,
-                track_hifi_id,
-                now_dt,
-                confidence=0.99,
-                track_artist_hifi_id=track_row.get('track_artist_hifi_id'),
-                album_artist_hifi_id=track_row.get('album_artist_hifi_id'),
-                album_payload_cache=album_payload_cache,
-            )
-            progress['track_seed_rows_processed'] += 1
-            progress['track_seed_rows_updated'] += 1
-
-            if progress['track_seed_rows_processed'] % 25 == 0 or progress['track_seed_rows_processed'] == len(track_seed_rows):
-                conn.commit()
-                _refresh_hifi_match_coverage_progress(cur, progress)
-                jobs.update_job_progress(job_id, {'progress': progress})
-
-        conn.commit()
-        _refresh_hifi_match_coverage_progress(cur, progress)
-        _raise_if_job_cancelled(job_id)
-        stages['backfilling_track_seed_ids'] = 'done'
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-        stages['matching_albums'] = 'in_progress'
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-        cur.execute(
-            """
-            SELECT albums.album_id, albums.artist_id, albums.title, albums.library_id, albums.hifi_id,
-                   albums.confidence, albums.complete, albums.matched_track_count,
-                   albums.expected_track_count, albums.last_seen_at,
-                   artists.name AS artist_name,
-                   artists.library_id AS artist_library_id,
-                   artists.hifi_id AS artist_hifi_id
-            FROM albums
-            JOIN artists ON artists.artist_id = albums.artist_id
-            WHERE albums.library_id IS NOT NULL
-              AND (
-                    albums.hifi_id IS NULL
-                 OR albums.confidence < 0.95
-                 OR EXISTS (
-                        SELECT 1
-                        FROM tracks pending_tracks
-                        WHERE pending_tracks.album_id = albums.album_id
-                          AND pending_tracks.library_id IS NOT NULL
-                          AND (
-                                pending_tracks.hifi_id IS NULL
-                             OR pending_tracks.confidence < 0.95
-                          )
-                     )
-              )
-            ORDER BY albums.album_id ASC
-            """
-        )
-        album_rows = cur.fetchall() or []
-        source_album_track_titles_map = _fetch_source_album_track_titles_map(cur, [row.get('album_id') for row in album_rows])
-        print(f"[HIFI_MATCH] Job {job_id}: Processing {len(album_rows)} album folders", flush=True)
-
-        for album_row in album_rows:
-            _raise_if_job_cancelled(job_id)
-            source_track_titles = source_album_track_titles_map.get(int(album_row.get('album_id')), []) if album_row.get('album_id') is not None else []
-            pending_track_rows = [track_row for track_row in source_track_titles if _track_needs_hifi_match(track_row)]
-            progress['tracks_processed'] += len(pending_track_rows)
-
-            album_payload, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_titles)
-            if album_payload:
-                apply_result = _apply_hifi_album_payload_match(
-                    cur,
-                    album_row,
-                    source_track_titles,
-                    album_payload,
-                    now_dt,
-                    album_confidence,
-                    tagged_track_ids_by_path=tagged_track_ids_by_path,
-                )
-                if apply_result.get('album_matched'):
-                    print(
-                        f"[HIFI_MATCH] Job {job_id}: Matched album '{album_row.get('title')}' (id={album_row.get('album_id')}) confidence={album_confidence:.2f}",
-                        flush=True,
-                    )
-                    progress['tracks_matched'] += apply_result.get('tracks_matched') or 0
-                    progress['albums_matched_from_search'] += 1
-                    progress['albums_matched'] += 1
-
-            progress['albums_processed'] += 1
-            if progress['albums_processed'] % 25 == 0 or progress['albums_processed'] == len(album_rows):
-                conn.commit()
-                _refresh_hifi_match_coverage_progress(cur, progress)
-                jobs.update_job_progress(job_id, {'progress': progress})
-
-        conn.commit()
-        _refresh_hifi_match_coverage_progress(cur, progress)
-        _raise_if_job_cancelled(job_id)
-        stages['matching_albums'] = 'done'
-        print(f"[HIFI_MATCH] Job {job_id}: Albums matching complete - {progress['albums_matched']}/{progress['albums_processed']} matched", flush=True)
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-        stages['updating_album_completeness'] = 'in_progress'
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-        cur.execute(
-            """
-            SELECT album_id, artist_id, title, library_id, hifi_id, confidence, complete,
-                   matched_track_count, expected_track_count, last_seen_at
-            FROM albums
-            WHERE hifi_id IS NOT NULL
-              AND (
-                    complete = FALSE
-                 OR matched_track_count < expected_track_count
-              )
-            ORDER BY album_id ASC
-            """
-        )
-        completeness_rows = cur.fetchall() or []
-        for album_row in completeness_rows:
-            _raise_if_job_cancelled(job_id)
-            _refresh_album_completeness(cur, album_row)
-            progress['albums_completed'] += 1
-            if progress['albums_completed'] % 25 == 0 or progress['albums_completed'] == len(completeness_rows):
-                _refresh_hifi_match_coverage_progress(cur, progress)
-                jobs.update_job_progress(job_id, {'progress': progress})
-
-        conn.commit()
-        _refresh_hifi_match_coverage_progress(cur, progress)
-        _raise_if_job_cancelled(job_id)
-        stages['updating_album_completeness'] = 'done'
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-    finally:
-        conn.close()
-
-    print(f"[HIFI_MATCH] Job {job_id} COMPLETE: track_seeded={progress['track_seed_rows_updated']}/{progress['track_seed_rows_processed']}, albums_matched={progress['albums_matched']}/{progress['albums_processed']}, search_albums={progress['albums_matched_from_search']}, tracks_matched={progress['tracks_matched']}/{progress['tracks_processed']}, albums_completed={progress['albums_completed']}", flush=True)
-    trigger = payload.get('trigger') if isinstance(payload, dict) else None
-    return {
-        'trigger': trigger or 'unknown',
-        'stages': stages,
-        'progress': progress,
-    }
 
 
 def process_automatic_matching_job(job_id, payload):
@@ -1821,11 +1607,6 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
     plex_library_update_worker_thread.start()
     print("Plex library update job worker started\n", flush=True)
-
-    # Start background worker for hifi matching jobs
-    hifi_match_worker_thread = threading.Thread(target=hifi_match_job_worker, daemon=True)
-    hifi_match_worker_thread.start()
-    print("Hifi match job worker started\n", flush=True)
 
     # Start background worker for automatic matching jobs
     automatic_matching_worker_thread = threading.Thread(target=automatic_matching_job_worker, daemon=True)
