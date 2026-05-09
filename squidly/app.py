@@ -91,9 +91,6 @@ from squidly.matching import (
     _match_source_track_to_album_payload,
     _serialize_match_variants,
     _evaluate_album_candidate,
-    _choose_artist_candidate,
-    _choose_album_candidate,
-    _choose_track_candidate,
     _get_artist_row,
     _get_album_row,
     _get_track_row_by_path,
@@ -101,7 +98,6 @@ from squidly.matching import (
     _upsert_album_row,
     _upsert_track_row,
     upsert_download_match_hint,
-    _fetch_source_album_track_rows_map,
     _fetch_source_album_track_titles_map,
     _apply_hifi_album_payload_match,
     _find_hifi_match_for_album,
@@ -694,21 +690,21 @@ def process_hifi_match_job(job_id, payload):
             """
         )
         album_rows = cur.fetchall() or []
-        source_album_track_rows_map = _fetch_source_album_track_rows_map(cur, [row.get('album_id') for row in album_rows])
+        source_album_track_titles_map = _fetch_source_album_track_titles_map(cur, [row.get('album_id') for row in album_rows])
         print(f"[HIFI_MATCH] Job {job_id}: Processing {len(album_rows)} album folders", flush=True)
 
         for album_row in album_rows:
             _raise_if_job_cancelled(job_id)
-            source_track_rows = source_album_track_rows_map.get(int(album_row.get('album_id')), []) if album_row.get('album_id') is not None else []
-            pending_track_rows = [track_row for track_row in source_track_rows if _track_needs_hifi_match(track_row)]
+            source_track_titles = source_album_track_titles_map.get(int(album_row.get('album_id')), []) if album_row.get('album_id') is not None else []
+            pending_track_rows = [track_row for track_row in source_track_titles if _track_needs_hifi_match(track_row)]
             progress['tracks_processed'] += len(pending_track_rows)
 
-            album_payload, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_rows)
+            album_payload, album_confidence, tagged_track_ids_by_path = _find_hifi_match_for_album(album_row, source_track_titles)
             if album_payload:
                 apply_result = _apply_hifi_album_payload_match(
                     cur,
                     album_row,
-                    source_track_rows,
+                    source_track_titles,
                     album_payload,
                     now_dt,
                     album_confidence,

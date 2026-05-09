@@ -19,8 +19,6 @@ from squidly.matching import (
     _score_album_candidate_title,
     _score_track_candidate_payload,
     _serialize_match_variants,
-    _choose_artist_candidate,
-    _choose_track_candidate,
 )
 
 
