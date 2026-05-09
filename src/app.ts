@@ -5025,11 +5025,12 @@ class App {
             `;
         }
 
-        if (job.job_type === 'hifi_match') {
+        if (job.job_type === 'automatic_matching') {
             const stageRows = [
-                { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
-                { key: 'matching_albums', label: 'Matching Albums' },
-                { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+                { key: 'plex_library_update', label: 'Plex Library Update' },
+                { key: 'plex_sync', label: 'Plex Sync' },
+                { key: 'tag_analysis', label: 'Tag Analysis' },
+                { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
             ];
 
             const stageHtml = stageRows.map(stage => {
@@ -5044,10 +5045,13 @@ class App {
             }).join('');
 
             const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
-            const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
-            const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
-            const progressText = `Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job • Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job • Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job`;
+            const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
+            const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
+            const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
+            const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
+            const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
+            const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
+            const progressText = `Plex: ${plexSyncTracks} tracks synced • Tags: ${tagScanned} scanned • ${tagFilled} filled • HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched`;
 
             return `
                 <div class="job-item">
@@ -5137,6 +5141,14 @@ class App {
                 return 'Hifi Match (Manual)';
             }
             return 'Hifi Match';
+        }
+
+        if (job.job_type === 'automatic_matching') {
+            const trigger = String(job.payload?.trigger || '').trim();
+            if (trigger === 'manual') {
+                return `Automatic Matching (Manual) #${job.id}`;
+            }
+            return `Automatic Matching #${job.id}`;
         }
 
         const artist = job.result?.artist;
