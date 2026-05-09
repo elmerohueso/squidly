@@ -174,6 +174,40 @@ def hifi_match_job_worker():
             time.sleep(5)
 
 
+def automatic_matching_job_worker():
+    from squidly.app import process_automatic_matching_job
+
+    print("[AUTO_MATCH_WORKER] Background worker started", flush=True)
+
+    while True:
+        try:
+            job = claim_next_job('automatic_matching')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_automatic_matching_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} completed", flush=True)
+            except JobCancelledError:
+                mark_job_cancelled(job['id'])
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} cancelled", flush=True)
+                time.sleep(1)
+            except Exception as e:
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[AUTO_MATCH_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
+
+
 def retry_pending_playlist_additions():
     from squidly.jobs import (
         get_pending_playlist_additions,

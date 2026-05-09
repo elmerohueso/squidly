@@ -66,6 +66,20 @@ def clean_path_components(file_path: str) -> str:
     return '/'.join(cleaned_parts)
 
 
+def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
+    """Normalize text for fuzzy matching.
+
+    Lowercases, strips trailing parenthetical/bracketed text if requested,
+    replaces non-alphanumeric runs with single spaces, and trims.
+    """
+    text = str(value or '').strip().lower()
+    if strip_trailing_parenthetical:
+        text = re.sub(r'\s*[\(\[].*[\)\]]\s*$', '', text)
+    text = re.sub(r'[^a-z0-9]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
 def extract_year_from_text(text: str) -> str:
     """Extract a 4-digit year from arbitrary text.
 

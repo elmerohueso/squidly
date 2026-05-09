@@ -2,7 +2,7 @@
 
 import re
 
-from squidly.utils import _safe_int, _safe_float, _now_utc
+from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
 from squidly.db import get_db_connection
 from squidly.jobs import enqueue_job, update_job_progress
 from squidly.hifi import (
@@ -18,50 +18,6 @@ from squidly.hifi import (
 MATCH_REVIEW_ARTWORK_SIZE = 350
 MATCH_REVIEW_HIFI_ARTWORK_SIZE = 640
 MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE = 750
-
-COMPILATION_KEYWORDS = (
-    'greatest hits', 'best of', 'mixtape', 'essence', 'classics',
-    'hits of', 'throwback', 'anthology', 'collection', 'singles collection',
-    'number ones', 'greatest', 'ultimate', 'essential', 'definitive',
-    'now that', 'presents', 'the best', 'complete', 'vol. ',
-)
-
-
-def compute_playlist_match_penalty(item, settings):
-    """Apply score penalties to deprioritize compilation, live, and karaoke matches."""
-    penalty = 0.0
-    item_title = str(item.get('title') or '').lower()
-    item_version = str(item.get('version') or '').lower()
-    item_album_title = str((item.get('album') or {}).get('title') or '').lower()
-
-    if settings.get('penalty_compilation'):
-        for kw in COMPILATION_KEYWORDS:
-            if kw in item_album_title:
-                penalty += 0.15
-                break
-
-    if settings.get('penalty_karaoke'):
-        for text in (item_title, item_version, item_album_title):
-            if 'karaoke' in text or 'instrumental' in text:
-                penalty += 0.20
-                break
-
-    if settings.get('penalty_live'):
-        for text in (item_title, item_version):
-            if re.search(r'\blive\b', text):
-                penalty += 0.15
-                break
-
-    return penalty
-
-
-def normalize_match_text(value: str, strip_trailing_parenthetical: bool = False) -> str:
-    text = str(value or '').strip().lower()
-    if strip_trailing_parenthetical:
-        text = re.sub(r'\s*[\(\[].*[\)\]]\s*$', '', text)
-    text = re.sub(r'[^a-z0-9]+', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
 
 
 def _extract_hifi_item_artists(item):

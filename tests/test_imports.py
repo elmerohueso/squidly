@@ -116,7 +116,6 @@ def test_import_matching():
         MATCH_REVIEW_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
-        normalize_match_text,
         _extract_hifi_item_artists,
         _extract_primary_hifi_artist,
         _track_needs_hifi_match,
@@ -176,6 +175,7 @@ def test_import_workers():
         download_job_worker,
         plex_sync_job_worker,
         hifi_match_job_worker,
+        automatic_matching_job_worker,
         retry_pending_playlist_additions,
         plex_sync_scheduler_worker,
     )
