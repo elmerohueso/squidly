@@ -12,6 +12,7 @@ from squidly.hifi import (
     _fetch_hifi_search_results,
     _fetch_hifi_album_payload,
     _fetch_hifi_artist_payload,
+    _fetch_hifi_track_info_payload,
     _extract_hifi_album_track_items,
 )
 from squidly.matching import (
@@ -272,6 +273,121 @@ def _score_album_candidate(album_row, candidate, source_track_titles=None):
     return min(confidence, 0.99)
 
 
+def _fetch_track_info_safe(track_hifi_id):
+    """Fetch track info, returning empty dict on 404 or error."""
+    try:
+        return _fetch_hifi_track_info_payload(track_hifi_id)
+    except Exception:
+        return {}
+
+
+def _propagate_hifi_ids_from_tracks(cur):
+    """Propagate hifi_ids from tagged tracks up to albums and artists.
+
+    Tracks that got hifi_id from tag backfill can be used to look up
+    their album and artist via the HiFi API, avoiding expensive search.
+    """
+    albums_seen = set()
+    artists_seen = set()
+    albums_filled = 0
+    artists_filled = 0
+
+    cur.execute(
+        """
+        SELECT DISTINCT t.album_id, t.artist_id
+        FROM tracks t
+        WHERE t.hifi_id IS NOT NULL AND t.hifi_id != ''
+          AND t.album_id IS NOT NULL
+          AND t.artist_id IS NOT NULL
+        """
+    )
+    rows = cur.fetchall() or []
+
+    for row in rows:
+        album_id = row.get('album_id')
+        artist_id = row.get('artist_id')
+
+        if album_id and album_id not in albums_seen:
+            albums_seen.add(album_id)
+            cur.execute(
+                "SELECT album_id, hifi_id FROM albums WHERE album_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
+                (album_id,)
+            )
+            album_row = cur.fetchone()
+            if album_row:
+                cur.execute(
+                    "SELECT hifi_id FROM tracks WHERE album_id = %s AND hifi_id IS NOT NULL AND hifi_id != '' LIMIT 1",
+                    (album_id,)
+                )
+                track_hifi_row = cur.fetchone()
+                if track_hifi_row:
+                    track_payload = _fetch_track_info_safe(track_hifi_row.get('hifi_id'))
+                    album_hifi_id = str(track_payload.get('album', {}).get('id') or '').strip()
+                    if album_hifi_id:
+                        cur.execute(
+                            "UPDATE albums SET hifi_id = %s, confidence = 0.99 WHERE album_id = %s",
+                            (album_hifi_id, album_id)
+                        )
+                        albums_filled += 1
+
+        if artist_id and artist_id not in artists_seen:
+            artists_seen.add(artist_id)
+            cur.execute(
+                "SELECT artist_id, hifi_id FROM artists WHERE artist_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
+                (artist_id,)
+            )
+            artist_row = cur.fetchone()
+            if artist_row:
+                cur.execute(
+                    "SELECT hifi_id FROM tracks WHERE artist_id = %s AND hifi_id IS NOT NULL AND hifi_id != '' LIMIT 1",
+                    (artist_id,)
+                )
+                track_hifi_row = cur.fetchone()
+                if track_hifi_row:
+                    track_payload = _fetch_track_info_safe(track_hifi_row.get('hifi_id'))
+                    artist_hifi_id = str(track_payload.get('artist', {}).get('id') or '').strip()
+                    if artist_hifi_id:
+                        cur.execute(
+                            "UPDATE artists SET hifi_id = %s, confidence = 0.99 WHERE artist_id = %s",
+                            (artist_hifi_id, artist_id)
+                        )
+                        artists_filled += 1
+
+    cur.execute(
+        """
+        SELECT DISTINCT a.album_id, a.artist_id, a.hifi_id AS album_hifi_id
+        FROM albums a
+        WHERE a.hifi_id IS NOT NULL AND a.hifi_id != ''
+          AND a.artist_id IS NOT NULL
+        """
+    )
+    album_rows = cur.fetchall() or []
+
+    for arow in album_rows:
+        artist_id = arow.get('artist_id')
+        if artist_id and artist_id not in artists_seen:
+            artists_seen.add(artist_id)
+            cur.execute(
+                "SELECT artist_id, hifi_id FROM artists WHERE artist_id = %s AND (hifi_id IS NULL OR hifi_id = '')",
+                (artist_id,)
+            )
+            artist_row = cur.fetchone()
+            if artist_row:
+                try:
+                    album_payload = _fetch_hifi_album_payload(arow.get('album_hifi_id'))
+                    artist_hifi_id = str(album_payload.get('artist', {}).get('id') or '').strip()
+                    if artist_hifi_id:
+                        cur.execute(
+                            "UPDATE artists SET hifi_id = %s, confidence = 0.99 WHERE artist_id = %s",
+                            (artist_hifi_id, artist_id)
+                        )
+                        artists_filled += 1
+                except Exception:
+                    pass
+
+    return albums_filled, artists_filled
+
+
 def find_missing_hifi_ids(progress_callback=None):
     """Scan all entities missing hifi_id and attempt to match via HiFi API.
 
@@ -286,6 +402,10 @@ def find_missing_hifi_ids(progress_callback=None):
     cur = conn.cursor()
 
     try:
+        albums_propagated, artists_propagated = _propagate_hifi_ids_from_tracks(cur)
+        conn.commit()
+        print(f"[HIFI_MATCH] Propagated hifi_ids from tagged tracks: {albums_propagated} albums, {artists_propagated} artists", flush=True)
+
         tracks = _find_tracks_needing_match(cur)
         albums = _find_albums_needing_match(cur)
         artists = _find_artists_needing_match(cur)
