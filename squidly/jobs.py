@@ -764,7 +764,7 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     now = datetime.utcnow()
     stale_cutoff = now - timedelta(minutes=max(1, int(stale_after_minutes)))
     now_iso = now.isoformat() + 'Z'
-    immediate_recovery_job_types = {'hifi_match', 'plex_library_sync'}
+    immediate_recovery_job_types = {'hifi_match', 'plex_library_sync', 'automatic_matching'}
 
     conn = get_db_connection()
     cur = conn.cursor()
