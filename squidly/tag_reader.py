@@ -28,22 +28,10 @@ def _resolve_library_file_path(file_path):
     if not raw_path:
         return ''
 
-    normalized_raw = raw_path.replace('\\', '/').strip()
-    if os.path.exists(normalized_raw):
-        return normalized_raw
+    if raw_path.startswith('/'):
+        return raw_path if os.path.exists(raw_path) else ''
 
-    downloads_root = DOWNLOADS_ROOT.rstrip('/').replace('\\', '/')
-    candidates = [
-        f"{downloads_root}/{raw_path}",
-        f"{downloads_root}/full_albums/{raw_path}",
-        f"{downloads_root}/loose_tracks/{raw_path}",
-    ]
-    for candidate in candidates:
-        normalized_candidate = os.path.normpath(candidate.replace('\\', '/'))
-        if os.path.exists(normalized_candidate):
-            return normalized_candidate
-
-    return ''
+    return f"{DOWNLOADS_ROOT}/{raw_path}"
 
 
 def _read_flac_tags(raw_path):

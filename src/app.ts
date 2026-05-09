@@ -3789,15 +3789,47 @@ class App {
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
         const stages = (job.result?.stages || {}) as Record<string, string>;
         const progress = (job.result?.progress || {}) as Record<string, unknown>;
+        const hasResult = job.result !== null && job.result !== undefined;
         const stageRows = [
-            { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
-            { key: 'matching_albums', label: 'Matching Albums' },
-            { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+            { key: 'plex_library_update', label: 'Plex Library Update' },
+            { key: 'plex_sync', label: 'Plex Sync' },
+            { key: 'tag_analysis', label: 'Tag Analysis' },
+            { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
         ];
 
-        const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
-        const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
-        const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
+        const jobTypeLabel = this.formatJobTypeLabel(job.job_type);
+
+        if (!hasResult) {
+            return `
+                <div class="match-activity-card">
+                    <div class="match-activity-header">
+                        <div>
+                            <h3 class="match-activity-title">Latest Match Scan</h3>
+                        </div>
+                        <span class="match-review-status ${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="match-activity-meta">
+                        <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                        <span class="match-activity-meta-item">Waiting to start...</span>
+                    </div>
+                    <div class="match-activity-stages">
+                        ${stageRows.map(stage => `
+                            <div class="job-stage">
+                                <span>${stage.label}</span>
+                                <span class="job-stage-status status-pending">Pending</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
+        const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
+        const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
+        const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
+        const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
+        const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
 
         return `
             <div class="match-activity-card">
@@ -3808,10 +3840,10 @@ class App {
                     <span class="match-review-status ${statusClass}">${statusLabel}</span>
                 </div>
                 <div class="match-activity-meta">
-                    <span class="match-activity-meta-item">Job ${job.id}</span>
-                    <span class="match-activity-meta-item">Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job</span>
-                    <span class="match-activity-meta-item">Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job</span>
-                    <span class="match-activity-meta-item">Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job</span>
+                    <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                    <span class="match-activity-meta-item">Plex: ${plexSyncTracks} tracks synced</span>
+                    <span class="match-activity-meta-item">Tags: ${tagScanned} scanned • ${tagFilled} filled</span>
+                    <span class="match-activity-meta-item">HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched</span>
                 </div>
                 <div class="match-activity-stages">
                     ${stageRows.map(stage => {
@@ -3828,6 +3860,23 @@ class App {
         `;
     }
 
+    private formatJobTypeLabel(jobType: string): string {
+        switch (jobType) {
+            case 'automatic_matching':
+                return 'Automatic Matching';
+            case 'hifi_match':
+                return 'HiFi Match';
+            case 'plex_library_sync':
+                return 'Plex Sync';
+            case 'plex_library_update':
+                return 'Plex Update';
+            case 'download_track':
+                return 'Download';
+            default:
+                return jobType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+    }
+
     private async loadMatchActivity(): Promise<void> {
         if (!this.matchReviewActivity || !this.matchReviewRunScanButton) {
             return;
@@ -3835,7 +3884,7 @@ class App {
 
         try {
             const params = new URLSearchParams({
-                job_type: 'hifi_match',
+                job_type: 'automatic_matching',
                 exclude_plex_playlist_add: '1',
                 limit: '1'
             });

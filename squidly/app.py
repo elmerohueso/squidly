@@ -117,7 +117,7 @@ from squidly.playlist_matching import (
     _lookup_track_metadata,
 )
 
-from squidly.tag_reader import scan_library_for_tags
+from squidly.tag_reader import scan_library_for_tags, _resolve_library_file_path
 from squidly.hifi_matcher import find_missing_hifi_ids
 
 from squidly.hifi import (
@@ -398,38 +398,16 @@ def _extract_plex_library_id(value):
     return raw
 
 
-def _resolve_library_file_path(file_path):
-    raw_path = str(file_path or '').strip()
-    if not raw_path:
-        return ''
-
-    normalized_raw = raw_path.replace('\\', '/').strip()
-    if os.path.exists(normalized_raw):
-        return normalized_raw
-
-    canonical_relative = _normalize_library_track_path(raw_path)
-    if canonical_relative:
-        downloads_root = DOWNLOADS_ROOT.rstrip('/').replace('\\', '/')
-        candidates = [
-            f"{downloads_root}/{canonical_relative}",
-            f"{downloads_root}/full_albums/{canonical_relative}",
-            f"{downloads_root}/loose_tracks/{canonical_relative}",
-        ]
-        for candidate in candidates:
-            normalized_candidate = os.path.normpath(candidate.replace('\\', '/'))
-            if os.path.exists(normalized_candidate):
-                return normalized_candidate
-
-    return ''
-
-
 def _read_embedded_hifi_ids(file_path):
     track_id = None
     album_id = None
     isrc = None
-    raw_path = _resolve_library_file_path(file_path)
-
-    if not raw_path or not os.path.exists(raw_path):
+    raw_path = str(file_path or '').strip()
+    if not raw_path:
+        return {'track_id': None, 'album_id': None, 'isrc': None}
+    if not raw_path.startswith('/'):
+        raw_path = f"{DOWNLOADS_ROOT}/{raw_path}"
+    if not os.path.exists(raw_path):
         print(f"[MATCH] Path does not exist after resolution: {file_path}", flush=True)
         return {'track_id': None, 'album_id': None, 'isrc': None}
 
@@ -613,9 +591,10 @@ def process_automatic_matching_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     print(f"[AUTO_MATCH] Job {job_id} running Plex sync", flush=True)
 
-    from squidly.plex import queue_plex_library_sync, any_plex_sync_jobs_running_or_queued, get_last_successful_plex_sync_finished_at
+    from squidly.plex import get_last_successful_plex_sync_finished_at
+    from squidly.jobs import any_plex_sync_jobs_running_or_queued
 
-    sync_job_id = queue_plex_library_sync(trigger='automatic_matching')
+    sync_job_id = jobs.queue_plex_library_sync(trigger='automatic_matching')
     if sync_job_id:
         print(f"[AUTO_MATCH] Job {job_id} queued Plex sync job {sync_job_id}", flush=True)
     else:
@@ -3706,7 +3685,7 @@ def start_hifi_match_endpoint():
     """Queue an automatic matching job: Plex update → sync → tag analysis → HiFi gap-fill."""
     from squidly.jobs import enqueue_job
 
-    existing = jobs.any_hifi_match_jobs_running_or_queued() or _any_automatic_matching_jobs_running_or_queued()
+    existing = any_hifi_match_jobs_running_or_queued() or _any_automatic_matching_jobs_running_or_queued()
     if existing:
         return jsonify({'error': 'A matching job is already queued or in progress'}), 409
 
