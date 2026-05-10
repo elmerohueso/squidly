@@ -787,6 +787,12 @@ body {
     color: var(--text-secondary);
 }
 
+.mirrors-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+}
+
 .mirrors-content {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -820,6 +826,32 @@ body {
     font-weight: 600;
     font-size: 1rem;
     color: var(--text-primary);
+}
+
+.endpoint-remove-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.endpoint-remove-btn:hover {
+    border-color: #ff4466;
+    color: #ff4466;
+    background: rgba(255, 68, 102, 0.1);
+}
+
+.endpoint-remove-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 .endpoint-status {

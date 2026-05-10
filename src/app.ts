@@ -564,6 +564,7 @@ class App {
     private flyoutOverlay: HTMLElement;
     private closeFlyoutButton: HTMLButtonElement;
     private flyoutContent: HTMLElement;
+    private addMirrorButton: HTMLButtonElement;
     private jobsButton: HTMLButtonElement;
     private jobsFlyout: HTMLElement;
     private jobsOverlay: HTMLElement;
@@ -862,6 +863,7 @@ class App {
         this.flyoutOverlay = document.getElementById('flyoutOverlay') as HTMLElement;
         this.closeFlyoutButton = document.getElementById('closeFlyout') as HTMLButtonElement;
         this.flyoutContent = document.getElementById('flyoutContent') as HTMLElement;
+        this.addMirrorButton = document.getElementById('addMirrorButton') as HTMLButtonElement;
         this.jobsButton = document.getElementById('jobsButton') as HTMLButtonElement;
         this.jobsFlyout = document.getElementById('jobsFlyout') as HTMLElement;
         this.jobsOverlay = document.getElementById('jobsOverlay') as HTMLElement;
@@ -1062,6 +1064,15 @@ class App {
         }
         if (this.flyoutOverlay) {
             this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+        }
+        if (this.flyoutContent) {
+            this.flyoutContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleFlyoutContentClick(e);
+            });
+        }
+
+        if (this.addMirrorButton) {
+            this.addMirrorButton.addEventListener('click', () => this.openAddMirrorModal());
         }
 
         if (this.jobsButton) {
@@ -6463,13 +6474,18 @@ class App {
             return `
                 <div class="endpoint-item">
                     <div class="endpoint-header">
-                        <span class="endpoint-name">${endpoint.name}</span>
-                        <div class="endpoint-status ${statusClass}">
-                            <span class="status-indicator ${statusClass}"></span>
-                            ${statusText}
+                        <span class="endpoint-name">${this.escapeHtml(endpoint.name)}</span>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="endpoint-status ${statusClass}">
+                                <span class="status-indicator ${statusClass}"></span>
+                                ${statusText}
+                            </div>
+                            <button type="button" class="endpoint-remove-btn" data-endpoint-name="${this.escapeHtml(endpoint.name)}" title="Remove mirror">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
                         </div>
                     </div>
-                    <div class="endpoint-url">${url}</div>
+                    <div class="endpoint-url">${this.escapeHtml(url)}</div>
                     <div class="endpoint-details">
                         <div class="endpoint-detail">
                             <span class="detail-label">Response Time</span>
@@ -6489,6 +6505,148 @@ class App {
         }).join('');
 
         this.flyoutContent.innerHTML = `${rateLimitSummary}${endpointMarkup}`;
+    }
+
+    private openAddMirrorModal(): void {
+        const overlay = document.createElement('div');
+        overlay.className = 'playlist-modal-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'playlist-modal';
+
+        const header = document.createElement('div');
+        header.className = 'playlist-modal-header';
+
+        const title = document.createElement('h3');
+        title.textContent = 'Add Mirror';
+        header.appendChild(title);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'playlist-modal-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+        header.appendChild(closeBtn);
+
+        const content = document.createElement('div');
+        content.className = 'playlist-modal-content';
+
+        const nameGroup = document.createElement('div');
+        nameGroup.className = 'settings-group';
+        const nameLabel = document.createElement('label');
+        nameLabel.className = 'settings-label';
+        nameLabel.textContent = 'Name';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'settings-input';
+        nameInput.placeholder = 'e.g. my-mirror';
+        nameGroup.appendChild(nameLabel);
+        nameGroup.appendChild(nameInput);
+
+        const urlGroup = document.createElement('div');
+        urlGroup.className = 'settings-group';
+        const urlLabel = document.createElement('label');
+        urlLabel.className = 'settings-label';
+        urlLabel.textContent = 'Encoded URL (base64)';
+        const urlInput = document.createElement('input');
+        urlInput.type = 'text';
+        urlInput.className = 'settings-input';
+        urlInput.placeholder = 'aHR0cDovL2V4YW1wbGUuY29tOjgwMDA=';
+        urlGroup.appendChild(urlLabel);
+        urlGroup.appendChild(urlInput);
+
+        content.appendChild(nameGroup);
+        content.appendChild(urlGroup);
+
+        const footer = document.createElement('div');
+        footer.className = 'playlist-modal-footer';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'playlist-modal-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'save-button';
+        submitBtn.textContent = 'Add';
+        submitBtn.addEventListener('click', async () => {
+            const name = nameInput.value.trim();
+            const encodedUrl = urlInput.value.trim();
+            if (!name || !encodedUrl) {
+                return;
+            }
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+            try {
+                const resp = await fetch('/api/endpoints', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, encodedUrl }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to add mirror');
+                }
+                document.body.removeChild(overlay);
+                void this.updateEndpointStatus();
+            } catch (e) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add';
+                alert(e instanceof Error ? e.message : 'Failed to add mirror');
+            }
+        });
+
+        footer.appendChild(cancelBtn);
+        footer.appendChild(submitBtn);
+
+        modal.appendChild(header);
+        modal.appendChild(content);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
+            }
+        });
+
+        nameInput.focus();
+    }
+
+    private async handleFlyoutContentClick(e: MouseEvent): Promise<void> {
+        const target = e.target as HTMLElement;
+        const removeBtn = target.closest('.endpoint-remove-btn') as HTMLButtonElement | null;
+        if (!removeBtn) {
+            return;
+        }
+
+        const name = removeBtn.getAttribute('data-endpoint-name');
+        if (!name) {
+            return;
+        }
+
+        if (!window.confirm(`Remove mirror "${name}"?`)) {
+            return;
+        }
+
+        removeBtn.disabled = true;
+        try {
+            const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}`, {
+                method: 'DELETE',
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Failed to remove mirror');
+            }
+            void this.updateEndpointStatus();
+        } catch (err) {
+            removeBtn.disabled = false;
+            alert(err instanceof Error ? err.message : 'Failed to remove mirror');
+        }
     }
 
     private updateSearchPlaceholder(): void {

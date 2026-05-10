@@ -648,17 +648,20 @@ def load_squid_urls():
 
 
 def seed_mirrors_from_json():
-    """Seed mirror_endpoints table from squidurls.json."""
+    """Seed mirror_endpoints table from squidurls.json only if empty."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT COUNT(*) FROM mirror_endpoints')
+    count = cur.fetchone()['count']
+    if count > 0:
+        print("[MIRRORS] Skipping seed — mirror_endpoints table is not empty", flush=True)
+        conn.close()
+        return
+
+    print("[MIRRORS] Seeding mirror_endpoints from squidurls.json", flush=True)
     with open('squidurls.json', 'r', encoding='utf-8') as f:
         urls_data = json.load(f)
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    # Clear existing entries
-    cur.execute('DELETE FROM mirror_endpoints')
-
-    # Insert fresh data from JSON with initial values
     for entry in urls_data:
         cur.execute(
             """
@@ -670,6 +673,100 @@ def seed_mirrors_from_json():
 
     conn.commit()
     conn.close()
+
+
+def add_mirror(name, encoded_url):
+    """Add a new mirror endpoint to the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (name) DO NOTHING
+        """,
+        (name, encoded_url, 0, None, None)
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_mirror(name):
+    """Remove a mirror endpoint from the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM mirror_endpoints WHERE name = %s', (name,))
+    conn.commit()
+    conn.close()
+
+
+def validate_all_endpoints_from_db():
+    """Validate all mirror endpoints from the database and update their status."""
+    print("\n" + "=" * 60, flush=True)
+    print("Starting Squid URL Validation", flush=True)
+    print("=" * 60, flush=True)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT name, encoded_url FROM mirror_endpoints')
+    mirrors = cur.fetchall()
+    conn.close()
+
+    online_count = 0
+    offline_count = 0
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    for mirror in mirrors:
+        name = mirror['name']
+        decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
+
+        print(f"\n[{name}] Checking {decoded_url}...", flush=True)
+        result = validate_endpoint(decoded_url, name, timeout=5)
+
+        cur.execute(
+            """
+            UPDATE mirror_endpoints
+            SET online = %s, response_time = %s, last_checked = %s
+            WHERE name = %s
+            """,
+            (
+                1 if result['online'] else 0,
+                result['responseTime'],
+                result['lastChecked'],
+                name
+            )
+        )
+
+        if result['online']:
+            online_count += 1
+            print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
+        else:
+            offline_count += 1
+            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
+
+    conn.commit()
+    conn.close()
+
+    print("\n" + "=" * 60, flush=True)
+    print("Validation Complete", flush=True)
+    print("=" * 60, flush=True)
+    print(f"Total endpoints: {len(mirrors)}", flush=True)
+    print(f"Online: {online_count}", flush=True)
+    print(f"Offline: {offline_count}", flush=True)
+    print("=" * 60 + "\n", flush=True)
+
+    return {
+        'total': len(mirrors),
+        'online': online_count,
+        'offline': offline_count
+    }
+
+
+def validate_all_endpoints():
+    """Validate all squid mirror endpoints and update database state."""
+    return validate_all_endpoints_from_db()
 
 
 def validate_endpoint(url, name, timeout=5):
@@ -714,67 +811,6 @@ def validate_endpoint(url, name, timeout=5):
             'lastChecked': timestamp,
             'error': str(e)
         }
-
-
-def validate_all_endpoints():
-    """Validate all squid mirror endpoints and update database state."""
-    print("\n" + "=" * 60, flush=True)
-    print("Starting Squid URL Validation", flush=True)
-    print("=" * 60, flush=True)
-
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-
-    online_count = 0
-    offline_count = 0
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    for entry in urls_data:
-        name = entry['name']
-        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-
-        print(f"\n[{name}] Checking {decoded_url}...", flush=True)
-        result = validate_endpoint(decoded_url, name, timeout=5)
-
-        cur.execute(
-            """
-            UPDATE mirror_endpoints
-            SET online = %s, response_time = %s, last_checked = %s
-            WHERE name = %s
-            """,
-            (
-                1 if result['online'] else 0,
-                result['responseTime'],
-                result['lastChecked'],
-                name
-            )
-        )
-
-        if result['online']:
-            online_count += 1
-            print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
-        else:
-            offline_count += 1
-            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
-
-    conn.commit()
-    conn.close()
-
-    print("\n" + "=" * 60, flush=True)
-    print("Validation Complete", flush=True)
-    print("=" * 60, flush=True)
-    print(f"Total endpoints: {len(urls_data)}", flush=True)
-    print(f"Online: {online_count}", flush=True)
-    print(f"Offline: {offline_count}", flush=True)
-    print("=" * 60 + "\n", flush=True)
-
-    return {
-        'total': len(urls_data),
-        'online': online_count,
-        'offline': offline_count
-    }
 
 
 def detect_audio_format(data: bytes) -> str:

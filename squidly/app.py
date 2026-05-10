@@ -3116,6 +3116,53 @@ def endpoints_status():
         'mirrorRateLimitStatus': mirror_rate_limit_status,
     })
 
+
+def _async_validate_endpoints():
+    """Run endpoint validation in a background thread."""
+    try:
+        downloads.validate_all_endpoints_from_db()
+    except Exception as e:
+        print(f"[ENDPOINTS] Async validation failed: {e}", flush=True)
+
+
+@app.route('/api/endpoints', methods=['POST'])
+def add_endpoint():
+    """Add a new mirror endpoint."""
+    payload = request.get_json()
+    if not payload:
+        return jsonify({'error': 'No JSON payload provided'}), 400
+
+    name = payload.get('name', '').strip()
+    encoded_url = payload.get('encodedUrl', '').strip()
+
+    if not name or not encoded_url:
+        return jsonify({'error': 'name and encodedUrl are required'}), 400
+
+    try:
+        downloads.add_mirror(name, encoded_url)
+    except Exception as e:
+        print(f"[ENDPOINTS] Failed to add mirror: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
+
+    threading.Thread(target=_async_validate_endpoints, daemon=True).start()
+
+    return jsonify({'name': name, 'added': True}), 201
+
+
+@app.route('/api/endpoints/<name>', methods=['DELETE'])
+def delete_endpoint(name):
+    """Remove a mirror endpoint."""
+    try:
+        downloads.remove_mirror(name)
+    except Exception as e:
+        print(f"[ENDPOINTS] Failed to remove mirror: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
+
+    threading.Thread(target=_async_validate_endpoints, daemon=True).start()
+
+    return jsonify({'name': name, 'removed': True}), 200
+
+
 @app.route('/api/listenbrainz/config', methods=['GET'])
 def get_listenbrainz_config_endpoint():
     """Get the current ListenBrainz configuration"""
