@@ -343,14 +343,14 @@ def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backof
 
 
 def get_online_mirror_names():
-    """Return set of mirror names that are currently marked online."""
+    """Return set of mirror names that are currently marked online and enabled."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
         SELECT name
         FROM mirror_endpoints
-        WHERE online = 1
+        WHERE online = 1 AND enabled = 1
         """
     )
     rows = cur.fetchall()
@@ -395,7 +395,7 @@ def _get_ordered_online_mirrors(url_list):
         """
         SELECT name, response_time
         FROM mirror_endpoints
-        WHERE online = 1
+        WHERE online = 1 AND enabled = 1
         """
     )
     online_rows = cur.fetchall()
@@ -673,11 +673,27 @@ def seed_mirrors_from_json():
         name = derive_mirror_name(decoded_url)
         cur.execute(
             """
-            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (name, entry['encodedUrl'], 0, None, None)
+            (name, entry['encodedUrl'], 0, None, None, 1)
         )
+
+
+def add_mirror(url):
+    """Add a new mirror endpoint to the database from a plain URL."""
+    name = derive_mirror_name(url)
+    encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (name) DO NOTHING
+        """,
+        (name, encoded_url, 0, None, None, 1)
+    )
 
     conn.commit()
     conn.close()
@@ -710,15 +726,60 @@ def remove_mirror(name):
     conn.close()
 
 
+def toggle_mirror(name):
+    """Toggle the enabled state of a mirror. Returns the new enabled state."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT enabled FROM mirror_endpoints WHERE name = %s', (name,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f'Mirror "{name}" not found')
+    new_state = 0 if row['enabled'] else 1
+    cur.execute('UPDATE mirror_endpoints SET enabled = %s WHERE name = %s', (new_state, name))
+    conn.commit()
+    conn.close()
+    return new_state
+
+
+def validate_single_endpoint(name):
+    """Validate a single mirror endpoint by name."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT name, encoded_url FROM mirror_endpoints WHERE name = %s', (name,))
+    mirror = cur.fetchone()
+    if mirror is None:
+        conn.close()
+        raise ValueError(f'Mirror "{name}" not found')
+    decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
+    result = validate_endpoint(decoded_url, name, timeout=5)
+    cur.execute(
+        """
+        UPDATE mirror_endpoints
+        SET online = %s, response_time = %s, last_checked = %s
+        WHERE name = %s
+        """,
+        (
+            1 if result['online'] else 0,
+            result['responseTime'],
+            result['lastChecked'],
+            name
+        )
+    )
+    conn.commit()
+    conn.close()
+    return result
+
+
 def validate_all_endpoints_from_db():
-    """Validate all mirror endpoints from the database and update their status."""
+    """Validate all enabled mirror endpoints from the database and update their status."""
     print("\n" + "=" * 60, flush=True)
     print("Starting Squid URL Validation", flush=True)
     print("=" * 60, flush=True)
 
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT name, encoded_url FROM mirror_endpoints')
+    cur.execute('SELECT name, encoded_url FROM mirror_endpoints WHERE enabled = 1')
     mirrors = cur.fetchall()
     conn.close()
 

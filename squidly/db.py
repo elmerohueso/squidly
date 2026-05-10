@@ -110,6 +110,16 @@ def init_db():
     )
     cur.execute(
         """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'mirror_endpoints'
+        """
+    )
+    mirror_columns = {row['column_name'] for row in cur.fetchall()}
+    if 'enabled' not in mirror_columns:
+        cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS plex_config (
             id INTEGER PRIMARY KEY,
             server_url TEXT,

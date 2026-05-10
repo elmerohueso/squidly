@@ -311,6 +311,7 @@ interface Endpoint {
     online: boolean;
     responseTime: number | null;
     lastChecked: string | null;
+    enabled: boolean;
 }
 
 interface MirrorRateLimitStatus {
@@ -6470,9 +6471,10 @@ class App {
             const lastChecked = endpoint.lastChecked
                 ? new Date(endpoint.lastChecked).toLocaleTimeString()
                 : 'Never';
+            const disabledClass = endpoint.enabled ? '' : ' disabled';
 
             return `
-                <div class="endpoint-item">
+                <div class="endpoint-item${disabledClass}">
                     <div class="endpoint-header">
                         <span class="endpoint-name">${this.escapeHtml(endpoint.name)}</span>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -6480,6 +6482,10 @@ class App {
                                 <span class="status-indicator ${statusClass}"></span>
                                 ${statusText}
                             </div>
+                            <label class="endpoint-toggle" title="${endpoint.enabled ? 'Disable mirror' : 'Enable mirror'}">
+                                <input type="checkbox" data-endpoint-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.enabled ? 'checked' : ''}>
+                                <span class="endpoint-toggle-slider"></span>
+                            </label>
                             <button type="button" class="endpoint-remove-btn" data-endpoint-name="${this.escapeHtml(endpoint.name)}" title="Remove mirror">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                             </button>
@@ -6605,6 +6611,32 @@ class App {
 
     private async handleFlyoutContentClick(e: MouseEvent): Promise<void> {
         const target = e.target as HTMLElement;
+
+        const toggleInput = target.closest('[data-endpoint-toggle]') as HTMLInputElement | null;
+        if (toggleInput) {
+            const name = toggleInput.getAttribute('data-endpoint-toggle');
+            if (!name) {
+                return;
+            }
+            const prevState = toggleInput.checked;
+            toggleInput.disabled = true;
+            try {
+                const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}/toggle`, {
+                    method: 'POST',
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to toggle mirror');
+                }
+                void this.updateEndpointStatus();
+            } catch (err) {
+                toggleInput.checked = prevState;
+                toggleInput.disabled = false;
+                alert(err instanceof Error ? err.message : 'Failed to toggle mirror');
+            }
+            return;
+        }
+
         const removeBtn = target.closest('.endpoint-remove-btn') as HTMLButtonElement | null;
         if (!removeBtn) {
             return;

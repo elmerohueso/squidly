@@ -3082,7 +3082,7 @@ def endpoints_status():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT name, encoded_url, online, response_time, last_checked
+        SELECT name, encoded_url, online, response_time, last_checked, enabled
         FROM mirror_endpoints
         ORDER BY response_time ASC NULLS LAST, name ASC
         """
@@ -3097,7 +3097,8 @@ def endpoints_status():
             'encodedUrl': row['encoded_url'],
             'online': bool(row['online']),
             'responseTime': row['response_time'],
-            'lastChecked': row['last_checked']
+            'lastChecked': row['last_checked'],
+            'enabled': bool(row['enabled']),
         })
 
     mirror_rate_limit_status = {}
@@ -3119,10 +3120,17 @@ def endpoints_status():
 
 def _async_validate_endpoints():
     """Run endpoint validation in a background thread."""
-    try:
-        downloads.validate_all_endpoints_from_db()
-    except Exception as e:
-        print(f"[ENDPOINTS] Async validation failed: {e}", flush=True)
+    _run_async(lambda: downloads.validate_all_endpoints_from_db())
+
+
+def _run_async(fn):
+    """Run a callable in a background daemon thread."""
+    def _wrapper():
+        try:
+            fn()
+        except Exception as e:
+            print(f"[ENDPOINTS] Async operation failed: {e}", flush=True)
+    threading.Thread(target=_wrapper, daemon=True).start()
 
 
 @app.route('/api/endpoints', methods=['POST'])
@@ -3142,7 +3150,7 @@ def add_endpoint():
         print(f"[ENDPOINTS] Failed to add mirror: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
-    threading.Thread(target=_async_validate_endpoints, daemon=True).start()
+    _run_async(lambda: downloads.validate_all_endpoints_from_db())
 
     return jsonify({'url': url, 'added': True}), 201
 
@@ -3156,9 +3164,26 @@ def delete_endpoint(name):
         print(f"[ENDPOINTS] Failed to remove mirror: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
-    threading.Thread(target=_async_validate_endpoints, daemon=True).start()
+    _run_async(lambda: downloads.validate_all_endpoints_from_db())
 
     return jsonify({'name': name, 'removed': True}), 200
+
+
+@app.route('/api/endpoints/<name>/toggle', methods=['POST'])
+def toggle_endpoint(name):
+    """Toggle the enabled state of a mirror endpoint."""
+    try:
+        new_state = downloads.toggle_mirror(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        print(f"[ENDPOINTS] Failed to toggle mirror: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
+
+    if new_state == 1:
+        _run_async(lambda: downloads.validate_single_endpoint(name))
+
+    return jsonify({'name': name, 'enabled': bool(new_state)}), 200
 
 
 @app.route('/api/listenbrainz/config', methods=['GET'])
