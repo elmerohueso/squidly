@@ -634,15 +634,24 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     return None, None
 
 
-def load_squid_urls():
-    """Load and decode squid mirror URLs from squidurls.json."""
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
+def load_enabled_mirror_urls():
+    """Load enabled mirror URLs from the database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT name, encoded_url
+        FROM mirror_endpoints
+        WHERE enabled = 1
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
 
     decoded_urls = []
-    for entry in urls_data:
-        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-        decoded_urls.append({'name': entry['name'], 'url': decoded_url})
+    for row in rows:
+        decoded_url = base64.b64decode(row['encoded_url']).decode('utf-8')
+        decoded_urls.append({'name': row['name'], 'url': decoded_url})
 
     return decoded_urls
 

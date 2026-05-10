@@ -1555,7 +1555,7 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     downloads.seed_mirrors_from_json()
 
     # Initialize URL list and round-robin iterator
-    SQUID_URLS = downloads.load_squid_urls()
+    SQUID_URLS = downloads.load_enabled_mirror_urls()
     url_iterator = cycle(SQUID_URLS)
 
     # Run validation on startup

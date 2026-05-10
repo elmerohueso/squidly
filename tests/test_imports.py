@@ -91,7 +91,6 @@ def test_import_downloads():
         detect_audio_format,
         download_cover_image,
         format_tidal_image_url,
-        load_squid_urls,
         make_request_with_retry,
         make_request_with_retry_rotating_mirrors,
         seed_mirrors_from_json,
