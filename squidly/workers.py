@@ -130,14 +130,14 @@ def plex_sync_job_worker():
             time.sleep(5)
 
 
-def hifi_match_job_worker():
-    from squidly.app import process_hifi_match_job
+def automatic_matching_job_worker():
+    from squidly.app import process_automatic_matching_job
 
-    print("[HIFI_MATCH_WORKER] Background worker started", flush=True)
+    print("[AUTO_MATCH_WORKER] Background worker started", flush=True)
 
     while True:
         try:
-            job = claim_next_job('hifi_match')
+            job = claim_next_job('automatic_matching')
             if not job:
                 time.sleep(5)
                 continue
@@ -147,30 +147,20 @@ def hifi_match_job_worker():
             except (TypeError, ValueError):
                 payload = {}
 
-            if any_plex_sync_jobs_running_or_queued() or any_plex_library_update_jobs_running_or_queued():
-                requeue_claimed_job(
-                    job['id'],
-                    delay_seconds=20,
-                    error_message='Waiting for Plex sync and update jobs to finish before hifi matching'
-                )
-                print(f"[HIFI_MATCH_WORKER] Job {job['id']} deferred until Plex jobs complete", flush=True)
-                time.sleep(1)
-                continue
-
             try:
-                result = process_hifi_match_job(job['id'], payload)
+                result = process_automatic_matching_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
-                print(f"[HIFI_MATCH_WORKER] Job {job['id']} completed", flush=True)
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} completed", flush=True)
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
-                print(f"[HIFI_MATCH_WORKER] Job {job['id']} cancelled", flush=True)
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} cancelled", flush=True)
                 time.sleep(1)
             except Exception as e:
-                print(f"[HIFI_MATCH_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                print(f"[AUTO_MATCH_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            print(f"[HIFI_MATCH_WORKER] Error in background worker: {str(e)}", flush=True)
+            print(f"[AUTO_MATCH_WORKER] Error in background worker: {str(e)}", flush=True)
             time.sleep(5)
 
 

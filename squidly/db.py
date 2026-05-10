@@ -227,14 +227,8 @@ def init_db():
             library_id TEXT UNIQUE,
             hifi_id TEXT,
             confidence NUMERIC(4,3) NOT NULL DEFAULT 0,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
             last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT artists_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT artists_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT artists_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+            CONSTRAINT artists_confidence_check CHECK (confidence >= 0 AND confidence <= 1)
         )
         """
     )
@@ -242,12 +236,6 @@ def init_db():
         """
         CREATE INDEX IF NOT EXISTS idx_artists_hifi_id
         ON artists (hifi_id)
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_artists_match_status
-        ON artists (match_status)
         """
     )
 
@@ -263,14 +251,8 @@ def init_db():
             complete BOOLEAN NOT NULL DEFAULT FALSE,
             matched_track_count INTEGER NOT NULL DEFAULT 0,
             expected_track_count INTEGER NOT NULL DEFAULT 0,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
             last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT albums_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT albums_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT albums_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+            CONSTRAINT albums_confidence_check CHECK (confidence >= 0 AND confidence <= 1)
         )
         """
     )
@@ -284,12 +266,6 @@ def init_db():
         """
         CREATE INDEX IF NOT EXISTS idx_albums_hifi_id
         ON albums (hifi_id)
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_albums_match_status
-        ON albums (match_status)
         """
     )
 
@@ -308,14 +284,8 @@ def init_db():
             bitrate INTEGER,
             disc_number INTEGER,
             track_number INTEGER,
-            match_status TEXT NOT NULL DEFAULT 'unmatched',
-            match_source TEXT,
-            matched_at TIMESTAMP,
-            confirmed_at TIMESTAMP,
             last_seen_at TIMESTAMP NOT NULL,
-            CONSTRAINT tracks_confidence_check CHECK (confidence >= 0 AND confidence <= 1),
-            CONSTRAINT tracks_match_status_check CHECK (match_status IN ('unmatched', 'proposed', 'confirmed', 'rejected')),
-            CONSTRAINT tracks_match_source_check CHECK (match_source IS NULL OR match_source IN ('path', 'tags', 'auto_artist', 'auto_album', 'auto_track', 'manual'))
+            CONSTRAINT tracks_confidence_check CHECK (confidence >= 0 AND confidence <= 1)
         )
         """
     )
@@ -335,12 +305,6 @@ def init_db():
         """
         CREATE INDEX IF NOT EXISTS idx_tracks_hifi_id
         ON tracks (hifi_id)
-        """
-    )
-    cur.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_tracks_match_status
-        ON tracks (match_status)
         """
     )
 
@@ -363,6 +327,32 @@ def init_db():
     )
     if not cur.fetchone():
         cur.execute("ALTER TABLE tracks ADD COLUMN duration INTEGER")
+
+    for table in ('artists', 'albums', 'tracks'):
+        for col in ('match_status', 'match_source', 'matched_at', 'confirmed_at'):
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+                """,
+                (table, col)
+            )
+            if cur.fetchone():
+                cur.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+
+    for table, col in [('artists', 'match_status'), ('albums', 'match_status'), ('tracks', 'match_status')]:
+        cur.execute(
+            """
+            SELECT conname
+            FROM pg_constraint c
+            JOIN pg_class t ON c.conrelid = t.oid
+            WHERE t.relname = %s AND c.conname LIKE %s
+            """,
+            (table, f'%{col}%')
+        )
+        for row in cur.fetchall():
+            cur.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {row['conname']}")
 
     cur.execute(
         """

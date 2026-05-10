@@ -364,7 +364,6 @@ interface PlexSongVariant {
 interface PlexTrackMatch {
     exists: boolean;
     variants?: PlexSongVariant[];
-    match_status?: string;
     confidence?: number | null;
 }
 
@@ -376,7 +375,6 @@ interface HifiAlbumLookupMatch {
     album_id: string;
     exists: boolean;
     complete: boolean;
-    match_status?: string;
     confidence?: number | null;
     matched_track_count?: number;
     expected_track_count?: number;
@@ -387,7 +385,6 @@ interface HifiArtistLookupMatch {
     artist_id: string;
     exists: boolean;
     complete: boolean;
-    match_status?: string;
     confidence?: number | null;
     variants?: PlexSongVariant[];
 }
@@ -407,10 +404,6 @@ interface HifiReviewArtist {
     hifi_id?: string;
     picture?: string;
     confidence?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiReviewAlbum {
@@ -426,10 +419,6 @@ interface HifiReviewAlbum {
     complete?: boolean;
     matched_track_count?: number;
     expected_track_count?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiReviewTrack {
@@ -450,10 +439,6 @@ interface HifiReviewTrack {
     bitrate?: number;
     disc_number?: number;
     track_number?: number;
-    match_status?: string;
-    match_source?: string;
-    matched_at?: string;
-    confirmed_at?: string;
 }
 
 interface HifiMatchReviewResponse {
@@ -3804,15 +3789,47 @@ class App {
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
         const stages = (job.result?.stages || {}) as Record<string, string>;
         const progress = (job.result?.progress || {}) as Record<string, unknown>;
+        const hasResult = job.result !== null && job.result !== undefined;
         const stageRows = [
-            { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
-            { key: 'matching_albums', label: 'Matching Albums' },
-            { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+            { key: 'plex_library_update', label: 'Plex Library Update' },
+            { key: 'plex_sync', label: 'Plex Sync' },
+            { key: 'tag_analysis', label: 'Tag Analysis' },
+            { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
         ];
 
-        const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
-        const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
-        const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
+        const jobTypeLabel = this.formatJobTypeLabel(job.job_type);
+
+        if (!hasResult) {
+            return `
+                <div class="match-activity-card">
+                    <div class="match-activity-header">
+                        <div>
+                            <h3 class="match-activity-title">Latest Match Scan</h3>
+                        </div>
+                        <span class="match-review-status ${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="match-activity-meta">
+                        <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                        <span class="match-activity-meta-item">Waiting to start...</span>
+                    </div>
+                    <div class="match-activity-stages">
+                        ${stageRows.map(stage => `
+                            <div class="job-stage">
+                                <span>${stage.label}</span>
+                                <span class="job-stage-status status-pending">Pending</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
+        const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
+        const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
+        const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
+        const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
+        const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
 
         return `
             <div class="match-activity-card">
@@ -3823,10 +3840,10 @@ class App {
                     <span class="match-review-status ${statusClass}">${statusLabel}</span>
                 </div>
                 <div class="match-activity-meta">
-                    <span class="match-activity-meta-item">Job ${job.id}</span>
-                    <span class="match-activity-meta-item">Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job</span>
-                    <span class="match-activity-meta-item">Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job</span>
-                    <span class="match-activity-meta-item">Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job</span>
+                    <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                    <span class="match-activity-meta-item">Plex: ${plexSyncTracks} tracks synced</span>
+                    <span class="match-activity-meta-item">Tags: ${tagScanned} scanned • ${tagFilled} filled</span>
+                    <span class="match-activity-meta-item">HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched</span>
                 </div>
                 <div class="match-activity-stages">
                     ${stageRows.map(stage => {
@@ -3843,6 +3860,23 @@ class App {
         `;
     }
 
+    private formatJobTypeLabel(jobType: string): string {
+        switch (jobType) {
+            case 'automatic_matching':
+                return 'Automatic Matching';
+            case 'hifi_match':
+                return 'HiFi Match';
+            case 'plex_library_sync':
+                return 'Plex Sync';
+            case 'plex_library_update':
+                return 'Plex Update';
+            case 'download_track':
+                return 'Download';
+            default:
+                return jobType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+    }
+
     private async loadMatchActivity(): Promise<void> {
         if (!this.matchReviewActivity || !this.matchReviewRunScanButton) {
             return;
@@ -3850,7 +3884,7 @@ class App {
 
         try {
             const params = new URLSearchParams({
-                job_type: 'hifi_match',
+                job_type: 'automatic_matching',
                 exclude_plex_playlist_add: '1',
                 limit: '1'
             });
@@ -3921,16 +3955,13 @@ class App {
         return `${Math.round(confidence * 100)}%`;
     }
 
-    private formatMatchStatusLabel(status?: string | null): string {
-        const normalized = String(status || 'unmatched').trim().toLowerCase();
-        if (normalized === 'confirmed') {
-            return 'Confirmed';
+    private formatMatchStatusLabel(confidence?: number | null): string {
+        const c = typeof confidence === 'number' ? confidence : 0;
+        if (c >= 0.95) {
+            return 'Matched';
         }
-        if (normalized === 'proposed') {
+        if (c > 0) {
             return 'Needs Review';
-        }
-        if (normalized === 'rejected') {
-            return 'Rejected';
         }
         return 'Unmatched';
     }
@@ -4123,13 +4154,14 @@ class App {
         entityLabel: string,
         title: string,
         subtitle: string,
-        status: string | undefined,
+        confidence: number | undefined,
         summaryHtml: string,
         sourcePaneHtml: string,
         candidatePaneHtml: string,
         actionsHtml: string,
     ): string {
-        const normalizedStatus = String(status || 'unmatched');
+        const statusLabel = this.formatMatchStatusLabel(confidence);
+        const normalizedStatus = confidence && confidence >= 0.95 ? 'confirmed' : confidence && confidence > 0 ? 'proposed' : 'unmatched';
 
         return `
             <div class="match-review-card" data-entity-type="${entityType}" data-review-id="${reviewId}">
@@ -4143,7 +4175,7 @@ class App {
                         <div class="match-review-meta">${summaryHtml}</div>
                     </div>
                     <div class="match-review-card-controls">
-                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.formatMatchStatusLabel(status)}</span>
+                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.escapeHtml(statusLabel)}</span>
                         <button
                             type="button"
                             class="match-review-toggle"
@@ -4296,11 +4328,8 @@ class App {
             'Artist',
             item.name || 'Unknown Artist',
             'Compare the Plex library artist against Explore artist candidates.',
-            item.match_status,
-            [
-                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
-                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
-            ].join(''),
+            item.confidence,
+            `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
             `
                 <section class="match-review-pane source-pane">
                     <div class="match-review-pane-label">Library Source</div>
@@ -4342,11 +4371,10 @@ class App {
             'Album',
             item.title || 'Unknown Album',
             `${item.artist_name || 'Unknown Artist'} • Review the library album against Explore releases.`,
-            item.match_status,
+            item.confidence,
             [
                 `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
-                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`,
-                `<span class="match-review-meta-item">Source ${this.escapeHtml(item.match_source || '—')}</span>`
+                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`
             ].join(''),
             `
                 <section class="match-review-pane source-pane">
@@ -4393,7 +4421,7 @@ class App {
             'Track',
             item.title || 'Unknown Track',
             `${subtitleParts.join(' • ') || 'Unknown'} • Compare the library file against Explore tracks.`,
-            item.match_status,
+            item.confidence,
             [
                 `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
                 `<span class="match-review-meta-item">Format ${this.escapeHtml((item.format || '—').toUpperCase())}</span>`,
@@ -4997,11 +5025,12 @@ class App {
             `;
         }
 
-        if (job.job_type === 'hifi_match') {
+        if (job.job_type === 'automatic_matching') {
             const stageRows = [
-                { key: 'backfilling_track_seed_ids', label: 'Backfilling Track IDs' },
-                { key: 'matching_albums', label: 'Matching Albums' },
-                { key: 'updating_album_completeness', label: 'Updating Album Completeness' }
+                { key: 'plex_library_update', label: 'Plex Library Update' },
+                { key: 'plex_sync', label: 'Plex Sync' },
+                { key: 'tag_analysis', label: 'Tag Analysis' },
+                { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
             ];
 
             const stageHtml = stageRows.map(stage => {
@@ -5016,10 +5045,13 @@ class App {
             }).join('');
 
             const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const artistsCoverage = this.getMatchCoverageFromProgress(progress, 'artists');
-            const albumsCoverage = this.getMatchCoverageFromProgress(progress, 'albums');
-            const tracksCoverage = this.getMatchCoverageFromProgress(progress, 'tracks');
-            const progressText = `Artists: ${artistsCoverage.total} total • ${artistsCoverage.missing} unmatched • ${artistsCoverage.matched} matched this job • Albums: ${albumsCoverage.total} total • ${albumsCoverage.missing} unmatched • ${albumsCoverage.matched} matched this job • Tracks: ${tracksCoverage.total} total • ${tracksCoverage.missing} unmatched • ${tracksCoverage.matched} matched this job`;
+            const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
+            const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
+            const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
+            const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
+            const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
+            const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
+            const progressText = `Plex: ${plexSyncTracks} tracks synced • Tags: ${tagScanned} scanned • ${tagFilled} filled • HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched`;
 
             return `
                 <div class="job-item">
@@ -5109,6 +5141,14 @@ class App {
                 return 'Hifi Match (Manual)';
             }
             return 'Hifi Match';
+        }
+
+        if (job.job_type === 'automatic_matching') {
+            const trigger = String(job.payload?.trigger || '').trim();
+            if (trigger === 'manual') {
+                return `Automatic Matching (Manual) #${job.id}`;
+            }
+            return `Automatic Matching #${job.id}`;
         }
 
         const artist = job.result?.artist;
@@ -7201,26 +7241,7 @@ class App {
             );
     }
 
-    private buildStoredMatchTooltip(matchStatus?: string | null, confidence?: number | null, variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
-        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
-
-        if (!Array.isArray(variants) || variants.length === 0) {
-            return heading;
-        }
-
-        const details = variants.map((variant) => {
-            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? ` (${variant.bitrate} kbps)`
-                : '';
-            return variant.file_path
-                ? `  ${variant.file_path}${bitrate}`
-                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
-        });
-
-        return `${heading}\n${details.join('\n')}`;
-    }
-
-    private createPlexMatchChip(match: { [key: string]: any; match_status?: string | null; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
+    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
         const chip = document.createElement('span');
         const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
         const incomplete = options?.incomplete === true;
@@ -7248,8 +7269,27 @@ class App {
             label += ' · low quality';
         }
         chip.textContent = label;
-        chip.title = this.buildStoredMatchTooltip(match.match_status, match.confidence, match.variants || [], incomplete);
+        chip.title = this.buildStoredMatchTooltip(match.variants || [], incomplete);
         return chip;
+    }
+
+    private buildStoredMatchTooltip(variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
+        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
+
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return heading;
+        }
+
+        const details = variants.map((variant) => {
+            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            return variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+        });
+
+        return `${heading}\n${details.join('\n')}`;
     }
 
     private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {

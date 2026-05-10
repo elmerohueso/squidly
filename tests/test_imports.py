@@ -116,11 +116,8 @@ def test_import_matching():
         MATCH_REVIEW_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
-        normalize_match_text,
         _extract_hifi_item_artists,
         _extract_primary_hifi_artist,
-        _track_needs_hifi_match,
-        _is_manual_match,
         _merge_match_state,
         _is_hifi_explicit,
         _format_hifi_track_title,
@@ -133,23 +130,15 @@ def test_import_matching():
         _score_album_candidate_artist_alignment,
         _score_album_candidate_title,
         _score_track_candidate_payload,
-        _evaluate_album_payload_match,
-        _match_source_track_to_album_payload,
         _serialize_match_variants,
         _evaluate_album_candidate,
-        _choose_artist_candidate,
-        _choose_album_candidate,
-        _choose_track_candidate,
         _get_artist_row,
         _get_album_row,
         _get_track_row_by_path,
         _upsert_artist_row,
         _upsert_album_row,
         _upsert_track_row,
-        _fetch_source_album_track_rows_map,
         _fetch_source_album_track_titles_map,
-        _apply_hifi_album_payload_match,
-        _find_hifi_match_for_album,
         _find_hifi_track_search_candidate,
         _cascade_track_confirm_ids,
         _refresh_album_completeness,
@@ -175,7 +164,7 @@ def test_import_workers():
         _raise_if_job_cancelled,
         download_job_worker,
         plex_sync_job_worker,
-        hifi_match_job_worker,
+        automatic_matching_job_worker,
         retry_pending_playlist_additions,
         plex_sync_scheduler_worker,
     )
@@ -253,13 +242,14 @@ def test_db_does_not_import_app():
 
 
 def test_matching_does_not_import_app():
-    """matching.py must not import from app to avoid circular deps (except _read_embedded_hifi_ids and _fetch_hifi_track_info_payload via lazy import)."""
+    """matching.py must not import from app at top level to avoid circular deps (lazy imports inside functions are allowed)."""
     import squidly.matching as matching_module
     import inspect
 
     source = inspect.getsource(matching_module)
-    assert "from squidly.app import" not in source or "_read_embedded_hifi_ids" in source
-    assert "import squidly.app" not in source
+    lines = source.split('\n')
+    top_level_imports = [l for l in lines if l.startswith('from squidly.app') or l.startswith('import squidly.app')]
+    assert len(top_level_imports) == 0, f"matching.py has top-level app imports: {top_level_imports}"
 
 
 def test_workers_does_not_import_app_directly():
