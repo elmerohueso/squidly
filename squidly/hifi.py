@@ -10,7 +10,7 @@ import re
 from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, List, Optional
 
-from squidly.downloads import make_request_with_retry_rotating_mirrors, load_squid_urls
+from squidly.downloads import make_request_with_retry_rotating_mirrors, load_enabled_mirror_urls
 
 
 _SQUID_URLS_CACHE = None
@@ -19,7 +19,7 @@ _SQUID_URLS_CACHE = None
 def _get_squid_urls():
     global _SQUID_URLS_CACHE
     if _SQUID_URLS_CACHE is None:
-        _SQUID_URLS_CACHE = load_squid_urls()
+        _SQUID_URLS_CACHE = load_enabled_mirror_urls()
     return _SQUID_URLS_CACHE
 
 
