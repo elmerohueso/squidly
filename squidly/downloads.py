@@ -11,7 +11,7 @@ from pathlib import Path
 from threading import Lock
 import time
 from itertools import cycle
-from urllib.parse import urljoin, urlencode
+from urllib.parse import urljoin, urlencode, urlparse
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4, MP4Cover
 import requests
@@ -647,6 +647,12 @@ def load_squid_urls():
     return decoded_urls
 
 
+def derive_mirror_name(url):
+    """Derive a mirror name from a URL hostname."""
+    parsed = urlparse(url)
+    return parsed.hostname or url
+
+
 def seed_mirrors_from_json():
     """Seed mirror_endpoints table from squidurls.json only if empty."""
     conn = get_db_connection()
@@ -663,20 +669,24 @@ def seed_mirrors_from_json():
         urls_data = json.load(f)
 
     for entry in urls_data:
+        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
+        name = derive_mirror_name(decoded_url)
         cur.execute(
             """
             INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (entry.get('name'), entry.get('encodedUrl'), 0, None, None)
+            (name, entry['encodedUrl'], 0, None, None)
         )
 
     conn.commit()
     conn.close()
 
 
-def add_mirror(name, encoded_url):
-    """Add a new mirror endpoint to the database."""
+def add_mirror(url):
+    """Add a new mirror endpoint to the database from a plain URL."""
+    name = derive_mirror_name(url)
+    encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(

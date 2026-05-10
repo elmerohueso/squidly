@@ -3132,21 +3132,19 @@ def add_endpoint():
     if not payload:
         return jsonify({'error': 'No JSON payload provided'}), 400
 
-    name = payload.get('name', '').strip()
-    encoded_url = payload.get('encodedUrl', '').strip()
-
-    if not name or not encoded_url:
-        return jsonify({'error': 'name and encodedUrl are required'}), 400
+    url = payload.get('url', '').strip()
+    if not url:
+        return jsonify({'error': 'url is required'}), 400
 
     try:
-        downloads.add_mirror(name, encoded_url)
+        downloads.add_mirror(url)
     except Exception as e:
         print(f"[ENDPOINTS] Failed to add mirror: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
     threading.Thread(target=_async_validate_endpoints, daemon=True).start()
 
-    return jsonify({'name': name, 'added': True}), 201
+    return jsonify({'url': url, 'added': True}), 201
 
 
 @app.route('/api/endpoints/<name>', methods=['DELETE'])

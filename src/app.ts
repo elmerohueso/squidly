@@ -6532,31 +6532,18 @@ class App {
         const content = document.createElement('div');
         content.className = 'playlist-modal-content';
 
-        const nameGroup = document.createElement('div');
-        nameGroup.className = 'settings-group';
-        const nameLabel = document.createElement('label');
-        nameLabel.className = 'settings-label';
-        nameLabel.textContent = 'Name';
-        const nameInput = document.createElement('input');
-        nameInput.type = 'text';
-        nameInput.className = 'settings-input';
-        nameInput.placeholder = 'e.g. my-mirror';
-        nameGroup.appendChild(nameLabel);
-        nameGroup.appendChild(nameInput);
-
         const urlGroup = document.createElement('div');
         urlGroup.className = 'settings-group';
         const urlLabel = document.createElement('label');
         urlLabel.className = 'settings-label';
-        urlLabel.textContent = 'Encoded URL (base64)';
+        urlLabel.textContent = 'Mirror URL';
         const urlInput = document.createElement('input');
         urlInput.type = 'text';
         urlInput.className = 'settings-input';
-        urlInput.placeholder = 'aHR0cDovL2V4YW1wbGUuY29tOjgwMDA=';
+        urlInput.placeholder = 'http://mirror.example.com:8000';
         urlGroup.appendChild(urlLabel);
         urlGroup.appendChild(urlInput);
 
-        content.appendChild(nameGroup);
         content.appendChild(urlGroup);
 
         const footer = document.createElement('div');
@@ -6573,9 +6560,8 @@ class App {
         submitBtn.className = 'save-button';
         submitBtn.textContent = 'Add';
         submitBtn.addEventListener('click', async () => {
-            const name = nameInput.value.trim();
-            const encodedUrl = urlInput.value.trim();
-            if (!name || !encodedUrl) {
+            const url = urlInput.value.trim();
+            if (!url) {
                 return;
             }
             submitBtn.disabled = true;
@@ -6584,7 +6570,7 @@ class App {
                 const resp = await fetch('/api/endpoints', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, encodedUrl }),
+                    body: JSON.stringify({ url }),
                 });
                 if (!resp.ok) {
                     const err = await resp.json();
@@ -6614,7 +6600,7 @@ class App {
             }
         });
 
-        nameInput.focus();
+        urlInput.focus();
     }
 
     private async handleFlyoutContentClick(e: MouseEvent): Promise<void> {
