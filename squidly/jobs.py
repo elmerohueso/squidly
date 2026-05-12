@@ -899,3 +899,30 @@ def update_job_progress(job_id, updates):
     )
     conn.commit()
     conn.close()
+
+
+def any_plex_listen_history_sync_jobs_running_or_queued():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM jobs
+        WHERE job_type = 'plex_listen_history_sync'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return (row.get('count') or 0) > 0
+
+
+def queue_plex_listen_history_sync(trigger='scheduled'):
+    if any_plex_listen_history_sync_jobs_running_or_queued():
+        return None
+
+    payload = {
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return enqueue_job('plex_listen_history_sync', payload, max_attempts=5)

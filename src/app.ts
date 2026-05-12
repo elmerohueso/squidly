@@ -530,7 +530,23 @@ interface AppRouteState {
     playlistType?: string;
 }
 
-type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs';
+type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
+
+interface ListenHistoryEntry {
+    id: number;
+    plex_account_id: number;
+    plex_username: string;
+    track_library_id: string | null;
+    hifi_id: string | null;
+    title: string;
+    artist: string | null;
+    album: string | null;
+    duration: number | null;
+    played_at: string;
+    view_offset: number | null;
+    view_count: number | null;
+    synced_at: string;
+}
 
 interface LibraryRouteState {
     view: 'artists' | 'artist_albums' | 'album_tracks' | 'playlist_tracks';
@@ -714,6 +730,10 @@ class App {
     private listenbrainzCurrentUsername: string | null = null;
     private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
 
+    private historyTableContainer: HTMLElement;
+    private historyEntries: ListenHistoryEntry[] = [];
+    private historyLoading: boolean = false;
+
     private getSearchTypeName(searchType?: string): string {
         const normalized = (searchType || 's').toLowerCase();
         const labels: Record<string, string> = {
@@ -882,6 +902,7 @@ class App {
         this.matchReviewActivity = document.getElementById('matchReviewActivity') as HTMLElement;
         this.matchReviewSummary = document.getElementById('matchReviewSummary') as HTMLElement;
         this.matchReviewContent = document.getElementById('matchReviewContent') as HTMLElement;
+        this.historyTableContainer = document.getElementById('historyTableContainer') as HTMLElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
@@ -966,6 +987,7 @@ class App {
         this.switchPage('explore', false);
 
         this.initializeHistoryNavigation();
+        this.initializeHistoryControls();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
@@ -1850,7 +1872,8 @@ class App {
             settings: 'Settings',
             mirrors: 'Hi-Fi Mirrors',
             matches: 'Match Review',
-            jobs: 'Jobs'
+            jobs: 'Jobs',
+            history: 'Listen History'
         };
         if (normalizedPage === 'explore') {
             this.renderTopBarTitle('Explore');
@@ -1898,6 +1921,10 @@ class App {
 
         if (normalizedPage === 'library' && !this.libraryLoadedOnce && updateHistory) {
             void this.loadLibraryArtists(0, false);
+        }
+
+        if (normalizedPage === 'history') {
+            void this.loadListenHistory();
         }
 
         if (updateHistory && !this.isHandlingPopState && previousPage !== normalizedPage) {
@@ -2491,6 +2518,10 @@ class App {
         void this.updateSidebarPlaylists();
         void this.updatePlexLoginOnlyState();
         this.updateUserTypeAccess();
+
+        if (this.currentPage === 'history') {
+            void this.loadListenHistory();
+        }
     }
 
     private async loadPlexUsersForDropdown(): Promise<void> {
@@ -2533,6 +2564,10 @@ class App {
 
         if (this.currentPage === 'library') {
             void this.loadLibraryArtists(0, false);
+        }
+
+        if (this.currentPage === 'history') {
+            void this.loadListenHistory();
         }
     }
 
@@ -2880,6 +2915,9 @@ class App {
         playlistNavItems.appendChild(ytmSection.container);
     }
 
+    private initializeHistoryControls(): void {
+    }
+
     private initializeHistoryNavigation(): void {
         window.addEventListener('popstate', (event: PopStateEvent) => {
             void this.handlePopState(event);
@@ -2902,7 +2940,7 @@ class App {
     }
 
     private normalizePage(page: string | null | undefined): AppPage {
-        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'matches' || page === 'jobs') {
+        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'matches' || page === 'jobs' || page === 'history') {
             return page;
         }
         return 'explore';
@@ -3882,6 +3920,8 @@ class App {
                 return 'Plex Sync';
             case 'plex_library_update':
                 return 'Plex Update';
+            case 'plex_listen_history_sync':
+                return 'Listen History Sync';
             case 'download_track':
                 return 'Download';
             default:
@@ -5083,6 +5123,54 @@ class App {
             `;
         }
 
+        if (job.job_type === 'plex_listen_history_sync') {
+            const stageRows = [
+                { key: 'resolving_accounts', label: 'Resolving Accounts' },
+                { key: 'fetching_history', label: 'Fetching History' },
+                { key: 'storing_entries', label: 'Storing Entries' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const usersProcessed = Number(progress.users_processed || 0);
+            const totalUsers = Number(progress.total_users || 0);
+            const entriesFetched = Number(progress.entries_fetched || 0);
+            const entriesStored = Number(progress.entries_stored || 0);
+            const resultData = (job.result || {}) as Record<string, unknown>;
+            const totalFetched = Number(resultData.total_entries_fetched || 0);
+            const totalStored = Number(resultData.total_entries_stored || 0);
+            const progressText = totalFetched > 0
+                ? `${usersProcessed}/${totalUsers} users • ${totalFetched} entries fetched • ${totalStored} stored`
+                : `${usersProcessed}/${totalUsers} users processed`;
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="${actionsClass}">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
+                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'tagged', label: 'Tagged' },
@@ -5161,6 +5249,17 @@ class App {
                 return `Automatic Matching (Manual) #${job.id}`;
             }
             return `Automatic Matching #${job.id}`;
+        }
+
+        if (job.job_type === 'plex_listen_history_sync') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'post_library_sync') {
+                return `Listen History Sync (Auto) #${job.id}`;
+            }
+            if (trigger === 'manual') {
+                return `Listen History Sync (Manual) #${job.id}`;
+            }
+            return `Listen History Sync #${job.id}`;
         }
 
         const artist = job.result?.artist;
@@ -10792,6 +10891,121 @@ class App {
         this.isDownloadingAll = false;
         this.setBulkActionButtonState(addAllPlaylistBtn, 'playlist', failedCount > 0 ? 'failed' : 'success');
         console.log(`[PLAYLIST_ALL] Queued ${addedCount}/${totalTracks} tracks`);
+    }
+
+    private async loadListenHistory(): Promise<void> {
+        if (this.historyLoading) return;
+        this.historyLoading = true;
+
+        if (!this.historyTableContainer) {
+            this.historyLoading = false;
+            return;
+        }
+
+        this.historyTableContainer.innerHTML = '<p class="loading-text">Loading listen history...</p>';
+
+        try {
+            this.pendingRequestController = new AbortController();
+            const params = new URLSearchParams();
+            params.set('limit', '200');
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/listen-history?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController.signal
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch listen history');
+            }
+
+            const data = await response.json();
+            this.historyEntries = data.history || [];
+            this.renderListenHistory();
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            if (this.historyTableContainer) {
+                this.historyTableContainer.innerHTML = `<p class="loading-text">Error loading listen history: ${error instanceof Error ? error.message : 'Unknown error'}</p>`;
+            }
+        } finally {
+            this.historyLoading = false;
+        }
+    }
+
+    private renderListenHistory(): void {
+        if (!this.historyTableContainer) return;
+
+        if (this.historyEntries.length === 0) {
+            this.historyTableContainer.innerHTML = '<p class="loading-text">No listen history found. Run a Plex library sync to populate history.</p>';
+            return;
+        }
+
+        const rows = this.historyEntries.map(entry => {
+            const playedDate = this.formatHistoryDate(entry.played_at);
+            const duration = entry.duration ? this.formatHistoryDuration(entry.duration) : '';
+            const hifiBadge = entry.hifi_id ? `<span class="hifi-badge" title="HiFi ID">${this.escapeHtml(entry.hifi_id)}</span>` : '';
+
+            return `<tr>
+                <td>${this.escapeHtml(playedDate)}</td>
+                <td>${this.escapeHtml(entry.title)}</td>
+                <td>${this.escapeHtml(entry.artist || '')}</td>
+                <td>${this.escapeHtml(entry.album || '')}</td>
+                <td>${this.escapeHtml(duration)}</td>
+                <td>${hifiBadge}</td>
+            </tr>`;
+        }).join('');
+
+        this.historyTableContainer.innerHTML = `
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Played</th>
+                        <th>Track</th>
+                        <th>Artist</th>
+                        <th>Album</th>
+                        <th>Duration</th>
+                        <th>HiFi</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    private formatHistoryDate(isoString: string): string {
+        try {
+            const date = new Date(isoString);
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffHours = diffMs / (1000 * 60 * 60);
+            const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+            if (diffHours < 1) {
+                const mins = Math.floor(diffMs / (1000 * 60));
+                return `${mins}m ago`;
+            }
+            if (diffHours < 24) {
+                return `${Math.floor(diffHours)}h ago`;
+            }
+            if (diffDays < 7) {
+                return `${Math.floor(diffDays)}d ago`;
+            }
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        } catch {
+            return isoString;
+        }
+    }
+
+    private formatHistoryDuration(ms: number): string {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
 }
 
