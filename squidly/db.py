@@ -161,6 +161,8 @@ def init_db():
         cur.execute('ALTER TABLE user_settings ADD COLUMN listenbrainz_username TEXT')
     if 'ytm_headers' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN ytm_headers TEXT')
+    if 'plex_account_id' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN plex_account_id INTEGER')
 
     cur.execute(
         """
@@ -429,6 +431,55 @@ def init_db():
     cur.execute('SELECT id FROM library_update_status WHERE id = 1')
     if not cur.fetchone():
         cur.execute('INSERT INTO library_update_status (id, library_update_needed) VALUES (1, FALSE)')
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listen_history (
+            id SERIAL PRIMARY KEY,
+            plex_account_id INTEGER NOT NULL,
+            plex_username TEXT,
+            track_library_id TEXT,
+            hifi_id TEXT,
+            title TEXT NOT NULL,
+            artist TEXT,
+            album TEXT,
+            duration INTEGER,
+            played_at TIMESTAMP NOT NULL,
+            view_offset INTEGER,
+            view_count INTEGER,
+            synced_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (plex_account_id, track_library_id, played_at)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_listen_history_account
+        ON listen_history (plex_account_id)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_listen_history_played_at
+        ON listen_history (played_at DESC)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_listen_history_hifi_id
+        ON listen_history (hifi_id)
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS listen_history_sync_status (
+            plex_account_id INTEGER PRIMARY KEY,
+            last_synced_at TIMESTAMP,
+            sync_status TEXT
+        )
+        """
+    )
 
     conn.commit()
     conn.close()

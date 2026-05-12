@@ -663,3 +663,152 @@ def save_download_settings(settings):
     )
     conn.commit()
     conn.close()
+
+
+def save_plex_account_id(plex_client_id, plex_account_id):
+    plex_client_id = str(plex_client_id or '').strip()
+    if not plex_client_id:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE user_settings
+        SET plex_account_id = %s
+        WHERE plex_client_id = %s
+        """,
+        (plex_account_id, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_all_plex_account_mappings():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT username, plex_client_id, plex_account_id, plex_owner
+        FROM user_settings
+        WHERE plex_client_id IS NOT NULL
+        ORDER BY plex_owner DESC, username ASC
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return rows
+
+
+def get_listen_history(plex_account_id=None, limit=100, since=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    conditions = []
+    params = []
+    if plex_account_id is not None:
+        conditions.append('plex_account_id = %s')
+        params.append(plex_account_id)
+    if since is not None:
+        conditions.append('played_at >= %s')
+        params.append(since)
+
+    where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+    params.append(limit)
+
+    cur.execute(
+        f"""
+        SELECT id, plex_account_id, plex_username, track_library_id, hifi_id,
+               title, artist, album, duration, played_at, view_offset, view_count, synced_at
+        FROM listen_history
+        {where_clause}
+        ORDER BY played_at DESC
+        LIMIT %s
+        """,
+        params
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return rows
+
+
+def upsert_listen_history_entries(entries, plex_account_id, plex_username):
+    if not entries:
+        return 0
+    conn = get_db_connection()
+    cur = conn.cursor()
+    inserted = 0
+    for entry in entries:
+        cur.execute(
+            """
+            INSERT INTO listen_history (
+                plex_account_id, plex_username, track_library_id, hifi_id,
+                title, artist, album, duration, played_at, view_offset, view_count
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (plex_account_id, track_library_id, played_at) DO UPDATE SET
+                plex_username = excluded.plex_username,
+                hifi_id = COALESCE(excluded.hifi_id, listen_history.hifi_id),
+                title = excluded.title,
+                artist = excluded.artist,
+                album = excluded.album,
+                duration = excluded.duration,
+                view_offset = excluded.view_offset,
+                view_count = excluded.view_count,
+                synced_at = NOW()
+            """,
+            (
+                plex_account_id,
+                plex_username,
+                entry.get('track_library_id'),
+                entry.get('hifi_id'),
+                entry.get('title', ''),
+                entry.get('artist'),
+                entry.get('album'),
+                entry.get('duration'),
+                entry.get('played_at'),
+                entry.get('view_offset'),
+                entry.get('view_count'),
+            )
+        )
+        inserted += 1
+    conn.commit()
+    conn.close()
+    return inserted
+
+
+def get_listen_history_sync_status(plex_account_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT last_synced_at, sync_status
+        FROM listen_history_sync_status
+        WHERE plex_account_id = %s
+        """,
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    if row is None:
+        return {'last_synced_at': None, 'sync_status': None}
+    return {
+        'last_synced_at': row['last_synced_at'],
+        'sync_status': row['sync_status']
+    }
+
+
+def set_listen_history_sync_status(plex_account_id, last_synced_at, status=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO listen_history_sync_status (plex_account_id, last_synced_at, sync_status)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (plex_account_id) DO UPDATE SET
+            last_synced_at = excluded.last_synced_at,
+            sync_status = excluded.sync_status
+        """,
+        (plex_account_id, last_synced_at, status)
+    )
+    conn.commit()
+    conn.close()

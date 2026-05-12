@@ -11,6 +11,7 @@ from squidly.jobs import (
     mark_job_in_progress,
     mark_job_retrying,
     mark_job_succeeded,
+    queue_plex_listen_history_sync,
     requeue_claimed_job,
     serialize_job_payload,
 )
@@ -117,6 +118,7 @@ def plex_sync_job_worker():
                 result = process_plex_sync_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
                 print(f"[PLEX_SYNC_WORKER] Job {job['id']} completed", flush=True)
+                queue_plex_listen_history_sync(trigger='post_library_sync')
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
                 print(f"[PLEX_SYNC_WORKER] Job {job['id']} cancelled", flush=True)
@@ -279,3 +281,37 @@ def plex_sync_scheduler_worker():
             print(f"[PLEX_SYNC_SCHEDULER] Error: {str(e)}", flush=True)
 
         time.sleep(60)
+
+
+def listen_history_sync_worker():
+    from squidly.app import process_plex_listen_history_sync
+
+    print("[HISTORY_SYNC_WORKER] Background worker started", flush=True)
+
+    while True:
+        try:
+            job = claim_next_job('plex_listen_history_sync')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_plex_listen_history_sync(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} completed", flush=True)
+            except JobCancelledError:
+                mark_job_cancelled(job['id'])
+                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} cancelled", flush=True)
+                time.sleep(1)
+            except Exception as e:
+                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            print(f"[HISTORY_SYNC_WORKER] Error in background worker: {str(e)}", flush=True)
+            time.sleep(5)
