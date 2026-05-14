@@ -4,6 +4,7 @@ Reads FLAC and M4A tags to fill missing fields in the local database.
 MP3 files are not supported.
 """
 
+import logging
 import os
 
 from mutagen.flac import FLAC
@@ -20,6 +21,8 @@ from squidly.matching import (
     _upsert_album_row,
     _upsert_artist_row,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_library_file_path(file_path):
@@ -252,7 +255,7 @@ def scan_library_for_tags(progress_callback=None):
                     filled += 1
             except Exception as e:
                 errors += 1
-                print(f"[TAG_SCAN] Error processing {track_row.get('path')}: {e}", flush=True)
+                logger.info("[TAG_SCAN] Error processing %s: %s", track_row.get('path'), e)
 
             if progress_callback and idx % 10 == 0:
                 progress_callback(idx, total)

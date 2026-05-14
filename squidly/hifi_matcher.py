@@ -6,6 +6,8 @@ tag analysis. Uses ISRC-first strategy for tracks (exact match), then
 falls back to title+artist search.
 """
 
+import logging
+
 from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
 from squidly.db import get_db_connection
 from squidly.hifi import (
@@ -31,6 +33,8 @@ from squidly.matching import (
     _has_explicit_marker,
     _is_hifi_explicit,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _find_tracks_needing_match(cur):
@@ -404,7 +408,7 @@ def find_missing_hifi_ids(progress_callback=None):
     try:
         albums_propagated, artists_propagated = _propagate_hifi_ids_from_tracks(cur)
         conn.commit()
-        print(f"[HIFI_MATCH] Propagated hifi_ids from tagged tracks: {albums_propagated} albums, {artists_propagated} artists", flush=True)
+        logger.info("[HIFI_MATCH] Propagated hifi_ids from tagged tracks: %d albums, %d artists", albums_propagated, artists_propagated)
 
         tracks = _find_tracks_needing_match(cur)
         albums = _find_albums_needing_match(cur)
@@ -453,7 +457,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_tracks += 1
             except Exception as e:
                 errors += 1
-                print(f"[HIFI_MATCH] Error matching track {track_row.get('track_id')}: {e}", flush=True)
+                logger.info("[HIFI_MATCH] Error matching track %s: %s", track_row.get('track_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('tracks', idx, total_tracks)
@@ -493,7 +497,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_albums += 1
             except Exception as e:
                 errors += 1
-                print(f"[HIFI_MATCH] Error matching album {album_row.get('album_id')}: {e}", flush=True)
+                logger.info("[HIFI_MATCH] Error matching album %s: %s", album_row.get('album_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('albums', idx, total_albums)
@@ -513,7 +517,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_artists += 1
             except Exception as e:
                 errors += 1
-                print(f"[HIFI_MATCH] Error matching artist {artist_row.get('artist_id')}: {e}", flush=True)
+                logger.info("[HIFI_MATCH] Error matching artist %s: %s", artist_row.get('artist_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('artists', idx, total_artists)

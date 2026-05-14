@@ -1,6 +1,7 @@
 """Plex-related helpers and utilities."""
 
 import json
+import logging
 import re
 import threading
 import time
@@ -16,6 +17,8 @@ from squidly.storage import (
     save_plex_config,
     set_last_library_update_time,
 )
+
+logger = logging.getLogger(__name__)
 
 # For PIN login state (in-memory, per-process; production should use persistent store)
 plex_pin_sessions = {}
@@ -138,7 +141,7 @@ def get_all_plex_users():
 
         return True, users, None
     except Exception as e:
-        print(f"[PLEX] Failed to fetch Plex users: {str(e)}", flush=True)
+        logger.info("[PLEX] Failed to fetch Plex users: %s", str(e))
         return False, [], str(e)
 
 
@@ -171,14 +174,14 @@ def _get_plex_server_for_user(server_url, api_token, user_id=None):
                         # Use switchUser to get a PlexServer instance scoped to the managed user
                         return plex.switchUser(u)
                     except Exception as e:
-                        print(f"[PLEX] Failed to switch to managed user {user_id_str}: {e}", flush=True)
+                        logger.info("[PLEX] Failed to switch to managed user %s: %s", user_id_str, e)
                         continue
         except Exception as e:
-            print(f"[PLEX] Failed to fetch managed users for user selection {user_id}: {e}", flush=True)
+                logger.info("[PLEX] Failed to fetch managed users for user selection %s: %s", user_id, e)
 
         return plex
     except Exception as e:
-        print(f"[PLEX] Failed to create PlexServer for user {user_id}: {e}", flush=True)
+        logger.info("[PLEX] Failed to create PlexServer for user %s: %s", user_id, e)
         raise
 
 
@@ -212,7 +215,7 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
         return True, sorted(playlists, key=lambda p: p['name'].casefold()), None
 
     except Exception as e:
-        print(f"[PLEX] Failed to fetch playlists: {str(e)}", flush=True)
+        logger.info("[PLEX] Failed to fetch playlists: %s", str(e))
         return False, [], str(e)
 
 
@@ -229,13 +232,13 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
         server_url = server_url.rstrip('/')
         token_len = len(api_token) if isinstance(api_token, str) else 0
-        print(
-            f"[PLEX] Add-to-playlist start: url={server_url}, library='{library_name}', playlist='{playlist_name}', token_len={token_len}, user_id={user_id}",
-            flush=True
+        logger.info(
+            "[PLEX] Add-to-playlist start: url=%s, library='%s', playlist='%s', token_len=%d, user_id=%s",
+            server_url, library_name, playlist_name, token_len, user_id,
         )
 
         plex = _get_plex_server_for_user(server_url, api_token, user_id)
-        print("[PLEX] Connected to Plex server", flush=True)
+        logger.info("[PLEX] Connected to Plex server")
 
         library = None
         for section in plex.library.sections():
@@ -245,7 +248,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
 
         if not library:
             available = [f"{section.title} ({section.type})" for section in plex.library.sections()]
-            print(f"[PLEX] Library not found. Available sections: {available}", flush=True)
+            logger.info("[PLEX] Library not found. Available sections: %s", available)
             return False, f'Library "{library_name}" not found or is not a music library'
 
         raw_full_path = str(full_path or '').strip()
@@ -259,7 +262,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
         normalized_file_path = '\\'.join(tail_parts)
         trailing_suffix = '/'.join(tail_parts)
-        print(f"[PLEX] Resolving ratingKey via tracks for file_path={normalized_file_path}", flush=True)
+        logger.info("[PLEX] Resolving ratingKey via tracks for file_path=%s", normalized_file_path)
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -284,7 +287,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         ]
 
         if not rating_keys:
-            print(f"[PLEX] No library_id found in tracks for file_path={normalized_file_path}", flush=True)
+            logger.info("[PLEX] No library_id found in tracks for file_path=%s", normalized_file_path)
             return False, (
                 f'file_path "{normalized_file_path}" was not found in tracks with a library_id. '
                 'Run a Plex library sync first.'
@@ -297,10 +300,10 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                 candidate = plex.fetchItem(metadata_key)
                 if candidate is not None:
                     track = candidate
-                    print(f"[PLEX] Resolved track using ratingKey={rating_key}", flush=True)
+                    logger.info("[PLEX] Resolved track using ratingKey=%s", rating_key)
                     break
             except Exception as e:
-                print(f"[PLEX] Failed to fetch item for ratingKey={rating_key}: {str(e)}", flush=True)
+                logger.info("[PLEX] Failed to fetch item for ratingKey=%s: %s", rating_key, str(e))
 
         if track is None:
             return False, (
@@ -313,38 +316,38 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
             playlist = None
             try:
                 playlists = plex.playlists()
-                print(f"[PLEX] Existing playlists found: {len(playlists)}", flush=True)
+                logger.info("[PLEX] Existing playlists found: %d", len(playlists))
                 for pl in playlists:
                     if pl.title == playlist_name:
                         playlist = pl
                         break
             except Exception as e:
-                print(f"[PLEX] Error getting playlists: {str(e)}", flush=True)
+                logger.info("[PLEX] Error getting playlists: %s", str(e))
 
             if not playlist:
                 try:
-                    print(f"[PLEX] Creating playlist: {playlist_name}", flush=True)
+                    logger.info("[PLEX] Creating playlist: %s", playlist_name)
                     playlist = plex.createPlaylist(playlist_name, items=[track])
-                    print(f"[PLEX] Created new playlist: {playlist_name}", flush=True)
+                    logger.info("[PLEX] Created new playlist: %s", playlist_name)
                     return True, f'Created playlist "{playlist_name}" and added track'
                 except Exception as e:
-                    print(f"[PLEX] Error creating playlist: {str(e)}", flush=True)
+                    logger.info("[PLEX] Error creating playlist: %s", str(e))
                     return False, f'Error creating playlist: {str(e)}'
             else:
-                print(f"[PLEX] Using existing playlist: {playlist_name}", flush=True)
+                logger.info("[PLEX] Using existing playlist: %s", playlist_name)
             
             try:
                 playlist.addItems(track)
-                print(f"[PLEX] Added track to playlist: {playlist_name}", flush=True)
+                logger.info("[PLEX] Added track to playlist: %s", playlist_name)
                 return True, f'Added track to playlist "{playlist_name}"'
             except Exception as e:
                 if 'already in' in str(e).lower():
                     return True, f'Track already in playlist "{playlist_name}"'
-                print(f"[PLEX] Error adding track to playlist: {str(e)}", flush=True)
+                logger.info("[PLEX] Error adding track to playlist: %s", str(e))
                 return False, f'Error adding to playlist: {str(e)}'
 
     except Exception as e:
-        print(f"[PLEX] Unexpected error: {str(e)}", flush=True)
+        logger.info("[PLEX] Unexpected error: %s", str(e))
         return False, f'Unexpected error: {str(e)}'
 
 
@@ -406,16 +409,16 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
 
         if active:
             saw_active = True
-            print('[LIBRARY_UPDATE] Plex scan still in progress...', flush=True)
+            logger.info('[LIBRARY_UPDATE] Plex scan still in progress...')
         elif saw_active:
-            print('[LIBRARY_UPDATE] Plex scan appears complete.', flush=True)
+            logger.info('[LIBRARY_UPDATE] Plex scan appears complete.')
             return True, True
         elif elapsed >= startup_grace_seconds:
-            print('[LIBRARY_UPDATE] Did not observe an active scan during startup grace window.', flush=True)
+            logger.info('[LIBRARY_UPDATE] Did not observe an active scan during startup grace window.')
             return False, False
 
         if elapsed >= timeout_seconds:
-            print('[LIBRARY_UPDATE] Timed out waiting for Plex scan completion.', flush=True)
+            logger.info('[LIBRARY_UPDATE] Timed out waiting for Plex scan completion.')
             return False, saw_active
 
         time.sleep(max(1, poll_interval_seconds))
@@ -500,7 +503,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     stages['scanning_plex_library'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} connecting to Plex at {server_url}", flush=True)
+    logger.info("[LIBRARY_UPDATE_JOB] Job %s connecting to Plex at %s", job_id, server_url)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
 
     library = None
@@ -512,7 +515,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     if not library:
         raise ValueError(f'Plex music library "{library_name}" not found')
 
-    print(f"[LIBRARY_UPDATE_JOB] Job {job_id} triggering scan on library '{library_name}'", flush=True)
+    logger.info("[LIBRARY_UPDATE_JOB] Job %s triggering scan on library '%s'", job_id, library_name)
     library.update()
 
     completed, saw_active = wait_for_plex_library_scan_completion(
@@ -543,9 +546,11 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
-    print(
-        f"[LIBRARY_UPDATE_JOB] Job {job_id} finished. scan_outcome={scan_outcome} sync_queue_status={progress['sync_queue_status']}",
-        flush=True
+    logger.info(
+        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s sync_queue_status=%s",
+        job_id,
+        scan_outcome,
+        progress['sync_queue_status'],
     )
 
     return {
@@ -559,7 +564,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
 
 
 def plex_library_update_job_worker():
-    print("[LIBRARY_UPDATE_JOB_WORKER] Background worker started", flush=True)
+    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Background worker started")
     gate_poll_seconds = 15
 
     while True:
@@ -571,9 +576,11 @@ def plex_library_update_job_worker():
                     blocking_count = gate_state.get('blocking_count') or 0
                     idle_seconds = gate.get('idle_seconds')
                     required_idle = gate.get('required_idle_seconds') or 180
-                    print(
-                        f"[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking={blocking_count} idle_seconds={idle_seconds} required_idle={required_idle}",
-                        flush=True
+                    logger.info(
+                        "[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking=%d idle_seconds=%s required_idle=%s",
+                        blocking_count,
+                        idle_seconds,
+                        required_idle,
                     )
                 time.sleep(gate_poll_seconds)
                 continue
@@ -596,19 +603,19 @@ def plex_library_update_job_worker():
                         delay_seconds=gate_poll_seconds,
                         error_message='Waiting for downloads gate before starting Plex library update'
                     )
-                    print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} deferred until downloads gate is ready", flush=True)
+                    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s deferred until downloads gate is ready", job['id'])
                     time.sleep(1)
                     continue
 
                 result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
                 jobs.mark_job_succeeded(job['id'], result)
-                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} completed", flush=True)
+                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s completed", job['id'])
             except Exception as e:
-                print(f"[LIBRARY_UPDATE_JOB_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s failed: %s", job['id'], str(e))
                 jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            print(f"[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
 
 

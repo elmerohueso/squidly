@@ -1,4 +1,8 @@
 
+import logging
+from squidly.logging_setup import setup_logging
+setup_logging()
+
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
 
@@ -178,6 +182,8 @@ from squidly.storage import (
     set_library_update_needed,
 )
 
+logger = logging.getLogger(__name__)
+
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 app = Flask(
     __name__,
@@ -204,11 +210,11 @@ def plex_list_users():
                         try:
                             save_plex_user_setting(username, plex_client_id, plex_owner)
                         except Exception as e:
-                            print(f'[PLEX] Failed to save user setting for {username}/{plex_client_id}: {e}', flush=True)
+                            logger.info("[PLEX] Failed to save user setting for %s/%s: %s", username, plex_client_id, e)
             else:
-                print(f'[PLEX] Failed to fetch users for sync: {error}', flush=True)
+                logger.info("[PLEX] Failed to fetch users for sync: %s", error)
         except Exception as e:
-            print(f'[PLEX] /api/plex/users?sync failed: {e}', flush=True)
+            logger.info("[PLEX] /api/plex/users?sync failed: %s", e)
             return jsonify({'users': []}), 200
 
         result = [
@@ -236,7 +242,7 @@ def plex_list_users():
             })
         return jsonify({'users': result})
     except Exception as e:
-        print(f'[PLEX] /api/plex/users failed to read saved users: {e}', flush=True)
+        logger.info("[PLEX] /api/plex/users failed to read saved users: %s", e)
         return jsonify({'users': []}), 200
 # --- Plex PIN OAuth API ---
 import threading
@@ -266,62 +272,62 @@ def plex_clear_credentials():
 
 @app.route('/api/plex/pin/start', methods=['POST'])
 def plex_pin_start():
-    print('[DEBUG] /api/plex/pin/start called', flush=True)
+    logger.info("[DEBUG] /api/plex/pin/start called")
     try:
-        print('[DEBUG] Attempting to create MyPlexPinLogin...', flush=True)
+        logger.info("[DEBUG] Attempting to create MyPlexPinLogin...")
         pinlogin = MyPlexPinLogin(oauth=False)
-        print('[DEBUG] MyPlexPinLogin created', flush=True)
+        logger.info("[DEBUG] MyPlexPinLogin created")
         pin = pinlogin.pin
-        print(f'[DEBUG] PIN generated: {pin}', flush=True)
+        logger.info("[DEBUG] PIN generated: %s", pin)
         client_id = id(pinlogin)
         plex_pin_sessions[client_id] = pinlogin
-        print(f'[DEBUG] Stored pinlogin in session with client_id: {client_id}', flush=True)
+        logger.info("[DEBUG] Stored pinlogin in session with client_id: %s", client_id)
         return jsonify({
             'ok': True,
             'pin': pin,
             'client_id': client_id
         })
     except Exception as e:
-        print(f'[ERROR] Exception in /api/plex/pin/start: {e}', flush=True)
+        logger.info("[ERROR] Exception in /api/plex/pin/start: %s", e)
         import traceback; traceback.print_exc()
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 @app.route('/api/plex/pin/status', methods=['POST'])
 def plex_pin_status():
-    print('[DEBUG] /api/plex/pin/status called', flush=True)
+    logger.info("[DEBUG] /api/plex/pin/status called")
     data = request.get_json(force=True)
     client_id = data.get('client_id')
     pin = data.get('pin')
-    print(f'[DEBUG] Received client_id={client_id}, pin={pin}', flush=True)
+    logger.info("[DEBUG] Received client_id=%s, pin=%s", client_id, pin)
     if not client_id or not pin:
-        print('[DEBUG] Missing client_id or pin', flush=True)
+        logger.info("[DEBUG] Missing client_id or pin")
         return jsonify({'ok': False, 'error': 'Missing client_id or pin'}), 400
     pinlogin = plex_pin_sessions.get(client_id)
     if not pinlogin:
-        print('[DEBUG] Session expired or not found for client_id', flush=True)
+        logger.info("[DEBUG] Session expired or not found for client_id")
         return jsonify({'ok': False, 'error': 'Session expired or not found'}), 404
     # Check if already expired
     if getattr(pinlogin, 'expired', False):
-        print('[DEBUG] PIN expired for client_id', flush=True)
+        logger.info("[DEBUG] PIN expired for client_id")
         return jsonify({'ok': False, 'expired': True, 'error': 'PIN expired'}), 410
     try:
-        print('[DEBUG] Calling pinlogin.checkLogin()', flush=True)
+        logger.info("[DEBUG] Calling pinlogin.checkLogin()")
         if pinlogin.checkLogin():
-            print('[DEBUG] pinlogin.checkLogin() returned True', flush=True)
+            logger.info("[DEBUG] pinlogin.checkLogin() returned True")
             token = getattr(pinlogin, 'token', None)
             acc = None
             try:
-                print('[DEBUG] Creating MyPlexAccount', flush=True)
+                logger.info("[DEBUG] Creating MyPlexAccount")
                 acc = MyPlexAccount(token=token)
             except Exception as e:
-                print(f'[DEBUG] Failed to create MyPlexAccount: {e}', flush=True)
+                logger.info("[DEBUG] Failed to create MyPlexAccount: %s", e)
                 return jsonify({'ok': False, 'error': f'Login succeeded but failed to create MyPlexAccount: {e}'}), 500
             # Find local server baseurl
             try:
-                print('[DEBUG] Fetching acc.resources()', flush=True)
+                logger.info("[DEBUG] Fetching acc.resources()")
                 res = acc.resources()
             except Exception as e:
-                print(f'[DEBUG] Failed to fetch resources: {e}', flush=True)
+                logger.info("[DEBUG] Failed to fetch resources: %s", e)
                 return jsonify({'ok': False, 'error': f'Login succeeded but failed to fetch resources: {e}'}), 500
             server_res = None
             for r in res:
@@ -335,23 +341,23 @@ def plex_pin_status():
                 local_conn = next((c for c in conns if getattr(c, 'local', False)), None)
                 if local_conn:
                     baseurl = getattr(local_conn, 'uri', None)
-            print(f'[DEBUG] baseurl={baseurl}, token={token}', flush=True)
+            logger.info("[DEBUG] baseurl=%s, token=%s", baseurl, token)
             # Save to DB
             if baseurl and token:
-                print('[DEBUG] Saving Plex config to DB', flush=True)
+                logger.info("[DEBUG] Saving Plex config to DB")
                 config = get_plex_config()
                 save_plex_config(baseurl, token, config.get('library_name') or '', config.get('sync_interval_hours') or 24)
             # Clean up session
-            print('[DEBUG] Cleaning up pin session', flush=True)
+            logger.info("[DEBUG] Cleaning up pin session")
             plex_pin_sessions.pop(client_id, None)
             return jsonify({'ok': True, 'token': token, 'baseurl': baseurl, 'username': getattr(acc, 'username', None)})
         else:
-            print('[DEBUG] pinlogin.checkLogin() returned False (pending)', flush=True)
+            logger.info("[DEBUG] pinlogin.checkLogin() returned False (pending)")
             return jsonify({'ok': False, 'pending': True})
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        print(f'[DEBUG] Exception in /api/plex/pin/status: {e}\n{tb}', flush=True)
+        logger.info("[DEBUG] Exception in /api/plex/pin/status: %s %s", e, tb)
         return jsonify({'ok': False, 'error': str(e), 'traceback': tb}), 500
 
 from squidly.config import (
@@ -366,12 +372,12 @@ from squidly.config import (
 # Attempting to create them can shadow the mount points
 
 if not os.path.exists(DOWNLOADS_ROOT):
-    print(f"Error: Downloads directory does not exist: {DOWNLOADS_ROOT}", file=sys.stderr)
-    print(f"Check docker-compose volume mounts are configured correctly", file=sys.stderr)
+    logger.error("Error: Downloads directory does not exist: %s", DOWNLOADS_ROOT)
+    logger.error("Check docker-compose volume mounts are configured correctly")
 elif not os.access(DOWNLOADS_ROOT, os.W_OK):
-    print(f"Error: Downloads directory is not writable: {DOWNLOADS_ROOT}", file=sys.stderr)
+    logger.error("Error: Downloads directory is not writable: %s", DOWNLOADS_ROOT)
 else:
-    print(f"Downloads directory ready: {DOWNLOADS_ROOT}", flush=True)
+    logger.info("Downloads directory ready: %s", DOWNLOADS_ROOT)
 
 from squidly.db import get_db_connection, init_db
 
@@ -415,7 +421,7 @@ def _read_embedded_hifi_ids(file_path):
     if not raw_path.startswith('/'):
         raw_path = f"{DOWNLOADS_ROOT}/{raw_path}"
     if not os.path.exists(raw_path):
-        print(f"[MATCH] Path does not exist after resolution: {file_path}", flush=True)
+        logger.info("[MATCH] Path does not exist after resolution: %s", file_path)
         return {'track_id': None, 'album_id': None, 'isrc': None}
 
     try:
@@ -457,11 +463,11 @@ def _read_embedded_hifi_ids(file_path):
                 isrc = str(isrc_frame.text[0]).strip()
         
         if track_id or album_id or isrc:
-            print(f"[MATCH] Found embedded IDs: track={track_id}, album={album_id}, isrc={isrc}", flush=True)
+            logger.info("[MATCH] Found embedded IDs: track=%s, album=%s, isrc=%s", track_id, album_id, isrc)
         else:
-            print(f"[MATCH] No embedded Tidal IDs or ISRC found in file", flush=True)
+            logger.info("[MATCH] No embedded Tidal IDs or ISRC found in file")
     except Exception as e:
-        print(f"[MATCH] Failed to read embedded hifi IDs from {raw_path}: {str(e)}", flush=True)
+        logger.info("[MATCH] Failed to read embedded hifi IDs from %s: %s", raw_path, str(e))
 
     return {
         'track_id': track_id or None,
@@ -517,7 +523,7 @@ def _get_match_review_plex_context():
 
         return server_url, api_token, library
     except Exception as e:
-        print(f"[MATCH_REVIEW] Unable to resolve Plex context for artwork: {str(e)}", flush=True)
+        logger.info("[MATCH_REVIEW] Unable to resolve Plex context for artwork: %s", str(e))
         return None, None, None
 
 
@@ -539,7 +545,7 @@ def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, imag
                 image_size=image_size,
             ) if item else None
         except Exception as e:
-            print(f"[MATCH_REVIEW] Failed to fetch Plex artwork for {normalized_id}: {str(e)}", flush=True)
+            logger.info("[MATCH_REVIEW] Failed to fetch Plex artwork for %s: %s", normalized_id, str(e))
             image_map[normalized_id] = None
 
     return image_map
@@ -574,16 +580,16 @@ def process_automatic_matching_job(job_id, payload):
     # Stage 1: Queue Plex library update
     stages['plex_library_update'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    print(f"[AUTO_MATCH] Job {job_id} queueing Plex library update", flush=True)
+    logger.info("[AUTO_MATCH] Job %s queueing Plex library update", job_id)
 
     from squidly.plex import queue_plex_library_update, any_plex_library_update_jobs_running_or_queued
 
     update_job_id = queue_plex_library_update(trigger='automatic_matching')
     if update_job_id:
         progress['plex_update_queued'] = True
-        print(f"[AUTO_MATCH] Job {job_id} queued Plex library update job {update_job_id}", flush=True)
+        logger.info("[AUTO_MATCH] Job %s queued Plex library update job %s", job_id, update_job_id)
     else:
-        print(f"[AUTO_MATCH] Job {job_id} no Plex library update needed or already queued", flush=True)
+        logger.info("[AUTO_MATCH] Job %s no Plex library update needed or already queued", job_id)
 
     # Wait for Plex library update to finish
     while any_plex_library_update_jobs_running_or_queued():
@@ -596,16 +602,16 @@ def process_automatic_matching_job(job_id, payload):
     # Stage 2: Run Plex sync
     stages['plex_sync'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    print(f"[AUTO_MATCH] Job {job_id} running Plex sync", flush=True)
+    logger.info("[AUTO_MATCH] Job %s running Plex sync", job_id)
 
     from squidly.plex import get_last_successful_plex_sync_finished_at
     from squidly.jobs import any_plex_sync_jobs_running_or_queued
 
     sync_job_id = jobs.queue_plex_library_sync(trigger='automatic_matching')
     if sync_job_id:
-        print(f"[AUTO_MATCH] Job {job_id} queued Plex sync job {sync_job_id}", flush=True)
+        logger.info("[AUTO_MATCH] Job %s queued Plex sync job %s", job_id, sync_job_id)
     else:
-        print(f"[AUTO_MATCH] Job {job_id} Plex sync already running or queued", flush=True)
+        logger.info("[AUTO_MATCH] Job %s Plex sync already running or queued", job_id)
 
     # Wait for Plex sync to finish
     while any_plex_sync_jobs_running_or_queued():
@@ -622,12 +628,12 @@ def process_automatic_matching_job(job_id, payload):
 
     stages['plex_sync'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-    print(f"[AUTO_MATCH] Job {job_id} Plex sync complete, {progress['plex_sync_tracks']} tracks in library", flush=True)
+    logger.info("[AUTO_MATCH] Job %s Plex sync complete, %s tracks in library", job_id, progress['plex_sync_tracks'])
 
     # Stage 3: Tag analysis
     stages['tag_analysis'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    print(f"[AUTO_MATCH] Job {job_id} running tag analysis", flush=True)
+    logger.info("[AUTO_MATCH] Job %s running tag analysis", job_id)
 
     def tag_progress(current, total):
         progress['tag_scanned'] = current
@@ -639,12 +645,12 @@ def process_automatic_matching_job(job_id, payload):
 
     stages['tag_analysis'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-    print(f"[AUTO_MATCH] Job {job_id} tag analysis complete, scanned={progress['tag_scanned']}, filled={progress['tag_filled']}", flush=True)
+    logger.info("[AUTO_MATCH] Job %s tag analysis complete, scanned=%s, filled=%s", job_id, progress['tag_scanned'], progress['tag_filled'])
 
     # Stage 4: HiFi gap-fill
     stages['hifi_gap_fill'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    print(f"[AUTO_MATCH] Job {job_id} running HiFi gap-fill", flush=True)
+    logger.info("[AUTO_MATCH] Job %s running HiFi gap-fill", job_id)
 
     def hifi_progress(entity_type, current, total):
         jobs.update_job_progress(job_id, {'progress': progress})
@@ -656,7 +662,7 @@ def process_automatic_matching_job(job_id, payload):
 
     stages['hifi_gap_fill'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-    print(f"[AUTO_MATCH] Job {job_id} HiFi gap-fill complete, tracks={progress['hifi_tracks_matched']}, albums={progress['hifi_albums_matched']}, artists={progress['hifi_artists_matched']}", flush=True)
+    logger.info("[AUTO_MATCH] Job %s HiFi gap-fill complete, tracks=%s, albums=%s, artists=%s", job_id, progress['hifi_tracks_matched'], progress['hifi_albums_matched'], progress['hifi_artists_matched'])
 
     return {
         'trigger': trigger,
@@ -691,7 +697,7 @@ def process_plex_sync_job(job_id, payload):
     }
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    print(f"[PLEX_SYNC] Job {job_id} connecting to Plex at {server_url}", flush=True)
+    logger.info("[PLEX_SYNC] Job %s connecting to Plex at %s", job_id, server_url)
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
     jobs.update_job_progress(job_id, {'stages': stages})
 
@@ -705,7 +711,7 @@ def process_plex_sync_job(job_id, payload):
     if not library:
         raise ValueError(f'Plex music library "{library_name}" not found')
 
-    print(f"[PLEX_SYNC] Job {job_id} fetching tracks from library '{library_name}'", flush=True)
+    logger.info("[PLEX_SYNC] Job %s fetching tracks from library '%s'", job_id, library_name)
     tracks = []
     try:
         _raise_if_job_cancelled(job_id)
@@ -910,7 +916,7 @@ def process_plex_sync_job(job_id, payload):
 
     labeled_count = 0
     if explicit_album_keys:
-        print(f"[PLEX_SYNC] Job {job_id}: Adding 'Explicit' label to {len(explicit_album_keys)} albums", flush=True)
+        logger.info("[PLEX_SYNC] Job %s: Adding 'Explicit' label to %s albums", job_id, len(explicit_album_keys))
         for album_key in explicit_album_keys:
             try:
                 # Use a shorter timeout for label operations to prevent hanging
@@ -921,16 +927,16 @@ def process_plex_sync_job(job_id, payload):
                 if album and hasattr(album, 'addLabel'):
                     album.addLabel('Explicit')
                     labeled_count += 1
-                    print(f"[PLEX_SYNC] Job {job_id}: Added 'Explicit' label to album {album_key}", flush=True)
+                    logger.info("[PLEX_SYNC] Job %s: Added 'Explicit' label to album %s", job_id, album_key)
             except Exception as e:
-                print(f"[PLEX_SYNC] Job {job_id}: Failed to add 'Explicit' label to album {album_key}: {str(e)}", flush=True)
+                logger.info("[PLEX_SYNC] Job %s: Failed to add 'Explicit' label to album %s: %s", job_id, album_key, str(e))
                 # Continue to next album instead of failing the entire job
                 continue
         
         # Reset timeout back to default
         if hasattr(plex, '_session'):
             plex._session.timeout = 20
-        print(f"[PLEX_SYNC] Job {job_id}: Successfully labeled {labeled_count} albums as Explicit", flush=True)
+        logger.info("[PLEX_SYNC] Job %s: Successfully labeled %s albums as Explicit", job_id, labeled_count)
 
     progress['explicit_albums_labeled'] = labeled_count
     stages['labeling_explicit_albums'] = 'done'
@@ -1008,10 +1014,10 @@ def process_plex_sync_job(job_id, payload):
             progress['tags_read'] = tags_read
             progress['tags_updated'] = tags_updated
             jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-            print(f"[PLEX_SYNC] Job {job_id}: Tag backfill progress: read={tags_read}, updated={tags_updated}, albums_backfilled={len(albums_backfilled)}", flush=True)
+            logger.info("[PLEX_SYNC] Job %s: Tag backfill progress: read=%s, updated=%s, albums_backfilled=%s", job_id, tags_read, tags_updated, len(albums_backfilled))
 
     conn.commit()
-    print(f"[PLEX_SYNC] Job {job_id}: Tag backfill complete: read={tags_read}, updated={tags_updated}, albums_backfilled={len(albums_backfilled)}", flush=True)
+    logger.info("[PLEX_SYNC] Job %s: Tag backfill complete: read=%s, updated=%s, albums_backfilled=%s", job_id, tags_read, tags_updated, len(albums_backfilled))
 
     stages['backfilling_track_ids_from_tags'] = 'done'
     progress['tags_read'] = tags_read
@@ -1019,10 +1025,7 @@ def process_plex_sync_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
-    print(
-        f"[PLEX_SYNC] Job {job_id} finished. tracks={progress['total_tracks']} upserted={upserted} deleted={deleted} explicit_albums_labeled={labeled_count} tags_read={tags_read} tags_updated={tags_updated}",
-        flush=True
-    )
+    logger.info("[PLEX_SYNC] Job %s finished. tracks=%s upserted=%s deleted=%s explicit_albums_labeled=%s tags_read=%s tags_updated=%s", job_id, progress['total_tracks'], upserted, deleted, labeled_count, tags_read, tags_updated)
 
     return {
         'trigger': trigger or 'unknown',
@@ -1053,7 +1056,7 @@ def process_download_job(job_id, payload):
     if not track_id:
         raise ValueError('trackId is required')
 
-    print(f"[DOWNLOAD] Fetching track metadata from normalized HiFi object for quality={quality_choice}", flush=True)
+    logger.info("[DOWNLOAD] Fetching track metadata from normalized HiFi object for quality=%s", quality_choice)
     try:
         track_object = get_hifi_track_object(
             track_id,
@@ -1076,20 +1079,20 @@ def process_download_job(job_id, payload):
     downloads_folder = DOWNLOADS_ROOT
 
     if not os.path.exists(downloads_folder):
-        print(f"[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: {downloads_folder}", flush=True)
+        logger.info("[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: %s", downloads_folder)
         os.makedirs(downloads_folder, exist_ok=True)
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
 
     output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
-    print(f"[DOWNLOAD] Selected output format={output_format!r} for quality='{quality_choice}'", flush=True)
+    logger.info("[DOWNLOAD] Selected output format=%s for quality='%s'", output_format, quality_choice)
 
     temp_folder = '/app/temp'
     os.makedirs(temp_folder, exist_ok=True)
     temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
-    print(f"[DOWNLOAD] Downloading track data from trackManifests into temporary file: {temp_source_path}", flush=True)
+    logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
     try:
         downloads.download_track_manifest(
             track_id=track_id,
@@ -1104,29 +1107,23 @@ def process_download_job(job_id, payload):
     with open(temp_source_path, 'rb') as tmp_file:
         audio_format = downloads.detect_audio_format(tmp_file.read(32))
 
-    print(f"[DOWNLOAD] Detected downloaded audio format: {audio_format}", flush=True)
+    logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
     if audio_format == 'unknown':
-        print(f"[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC", flush=True)
+        logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
         audio_format = 'flac'
 
-    print(f"\n[DOWNLOAD] Job {job_id} starting for track {track_id}", flush=True)
-    print(f"[DOWNLOAD] Quality: {quality_choice}", flush=True)
-    print(f"[DOWNLOAD] Output format: {output_format}", flush=True)
-    print(f"[DOWNLOAD] File naming template: {file_naming}", flush=True)
-    print(f"[DOWNLOAD] Downloads folder: {downloads_folder}", flush=True)
+    logger.info(" [DOWNLOAD] Job %s starting for track %s", job_id, track_id)
+    logger.info("[DOWNLOAD] Quality: %s", quality_choice)
+    logger.info("[DOWNLOAD] Output format: %s", output_format)
+    logger.info("[DOWNLOAD] File naming template: %s", file_naming)
+    logger.info("[DOWNLOAD] Downloads folder: %s", downloads_folder)
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
 
-    print(f"[DOWNLOAD_DEBUG] raw track_object keys={list(track_object.keys())}", flush=True)
-    print(
-        f"[DOWNLOAD_DEBUG] read track fields id={track_data.get('id')!r} title={track_data.get('title')!r} version={track_data.get('version')!r} explicit={track_data.get('explicit')!r} trackNumber={track_data.get('trackNumber')!r} discNumber={track_data.get('discNumber')!r} volumeNumber={track_data.get('volumeNumber')!r} isrc={track_data.get('isrc')!r} maxAudioQuality={track_data.get('maxAudioQuality')!r} audioQuality={track_data.get('audioQuality')!r} copyright={track_data.get('copyright')!r} artists={[a.get('name') if isinstance(a, dict) else None for a in (track_data.get('artists') or [])]!r}",
-        flush=True
-    )
-    print(
-        f"[DOWNLOAD_DEBUG] read album fields id={album_data.get('id')!r} title={album_data.get('title')!r} cover={album_data.get('cover')!r} releaseDate={album_data.get('releaseDate')!r} explicit={album_data.get('explicit')!r} numberOfDiscs={album_data.get('numberOfDiscs')!r} numberOfVolumes={album_data.get('numberOfVolumes')!r} numberOfTracks={album_data.get('numberOfTracks')!r} maxAudioQuality={album_data.get('maxAudioQuality')!r} copyright={album_data.get('copyright')!r} artists={[a.get('name') if isinstance(a, dict) else None for a in (album_data.get('artists') or [])]!r}",
-        flush=True
-    )
+    logger.info("[DOWNLOAD_DEBUG] raw track_object keys=%s", list(track_object.keys()))
+    logger.info("[DOWNLOAD_DEBUG] read track fields id=%s title=%s version=%s explicit=%s trackNumber=%s discNumber=%s volumeNumber=%s isrc=%s maxAudioQuality=%s audioQuality=%s copyright=%s artists=%s", track_data.get('id'), track_data.get('title'), track_data.get('version'), track_data.get('explicit'), track_data.get('trackNumber'), track_data.get('discNumber'), track_data.get('volumeNumber'), track_data.get('isrc'), track_data.get('maxAudioQuality'), track_data.get('audioQuality'), track_data.get('copyright'), [a.get('name') if isinstance(a, dict) else None for a in (track_data.get('artists') or [])])
+    logger.info("[DOWNLOAD_DEBUG] read album fields id=%s title=%s cover=%s releaseDate=%s explicit=%s numberOfDiscs=%s numberOfVolumes=%s numberOfTracks=%s maxAudioQuality=%s copyright=%s artists=%s", album_data.get('id'), album_data.get('title'), album_data.get('cover'), album_data.get('releaseDate'), album_data.get('explicit'), album_data.get('numberOfDiscs'), album_data.get('numberOfVolumes'), album_data.get('numberOfTracks'), album_data.get('maxAudioQuality'), album_data.get('copyright'), [a.get('name') if isinstance(a, dict) else None for a in (album_data.get('artists') or [])])
 
     track_artist_name = 'Unknown Artist'
     track_artist_id = None
@@ -1240,7 +1237,7 @@ def process_download_job(job_id, payload):
     artist_name = track_artist_name
     effective_artist_name = album_artist_name or track_artist_name
 
-    print(f"[DOWNLOAD] Extracted metadata: TrackArtist='{track_artist_name}', AlbumArtist='{album_artist_name or ''}', EffectiveArtistForPath='{effective_artist_name}', Album='{album_name}', Title='{track_title}', TrackNum='{track_num}', DiscNum='{disc_num}', Year='{release_year}', Cover='{cover_url}'", flush=True)
+    logger.info("[DOWNLOAD] Extracted metadata: TrackArtist='%s', AlbumArtist='%s', EffectiveArtistForPath='%s', Album='%s', Title='%s', TrackNum='%s', DiscNum='%s', Year='%s', Cover='%s'", track_artist_name, album_artist_name or '', effective_artist_name, album_name, track_title, track_num, disc_num, release_year, cover_url)
 
     file_ext = output_format
 
@@ -1264,12 +1261,9 @@ def process_download_job(job_id, payload):
     full_path = os.path.join(downloads_folder, file_path)
     full_path = os.path.normpath(full_path)
 
-    print(f"[DOWNLOAD_DEBUG] file_naming='{file_naming}' template -> file_path='{file_path}'", flush=True)
-    print(f"[DOWNLOAD_DEBUG] resolved full_path='{full_path}' downloads_folder='{downloads_folder}'", flush=True)
-    print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: selected_format='{output_format}', title='{track_title}', artist='{artist_name}', album='{album_name}', effective_artist='{effective_artist_name}'",
-        flush=True
-    )
+    logger.info("[DOWNLOAD_DEBUG] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
+    logger.info("[DOWNLOAD_DEBUG] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
+    logger.info("[DOWNLOAD_DECISION] Job %s: selected_format='%s', title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, output_format, track_title, artist_name, album_name, effective_artist_name)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1289,20 +1283,14 @@ def process_download_job(job_id, payload):
         }
         for row in metadata_rows[:8]
     ]
-    print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: metadata_candidates={len(metadata_rows)}, matching_selected_format={len(matching_rows)}, candidate_summary={summary_rows}",
-        flush=True
-    )
+    logger.info("[DOWNLOAD_DECISION] Job %s: metadata_candidates=%s, matching_selected_format=%s, candidate_summary=%s", job_id, len(metadata_rows), len(matching_rows), summary_rows)
     if matching_rows:
         matched_row = matching_rows[0]
         matched_path = str(matched_row.get('file_path') or '').strip()
         if matched_path:
             full_path = matched_path
-        print(
-            f"[DOWNLOAD_DECISION] Job {job_id}: skipping download because existing Plex inventory metadata matches selected format and quality (format='{matched_row.get('format')}', bitrate='{matched_row.get('bitrate')}')",
-            flush=True
-        )
-        print(f"[DOWNLOAD] Existing metadata match found - skipping download pipeline", flush=True)
+        logger.info("[DOWNLOAD_DECISION] Job %s: skipping download because existing Plex inventory metadata matches selected format and quality (format='%s', bitrate='%s')", job_id, matched_row.get('format'), matched_row.get('bitrate'))
+        logger.info("[DOWNLOAD] Existing metadata match found - skipping download pipeline")
         stages['downloaded'] = 'done'
         stages['tagged'] = 'done'
         stages['converted'] = 'skipped'
@@ -1328,9 +1316,9 @@ def process_download_job(job_id, payload):
                 plex_user_id=payload.get('plex_user_id')
             )
             stages['playlist_added'] = 'queued'
-            print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
+            logger.info("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job")
         else:
-            print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+            logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
             stages['playlist_added'] = 'skipped'
         jobs.update_job_progress(job_id, {'stages': stages})
 
@@ -1362,10 +1350,7 @@ def process_download_job(job_id, payload):
             'stages': stages
         }
 
-    print(
-        f"[DOWNLOAD_DECISION] Job {job_id}: downloading because no existing Plex inventory metadata matched selected format '{output_format}'",
-        flush=True
-    )
+    logger.info("[DOWNLOAD_DECISION] Job %s: downloading because no existing Plex inventory metadata matched selected format '%s'", job_id, output_format)
 
     jobs.update_job_progress(job_id, {
         'artist': artist_name,
@@ -1386,17 +1371,17 @@ def process_download_job(job_id, payload):
     if 'DOLBY_ATMOS' in media_tags and 'HIRES_LOSSLESS' not in media_tags:
         media_tags.append('HIRES_LOSSLESS')
 
-    print(f"[DOWNLOAD] File path template result: {file_path}", flush=True)
+    logger.info("[DOWNLOAD] File path template result: %s", file_path)
 
-    print(f"[DOWNLOAD] Full output path: {full_path}", flush=True)
+    logger.info("[DOWNLOAD] Full output path: %s", full_path)
 
     output_dir = os.path.dirname(full_path)
-    print(f"[DOWNLOAD] Creating directory structure: {output_dir}", flush=True)
+    logger.info("[DOWNLOAD] Creating directory structure: %s", output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
-    print(f"[DOWNLOAD] SUCCESS: Directory created/exists: {output_dir}", flush=True)
+    logger.info("[DOWNLOAD] SUCCESS: Directory created/exists: %s", output_dir)
 
-    print(f"[DOWNLOAD] Download complete. Using temporary source file: {temp_source_path}", flush=True)
+    logger.info("[DOWNLOAD] Download complete. Using temporary source file: %s", temp_source_path)
 
     cover_image_data = None
     if cover_url:
@@ -1437,30 +1422,30 @@ def process_download_job(job_id, payload):
         'audio_quality': track_data.get('maxAudioQuality') or track_data.get('audioQuality'),
     }
 
-    print(f"[DOWNLOAD_DEBUG] cover_url='{cover_url}' cover_bytes={len(cover_image_data) if cover_image_data else 0}", flush=True)
-    print(f"[DOWNLOAD_DEBUG] metadata_dict={metadata_dict}", flush=True)
+    logger.info("[DOWNLOAD_DEBUG] cover_url='%s' cover_bytes=%s", cover_url, len(cover_image_data) if cover_image_data else 0)
+    logger.info("[DOWNLOAD_DEBUG] metadata_dict=%s", metadata_dict)
 
     temp_folder = '/app/temp'
     os.makedirs(temp_folder, exist_ok=True)
 
     temp_target_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
-    print(f"[DOWNLOAD] Using temporary source file: {temp_source_path}", flush=True)
+    logger.info("[DOWNLOAD] Using temporary source file: %s", temp_source_path)
 
     stages['downloaded'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    print(f"[DOWNLOAD] Adding metadata to staged {output_format.upper()}: {temp_source_path}", flush=True)
-    print(f"[DOWNLOAD_DEBUG] tagging temp_source_path='{temp_source_path}'", flush=True)
+    logger.info("[DOWNLOAD] Adding metadata to staged %s: %s", output_format.upper(), temp_source_path)
+    logger.info("[DOWNLOAD_DEBUG] tagging temp_source_path='%s'", temp_source_path)
     downloads.add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
-    print(f"[DOWNLOAD_DEBUG] tagging complete for temp_source_path='{temp_source_path}'", flush=True)
+    logger.info("[DOWNLOAD_DEBUG] tagging complete for temp_source_path='%s'", temp_source_path)
     stages['tagged'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
     converted = False
     if output_format == 'm4a' and audio_format != 'm4a':
-        print(f"[DOWNLOAD] Output format is AAC - converting staged {audio_format.upper()} to M4A", flush=True)
+        logger.info("[DOWNLOAD] Output format is AAC - converting staged %s to M4A", audio_format.upper())
         success = convert_to_aac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             downloads.cleanup_file(temp_source_path)
@@ -1468,12 +1453,12 @@ def process_download_job(job_id, payload):
             raise Exception(f"Failed to convert {audio_format.upper()} to M4A")
 
         shutil.move(temp_target_path, full_path)
-        print(f"[DOWNLOAD_DEBUG] tagging final M4A full_path='{full_path}'", flush=True)
+        logger.info("[DOWNLOAD_DEBUG] tagging final M4A full_path='%s'", full_path)
         downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
-        print(f"[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='{full_path}'", flush=True)
+        logger.info("[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='%s'", full_path)
         converted = True
     elif output_format == 'flac' and audio_format != 'flac':
-        print(f"[DOWNLOAD] Output format is FLAC - converting staged {audio_format.upper()} to FLAC", flush=True)
+        logger.info("[DOWNLOAD] Output format is FLAC - converting staged %s to FLAC", audio_format.upper())
         success = convert_to_flac(temp_source_path, temp_target_path, source_format=audio_format)
         if not success:
             downloads.cleanup_file(temp_source_path)
@@ -1481,16 +1466,16 @@ def process_download_job(job_id, payload):
             raise Exception(f"Failed to convert {audio_format.upper()} to FLAC")
 
         shutil.move(temp_target_path, full_path)
-        print(f"[DOWNLOAD_DEBUG] tagging final FLAC full_path='{full_path}'", flush=True)
+        logger.info("[DOWNLOAD_DEBUG] tagging final FLAC full_path='%s'", full_path)
         downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
-        print(f"[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='{full_path}'", flush=True)
+        logger.info("[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='%s'", full_path)
         converted = True
     else:
         if not full_path.endswith(f'.{output_format}'):
             full_path = full_path.rsplit('.', 1)[0] + f'.{output_format}'
-            print(f"[DOWNLOAD] Updated output path with correct extension: {full_path}", flush=True)
+            logger.info("[DOWNLOAD] Updated output path with correct extension: %s", full_path)
 
-        print(f"[DOWNLOAD] Output is {output_format.upper()} - moving from temp", flush=True)
+        logger.info("[DOWNLOAD] Output is %s - moving from temp", output_format.upper())
         shutil.move(temp_source_path, full_path)
 
     stages['converted'] = 'done' if converted else 'skipped'
@@ -1504,7 +1489,7 @@ def process_download_job(job_id, payload):
     else:
         downloads.cleanup_file(temp_source_path)
 
-    print(f"[DOWNLOAD] SUCCESS: Downloaded and saved to {full_path}", flush=True)
+    logger.info("[DOWNLOAD] SUCCESS: Downloaded and saved to %s", full_path)
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
@@ -1518,9 +1503,9 @@ def process_download_job(job_id, payload):
             plex_user_id=payload.get('plex_user_id')
         )
         stages['playlist_added'] = 'queued'
-        print("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job", flush=True)
+        logger.info("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job")
     else:
-        print("[DOWNLOAD] Plex playlist update skipped. No playlist requested.", flush=True)
+        logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
         stages['playlist_added'] = 'skipped'
     jobs.update_job_progress(job_id, {'stages': stages})
 
@@ -1567,7 +1552,7 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
 
     # Run validation on startup
     # With gunicorn --preload, this runs once before workers are forked
-    print("Squidly starting up...", flush=True)
+    logger.info("Squidly starting up...")
     downloads.validate_all_endpoints()
     jobs.backfill_plex_playlist_add_parent_links()
     plex_healthcheck()
@@ -1575,39 +1560,39 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     # Start background worker for retrying failed Plex playlist additions
     plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
     plex_retry_thread.start()
-    print("Plex playlist retry worker started\n", flush=True)
+    logger.info("Plex playlist retry worker started ")
 
     # Start background worker for processing download jobs
 
     # Start background worker for processing download jobs
     download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
     download_worker_thread.start()
-    print("Download job worker started\n", flush=True)
+    logger.info("Download job worker started ")
 
     # Start background worker for Plex library sync jobs
     plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
     plex_sync_worker_thread.start()
-    print("Plex library sync job worker started\n", flush=True)
+    logger.info("Plex library sync job worker started ")
 
     # Start background worker for Plex library update jobs
     plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
     plex_library_update_worker_thread.start()
-    print("Plex library update job worker started\n", flush=True)
+    logger.info("Plex library update job worker started ")
 
     # Start background worker for automatic matching jobs
     automatic_matching_worker_thread = threading.Thread(target=automatic_matching_job_worker, daemon=True)
     automatic_matching_worker_thread.start()
-    print("Automatic matching job worker started\n", flush=True)
+    logger.info("Automatic matching job worker started ")
 
     # Start scheduler for interval-based Plex sync jobs
     plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)
     plex_sync_scheduler_thread.start()
-    print("Plex library sync scheduler started\n", flush=True)
+    logger.info("Plex library sync scheduler started ")
 
     # Start background worker for listen history sync jobs
     listen_history_sync_thread = threading.Thread(target=listen_history_sync_worker, daemon=True)
     listen_history_sync_thread.start()
-    print("Listen history sync worker started\n", flush=True)
+    logger.info("Listen history sync worker started ")
 
     # Legacy timed library update worker is intentionally disabled.
     # Updates are now queued on download enqueue and gated in process_plex_library_update_job.
@@ -1616,9 +1601,9 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
 
     try:
         os.makedirs('/app/temp', exist_ok=True)
-        print("Temp folder ready (/app/temp)", flush=True)
+        logger.info("Temp folder ready (/app/temp)")
     except Exception as e:
-        print(f"WARNING: Failed to create temp folder: {str(e)}", flush=True)
+        logger.info("WARNING: Failed to create temp folder: %s", str(e))
 
 
 # Helper to check if Plex credentials are valid
@@ -2434,7 +2419,7 @@ def lastfm_playlist():
             'details': str(e)
         }), 500
     except Exception as e:
-        print(f"Last.fm scraping error: {e}", flush=True)
+        logger.info("Last.fm scraping error: %s", e)
         return jsonify({
             'error': 'Failed to process Last.fm playlist',
             'details': str(e)
@@ -2504,7 +2489,7 @@ def youtube_music_playlist():
         })
 
     except Exception as e:
-        print(f"YouTube Music playlist parsing error: {e}", flush=True)
+        logger.info("YouTube Music playlist parsing error: %s", e)
         return jsonify({
             'error': 'Failed to process YouTube Music playlist',
             'details': str(e)
@@ -2569,7 +2554,7 @@ def download_track():
     file_naming = payload.get('fileNamingAlbum') or payload.get('fileNaming') or file_naming_album
 
     if not track_id:
-        print(f"[DOWNLOAD] ERROR: trackId is missing", flush=True)
+        logger.info("[DOWNLOAD] ERROR: trackId is missing")
         return jsonify({'error': 'trackId is required'}), 400
 
     # Use global setting as fallback if not specified in payload
@@ -2592,17 +2577,17 @@ def download_track():
 
     update_job_id = queue_plex_library_update(trigger='download_enqueue')
     if update_job_id:
-        print(f"[DOWNLOAD] Queued plex_library_update job {update_job_id} (download enqueue)", flush=True)
+        logger.info("[DOWNLOAD] Queued plex_library_update job %s (download enqueue)", update_job_id)
     else:
-        print("[DOWNLOAD] plex_library_update already queued/in progress; not queueing another", flush=True)
+        logger.info("[DOWNLOAD] plex_library_update already queued/in progress; not queueing another")
 
     sync_job_id = jobs.queue_plex_library_sync(trigger='download_enqueue')
     if sync_job_id:
-        print(f"[DOWNLOAD] Queued plex_library_sync job {sync_job_id} (download enqueue)", flush=True)
+        logger.info("[DOWNLOAD] Queued plex_library_sync job %s (download enqueue)", sync_job_id)
     else:
-        print("[DOWNLOAD] plex_library_sync already queued/in progress; not queueing another", flush=True)
+        logger.info("[DOWNLOAD] plex_library_sync already queued/in progress; not queueing another")
 
-    print(f"[DOWNLOAD] Queued download job {job_id} for track {track_id}", flush=True)
+    logger.info("[DOWNLOAD] Queued download job %s for track %s", job_id, track_id)
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
 @app.route('/api/jobs', methods=['GET'])
@@ -3117,7 +3102,7 @@ def endpoints_status():
     try:
         mirror_rate_limit_status = downloads.get_mirror_rate_limit_status() or {}
     except Exception as e:
-        print(f"[ENDPOINTS] Failed to get mirror rate limit status: {e}", flush=True)
+        logger.info("[ENDPOINTS] Failed to get mirror rate limit status: %s", e)
 
     return jsonify({
         'endpoints': endpoints,
@@ -3141,7 +3126,7 @@ def _run_async(fn):
         try:
             fn()
         except Exception as e:
-            print(f"[ENDPOINTS] Async operation failed: {e}", flush=True)
+            logger.info("[ENDPOINTS] Async operation failed: %s", e)
     threading.Thread(target=_wrapper, daemon=True).start()
 
 
@@ -3159,7 +3144,7 @@ def add_endpoint():
     try:
         downloads.add_mirror(url)
     except Exception as e:
-        print(f"[ENDPOINTS] Failed to add mirror: {e}", flush=True)
+        logger.info("[ENDPOINTS] Failed to add mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
     _run_async(lambda: downloads.validate_all_endpoints_from_db())
@@ -3173,7 +3158,7 @@ def delete_endpoint(name):
     try:
         downloads.remove_mirror(name)
     except Exception as e:
-        print(f"[ENDPOINTS] Failed to remove mirror: {e}", flush=True)
+        logger.info("[ENDPOINTS] Failed to remove mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
     _run_async(lambda: downloads.validate_all_endpoints_from_db())
@@ -3189,7 +3174,7 @@ def toggle_endpoint(name):
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     except Exception as e:
-        print(f"[ENDPOINTS] Failed to toggle mirror: {e}", flush=True)
+        logger.info("[ENDPOINTS] Failed to toggle mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
     if new_state == 1:
@@ -3570,7 +3555,7 @@ def get_ytm_playlists():
         return jsonify({'playlists': result})
 
     except Exception as e:
-        print(f"YouTube Music playlists error: {e}", flush=True)
+        logger.info("YouTube Music playlists error: %s", e)
         return jsonify({'error': f'Failed to fetch playlists: {str(e)}'}), 500
 
 
@@ -3604,7 +3589,7 @@ def get_ytm_playlist(playlist_id):
         })
 
     except Exception as e:
-        print(f"YouTube Music playlist error: {e}", flush=True)
+        logger.info("YouTube Music playlist error: %s", e)
         return jsonify({'error': f'Failed to fetch playlist: {str(e)}'}), 500
 
 
@@ -4260,7 +4245,7 @@ def get_plex_playlist_tracks():
         })
 
     except Exception as e:
-        print(f"[PLEX] Failed to fetch playlist tracks: {str(e)}", flush=True)
+        logger.info("[PLEX] Failed to fetch playlist tracks: %s", str(e))
         return jsonify({'error': f'Failed to fetch playlist tracks: {str(e)}'}), 500
 
 @app.route('/api/plex/playlists', methods=['POST'])
@@ -4289,27 +4274,27 @@ def create_plex_playlist_endpoint():
         if user_id:
             try:
                 plex = plex.switchUser(user_id)
-                print(f"[PLEX] Switched to user {user_id} for playlist creation", flush=True)
+                logger.info("[PLEX] Switched to user %s for playlist creation", user_id)
             except Exception as e:
-                print(f"[PLEX] Failed to switch user: {str(e)}", flush=True)
+                logger.info("[PLEX] Failed to switch user: %s", str(e))
                 return jsonify({'error': f'Failed to switch user: {str(e)}'}), 400
 
         # Check if playlist already exists
-        print(f"[PLEX] Checking if playlist exists: {playlist_name}", flush=True)
+        logger.info("[PLEX] Checking if playlist exists: %s", playlist_name)
         try:
             playlists = plex.playlists()
             for pl in playlists:
                 if pl.title == playlist_name:
-                    print(f"[PLEX] Playlist already exists: {playlist_name}", flush=True)
+                    logger.info("[PLEX] Playlist already exists: %s", playlist_name)
                     return jsonify({'success': True, 'playlist_name': playlist_name, 'already_exists': True})
         except Exception as e:
-            print(f"[PLEX] Error checking playlists: {str(e)}", flush=True)
+            logger.info("[PLEX] Error checking playlists: %s", str(e))
 
         # Playlist doesn't exist yet - that's fine, we'll create it on first track add
-        print(f"[PLEX] Playlist will be created on first track add: {playlist_name}", flush=True)
+        logger.info("[PLEX] Playlist will be created on first track add: %s", playlist_name)
         return jsonify({'success': True, 'playlist_name': playlist_name})
     except Exception as e:
-        print(f"[PLEX] Error validating playlist: {str(e)}", flush=True)
+        logger.info("[PLEX] Error validating playlist: %s", str(e))
         return jsonify({'error': f'Failed to validate playlist: {str(e)}'}), 500
 
 @app.route('/api/plex/libraries', methods=['GET'])
@@ -4381,19 +4366,16 @@ def _resolve_plex_user_context(plex, user_id):
         )
         try:
             switched = plex.switchUser(switch_target)
-            print(f"[PLEX_LIBRARY] Switched to user {switch_target} (requested {requested_user_id})", flush=True)
+            logger.info("[PLEX_LIBRARY] Switched to user %s (requested %s)", switch_target, requested_user_id)
             return switched, switch_target
         except Exception as e:
-            print(
-                f"[PLEX_LIBRARY] Failed to switch user {requested_user_id} via '{switch_target}': {str(e)}. Using owner context.",
-                flush=True
-            )
+            logger.info("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
             return plex, None
 
     if selected_user and bool(selected_user.get('is_owner')):
-        print(f"[PLEX_LIBRARY] Requested owner user {requested_user_id}; using owner context", flush=True)
+        logger.info("[PLEX_LIBRARY] Requested owner user %s; using owner context", requested_user_id)
     else:
-        print(f"[PLEX_LIBRARY] User {requested_user_id} not found in current account; using owner context", flush=True)
+        logger.info("[PLEX_LIBRARY] User %s not found in current account; using owner context", requested_user_id)
 
     return plex, None
 
@@ -4495,7 +4477,7 @@ def get_plex_library_overview_endpoint():
             'tracks': tracks,
         })
     except Exception as e:
-        print(f"[PLEX_LIBRARY] Failed to fetch overview: {str(e)}", flush=True)
+        logger.info("[PLEX_LIBRARY] Failed to fetch overview: %s", str(e))
         return jsonify({'error': f'Failed to fetch Plex library overview: {str(e)}'}), 500
 
 
@@ -4556,7 +4538,7 @@ def get_plex_library_artists_endpoint():
             'artists': artists,
         })
     except Exception as e:
-        print(f"[PLEX_LIBRARY] Failed to fetch artists: {str(e)}", flush=True)
+        logger.info("[PLEX_LIBRARY] Failed to fetch artists: %s", str(e))
         return jsonify({'error': f'Failed to fetch Plex artists: {str(e)}'}), 500
 
 
@@ -4760,7 +4742,7 @@ def get_plex_library_track_stream_endpoint(track_id):
             'stream_url': stream_url,
         })
     except Exception as e:
-        print(f"[PLEX_LIBRARY] Failed to fetch track stream {track_id}: {str(e)}", flush=True)
+        logger.info("[PLEX_LIBRARY] Failed to fetch track stream %s: %s", track_id, str(e))
         return jsonify({'error': f'Failed to fetch Plex track stream URL: {str(e)}'}), 500
 
 @app.route('/api/plex/songs/match', methods=['POST'])
@@ -4907,14 +4889,14 @@ def process_plex_listen_history_sync(job_id, payload):
             mindate = dt - timedelta(hours=1)
     else:
         mindate = datetime.utcnow() - timedelta(days=30)
-        print(f"[HISTORY_SYNC] Initial sync — limiting to last 30 days (mindate={mindate.isoformat()})", flush=True)
+        logger.info("[HISTORY_SYNC] Initial sync — limiting to last 30 days (mindate=%s)", mindate.isoformat())
 
-    print(f"[HISTORY_SYNC] Fetching Plex history (mindate={mindate}, maxresults=50000)...", flush=True)
+    logger.info("[HISTORY_SYNC] Fetching Plex history (mindate=%s, maxresults=50000)...", mindate)
     try:
         history_items = plex.history(mindate=mindate, maxresults=50000)
     except Exception as e:
         raise ValueError(f'Failed to fetch Plex history: {e}')
-    print(f"[HISTORY_SYNC] Fetched {len(history_items)} history items", flush=True)
+    logger.info("[HISTORY_SYNC] Fetched %s history items", len(history_items))
 
     account_id_to_users = {}
     for u in resolved_users:

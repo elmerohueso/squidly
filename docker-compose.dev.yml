@@ -22,6 +22,8 @@ services:
     volumes:
       # Mount downloads folder for track downloads
       - ./downloads:/downloads
+      # Mount logs folder for persistent logging
+      - ./logs:/logs
     depends_on:
       squidly-postgres-dev:
         condition: service_healthy
