@@ -1,6 +1,7 @@
 """Job queue and worker logic for Squidly."""
 
 import json
+import logging
 import os
 import time
 import threading
@@ -30,6 +31,8 @@ from squidly.storage import (
     set_last_job_finished_at,
     get_plex_config,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_job_payload(payload):
@@ -116,12 +119,12 @@ def queue_pending_playlist_addition(artist, album, title, file_path, playlist_na
     existing = cur.fetchone()
 
     if existing:
-        print(f"[PLEX_QUEUE] Track already in queue: {artist} - {title}", flush=True)
+        logger.info("[PLEX_QUEUE] Track already in queue: %s - %s", artist, title)
         conn.close()
         return
     conn.close()
     job_id = enqueue_job('plex_playlist_add', payload)
-    print(f"[PLEX_QUEUE] Queued for retry (job {job_id}, parent {parent_job_id}): {artist} - {title}", flush=True)
+    logger.info("[PLEX_QUEUE] Queued for retry (job %s, parent %s): %s - %s", job_id, parent_job_id, artist, title)
 
 
 def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
@@ -209,7 +212,7 @@ def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
 
 def backfill_plex_playlist_add_parent_links():
     """One-time repair for legacy plex_playlist_add jobs missing parent_job_id in payload."""
-    print("[PLEX_REPAIR] Starting parent link backfill", flush=True)
+    logger.info("[PLEX_REPAIR] Starting parent link backfill")
     now = datetime.utcnow().isoformat() + 'Z'
 
     conn = get_db_connection()
@@ -320,9 +323,10 @@ def backfill_plex_playlist_add_parent_links():
 
     conn.commit()
     conn.close()
-    print(
-        f"[PLEX_REPAIR] Backfill complete: linked={linked_count}, reconciled={reconciled_count}",
-        flush=True
+    logger.info(
+        "[PLEX_REPAIR] Backfill complete: linked=%d, reconciled=%d",
+        linked_count,
+        reconciled_count,
     )
 
 
@@ -852,13 +856,13 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     conn.commit()
     conn.close()
 
-    print(
-        (
-            f"[JOB_RECOVERY] stale_cutoff_minutes={max(1, int(stale_after_minutes))} "
-            f"recovered={recovered} immediate={recovered_immediately} exhausted={exhausted} "
-            f"skipped_waiting_playlist={skipped_waiting_playlist}"
-        ),
-        flush=True
+    logger.info(
+        "[JOB_RECOVERY] stale_cutoff_minutes=%d recovered=%d immediate=%d exhausted=%d skipped_waiting_playlist=%d",
+        max(1, int(stale_after_minutes)),
+        recovered,
+        recovered_immediately,
+        exhausted,
+        skipped_waiting_playlist,
     )
 
 

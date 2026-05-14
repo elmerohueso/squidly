@@ -18,6 +18,10 @@ import requests
 from squidly.db import get_db_connection
 from squidly.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
     """Format a Tidal CDN image URL from a UUID/path and requested square size."""
@@ -255,19 +259,19 @@ def download_track_manifest(
                 playlist_text = playlist_resp.text
                 init_uri, segment_uris = parse_hls_playlist(playlist_text, playlist_uri)
 
-            print(f"[DOWNLOAD] Found {len(segment_uris)} segment URIs", flush=True)
+            logger.info("[DOWNLOAD] Found %d segment URIs", len(segment_uris))
             if init_uri:
-                print('[DOWNLOAD] Found init segment URI', flush=True)
+                logger.info("[DOWNLOAD] Found init segment URI")
 
             with intermediate_path.open('wb') as output_file:
                 if init_uri:
-                    print('[DOWNLOAD] Downloading HLS init segment', flush=True)
+                    logger.info("[DOWNLOAD] Downloading HLS init segment")
                     try:
                         output_file.write(download_binary(init_uri))
                     except Exception as exc:
                         raise RuntimeError(f'Failed to download HLS init segment: {init_uri}') from exc
 
-                print(f'[DOWNLOAD] Downloading {len(segment_uris)} HLS segments', flush=True)
+                logger.info("[DOWNLOAD] Downloading %d HLS segments", len(segment_uris))
                 downloaded_segments = 0
                 for segment_url in segment_uris:
                     try:
@@ -278,25 +282,25 @@ def download_track_manifest(
                         ) from exc
                     downloaded_segments += 1
 
-                print(f'[DOWNLOAD] Downloaded {downloaded_segments}/{len(segment_uris)} HLS segments', flush=True)
+                logger.info("[DOWNLOAD] Downloaded %d/%d HLS segments", downloaded_segments, len(segment_uris))
 
             if should_demux:
-                print(f'[DOWNLOAD] Demuxing FLAC from MP4 container: {intermediate_path} -> {output_path}', flush=True)
+                logger.info("[DOWNLOAD] Demuxing FLAC from MP4 container: %s -> %s", intermediate_path, output_path)
                 demux_flac(intermediate_path, output_path)
                 intermediate_path.unlink()
-                print(f'[DOWNLOAD] Demux complete: {output_path}', flush=True)
+                logger.info("[DOWNLOAD] Demux complete: %s", output_path)
             else:
-                print(f'[DOWNLOAD] Download complete: {output_path}', flush=True)
+                logger.info("[DOWNLOAD] Download complete: %s", output_path)
 
         elif manifest_type == 'MPEG_DASH' or playlist_uri.endswith('.mpd') or '<MPD' in playlist_text:
             if output_path.suffix.lower() == '.mpd':
-                print(f'[DOWNLOAD] Saving MPEG-DASH manifest to: {output_path}', flush=True)
+                logger.info("[DOWNLOAD] Saving MPEG-DASH manifest to: %s", output_path)
                 output_path.write_bytes(playlist_resp.content)
-                print('[DOWNLOAD] MPEG-DASH manifest saved. Media segment download is not implemented in this helper.', flush=True)
+                logger.info("[DOWNLOAD] MPEG-DASH manifest saved. Media segment download is not implemented in this helper.")
             else:
-                print(f'[DOWNLOAD] Downloading MPEG-DASH audio from manifest: {playlist_uri}', flush=True)
+                logger.info("[DOWNLOAD] Downloading MPEG-DASH audio from manifest: %s", playlist_uri)
                 download_dash_audio(playlist_uri, output_path)
-                print(f'[DOWNLOAD] Download complete: {output_path}', flush=True)
+                logger.info("[DOWNLOAD] Download complete: %s", output_path)
         else:
             raise ValueError('Unsupported manifest type or response content for download.')
     except Exception:
@@ -544,7 +548,7 @@ def enforce_mirror_rate_limit():
     elapsed = time.time() - last
     needed = _mirror_rate_limit_state['current_interval'] - elapsed
     if needed > 0:
-        print(f"[DOWNLOAD] Rate limiter sleeping {needed:.2f}s to enforce interval { _mirror_rate_limit_state['current_interval'] }s", flush=True)
+        logger.info("[DOWNLOAD] Rate limiter sleeping %.2fs to enforce interval %ss", needed, _mirror_rate_limit_state['current_interval'])
         time.sleep(needed)
 
 
@@ -579,11 +583,11 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
             full_url = f"{target_url}{url_base}"
             last_target = target
 
-            print(f"[DOWNLOAD] Trying mirror '{target['name']}' ({full_url}) attempt {attempt + 1}/{max_retries + 1}", flush=True)
+            logger.info("[DOWNLOAD] Trying mirror '%s' (%s) attempt %d/%d", target['name'], full_url, attempt + 1, max_retries + 1)
             response = make_request_with_retry(full_url, method=method, timeout=timeout, backoff_factor=backoff_factor, **kwargs)
 
             if response is not None:
-                print(f"[DOWNLOAD] Mirror '{target['name']}' returned {response.status_code} for {url_base}", flush=True)
+                logger.info("[DOWNLOAD] Mirror '%s' returned %d for %s", target['name'], response.status_code, url_base)
 
                 if response.status_code == 429:
                     _record_rate_limit_event(429)
@@ -591,15 +595,9 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
                     _set_preferred_mirror_index(current_index + 1, eligible_count)
 
                     if rate_limit_attempts == 0:
-                        print(
-                            f"[DOWNLOAD] Mirror '{target['name']}' returned 429 Too Many Requests. Waiting {rate_limit_sleep_seconds}s before retrying...",
-                            flush=True
-                        )
+                        logger.info("[DOWNLOAD] Mirror '%s' returned 429 Too Many Requests. Waiting %ds before retrying...", target['name'], rate_limit_sleep_seconds)
                     else:
-                        print(
-                            f"[DOWNLOAD] Mirror '{target['name']}' still returning 429. Doubling wait to {rate_limit_sleep_seconds}s and retrying...",
-                            flush=True
-                        )
+                        logger.info("[DOWNLOAD] Mirror '%s' still returning 429. Doubling wait to %ds and retrying...", target['name'], rate_limit_sleep_seconds)
 
                     if attempt >= max_retries:
                         last_exception = requests.exceptions.HTTPError(f"429: {response.text}")
@@ -669,11 +667,11 @@ def seed_mirrors_from_json():
     cur.execute('SELECT COUNT(*) FROM mirror_endpoints')
     count = cur.fetchone()['count']
     if count > 0:
-        print("[MIRRORS] Skipping seed — mirror_endpoints table is not empty", flush=True)
+        logger.info("[MIRRORS] Skipping seed — mirror_endpoints table is not empty")
         conn.close()
         return
 
-    print("[MIRRORS] Seeding mirror_endpoints from squidurls.json", flush=True)
+    logger.info("[MIRRORS] Seeding mirror_endpoints from squidurls.json")
     with open('squidurls.json', 'r', encoding='utf-8') as f:
         urls_data = json.load(f)
 
@@ -782,9 +780,9 @@ def validate_single_endpoint(name):
 
 def validate_all_endpoints_from_db():
     """Validate all enabled mirror endpoints from the database and update their status."""
-    print("\n" + "=" * 60, flush=True)
-    print("Starting Squid URL Validation", flush=True)
-    print("=" * 60, flush=True)
+    logger.info("\n%s", "=" * 60)
+    logger.info("Starting Squid URL Validation")
+    logger.info("%s", "=" * 60)
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -802,7 +800,7 @@ def validate_all_endpoints_from_db():
         name = mirror['name']
         decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
 
-        print(f"\n[{name}] Checking {decoded_url}...", flush=True)
+        logger.info("\n[%s] Checking %s...", name, decoded_url)
         result = validate_endpoint(decoded_url, name, timeout=5)
 
         cur.execute(
@@ -821,21 +819,21 @@ def validate_all_endpoints_from_db():
 
         if result['online']:
             online_count += 1
-            print(f"  ✓ ONLINE - Response time: {result['responseTime']}ms", flush=True)
+            logger.info("  ✓ ONLINE - Response time: %sms", result['responseTime'])
         else:
             offline_count += 1
-            print(f"  ✗ OFFLINE - {result.get('error', 'Unknown error')}", flush=True)
+            logger.info("  ✗ OFFLINE - %s", result.get('error', 'Unknown error'))
 
     conn.commit()
     conn.close()
 
-    print("\n" + "=" * 60, flush=True)
-    print("Validation Complete", flush=True)
-    print("=" * 60, flush=True)
-    print(f"Total endpoints: {len(mirrors)}", flush=True)
-    print(f"Online: {online_count}", flush=True)
-    print(f"Offline: {offline_count}", flush=True)
-    print("=" * 60 + "\n", flush=True)
+    logger.info("\n%s", "=" * 60)
+    logger.info("Validation Complete")
+    logger.info("%s", "=" * 60)
+    logger.info("Total endpoints: %d", len(mirrors))
+    logger.info("Online: %d", online_count)
+    logger.info("Offline: %d", offline_count)
+    logger.info("%s\n", "=" * 60)
 
     return {
         'total': len(mirrors),
@@ -915,9 +913,9 @@ def cleanup_file(path: str) -> None:
     try:
         if os.path.exists(path):
             os.remove(path)
-            print(f"[DOWNLOAD] Cleaned up temporary file", flush=True)
+            logger.info("[DOWNLOAD] Cleaned up temporary file")
     except Exception as e:
-        print(f"[DOWNLOAD] WARNING: Failed to clean up temp file: {str(e)}", flush=True)
+        logger.info("[DOWNLOAD] WARNING: Failed to clean up temp file: %s", str(e))
 
 
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
@@ -944,13 +942,10 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
         file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
-        print(
-            f"[ID3_DEBUG] Writing tags for '{file_path}' type='{file_type}'",
-            flush=True
-        )
-        print(
-            f"[ID3_DEBUG] tag payload artist={artist!r} track_artists={metadata.get('track_artists')!r} album_artist={metadata.get('album_artist')!r} album_artists={metadata.get('album_artists')!r} title={title!r} album={album!r} year={year!r} track_number={track_num!r} disc_number={disc_num!r} version={metadata.get('version')!r} isrc={metadata.get('isrc')!r} audio_quality={metadata.get('audio_quality')!r}",
-            flush=True
+        logger.info("[ID3_DEBUG] Writing tags for '%s' type='%s'", file_path, file_type)
+        logger.info(
+            "[ID3_DEBUG] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
+            artist, metadata.get('track_artists'), metadata.get('album_artist'), metadata.get('album_artists'), title, album, year, track_num, disc_num, metadata.get('version'), metadata.get('isrc'), metadata.get('audio_quality')
         )
 
         # Handle FLAC files
@@ -1003,9 +998,9 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     audio.add_picture(pic)
 
                 audio.save()
-                print(f"[ID3] Successfully added FLAC metadata to {file_path}", flush=True)
+                logger.info("[ID3] Successfully added FLAC metadata to %s", file_path)
             except Exception as e:
-                print(f"[ID3] Warning: Could not write FLAC tags: {str(e)}", flush=True)
+                logger.info("[ID3] Warning: Could not write FLAC tags: %s", str(e))
 
         # Handle M4A/AAC files
         elif file_path.lower().endswith('.m4a'):
@@ -1068,15 +1063,15 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
                 audio.save()
-                print(f"[ID3] Successfully added M4A metadata to {file_path}", flush=True)
+                logger.info("[ID3] Successfully added M4A metadata to %s", file_path)
             except Exception as e:
-                print(f"[ID3] Warning: Could not write M4A tags: {str(e)}", flush=True)
+                logger.info("[ID3] Warning: Could not write M4A tags: %s", str(e))
 
         # MP3 tagging is not supported
 
 
     except Exception as e:
-        print(f"[ID3] Error adding ID3 tags: {str(e)}", flush=True)
+        logger.info("[ID3] Error adding ID3 tags: %s", str(e))
 
 
 def download_cover_image(cover_url):
@@ -1085,24 +1080,24 @@ def download_cover_image(cover_url):
     Returns binary image data or None if download fails.
     """
     if not cover_url:
-        print(f"[COVER] No cover URL provided", flush=True)
+        logger.info("[COVER] No cover URL provided")
         return None
     
     try:
-        print(f"[COVER] Downloading cover image from: {cover_url}", flush=True)
+        logger.info("[COVER] Downloading cover image from: %s", cover_url)
         response = requests.get(cover_url, timeout=10)
         
         if response.ok:
-            print(f"[COVER] Successfully downloaded cover image ({len(response.content)} bytes)", flush=True)
+            logger.info("[COVER] Successfully downloaded cover image (%d bytes)", len(response.content))
             return response.content
         else:
-            print(f"[COVER] Failed to download cover image. Status: {response.status_code}", flush=True)
+            logger.info("[COVER] Failed to download cover image. Status: %d", response.status_code)
             return None
     except requests.exceptions.Timeout:
-        print(f"[COVER] ERROR: Timeout downloading cover image from {cover_url}", flush=True)
+        logger.info("[COVER] ERROR: Timeout downloading cover image from %s", cover_url)
         return None
     except Exception as e:
-        print(f"[COVER] Error downloading cover image: {str(e)}", flush=True)
+        logger.info("[COVER] Error downloading cover image: %s", str(e))
         return None
 
 
@@ -1119,10 +1114,7 @@ def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio'
         True on success, False on failure
     """
     try:
-        print(
-            f"[FFMPEG] Converting {source_format.upper()} to MP3 (highest VBR quality): {source_path} -> {mp3_path}",
-            flush=True
-        )
+        logger.info("[FFMPEG] Converting %s to MP3 (highest VBR quality): %s -> %s", source_format.upper(), source_path, mp3_path)
 
         mp3_dir = os.path.dirname(mp3_path)
         if mp3_dir:
@@ -1137,21 +1129,21 @@ def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio'
             mp3_path
         ]
 
-        print(f"[FFMPEG] Command: {' '.join(cmd)}", flush=True)
+        logger.info("[FFMPEG] Command: %s", ' '.join(cmd))
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode == 0:
-            print(f"[FFMPEG] SUCCESS: Converted to {mp3_path}", flush=True)
+            logger.info("[FFMPEG] SUCCESS: Converted to %s", mp3_path)
             return True
 
-        print(f"[FFMPEG] ERROR: Conversion failed with code {result.returncode}", flush=True)
-        print(f"[FFMPEG] stderr: {result.stderr}", flush=True)
+        logger.info("[FFMPEG] ERROR: Conversion failed with code %d", result.returncode)
+        logger.info("[FFMPEG] stderr: %s", result.stderr)
         return False
 
     except subprocess.TimeoutExpired:
-        print(f"[FFMPEG] ERROR: Conversion timeout", flush=True)
+        logger.info("[FFMPEG] ERROR: Conversion timeout")
         return False
     except Exception as e:
-        print(f"[FFMPEG] ERROR: {str(e)}", flush=True)
+        logger.info("[FFMPEG] ERROR: %s", str(e))
         return False

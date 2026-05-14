@@ -1,6 +1,7 @@
 """Background worker loop functions for Squidly job processing."""
 
 import json
+import logging
 import time
 
 from squidly.jobs import (
@@ -22,6 +23,8 @@ from squidly.jobs import (
 )
 from datetime import datetime, timedelta
 
+logger = logging.getLogger(__name__)
+
 
 class JobCancelledError(Exception):
     pass
@@ -36,7 +39,7 @@ def _raise_if_job_cancelled(job_id):
 def download_job_worker():
     from squidly.app import process_download_job
 
-    print("[DOWNLOAD_WORKER] Background worker started", flush=True)
+    logger.info("[DOWNLOAD_WORKER] Background worker started")
 
     while True:
         try:
@@ -57,40 +60,40 @@ def download_job_worker():
                 from squidly.jobs import _download_track_all_stages_done
                 if _download_track_all_stages_done(stages):
                     mark_job_succeeded(job['id'], result)
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} completed", flush=True)
+                    logger.info("[DOWNLOAD_WORKER] Job %s completed", job['id'])
                 elif isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
                     mark_job_in_progress(job['id'])
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} waiting for playlist_add completion", flush=True)
+                    logger.info("[DOWNLOAD_WORKER] Job %s waiting for playlist_add completion", job['id'])
                 else:
                     stage_state = stages if isinstance(stages, dict) else {}
                     error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_message}", flush=True)
+                    logger.info("[DOWNLOAD_WORKER] Job %s failed: %s", job['id'], error_message)
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
             except Exception as e:
                 error_str = str(e)
                 if 'permanent' in error_str.lower():
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed (permanent): {error_str}", flush=True)
+                    logger.info("[DOWNLOAD_WORKER] Job %s failed (permanent): %s", job['id'], error_str)
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_str)
                 elif 'manifest' in error_str.lower() or 'transient' in error_str.lower():
                     if job['attempt_count'] + 1 >= job['max_attempts']:
-                        print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_str}", flush=True)
+                        logger.info("[DOWNLOAD_WORKER] Job %s failed: %s", job['id'], error_str)
                         mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_str)
                     else:
-                        print(f"[DOWNLOAD_WORKER] Job {job['id']} retrying (manifest fetch): {error_str}", flush=True)
+                        logger.info("[DOWNLOAD_WORKER] Job %s retrying (manifest fetch): %s", job['id'], error_str)
                         mark_job_retrying(job['id'], job['attempt_count'], error_str)
                 else:
-                    print(f"[DOWNLOAD_WORKER] Job {job['id']} failed: {error_str}", flush=True)
+                    logger.info("[DOWNLOAD_WORKER] Job %s failed: %s", job['id'], error_str)
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_str)
                 time.sleep(1)
         except Exception as e:
-            print(f"[DOWNLOAD_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[DOWNLOAD_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
 
 
 def plex_sync_job_worker():
     from squidly.app import process_plex_sync_job
 
-    print("[PLEX_SYNC_WORKER] Background worker started", flush=True)
+    logger.info("[PLEX_SYNC_WORKER] Background worker started")
 
     while True:
         try:
@@ -110,32 +113,32 @@ def plex_sync_job_worker():
                     delay_seconds=20,
                     error_message='Waiting for plex_library_update jobs to finish before sync'
                 )
-                print(f"[PLEX_SYNC_WORKER] Job {job['id']} deferred until library update completes", flush=True)
+                logger.info("[PLEX_SYNC_WORKER] Job %s deferred until library update completes", job['id'])
                 time.sleep(1)
                 continue
 
             try:
                 result = process_plex_sync_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
-                print(f"[PLEX_SYNC_WORKER] Job {job['id']} completed", flush=True)
+                logger.info("[PLEX_SYNC_WORKER] Job %s completed", job['id'])
                 queue_plex_listen_history_sync(trigger='post_library_sync')
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
-                print(f"[PLEX_SYNC_WORKER] Job {job['id']} cancelled", flush=True)
+                logger.info("[PLEX_SYNC_WORKER] Job %s cancelled", job['id'])
                 time.sleep(1)
             except Exception as e:
-                print(f"[PLEX_SYNC_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                logger.info("[PLEX_SYNC_WORKER] Job %s failed: %s", job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            print(f"[PLEX_SYNC_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[PLEX_SYNC_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
 
 
 def automatic_matching_job_worker():
     from squidly.app import process_automatic_matching_job
 
-    print("[AUTO_MATCH_WORKER] Background worker started", flush=True)
+    logger.info("[AUTO_MATCH_WORKER] Background worker started")
 
     while True:
         try:
@@ -152,17 +155,17 @@ def automatic_matching_job_worker():
             try:
                 result = process_automatic_matching_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
-                print(f"[AUTO_MATCH_WORKER] Job {job['id']} completed", flush=True)
+                logger.info("[AUTO_MATCH_WORKER] Job %s completed", job['id'])
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
-                print(f"[AUTO_MATCH_WORKER] Job {job['id']} cancelled", flush=True)
+                logger.info("[AUTO_MATCH_WORKER] Job %s cancelled", job['id'])
                 time.sleep(1)
             except Exception as e:
-                print(f"[AUTO_MATCH_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                logger.info("[AUTO_MATCH_WORKER] Job %s failed: %s", job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            print(f"[AUTO_MATCH_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[AUTO_MATCH_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
 
 
@@ -176,7 +179,7 @@ def retry_pending_playlist_additions():
     from squidly.plex import add_tracks_to_plex_playlist
 
     """Background worker that periodically retries failed playlist additions."""
-    print("[PLEX_WORKER] Background worker started", flush=True)
+    logger.info("[PLEX_WORKER] Background worker started")
 
     while True:
         try:
@@ -192,7 +195,7 @@ def retry_pending_playlist_additions():
             if not pending:
                 continue
 
-            print(f"[PLEX_WORKER] Found {len(pending)} pending playlist additions to retry", flush=True)
+            logger.info("[PLEX_WORKER] Found %d pending playlist additions to retry", len(pending))
 
             for addition in pending:
                 parent_job_id = None
@@ -214,32 +217,32 @@ def retry_pending_playlist_additions():
                     )
 
                     if success:
-                        print(f"[PLEX_WORKER] Successfully added: {artist} - {title}", flush=True)
+                        logger.info("[PLEX_WORKER] Successfully added: %s - %s", artist, title)
                         remove_pending_addition(addition['id'])
                         update_parent_playlist_stage(parent_job_id, 'done')
                     else:
                         update_pending_addition_attempt(addition['id'], message)
                         if addition['attempt_count'] + 1 >= addition['max_attempts']:
                             update_parent_playlist_stage(parent_job_id, 'failed')
-                            print(f"[PLEX_WORKER] Max attempts reached for: {artist} - {title}", flush=True)
+                            logger.info("[PLEX_WORKER] Max attempts reached for: %s - %s", artist, title)
                         else:
-                            print(f"[PLEX_WORKER] Retry failed (attempt {addition['attempt_count'] + 1}/{addition['max_attempts']}): {message}", flush=True)
+                            logger.info("[PLEX_WORKER] Retry failed (attempt %d/%d): %s", addition['attempt_count'] + 1, addition['max_attempts'], message)
 
                     time.sleep(2)
 
                 except Exception as e:
-                    print(f"[PLEX_WORKER] Error processing addition {addition['id']}: {str(e)}", flush=True)
+                    logger.info("[PLEX_WORKER] Error processing addition %s: %s", addition['id'], str(e))
                     update_pending_addition_attempt(addition['id'], str(e))
                     if addition['attempt_count'] + 1 >= addition['max_attempts']:
                         update_parent_playlist_stage(parent_job_id, 'failed')
 
         except Exception as e:
-            print(f"[PLEX_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[PLEX_WORKER] Error in background worker: %s", str(e))
             time.sleep(60)
 
 
 def plex_sync_scheduler_worker():
-    print("[PLEX_SYNC_SCHEDULER] Background scheduler started", flush=True)
+    logger.info("[PLEX_SYNC_SCHEDULER] Background scheduler started")
 
     while True:
         try:
@@ -275,10 +278,10 @@ def plex_sync_scheduler_worker():
             if should_enqueue:
                 queued = queue_plex_library_sync(trigger='interval')
                 if queued:
-                    print(f"[PLEX_SYNC_SCHEDULER] Queued interval sync job {queued}", flush=True)
+                    logger.info("[PLEX_SYNC_SCHEDULER] Queued interval sync job %s", queued)
 
         except Exception as e:
-            print(f"[PLEX_SYNC_SCHEDULER] Error: {str(e)}", flush=True)
+            logger.info("[PLEX_SYNC_SCHEDULER] Error: %s", str(e))
 
         time.sleep(60)
 
@@ -286,7 +289,7 @@ def plex_sync_scheduler_worker():
 def listen_history_sync_worker():
     from squidly.app import process_plex_listen_history_sync
 
-    print("[HISTORY_SYNC_WORKER] Background worker started", flush=True)
+    logger.info("[HISTORY_SYNC_WORKER] Background worker started")
 
     while True:
         try:
@@ -303,15 +306,15 @@ def listen_history_sync_worker():
             try:
                 result = process_plex_listen_history_sync(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
-                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} completed", flush=True)
+                logger.info("[HISTORY_SYNC_WORKER] Job %s completed", job['id'])
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
-                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} cancelled", flush=True)
+                logger.info("[HISTORY_SYNC_WORKER] Job %s cancelled", job['id'])
                 time.sleep(1)
             except Exception as e:
-                print(f"[HISTORY_SYNC_WORKER] Job {job['id']} failed: {str(e)}", flush=True)
+                logger.info("[HISTORY_SYNC_WORKER] Job %s failed: %s", job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            print(f"[HISTORY_SYNC_WORKER] Error in background worker: {str(e)}", flush=True)
+            logger.info("[HISTORY_SYNC_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
