@@ -1104,6 +1104,12 @@ def process_download_job(job_id, payload):
     except Exception as e:
         raise jobs.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
 
+    expected_duration = track_data.get('duration')
+    try:
+        downloads.validate_audio_duration(temp_source_path, expected_duration)
+    except RuntimeError as e:
+        raise jobs.TransientDownloadError(str(e)) from e
+
     with open(temp_source_path, 'rb') as tmp_file:
         audio_format = downloads.detect_audio_format(tmp_file.read(32))
 

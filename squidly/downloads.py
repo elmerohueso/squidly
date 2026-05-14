@@ -1147,3 +1147,60 @@ def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio'
     except Exception as e:
         logger.info("[FFMPEG] ERROR: %s", str(e))
         return False
+
+
+_DURATION_RE = re.compile(r'time=(\d+):(\d+):(\d+)\.(\d+)')
+
+
+def validate_audio_duration(file_path, expected_duration_seconds):
+    """Validate that the actual decoded audio duration matches expectations.
+
+    Runs a full decode via ffmpeg to detect truncated/preview files where
+    container metadata claims a longer duration than the actual audio stream.
+
+    Args:
+        file_path: Path to the audio file to validate.
+        expected_duration_seconds: Expected duration in seconds (from track metadata).
+
+    Raises:
+        RuntimeError: If actual duration is < 50% of expected.
+    """
+    if not expected_duration_seconds:
+        return
+
+    try:
+        expected = int(expected_duration_seconds)
+    except (TypeError, ValueError):
+        return
+
+    if expected < 10:
+        return
+
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-i', file_path, '-f', 'null', '/dev/null'],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        logger.info("[DOWNLOAD] Duration validation timed out for %s", file_path)
+        return
+    except Exception as e:
+        logger.info("[DOWNLOAD] Duration validation skipped: %s", e)
+        return
+
+    match = _DURATION_RE.search(result.stderr)
+    if not match:
+        logger.info("[DOWNLOAD] Duration validation skipped: could not parse ffmpeg output for %s", file_path)
+        return
+
+    hours, minutes, seconds, fractions = match.groups()
+    actual_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(fraction) / (10 ** len(fraction))
+
+    if actual_seconds < expected * 0.5:
+        raise RuntimeError(
+            f"Downloaded audio is truncated: expected ~{expected}s but actual decoded duration is {actual_seconds:.1f}s"
+        )
+
+    logger.info("[DOWNLOAD] Duration validation passed: expected ~%ds, actual %.1fs", expected, actual_seconds)
