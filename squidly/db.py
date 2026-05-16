@@ -481,5 +481,46 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_playlists (
+            id SERIAL PRIMARY KEY,
+            plex_account_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            seed_count INTEGER NOT NULL,
+            track_count INTEGER NOT NULL,
+            generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (plex_account_id, slug)
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_playlist_tracks (
+            id SERIAL PRIMARY KEY,
+            playlist_id INTEGER REFERENCES recommendation_playlists(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            hifi_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            artist TEXT,
+            album TEXT,
+            duration INTEGER,
+            cover TEXT,
+            seed_hifi_id INTEGER,
+            score FLOAT
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rec_playlist_tracks_playlist_id
+        ON recommendation_playlist_tracks (playlist_id)
+        """
+    )
+
     conn.commit()
     conn.close()

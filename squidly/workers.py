@@ -318,3 +318,89 @@ def listen_history_sync_worker():
         except Exception as e:
             logger.info("[HISTORY_SYNC_WORKER] Error in background worker: %s", str(e))
             time.sleep(5)
+
+
+def recommendation_job_worker():
+    from squidly.app import process_recommendation_job
+
+    logger.info("[RECOMMENDATION_WORKER] Background worker started")
+
+    while True:
+        try:
+            job = claim_next_job('generate_recommendations')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_recommendation_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                logger.info("[RECOMMENDATION_WORKER] Job %s completed", job['id'])
+            except JobCancelledError:
+                mark_job_cancelled(job['id'])
+                logger.info("[RECOMMENDATION_WORKER] Job %s cancelled", job['id'])
+                time.sleep(1)
+            except Exception as e:
+                logger.info("[RECOMMENDATION_WORKER] Job %s failed: %s", job['id'], str(e))
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            logger.info("[RECOMMENDATION_WORKER] Error in background worker: %s", str(e))
+            time.sleep(5)
+
+
+def recommendation_scheduler_worker():
+    from squidly.jobs import queue_recommendation_generation
+    from squidly.storage import get_all_plex_account_mappings, has_listen_history
+
+    logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
+
+    last_run_date = None
+
+    while True:
+        try:
+            now = datetime.utcnow()
+            today = now.date()
+
+            if last_run_date == today:
+                time.sleep(60)
+                continue
+
+            if now.hour != 0:
+                time.sleep(60)
+                continue
+
+            last_run_date = today
+            logger.info("[RECOMMENDATION_SCHEDULER] Running daily recommendation generation")
+
+            mappings = get_all_plex_account_mappings()
+            for mapping in mappings:
+                plex_account_id = mapping.get('plex_account_id')
+                plex_username = mapping.get('username')
+                if plex_account_id is None or plex_username is None:
+                    continue
+
+                if not has_listen_history(plex_account_id):
+                    continue
+
+                try:
+                    job_id = queue_recommendation_generation(
+                        slug='fresh-finds',
+                        plex_account_id=plex_account_id,
+                        plex_username=plex_username,
+                        trigger='scheduled'
+                    )
+                    if job_id:
+                        logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds for %s (job %s)", plex_username, job_id)
+                except Exception as e:
+                    logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue for %s: %s", plex_username, e)
+
+        except Exception as e:
+            logger.info("[RECOMMENDATION_SCHEDULER] Error: %s", str(e))
+
+        time.sleep(60)
