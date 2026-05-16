@@ -1195,7 +1195,7 @@ def validate_audio_duration(file_path, expected_duration_seconds):
         logger.info("[DOWNLOAD] Duration validation skipped: could not parse ffmpeg output for %s", file_path)
         return
 
-    hours, minutes, seconds, fractions = match.groups()
+    hours, minutes, seconds, fraction = match.groups()
     actual_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(fraction) / (10 ** len(fraction))
 
     if actual_seconds < expected * 0.5:
