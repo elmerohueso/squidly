@@ -5287,14 +5287,26 @@ def process_recommendation_job(job_id, payload):
     stages['fetching_recommendations'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 4: Process tracks - dedupe, filter, rank
+    # Stage 4: Process tracks - quality filter, dedupe, filter, rank
     stages['processing_tracks'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
 
+    # Filter by minimum quality from download settings
+    settings = get_download_settings()
+    min_quality = settings.get('quality', 'LOSSLESS')
+    min_rank = _get_hifi_audio_quality_rank(min_quality)
+    quality_filtered = []
+    for rec in raw_recommendations:
+        rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
+        if rec_rank >= min_rank:
+            quality_filtered.append(rec)
+    progress['tracks_after_quality_filter'] = len(quality_filtered)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
     # Deduplicate by hifi_id, aggregate frequency score
     deduped = {}
-    for rec in raw_recommendations:
+    for rec in quality_filtered:
         hid = rec['hifi_id']
         if hid not in deduped:
             deduped[hid] = rec

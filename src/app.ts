@@ -9802,7 +9802,19 @@ class App {
 
     private async refreshFreshFindsPlaylist(userId: string): Promise<void> {
         this.stopPlayback();
-        this.displayMessage('Refreshing Fresh Finds...');
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-in-progress">Starting...</div>
+                </div>
+            </div>
+        `;
         await this.triggerFreshFindsGeneration(userId);
         await this.renderFreshFindsTracks(userId);
     }
