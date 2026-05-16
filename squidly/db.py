@@ -481,5 +481,76 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_playlists (
+            id SERIAL PRIMARY KEY,
+            plex_account_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            seed_count INTEGER NOT NULL,
+            track_count INTEGER NOT NULL,
+            generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (plex_account_id, slug)
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS recommendation_playlist_tracks (
+            id SERIAL PRIMARY KEY,
+            playlist_id INTEGER REFERENCES recommendation_playlists(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            hifi_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            artist TEXT,
+            album TEXT,
+            duration INTEGER,
+            cover TEXT,
+            seed_hifi_id INTEGER,
+            score FLOAT
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rec_playlist_tracks_playlist_id
+        ON recommendation_playlist_tracks (playlist_id)
+        """
+    )
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'quality'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN quality TEXT")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'artist_id'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN artist_id INTEGER")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'album_id'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN album_id INTEGER")
+
     conn.commit()
     conn.close()

@@ -812,3 +812,215 @@ def set_listen_history_sync_status(plex_account_id, last_synced_at, status=None)
     )
     conn.commit()
     conn.close()
+
+
+def has_listen_history(plex_account_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT EXISTS(SELECT 1 FROM listen_history WHERE plex_account_id = %s) AS has_history",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return bool(row['has_history']) if row else False
+
+
+def get_recent_listen_history_seeds(plex_account_id, limit=20):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT ON (hifi_id)
+            hifi_id, title, artist, album, played_at
+        FROM listen_history
+        WHERE plex_account_id = %s AND hifi_id IS NOT NULL
+        ORDER BY hifi_id, played_at DESC
+        LIMIT %s
+        """,
+        (plex_account_id, limit)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return [
+        {
+            'hifi_id': int(row['hifi_id']),
+            'title': row['title'],
+            'artist': row['artist'],
+            'album': row['album'],
+            'played_at': row['played_at'],
+        }
+        for row in rows
+    ]
+
+
+def get_existing_hifi_ids():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT hifi_id FROM tracks WHERE hifi_id IS NOT NULL")
+    rows = cur.fetchall() or []
+    conn.close()
+    return {int(row['hifi_id']) for row in rows}
+
+
+def get_existing_artist_titles():
+    from squidly.utils import normalize_match_text
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT a.name AS artist_name, t.title AS track_title
+        FROM tracks t
+        JOIN artists a ON t.artist_id = a.artist_id
+        WHERE a.name IS NOT NULL AND t.title IS NOT NULL
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {
+        (normalize_match_text(row['artist_name']), normalize_match_text(row['track_title'], strip_trailing_parenthetical=True))
+        for row in rows
+    }
+
+
+def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (plex_account_id, slug) DO UPDATE SET
+                name = excluded.name,
+                strategy = excluded.strategy,
+                seed_count = excluded.seed_count,
+                track_count = excluded.track_count,
+                generated_at = NOW()
+            RETURNING id
+            """,
+            (plex_account_id, name, slug, strategy, seed_count, len(tracks))
+        )
+        playlist_id = cur.fetchone()['id']
+
+        cur.execute(
+            "DELETE FROM recommendation_playlist_tracks WHERE playlist_id = %s",
+            (playlist_id,)
+        )
+
+        for i, track in enumerate(tracks):
+            cur.execute(
+                """
+                INSERT INTO recommendation_playlist_tracks
+                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    playlist_id,
+                    i + 1,
+                    track['hifi_id'],
+                    track['title'],
+                    track.get('artist'),
+                    track.get('album'),
+                    track.get('duration'),
+                    track.get('cover'),
+                    track.get('seed_hifi_id'),
+                    track.get('score'),
+                    track.get('quality', ''),
+                    track.get('artist_id'),
+                    track.get('album_id'),
+                )
+            )
+
+        conn.commit()
+        return playlist_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_recommendation_playlist(plex_account_id, slug):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+        FROM recommendation_playlists
+        WHERE plex_account_id = %s AND slug = %s
+        """,
+        (plex_account_id, slug)
+    )
+    playlist = cur.fetchone()
+    if not playlist:
+        conn.close()
+        return None
+
+    cur.execute(
+        """
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
+        FROM recommendation_playlist_tracks
+        WHERE playlist_id = %s
+        ORDER BY position
+        """,
+        (playlist['id'],)
+    )
+    tracks = cur.fetchall() or []
+    conn.close()
+
+    return {
+        'id': playlist['id'],
+        'name': playlist['name'],
+        'slug': playlist['slug'],
+        'strategy': playlist['strategy'],
+        'seed_count': playlist['seed_count'],
+        'track_count': playlist['track_count'],
+        'generated_at': playlist['generated_at'],
+        'tracks': [
+            {
+                'position': t['position'],
+                'hifi_id': t['hifi_id'],
+                'title': t['title'],
+                'artist': t['artist'],
+                'album': t['album'],
+                'duration': t['duration'],
+                'cover': t['cover'],
+                'seed_hifi_id': t['seed_hifi_id'],
+                'score': t['score'],
+                'quality': t['quality'],
+                'artist_id': t['artist_id'],
+                'album_id': t['album_id'],
+            }
+            for t in tracks
+        ]
+    }
+
+
+def list_recommendation_playlists(plex_account_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+        FROM recommendation_playlists
+        WHERE plex_account_id = %s
+        ORDER BY generated_at DESC
+        """,
+        (plex_account_id,)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return [
+        {
+            'id': row['id'],
+            'name': row['name'],
+            'slug': row['slug'],
+            'strategy': row['strategy'],
+            'seed_count': row['seed_count'],
+            'track_count': row['track_count'],
+            'generated_at': row['generated_at'],
+        }
+        for row in rows
+    ]

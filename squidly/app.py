@@ -144,6 +144,8 @@ from squidly.workers import (
     retry_pending_playlist_additions,
     plex_sync_scheduler_worker,
     listen_history_sync_worker,
+    recommendation_job_worker,
+    recommendation_scheduler_worker,
 )
 
 from ytmusicapi import YTMusic
@@ -159,6 +161,8 @@ from squidly.storage import (
     get_all_plex_account_mappings,
     get_download_settings,
     get_download_write_gate_state,
+    get_existing_artist_titles,
+    get_existing_hifi_ids,
     get_last_download_activity_at,
     get_library_update_status,
     get_listen_history,
@@ -166,7 +170,11 @@ from squidly.storage import (
     get_listenbrainz_config,
     get_plex_config,
     get_plex_user_settings,
+    get_recent_listen_history_seeds,
+    get_recommendation_playlist,
     get_ytm_config,
+    has_listen_history,
+    list_recommendation_playlists,
     normalize_db_timestamp,
     save_download_settings,
     save_listenbrainz_config,
@@ -180,6 +188,7 @@ from squidly.storage import (
     set_listen_history_sync_status,
     upsert_listen_history_entries,
     set_library_update_needed,
+    save_recommendation_playlist,
 )
 
 logger = logging.getLogger(__name__)
@@ -1599,6 +1608,16 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     listen_history_sync_thread = threading.Thread(target=listen_history_sync_worker, daemon=True)
     listen_history_sync_thread.start()
     logger.info("Listen history sync worker started ")
+
+    # Start background worker for recommendation generation jobs
+    recommendation_worker_thread = threading.Thread(target=recommendation_job_worker, daemon=True)
+    recommendation_worker_thread.start()
+    logger.info("Recommendation job worker started ")
+
+    # Start scheduler for daily recommendation generation
+    recommendation_scheduler_thread = threading.Thread(target=recommendation_scheduler_worker, daemon=True)
+    recommendation_scheduler_thread.start()
+    logger.info("Recommendation scheduler started ")
 
     # Legacy timed library update worker is intentionally disabled.
     # Updates are now queued on download enqueue and gated in process_plex_library_update_job.
@@ -5138,4 +5157,320 @@ def get_listen_history_sync_status_route():
     return jsonify({
         'users': result,
         'sync_in_progress': (row.get('count') or 0) > 0
+    })
+
+
+# --- Recommendations ---
+
+def _wait_for_history_sync(timeout=120):
+    """Poll until any running/queued listen history sync job completes, or timeout."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) AS count FROM jobs
+            WHERE job_type = 'plex_listen_history_sync'
+              AND status IN ('queued', 'in_progress')
+            """
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row and row['count'] == 0:
+            return True
+        time.sleep(2)
+    return False
+
+
+def process_recommendation_job(job_id, payload):
+    from urllib.parse import urlencode
+
+    stages = {
+        'syncing_listen_history': 'pending',
+        'gathering_seeds': 'pending',
+        'fetching_recommendations': 'pending',
+        'processing_tracks': 'pending',
+        'saving_playlist': 'pending'
+    }
+    progress = {
+        'seeds_found': 0,
+        'recommendations_fetched': 0,
+        'tracks_after_filter': 0,
+        'tracks_saved': 0
+    }
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    plex_account_id = payload.get('plex_account_id')
+    plex_username = payload.get('plex_username', 'Unknown')
+    slug = payload.get('slug', 'fresh-finds')
+    trigger = payload.get('trigger', 'manual')
+
+    if plex_account_id is None:
+        raise ValueError('plex_account_id is required in payload')
+
+    # Stage 1: Sync listen history
+    stages['syncing_listen_history'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+    logger.info("[RECOMMENDATION] Job %s syncing listen history for %s", job_id, plex_username)
+
+    sync_job_id = jobs.queue_plex_listen_history_sync('recommendation')
+    if sync_job_id:
+        _wait_for_history_sync(timeout=120)
+
+    stages['syncing_listen_history'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages})
+
+    # Stage 2: Gather seeds
+    stages['gathering_seeds'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+    logger.info("[RECOMMENDATION] Job %s gathering seeds for %s", job_id, plex_username)
+
+    seeds = get_recent_listen_history_seeds(plex_account_id, limit=20)
+    progress['seeds_found'] = len(seeds)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    if not seeds:
+        raise ValueError(f'No listen history seeds found for user {plex_username}')
+
+    stages['gathering_seeds'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages})
+
+    # Stage 3: Fetch recommendations
+    stages['fetching_recommendations'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+    logger.info("[RECOMMENDATION] Job %s fetching recommendations for %d seeds", job_id, len(seeds))
+
+    raw_recommendations = []
+    for seed in seeds:
+        _raise_if_job_cancelled(job_id)
+        hifi_id = seed['hifi_id']
+        try:
+            response, target = downloads.make_request_with_retry_rotating_mirrors(
+                f"/recommendations/?{urlencode({'id': hifi_id})}",
+                SQUID_URLS,
+                method='GET',
+                timeout=10,
+                max_retries=2
+            )
+            if response.ok:
+                data = response.json()
+                items = []
+                if isinstance(data, dict):
+                    data_items = data.get('data', {}).get('items') or data.get('items') or []
+                    items = data_items if isinstance(data_items, list) else []
+                for item in items:
+                    track = item.get('track') or item.get('item') or item
+                    if isinstance(track, dict) and track.get('id') and track.get('title'):
+                        artists = track.get('artists') or []
+                        primary_artist = artists[0] if isinstance(artists, list) and len(artists) > 0 else {}
+                        album = track.get('album') if isinstance(track.get('album'), dict) else {}
+                        raw_recommendations.append({
+                            'hifi_id': int(track['id']),
+                            'title': track['title'],
+                            'artist': primary_artist.get('name') if isinstance(primary_artist, dict) else '',
+                            'artist_id': primary_artist.get('id') if isinstance(primary_artist, dict) else None,
+                            'album': album.get('title') if isinstance(album, dict) else '',
+                            'album_id': album.get('id') if isinstance(album, dict) else None,
+                            'duration': track.get('duration'),
+                            'cover': album.get('cover') if isinstance(album, dict) else track.get('cover'),
+                            'quality': track.get('maxAudioQuality') or track.get('audioQuality') or '',
+                            'seed_hifi_id': hifi_id,
+                        })
+                progress['recommendations_fetched'] = len(raw_recommendations)
+                jobs.update_job_progress(job_id, {'progress': progress})
+        except Exception as e:
+            logger.info("[RECOMMENDATION] Job %s failed to fetch recommendations for seed %s: %s", job_id, hifi_id, e)
+            continue
+
+    stages['fetching_recommendations'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages})
+
+    # Stage 4: Process tracks - quality filter, dedupe, filter, rank
+    stages['processing_tracks'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+    logger.info("[RECOMMENDATION] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
+
+    # Filter by minimum quality from download settings
+    settings = get_download_settings()
+    min_quality = settings.get('quality', 'LOSSLESS')
+    min_rank = _get_hifi_audio_quality_rank(min_quality)
+    quality_filtered = []
+    for rec in raw_recommendations:
+        rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
+        if rec_rank >= min_rank:
+            quality_filtered.append(rec)
+    progress['tracks_after_quality_filter'] = len(quality_filtered)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    # Deduplicate by hifi_id, aggregate frequency score
+    deduped = {}
+    for rec in quality_filtered:
+        hid = rec['hifi_id']
+        if hid not in deduped:
+            deduped[hid] = rec
+            deduped[hid]['score'] = 1
+        else:
+            deduped[hid]['score'] += 1
+
+    # Filter out tracks already in library by hifi_id or normalized artist-title
+    existing_hifi_ids = get_existing_hifi_ids()
+    existing_artist_titles = get_existing_artist_titles()
+    filtered = []
+    for rec in deduped.values():
+        if rec['hifi_id'] in existing_hifi_ids:
+            continue
+        artist_title = (
+            normalize_match_text(rec.get('artist', '')),
+            normalize_match_text(rec.get('title', ''), strip_trailing_parenthetical=True)
+        )
+        if artist_title in existing_artist_titles:
+            continue
+        filtered.append(rec)
+    progress['tracks_after_filter'] = len(filtered)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    # Sort by frequency score descending, take top 25
+    filtered.sort(key=lambda x: x['score'], reverse=True)
+    top_tracks = filtered[:25]
+
+    stages['processing_tracks'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages})
+
+    # Stage 5: Save playlist
+    stages['saving_playlist'] = 'in_progress'
+    jobs.update_job_progress(job_id, {'stages': stages})
+    logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
+
+    save_recommendation_playlist(
+        plex_account_id=plex_account_id,
+        slug=slug,
+        name='Fresh Finds',
+        strategy='fresh-finds',
+        seed_count=len(seeds),
+        tracks=top_tracks
+    )
+
+    progress['tracks_saved'] = len(top_tracks)
+    stages['saving_playlist'] = 'done'
+    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    return {
+        'stages': stages,
+        'progress': progress,
+        'trigger': trigger,
+        'plex_username': plex_username,
+    }
+
+
+@app.route('/api/recommendations/playlists', methods=['GET'])
+def list_recommendation_playlists_route():
+    user_id = request.args.get('user_id', '').strip() or None
+
+    plex_account_id = None
+    if user_id:
+        mappings = get_all_plex_account_mappings()
+        for m in mappings:
+            if str(m.get('plex_client_id') or '') == user_id:
+                plex_account_id = m.get('plex_account_id')
+                break
+
+    if plex_account_id is None:
+        return jsonify({'playlists': [], 'has_history': False})
+
+    has_history = has_listen_history(plex_account_id)
+    playlists = list_recommendation_playlists(plex_account_id)
+
+    result = []
+    for p in playlists:
+        generated_at = p.get('generated_at')
+        result.append({
+            'id': p['id'],
+            'name': p['name'],
+            'slug': p['slug'],
+            'strategy': p['strategy'],
+            'seed_count': p['seed_count'],
+            'track_count': p['track_count'],
+            'generated_at': generated_at.isoformat() + 'Z' if isinstance(generated_at, datetime) else str(generated_at),
+        })
+
+    return jsonify({'playlists': result, 'has_history': has_history})
+
+
+@app.route('/api/recommendations/generate', methods=['POST'])
+def generate_recommendation_playlist():
+    data = request.json if request.is_json else {}
+    slug = data.get('slug', 'fresh-finds')
+    user_id = data.get('user_id', '').strip()
+
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    plex_account_id = None
+    plex_username = None
+    mappings = get_all_plex_account_mappings()
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            plex_account_id = m.get('plex_account_id')
+            plex_username = m.get('username')
+            break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    job_id = jobs.queue_recommendation_generation(
+        slug=slug,
+        plex_account_id=plex_account_id,
+        plex_username=plex_username or 'Unknown',
+        trigger='manual'
+    )
+    if job_id is None:
+        return jsonify({'error': 'A recommendation generation job is already queued or in progress'}), 409
+
+    return jsonify({'ok': True, 'job_id': job_id, 'status': 'queued'}), 202
+
+
+@app.route('/api/recommendations/<slug>', methods=['GET'])
+def get_recommendation_playlist_route(slug):
+    user_id = request.args.get('user_id', '').strip() or None
+
+    plex_account_id = None
+    if user_id:
+        mappings = get_all_plex_account_mappings()
+        for m in mappings:
+            if str(m.get('plex_client_id') or '') == user_id:
+                plex_account_id = m.get('plex_account_id')
+                break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    playlist_data = get_recommendation_playlist(plex_account_id, slug)
+    if not playlist_data:
+        return jsonify({'error': 'Playlist not found'}), 404
+
+    generated_at = playlist_data.get('generated_at')
+    tracks = []
+    for t in playlist_data['tracks']:
+        artist_id = t.get('artist_id')
+        album_id = t.get('album_id')
+        tracks.append({
+            'id': t['hifi_id'],
+            'title': t['title'],
+            'artists': [{'id': artist_id, 'name': t['artist'] or 'Unknown Artist'}] if t['artist'] else [],
+            'album': {'id': album_id, 'title': t['album'] or '', 'cover': t['cover']} if t['album'] or t['cover'] else {},
+            'duration': t['duration'],
+            'explicit': False,
+            'maxAudioQuality': t.get('quality') or '',
+        })
+
+    return jsonify({
+        'playlist': {
+            'slug': playlist_data['slug'],
+            'name': playlist_data['name'],
+            'track_count': playlist_data['track_count'],
+            'generated_at': generated_at.isoformat() + 'Z' if isinstance(generated_at, datetime) else str(generated_at),
+        },
+        'tracks': tracks
     })

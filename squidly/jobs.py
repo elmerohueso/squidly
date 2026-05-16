@@ -930,3 +930,14 @@ def queue_plex_listen_history_sync(trigger='scheduled'):
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
     return enqueue_job('plex_listen_history_sync', payload, max_attempts=5)
+
+
+def queue_recommendation_generation(slug, plex_account_id, plex_username, trigger='scheduled'):
+    payload = {
+        'slug': slug,
+        'plex_account_id': plex_account_id,
+        'plex_username': plex_username,
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return enqueue_job('generate_recommendations', payload, max_attempts=3)

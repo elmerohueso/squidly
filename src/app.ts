@@ -819,6 +819,10 @@ class App {
         } else if (route.view === 'similar_artists') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'Similar Artists' });
+        } else if (route.view === 'fresh_finds') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Squidly' });
+            crumbs.push({ label: 'Fresh Finds' });
         } else {
             crumbs.push({ label: 'Explore' });
         }
@@ -2781,6 +2785,11 @@ class App {
             return { header, container, toggle };
         };
 
+        // --- SQUIDLY Playlists (first) ---
+        const squidlySection = createSection('SQUIDLY', 'sidebar_section_squidly');
+        playlistNavItems.appendChild(squidlySection.header);
+        playlistNavItems.appendChild(squidlySection.container);
+
         // --- Plex Playlists ---
         const plexSection = createSection('Plex', 'sidebar_section_plex');
         playlistNavItems.appendChild(plexSection.header);
@@ -2913,6 +2922,83 @@ class App {
             });
         }
         playlistNavItems.appendChild(ytmSection.container);
+
+        void this.loadSquidlySection(squidlySection.container);
+    }
+
+    private async loadSquidlySection(container: HTMLUListElement): Promise<void> {
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Not enough listen history to generate recommendations';
+            container.appendChild(li);
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/recommendations/playlists?user_id=${encodeURIComponent(userId)}`);
+            if (!response.ok) {
+                throw new Error('Failed to load recommendations');
+            }
+            const data = await response.json();
+            const hasHistory = data.has_history as boolean;
+            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
+
+            if (!hasHistory) {
+                const li = document.createElement('li');
+                li.style.padding = '0.5rem 0.75rem';
+                li.style.color = 'var(--text-muted)';
+                li.style.fontSize = '0.75rem';
+                li.textContent = 'Not enough listen history to generate recommendations';
+                container.appendChild(li);
+                return;
+            }
+
+            if (playlists.length === 0) {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'nav-item';
+                a.textContent = 'Fresh Finds';
+                a.style.fontSize = '0.875rem';
+                a.style.paddingTop = '0.25rem';
+                a.style.paddingBottom = '0.25rem';
+                a.addEventListener('click', (e: Event) => {
+                    e.preventDefault();
+                    this.switchPage('explore');
+                    void this.fetchFreshFindsPlaylist();
+                });
+                li.appendChild(a);
+                container.appendChild(li);
+            } else {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'nav-item';
+                const ff = playlists.find((p: any) => p.slug === 'fresh-finds');
+                a.textContent = 'Fresh Finds';
+                a.style.fontSize = '0.875rem';
+                a.style.paddingTop = '0.25rem';
+                a.style.paddingBottom = '0.25rem';
+                a.addEventListener('click', (e: Event) => {
+                    e.preventDefault();
+                    this.switchPage('explore');
+                    void this.fetchFreshFindsPlaylist();
+                });
+                li.appendChild(a);
+                container.appendChild(li);
+            }
+        } catch {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Not enough listen history to generate recommendations';
+            container.appendChild(li);
+        }
     }
 
     private initializeHistoryControls(): void {
@@ -3086,6 +3172,10 @@ class App {
         if (view === 'similar_artists') {
             const artistId = Number(params.get('id') || '0');
             return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
+        }
+
+        if (view === 'fresh_finds') {
+            return { view: 'fresh_finds' };
         }
 
         return view === 'home' ? { view: 'home' } : null;
@@ -3458,6 +3548,11 @@ class App {
 
         if (route.view === 'similar_artists' && route.artistId) {
             await this.fetchSimilarArtists(route.artistId, updateHistory);
+            return;
+        }
+
+        if (route.view === 'fresh_finds') {
+            await this.fetchFreshFindsPlaylist(updateHistory);
             return;
         }
     }
@@ -3922,6 +4017,8 @@ class App {
                 return 'Plex Update';
             case 'plex_listen_history_sync':
                 return 'Listen History Sync';
+            case 'generate_recommendations':
+                return 'Fresh Finds';
             case 'download_track':
                 return 'Download';
             default:
@@ -5171,6 +5268,52 @@ class App {
             `;
         }
 
+        if (job.job_type === 'generate_recommendations') {
+            const stageRows = [
+                { key: 'syncing_listen_history', label: 'Syncing Listen History' },
+                { key: 'gathering_seeds', label: 'Gathering Seeds' },
+                { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
+                { key: 'processing_tracks', label: 'Processing Tracks' },
+                { key: 'saving_playlist', label: 'Saving Playlist' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const seedsFound = Number(progress.seeds_found || 0);
+            const recsFetched = Number(progress.recommendations_fetched || 0);
+            const afterFilter = Number(progress.tracks_after_filter || 0);
+            const saved = Number(progress.tracks_saved || 0);
+            const progressText = seedsFound > 0
+                ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter • ${saved} tracks saved`
+                : 'Waiting to start...';
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="${actionsClass}">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'tagged', label: 'Tagged' },
@@ -5260,6 +5403,14 @@ class App {
                 return `Listen History Sync (Manual) #${job.id}`;
             }
             return `Listen History Sync #${job.id}`;
+        }
+
+        if (job.job_type === 'generate_recommendations') {
+            const username = job.payload?.plex_username || 'Unknown';
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled) #${job.id}`;
+            if (trigger === 'manual') return `Fresh Finds - ${username} (Manual) #${job.id}`;
+            return `Fresh Finds - ${username} #${job.id}`;
         }
 
         const artist = job.result?.artist;
@@ -9423,6 +9574,249 @@ class App {
             this.displayMessage('Error loading recommendations. Please try again.', () => this.fetchSimilarTracks(trackId));
             console.error('Recommendations fetch error:', error);
         }
+    }
+
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'fresh_finds' };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'fresh_finds' });
+        }
+        this.stopPlayback();
+        this.displayMessage('Loading Fresh Finds...');
+
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            this.displayMessage('Not enough listen history to generate recommendations');
+            return;
+        }
+
+        try {
+            const playlistsResponse = await fetch(`/api/recommendations/playlists?user_id=${encodeURIComponent(userId)}`);
+            if (!playlistsResponse.ok) {
+                throw new Error('Failed to check playlists');
+            }
+            const playlistsData = await playlistsResponse.json();
+            const hasHistory = playlistsData.has_history as boolean;
+            const playlists = Array.isArray(playlistsData.playlists) ? playlistsData.playlists : [];
+            const existing = playlists.find((p: any) => p.slug === 'fresh-finds');
+
+            if (!hasHistory) {
+                this.displayMessage('Not enough listen history to generate recommendations');
+                return;
+            }
+
+            if (existing) {
+                const generatedAt = new Date(existing.generated_at);
+                const hoursSince = (Date.now() - generatedAt.getTime()) / (1000 * 60 * 60);
+                if (hoursSince > 24) {
+                    void this.triggerFreshFindsGeneration(userId);
+                }
+                await this.renderFreshFindsTracks(userId);
+            } else {
+                await this.triggerFreshFindsGeneration(userId);
+            }
+        } catch (error) {
+            this.displayMessage('Error loading Fresh Finds. Please try again.', () => this.fetchFreshFindsPlaylist());
+            console.error('Fresh Finds fetch error:', error);
+        }
+    }
+
+    private async triggerFreshFindsGeneration(userId: string): Promise<void> {
+        try {
+            const response = await fetch('/api/recommendations/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: 'fresh-finds', user_id: userId })
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                if (response.status === 409) {
+                    await this.pollForFreshFindsCompletion(userId);
+                    return;
+                }
+                throw new Error(data.error || 'Failed to start generation');
+            }
+            await this.pollForFreshFindsCompletion(userId);
+        } catch (error) {
+            console.error('Fresh Finds generation error:', error);
+        }
+    }
+
+    private async pollForFreshFindsCompletion(userId: string): Promise<void> {
+        const poll = async (): Promise<void> => {
+            try {
+                const response = await fetch(`/api/jobs?jobs_filter=incomplete&exclude_plex_playlist_add=0`);
+                if (!response.ok) throw new Error('Failed to check job status');
+                const data = await response.json();
+                const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+                const activeJob = jobs.find((j: any) => j.job_type === 'generate_recommendations' && (j.status === 'queued' || j.status === 'in_progress'));
+                if (activeJob) {
+                    this.renderFreshFindsProgress(activeJob);
+                    setTimeout(poll, 3000);
+                } else {
+                    await this.renderFreshFindsTracks(userId);
+                }
+            } catch {
+                setTimeout(poll, 3000);
+            }
+        };
+        await poll();
+    }
+
+    private renderFreshFindsProgress(job: any): void {
+        const stages = (job.result?.stages || {}) as Record<string, string>;
+        const progress = (job.result?.progress || {}) as Record<string, number>;
+        const stageList = [
+            { key: 'syncing_listen_history', label: 'Syncing Listen History' },
+            { key: 'gathering_seeds', label: 'Gathering Seeds' },
+            { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
+            { key: 'processing_tracks', label: 'Processing Tracks' },
+            { key: 'saving_playlist', label: 'Saving Playlist' }
+        ];
+
+        const statusLabel = job.status === 'queued' ? 'Queued' : 'In Progress';
+        const seedsFound = progress.seeds_found || 0;
+        const recsFetched = progress.recommendations_fetched || 0;
+        const afterFilter = progress.tracks_after_filter || 0;
+
+        const stageHtml = stageList.map(s => {
+            const status = stages[s.key] || (job.status === 'succeeded' ? 'done' : 'pending');
+            const statusClass = `status-${status}`;
+            const label = status.replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            return `
+                <div class="job-stage">
+                    <span>${s.label}</span>
+                    <span class="job-stage-status ${statusClass}">${label}</span>
+                </div>
+            `;
+        }).join('');
+
+        const progressText = seedsFound > 0
+            ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter`
+            : 'Waiting to start...';
+
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-${job.status === 'queued' ? 'queued' : 'in-progress'}">${statusLabel}</div>
+                </div>
+                <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                <div class="job-stages">
+                    ${stageHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    private async renderFreshFindsTracks(userId: string): Promise<void> {
+        try {
+            const response = await fetch(`/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Fresh Finds tracks');
+            }
+            const data = await response.json();
+            const tracks = Array.isArray(data.tracks) ? data.tracks as Track[] : [];
+            const playlist = data.playlist || {};
+
+            if (tracks.length === 0) {
+                this.displayMessage('No new recommendations found. Try again later.');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+            const generatedDate = playlist.generated_at ? new Date(playlist.generated_at).toLocaleDateString() : '';
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>Fresh Finds${generatedDate ? ` — ${generatedDate}` : ''}</h2>
+                    </div>
+                </div>
+                <div class="results-list">
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="freshFindsResultsList">
+                                ${tracks.map(track => this.formatTrackGridRow(this.normalizeTrack(track), {
+                                    viewMode: 'multi-album',
+                                    showTrackNumber: false,
+                                    showAlbumColumn: true,
+                                    showArtwork: true,
+                                })).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement | null;
+            if (resultsHeaderTop) {
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+
+                const refreshBtn = document.createElement('button');
+                refreshBtn.id = 'refreshFreshFindsBtn';
+                refreshBtn.className = 'add-all-btn';
+                refreshBtn.title = 'Refresh Fresh Finds';
+                refreshBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                `;
+                refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
+                buttonsContainer.appendChild(refreshBtn);
+
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+
+            void this.annotateTrackCardsWithPlexStatus(tracks);
+        } catch (error) {
+            this.displayMessage('Error loading Fresh Finds tracks. Please try again.', () => this.fetchFreshFindsPlaylist());
+            console.error('Fresh Finds tracks fetch error:', error);
+        }
+    }
+
+    private async refreshFreshFindsPlaylist(userId: string): Promise<void> {
+        this.stopPlayback();
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-in-progress">Starting...</div>
+                </div>
+            </div>
+        `;
+        await this.triggerFreshFindsGeneration(userId);
+        await this.renderFreshFindsTracks(userId);
     }
 
     private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
