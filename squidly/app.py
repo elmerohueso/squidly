@@ -2790,6 +2790,8 @@ def get_jobs_filter_totals(exclude_bulk_playlist_add=True):
     where_sql = 'WHERE job_type <> %s' if exclude_bulk_playlist_add else ''
     params = ('bulk_playlist_add',) if exclude_bulk_playlist_add else ()
 
+    conn = get_db_connection()
+    cur = conn.cursor()
     cur.execute(
         f"""
         SELECT job_type, status, result_json
