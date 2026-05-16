@@ -2964,6 +2964,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.switchPage('explore');
                     void this.fetchFreshFindsPlaylist();
                 });
                 li.appendChild(a);
@@ -2980,6 +2981,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.switchPage('explore');
                     void this.fetchFreshFindsPlaylist();
                 });
                 li.appendChild(a);
@@ -9605,12 +9607,11 @@ class App {
                 const generatedAt = new Date(existing.generated_at);
                 const hoursSince = (Date.now() - generatedAt.getTime()) / (1000 * 60 * 60);
                 if (hoursSince > 24) {
-                    this.triggerFreshFindsGeneration(userId);
+                    void this.triggerFreshFindsGeneration(userId);
                 }
                 await this.renderFreshFindsTracks(userId);
             } else {
                 await this.triggerFreshFindsGeneration(userId);
-                await this.renderFreshFindsTracks(userId);
             }
         } catch (error) {
             this.displayMessage('Error loading Fresh Finds. Please try again.', () => this.fetchFreshFindsPlaylist());
@@ -9619,7 +9620,6 @@ class App {
     }
 
     private async triggerFreshFindsGeneration(userId: string): Promise<void> {
-        this.displayMessage('Generating Fresh Finds...');
         try {
             const response = await fetch('/api/recommendations/generate', {
                 method: 'POST',
@@ -9647,16 +9647,69 @@ class App {
                 if (!response.ok) throw new Error('Failed to check job status');
                 const data = await response.json();
                 const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-                const running = jobs.some((j: any) => j.job_type === 'generate_recommendations' && (j.status === 'queued' || j.status === 'in_progress'));
-                if (running) {
-                    this.displayMessage('Generating Fresh Finds...');
+                const activeJob = jobs.find((j: any) => j.job_type === 'generate_recommendations' && (j.status === 'queued' || j.status === 'in_progress'));
+                if (activeJob) {
+                    this.renderFreshFindsProgress(activeJob);
                     setTimeout(poll, 3000);
+                } else {
+                    await this.renderFreshFindsTracks(userId);
                 }
             } catch {
                 setTimeout(poll, 3000);
             }
         };
         await poll();
+    }
+
+    private renderFreshFindsProgress(job: any): void {
+        const stages = (job.result?.stages || {}) as Record<string, string>;
+        const progress = (job.result?.progress || {}) as Record<string, number>;
+        const stageList = [
+            { key: 'syncing_listen_history', label: 'Syncing Listen History' },
+            { key: 'gathering_seeds', label: 'Gathering Seeds' },
+            { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
+            { key: 'processing_tracks', label: 'Processing Tracks' },
+            { key: 'saving_playlist', label: 'Saving Playlist' }
+        ];
+
+        const statusLabel = job.status === 'queued' ? 'Queued' : 'In Progress';
+        const seedsFound = progress.seeds_found || 0;
+        const recsFetched = progress.recommendations_fetched || 0;
+        const afterFilter = progress.tracks_after_filter || 0;
+
+        const stageHtml = stageList.map(s => {
+            const status = stages[s.key] || (job.status === 'succeeded' ? 'done' : 'pending');
+            const statusClass = `status-${status}`;
+            const label = status.replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            return `
+                <div class="job-stage">
+                    <span>${s.label}</span>
+                    <span class="job-stage-status ${statusClass}">${label}</span>
+                </div>
+            `;
+        }).join('');
+
+        const progressText = seedsFound > 0
+            ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter`
+            : 'Waiting to start...';
+
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-${job.status === 'queued' ? 'queued' : 'in-progress'}">${statusLabel}</div>
+                </div>
+                <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                <div class="job-stages">
+                    ${stageHtml}
+                </div>
+            </div>
+        `;
     }
 
     private async renderFreshFindsTracks(userId: string): Promise<void> {
