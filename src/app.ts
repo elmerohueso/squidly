@@ -819,6 +819,10 @@ class App {
         } else if (route.view === 'similar_artists') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'Similar Artists' });
+        } else if (route.view === 'fresh_finds') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Squidly' });
+            crumbs.push({ label: 'Fresh Finds' });
         } else {
             crumbs.push({ label: 'Explore' });
         }
@@ -2975,7 +2979,7 @@ class App {
                 a.href = '#';
                 a.className = 'nav-item';
                 const ff = playlists.find((p: any) => p.slug === 'fresh-finds');
-                a.textContent = ff ? `Fresh Finds (${ff.track_count} tracks)` : 'Fresh Finds';
+                a.textContent = 'Fresh Finds';
                 a.style.fontSize = '0.875rem';
                 a.style.paddingTop = '0.25rem';
                 a.style.paddingBottom = '0.25rem';
