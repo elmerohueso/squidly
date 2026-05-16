@@ -863,6 +863,27 @@ def get_existing_hifi_ids():
     return {int(row['hifi_id']) for row in rows}
 
 
+def get_existing_artist_titles():
+    from squidly.utils import normalize_match_text
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT a.name AS artist_name, t.title AS track_title
+        FROM tracks t
+        JOIN artists a ON t.artist_id = a.artist_id
+        WHERE a.name IS NOT NULL AND t.title IS NOT NULL
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {
+        (normalize_match_text(row['artist_name']), normalize_match_text(row['track_title'], strip_trailing_parenthetical=True))
+        for row in rows
+    }
+
+
 def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
     conn = get_db_connection()
     cur = conn.cursor()

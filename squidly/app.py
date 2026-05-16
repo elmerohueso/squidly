@@ -161,6 +161,7 @@ from squidly.storage import (
     get_all_plex_account_mappings,
     get_download_settings,
     get_download_write_gate_state,
+    get_existing_artist_titles,
     get_existing_hifi_ids,
     get_last_download_activity_at,
     get_library_update_status,
@@ -5301,9 +5302,20 @@ def process_recommendation_job(job_id, payload):
         else:
             deduped[hid]['score'] += 1
 
-    # Filter out tracks already in library
+    # Filter out tracks already in library by hifi_id or normalized artist-title
     existing_hifi_ids = get_existing_hifi_ids()
-    filtered = [rec for rec in deduped.values() if rec['hifi_id'] not in existing_hifi_ids]
+    existing_artist_titles = get_existing_artist_titles()
+    filtered = []
+    for rec in deduped.values():
+        if rec['hifi_id'] in existing_hifi_ids:
+            continue
+        artist_title = (
+            normalize_match_text(rec.get('artist', '')),
+            normalize_match_text(rec.get('title', ''), strip_trailing_parenthetical=True)
+        )
+        if artist_title in existing_artist_titles:
+            continue
+        filtered.append(rec)
     progress['tracks_after_filter'] = len(filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
 
