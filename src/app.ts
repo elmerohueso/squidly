@@ -9756,6 +9756,21 @@ class App {
             if (resultsHeaderTop) {
                 const buttonsContainer = document.createElement('div');
                 buttonsContainer.className = 'add-all-buttons-container';
+
+                const refreshBtn = document.createElement('button');
+                refreshBtn.id = 'refreshFreshFindsBtn';
+                refreshBtn.className = 'add-all-btn';
+                refreshBtn.title = 'Refresh Fresh Finds';
+                refreshBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <polyline points="1 20 1 14 7 14"></polyline>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                `;
+                refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
+                buttonsContainer.appendChild(refreshBtn);
+
                 const addPlaylistBtn = document.createElement('button');
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
                 addPlaylistBtn.className = 'add-all-btn';
@@ -9779,6 +9794,13 @@ class App {
             this.displayMessage('Error loading Fresh Finds tracks. Please try again.', () => this.fetchFreshFindsPlaylist());
             console.error('Fresh Finds tracks fetch error:', error);
         }
+    }
+
+    private async refreshFreshFindsPlaylist(userId: string): Promise<void> {
+        this.stopPlayback();
+        this.displayMessage('Refreshing Fresh Finds...');
+        await this.triggerFreshFindsGeneration(userId);
+        await this.renderFreshFindsTracks(userId);
     }
 
     private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
