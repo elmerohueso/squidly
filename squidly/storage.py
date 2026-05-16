@@ -892,8 +892,8 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
             cur.execute(
                 """
                 INSERT INTO recommendation_playlist_tracks
-                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     playlist_id,
@@ -906,6 +906,9 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
                     track.get('cover'),
                     track.get('seed_hifi_id'),
                     track.get('score'),
+                    track.get('quality', ''),
+                    track.get('artist_id'),
+                    track.get('album_id'),
                 )
             )
 
@@ -936,7 +939,7 @@ def get_recommendation_playlist(plex_account_id, slug):
 
     cur.execute(
         """
-        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
         FROM recommendation_playlist_tracks
         WHERE playlist_id = %s
         ORDER BY position
@@ -965,6 +968,9 @@ def get_recommendation_playlist(plex_account_id, slug):
                 'cover': t['cover'],
                 'seed_hifi_id': t['seed_hifi_id'],
                 'score': t['score'],
+                'quality': t['quality'],
+                'artist_id': t['artist_id'],
+                'album_id': t['album_id'],
             }
             for t in tracks
         ]

@@ -9736,7 +9736,19 @@ class App {
                     </div>
                 </div>
                 <div class="results-list">
-                    ${this.formatTracksGrid(tracks)}
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="freshFindsResultsList">
+                                ${tracks.map(track => this.formatTrackGridRow(this.normalizeTrack(track), {
+                                    viewMode: 'multi-album',
+                                    showTrackNumber: false,
+                                    showAlbumColumn: true,
+                                    showArtwork: true,
+                                })).join('')}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
 

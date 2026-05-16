@@ -5262,13 +5262,19 @@ def process_recommendation_job(job_id, payload):
                 for item in items:
                     track = item.get('track') or item.get('item') or item
                     if isinstance(track, dict) and track.get('id') and track.get('title'):
+                        artists = track.get('artists') or []
+                        primary_artist = artists[0] if isinstance(artists, list) and len(artists) > 0 else {}
+                        album = track.get('album') if isinstance(track.get('album'), dict) else {}
                         raw_recommendations.append({
                             'hifi_id': int(track['id']),
                             'title': track['title'],
-                            'artist': (track.get('artists') or [{}])[0].get('name') if isinstance(track.get('artists'), list) else track.get('artist', {}).get('name') if isinstance(track.get('artist'), dict) else '',
-                            'album': track.get('album', {}).get('title') if isinstance(track.get('album'), dict) else '',
+                            'artist': primary_artist.get('name') if isinstance(primary_artist, dict) else '',
+                            'artist_id': primary_artist.get('id') if isinstance(primary_artist, dict) else None,
+                            'album': album.get('title') if isinstance(album, dict) else '',
+                            'album_id': album.get('id') if isinstance(album, dict) else None,
                             'duration': track.get('duration'),
-                            'cover': track.get('album', {}).get('cover') if isinstance(track.get('album'), dict) else track.get('cover'),
+                            'cover': album.get('cover') if isinstance(album, dict) else track.get('cover'),
+                            'quality': track.get('maxAudioQuality') or track.get('audioQuality') or '',
                             'seed_hifi_id': hifi_id,
                         })
                 progress['recommendations_fetched'] = len(raw_recommendations)
@@ -5423,13 +5429,16 @@ def get_recommendation_playlist_route(slug):
     generated_at = playlist_data.get('generated_at')
     tracks = []
     for t in playlist_data['tracks']:
+        artist_id = t.get('artist_id')
+        album_id = t.get('album_id')
         tracks.append({
             'id': t['hifi_id'],
             'title': t['title'],
-            'artists': [{'id': 0, 'name': t['artist'] or 'Unknown Artist'}] if t['artist'] else [],
-            'album': {'id': 0, 'title': t['album'] or '', 'cover': t['cover']} if t['album'] or t['cover'] else {},
+            'artists': [{'id': artist_id, 'name': t['artist'] or 'Unknown Artist'}] if t['artist'] else [],
+            'album': {'id': album_id, 'title': t['album'] or '', 'cover': t['cover']} if t['album'] or t['cover'] else {},
             'duration': t['duration'],
             'explicit': False,
+            'maxAudioQuality': t.get('quality') or '',
         })
 
     return jsonify({

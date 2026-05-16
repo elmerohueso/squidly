@@ -522,5 +522,35 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'quality'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN quality TEXT")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'artist_id'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN artist_id INTEGER")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'album_id'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN album_id INTEGER")
+
     conn.commit()
     conn.close()
