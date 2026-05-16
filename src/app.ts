@@ -2781,6 +2781,11 @@ class App {
             return { header, container, toggle };
         };
 
+        // --- SQUIDLY Playlists (first) ---
+        const squidlySection = createSection('SQUIDLY', 'sidebar_section_squidly');
+        playlistNavItems.appendChild(squidlySection.header);
+        playlistNavItems.appendChild(squidlySection.container);
+
         // --- Plex Playlists ---
         const plexSection = createSection('Plex', 'sidebar_section_plex');
         playlistNavItems.appendChild(plexSection.header);
@@ -2913,11 +2918,6 @@ class App {
             });
         }
         playlistNavItems.appendChild(ytmSection.container);
-
-        // --- SQUIDLY Playlists ---
-        const squidlySection = createSection('SQUIDLY', 'sidebar_section_squidly');
-        playlistNavItems.appendChild(squidlySection.header);
-        playlistNavItems.appendChild(squidlySection.container);
 
         void this.loadSquidlySection(squidlySection.container);
     }
