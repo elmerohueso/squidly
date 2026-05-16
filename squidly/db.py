@@ -552,5 +552,24 @@ def init_db():
     if not cur.fetchone():
         cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN album_id INTEGER")
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_playlist_adds (
+            id SERIAL PRIMARY KEY,
+            parent_job_id INTEGER,
+            file_path TEXT NOT NULL,
+            playlist_name TEXT NOT NULL,
+            plex_user_id TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_playlist_unique
+        ON pending_playlist_adds (file_path, playlist_name, COALESCE(plex_user_id, ''))
+        """
+    )
+
     conn.commit()
     conn.close()

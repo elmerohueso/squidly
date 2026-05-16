@@ -54,7 +54,6 @@ from io import BytesIO
 from squidly.plex import (
     _get_plex_server_for_user,
     _is_plex_library_scan_active,
-    add_tracks_to_plex_playlist,
     any_plex_library_update_jobs_running_or_queued,
     get_all_plex_users,
     get_plex_health_status,
@@ -141,7 +140,7 @@ from squidly.workers import (
     download_job_worker,
     plex_sync_job_worker,
     automatic_matching_job_worker,
-    retry_pending_playlist_additions,
+    bulk_playlist_add_job_worker,
     plex_sync_scheduler_worker,
     listen_history_sync_worker,
     recommendation_job_worker,
@@ -1322,16 +1321,13 @@ def process_download_job(job_id, payload):
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
             jobs.queue_pending_playlist_addition(
-                artist_name,
-                album_name,
-                track_title,
                 full_path,
                 playlist_name,
                 parent_job_id=job_id,
                 plex_user_id=payload.get('plex_user_id')
             )
             stages['playlist_added'] = 'queued'
-            logger.info("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job")
+            logger.info("[DOWNLOAD] Playlist requested - queued for bulk playlist add")
         else:
             logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
             stages['playlist_added'] = 'skipped'
@@ -1509,16 +1505,13 @@ def process_download_job(job_id, payload):
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
         jobs.queue_pending_playlist_addition(
-            artist_name,
-            album_name,
-            track_title,
             full_path,
             playlist_name,
             parent_job_id=job_id,
             plex_user_id=payload.get('plex_user_id')
         )
         stages['playlist_added'] = 'queued'
-        logger.info("[DOWNLOAD] Playlist requested - queued separate plex_playlist_add job")
+        logger.info("[DOWNLOAD] Playlist requested - queued for bulk playlist add")
     else:
         logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
         stages['playlist_added'] = 'skipped'
@@ -1569,13 +1562,12 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     # With gunicorn --preload, this runs once before workers are forked
     logger.info("Squidly starting up...")
     downloads.validate_all_endpoints()
-    jobs.backfill_plex_playlist_add_parent_links()
     plex_healthcheck()
 
-    # Start background worker for retrying failed Plex playlist additions
-    plex_retry_thread = threading.Thread(target=retry_pending_playlist_additions, daemon=True)
-    plex_retry_thread.start()
-    logger.info("Plex playlist retry worker started ")
+    # Start background worker for bulk playlist additions
+    bulk_playlist_thread = threading.Thread(target=bulk_playlist_add_job_worker, daemon=True)
+    bulk_playlist_thread.start()
+    logger.info("Bulk playlist add worker started ")
 
     # Start background worker for processing download jobs
 
@@ -2648,14 +2640,14 @@ def list_jobs():
     - status: filter by raw job status
     - job_type: filter by job type
     - jobs_filter: one of incomplete|complete|completed_with_errors|failed
-    - exclude_plex_playlist_add: default true
+    - exclude_bulk_playlist_add: default true
     - limit: optional max number of rows (no backend-enforced maximum)
     - offset: pagination offset (default 0)
     """
     status_filter = request.args.get('status')
     job_type_filter = request.args.get('job_type')
     jobs_filter = request.args.get('jobs_filter')
-    exclude_plex_playlist_add = request.args.get('exclude_plex_playlist_add', '1').lower() not in ('0', 'false', 'no')
+    exclude_bulk_playlist_add = request.args.get('exclude_bulk_playlist_add', '1').lower() not in ('0', 'false', 'no')
 
     limit = None
     limit_raw = request.args.get('limit')
@@ -2681,9 +2673,9 @@ def list_jobs():
     if job_type_filter:
         where_clauses.append('job_type = %s')
         params.append(job_type_filter)
-    if exclude_plex_playlist_add:
+    if exclude_bulk_playlist_add:
         where_clauses.append('job_type <> %s')
-        params.append('plex_playlist_add')
+        params.append('bulk_playlist_add')
 
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ''
 
@@ -2769,7 +2761,7 @@ def list_jobs():
             'priority': row['priority']
         })
 
-    totals = get_jobs_filter_totals(exclude_plex_playlist_add=exclude_plex_playlist_add)
+    totals = get_jobs_filter_totals(exclude_bulk_playlist_add=exclude_bulk_playlist_add)
     return jsonify({'jobs': jobs, 'totals': totals, 'total_count': total_count})
 
 def _effective_job_status(job_type, status, result_json):
@@ -2794,12 +2786,9 @@ def _effective_job_status(job_type, status, result_json):
 
     return status
 
-def get_jobs_filter_totals(exclude_plex_playlist_add=True):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    where_sql = 'WHERE job_type <> %s' if exclude_plex_playlist_add else ''
-    params = ('plex_playlist_add',) if exclude_plex_playlist_add else ()
+def get_jobs_filter_totals(exclude_bulk_playlist_add=True):
+    where_sql = 'WHERE job_type <> %s' if exclude_bulk_playlist_add else ''
+    params = ('bulk_playlist_add',) if exclude_bulk_playlist_add else ()
 
     cur.execute(
         f"""
@@ -2931,7 +2920,7 @@ def cancel_all_pending_jobs():
         status = row.get('status')
         job_type = row.get('job_type')
 
-        if job_type == 'plex_playlist_add':
+        if job_type == 'bulk_playlist_add':
             continue
 
         if status in ('queued', 'in_progress'):

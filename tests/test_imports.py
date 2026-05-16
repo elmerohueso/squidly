@@ -62,16 +62,18 @@ def test_import_jobs():
         PermanentDownloadError,
         TransientDownloadError,
         _download_track_all_stages_done,
-        backfill_plex_playlist_add_parent_links,
         claim_next_job,
         compute_job_backoff_seconds,
+        count_pending_playlist_adds,
+        delete_pending_playlist_adds,
         enqueue_job,
-        get_pending_playlist_additions,
+        get_pending_playlist_adds,
         is_job_cancelled,
         mark_job_failed,
         mark_job_in_progress,
         mark_job_retrying,
         mark_job_succeeded,
+        queue_bulk_playlist_add_job,
         queue_pending_playlist_addition,
         queue_plex_library_sync,
         recover_stale_in_progress_jobs,
@@ -79,8 +81,6 @@ def test_import_jobs():
         serialize_job_payload,
         start_plex_sync_job,
         update_job_progress,
-        update_parent_playlist_stage,
-        update_pending_addition_attempt,
     )
 
 
@@ -164,7 +164,7 @@ def test_import_workers():
         download_job_worker,
         plex_sync_job_worker,
         automatic_matching_job_worker,
-        retry_pending_playlist_additions,
+        bulk_playlist_add_job_worker,
         plex_sync_scheduler_worker,
     )
 

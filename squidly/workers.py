@@ -9,7 +9,6 @@ from squidly.jobs import (
     claim_next_job,
     mark_job_cancelled,
     mark_job_failed,
-    mark_job_in_progress,
     mark_job_retrying,
     mark_job_succeeded,
     queue_plex_listen_history_sync,
@@ -61,9 +60,6 @@ def download_job_worker():
                 if _download_track_all_stages_done(stages):
                     mark_job_succeeded(job['id'], result)
                     logger.info("[DOWNLOAD_WORKER] Job %s completed", job['id'])
-                elif isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                    mark_job_in_progress(job['id'])
-                    logger.info("[DOWNLOAD_WORKER] Job %s waiting for playlist_add completion", job['id'])
                 else:
                     stage_state = stages if isinstance(stages, dict) else {}
                     error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
@@ -122,6 +118,10 @@ def plex_sync_job_worker():
                 mark_job_succeeded(job['id'], result)
                 logger.info("[PLEX_SYNC_WORKER] Job %s completed", job['id'])
                 queue_plex_listen_history_sync(trigger='post_library_sync')
+                from squidly.jobs import queue_bulk_playlist_add_job
+                bulk_job_id = queue_bulk_playlist_add_job(trigger='post_library_sync')
+                if bulk_job_id:
+                    logger.info("[PLEX_SYNC_WORKER] Queued bulk playlist add job %s", bulk_job_id)
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
                 logger.info("[PLEX_SYNC_WORKER] Job %s cancelled", job['id'])
@@ -169,76 +169,55 @@ def automatic_matching_job_worker():
             time.sleep(5)
 
 
-def retry_pending_playlist_additions():
+def bulk_playlist_add_job_worker():
     from squidly.jobs import (
-        get_pending_playlist_additions,
-        remove_pending_addition,
-        update_parent_playlist_stage,
-        update_pending_addition_attempt,
+        claim_next_job,
+        mark_job_succeeded,
+        mark_job_failed,
+        get_pending_playlist_adds,
+        delete_pending_playlist_adds,
     )
-    from squidly.plex import add_tracks_to_plex_playlist
+    from squidly.plex import bulk_add_tracks_to_playlists
+    from squidly.storage import get_plex_config
 
-    """Background worker that periodically retries failed playlist additions."""
-    logger.info("[PLEX_WORKER] Background worker started")
+    logger.info("[BULK_PLAYLIST_WORKER] Background worker started")
 
     while True:
         try:
-            time.sleep(300)
-
-            plex_config = get_plex_config()
-
-            if not (plex_config['server_url'] and plex_config['api_token']):
+            job = claim_next_job('bulk_playlist_add')
+            if not job:
+                time.sleep(5)
                 continue
 
-            pending = get_pending_playlist_additions()
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
 
-            if not pending:
-                continue
+            try:
+                plex_config = get_plex_config()
+                server_url = (plex_config.get('server_url') or '').strip()
+                api_token = (plex_config.get('api_token') or '').strip()
+                library_name = (plex_config.get('library_name') or 'Music').strip()
 
-            logger.info("[PLEX_WORKER] Found %d pending playlist additions to retry", len(pending))
+                if not (server_url and api_token and library_name):
+                    raise ValueError('Plex is not fully configured')
 
-            for addition in pending:
-                parent_job_id = None
-                try:
-                    payload = addition.get('payload') or {}
-                    parent_job_id = payload.get('parent_job_id')
-                    artist = payload.get('artist', 'Unknown Artist')
-                    title = payload.get('title', 'Unknown Track')
-                    file_path = str(payload.get('file_path') or '').strip()
-                    playlist_name = payload.get('playlist_name')
-
-                    success, message = add_tracks_to_plex_playlist(
-                        plex_config['server_url'],
-                        plex_config['api_token'],
-                        plex_config['library_name'] or 'Music',
-                        playlist_name,
-                        file_path,
-                        payload.get('plex_user_id')
-                    )
-
-                    if success:
-                        logger.info("[PLEX_WORKER] Successfully added: %s - %s", artist, title)
-                        remove_pending_addition(addition['id'])
-                        update_parent_playlist_stage(parent_job_id, 'done')
-                    else:
-                        update_pending_addition_attempt(addition['id'], message)
-                        if addition['attempt_count'] + 1 >= addition['max_attempts']:
-                            update_parent_playlist_stage(parent_job_id, 'failed')
-                            logger.info("[PLEX_WORKER] Max attempts reached for: %s - %s", artist, title)
-                        else:
-                            logger.info("[PLEX_WORKER] Retry failed (attempt %d/%d): %s", addition['attempt_count'] + 1, addition['max_attempts'], message)
-
-                    time.sleep(2)
-
-                except Exception as e:
-                    logger.info("[PLEX_WORKER] Error processing addition %s: %s", addition['id'], str(e))
-                    update_pending_addition_attempt(addition['id'], str(e))
-                    if addition['attempt_count'] + 1 >= addition['max_attempts']:
-                        update_parent_playlist_stage(parent_job_id, 'failed')
-
+                result = bulk_add_tracks_to_playlists(
+                    job['id'],
+                    server_url,
+                    api_token,
+                    library_name,
+                )
+                mark_job_succeeded(job['id'], result)
+                logger.info("[BULK_PLAYLIST_WORKER] Job %s completed: %s", job['id'], result.get('summary', ''))
+            except Exception as e:
+                logger.info("[BULK_PLAYLIST_WORKER] Job %s failed: %s", job['id'], str(e))
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
         except Exception as e:
-            logger.info("[PLEX_WORKER] Error in background worker: %s", str(e))
-            time.sleep(60)
+            logger.info("[BULK_PLAYLIST_WORKER] Error in background worker: %s", str(e))
+            time.sleep(5)
 
 
 def plex_sync_scheduler_worker():

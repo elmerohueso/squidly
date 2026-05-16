@@ -33,6 +33,50 @@ _plex_health_status_lock = threading.Lock()
 _playlist_operation_lock = threading.Lock()
 
 
+def _get_or_create_playlist(plex, playlist_name, items=None):
+    """Find an existing playlist by name, or create a new one.
+
+    Returns (playlist, created) tuple.
+    Must be called within _playlist_operation_lock.
+    """
+    try:
+        playlists = plex.playlists()
+        for pl in playlists:
+            if pl.title == playlist_name:
+                return pl, False
+    except Exception as e:
+        logger.info("[PLEX] Error listing playlists: %s", str(e))
+
+    if items:
+        playlist = plex.createPlaylist(playlist_name, items=items)
+        logger.info("[PLEX] Created playlist '%s' with %d tracks", playlist_name, len(items))
+    else:
+        playlist = plex.createPlaylist(playlist_name)
+        logger.info("[PLEX] Created empty playlist '%s'", playlist_name)
+    return playlist, True
+
+
+def _add_items_to_playlist(playlist, items):
+    """Add items to a playlist, handling 'already in' errors gracefully.
+
+    Returns (added, skipped, failed) counts.
+    """
+    added = 0
+    skipped = 0
+    failed = 0
+    for item in items:
+        try:
+            playlist.addItems(item)
+            added += 1
+        except Exception as e:
+            if 'already in' in str(e).lower():
+                skipped += 1
+            else:
+                logger.info("[PLEX] Error adding item to playlist '%s': %s", playlist.title, str(e))
+                failed += 1
+    return added, skipped, failed
+
+
 def set_plex_health_status(ok, value):
     """Update cached Plex healthcheck status."""
     with _plex_health_status_lock:
@@ -311,44 +355,188 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                 'Run a Plex library sync to refresh the tracks table.'
             )
 
-        # Synchronize playlist operations to prevent duplicates during concurrent jobs
         with _playlist_operation_lock:
-            playlist = None
-            try:
-                playlists = plex.playlists()
-                logger.info("[PLEX] Existing playlists found: %d", len(playlists))
-                for pl in playlists:
-                    if pl.title == playlist_name:
-                        playlist = pl
-                        break
-            except Exception as e:
-                logger.info("[PLEX] Error getting playlists: %s", str(e))
+            playlist, created = _get_or_create_playlist(plex, playlist_name, items=[track])
+            if created:
+                return True, f'Created playlist "{playlist_name}" and added track'
 
-            if not playlist:
-                try:
-                    logger.info("[PLEX] Creating playlist: %s", playlist_name)
-                    playlist = plex.createPlaylist(playlist_name, items=[track])
-                    logger.info("[PLEX] Created new playlist: %s", playlist_name)
-                    return True, f'Created playlist "{playlist_name}" and added track'
-                except Exception as e:
-                    logger.info("[PLEX] Error creating playlist: %s", str(e))
-                    return False, f'Error creating playlist: {str(e)}'
-            else:
-                logger.info("[PLEX] Using existing playlist: %s", playlist_name)
-            
-            try:
-                playlist.addItems(track)
-                logger.info("[PLEX] Added track to playlist: %s", playlist_name)
+            added, skipped, failed = _add_items_to_playlist(playlist, [track])
+            if added:
                 return True, f'Added track to playlist "{playlist_name}"'
-            except Exception as e:
-                if 'already in' in str(e).lower():
-                    return True, f'Track already in playlist "{playlist_name}"'
-                logger.info("[PLEX] Error adding track to playlist: %s", str(e))
-                return False, f'Error adding to playlist: {str(e)}'
+            if skipped:
+                return True, f'Track already in playlist "{playlist_name}"'
+            return False, f'Failed to add track to playlist "{playlist_name}"'
 
     except Exception as e:
         logger.info("[PLEX] Unexpected error: %s", str(e))
         return False, f'Unexpected error: {str(e)}'
+
+
+def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
+    """Process all rows in pending_playlist_adds, grouped by (user_id, playlist_name).
+
+    Returns a result dict with progress fields for the job card.
+    """
+    from squidly.jobs import (
+        get_pending_playlist_adds,
+        delete_pending_playlist_adds,
+        update_job_progress,
+    )
+
+    stages = {
+        'resolving_tracks': 'pending',
+        'adding_to_playlists': 'pending',
+    }
+    progress = {
+        'total_tracks': 0,
+        'tracks_processed': 0,
+        'tracks_added': 0,
+        'tracks_skipped': 0,
+        'tracks_failed': 0,
+    }
+    update_job_progress(job_id, {'stages': stages, 'progress': progress})
+
+    pending = get_pending_playlist_adds()
+    total = len(pending)
+    progress['total_tracks'] = total
+    update_job_progress(job_id, {'progress': progress})
+
+    if total == 0:
+        stages['resolving_tracks'] = 'skipped'
+        stages['adding_to_playlists'] = 'skipped'
+        update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        return {
+            'total_tracks': 0,
+            'tracks_added': 0,
+            'tracks_skipped': 0,
+            'tracks_failed': 0,
+            'summary': 'No pending tracks',
+        }
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT library_id, right(replace(path, '\\', '/'), length(%s)) AS path_tail
+        FROM tracks
+        WHERE library_id IS NOT NULL AND library_id <> ''
+        """,
+        (pending[0]['file_path'].split('\\')[-3:] if '\\' in pending[0]['file_path'] else pending[0]['file_path'].split('/')[-3:],),
+    )
+
+    path_index = {}
+    for row in cur.fetchall() or []:
+        path_tail = str(row.get('path_tail') or '').strip()
+        library_id = str(row.get('library_id') or '').strip()
+        if path_tail and library_id:
+            path_index.setdefault(path_tail.lower(), []).append(library_id)
+    conn.close()
+
+    stages['resolving_tracks'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    groups = {}
+    for item in pending:
+        file_path = str(item.get('file_path') or '').strip()
+        playlist_name = str(item.get('playlist_name') or '').strip()
+        plex_user_id = item.get('plex_user_id')
+
+        path_parts = [p for p in re.split(r'[\\/]+', file_path) if p]
+        tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
+        path_tail = '\\'.join(tail_parts).lower()
+
+        library_ids = path_index.get(path_tail, [])
+        key = (plex_user_id, playlist_name)
+        groups.setdefault(key, {'tracks': [], 'ids': []})
+        groups[key]['tracks'].append(item)
+        groups[key]['ids'].extend(library_ids)
+
+    stages['adding_to_playlists'] = 'in_progress'
+    update_job_progress(job_id, {'stages': stages})
+
+    successful_ids = []
+    plex_cache = {}
+
+    for (plex_user_id, playlist_name), group_data in groups.items():
+        user_display = plex_user_id or 'Owner'
+        logger.info("[BULK_PLAYLIST] Processing %d tracks for playlist '%s' (user: %s)", len(group_data['tracks']), playlist_name, user_display)
+
+        if plex_user_id not in plex_cache:
+            try:
+                plex_cache[plex_user_id] = _get_plex_server_for_user(server_url, api_token, plex_user_id)
+            except Exception as e:
+                logger.info("[BULK_PLAYLIST] Failed to get Plex server for user %s: %s", user_display, str(e))
+                for item in group_data['tracks']:
+                    progress['tracks_processed'] += 1
+                    progress['tracks_failed'] += 1
+                    update_job_progress(job_id, {'progress': progress})
+                continue
+
+        plex = plex_cache[plex_user_id]
+
+        unique_library_ids = list(dict.fromkeys(group_data['ids']))
+        tracks_to_add = []
+
+        for rating_key in unique_library_ids:
+            metadata_key = rating_key if rating_key.startswith('/library/metadata/') else f'/library/metadata/{rating_key}'
+            try:
+                candidate = plex.fetchItem(metadata_key)
+                if candidate is not None:
+                    tracks_to_add.append(candidate)
+            except Exception as e:
+                logger.info("[BULK_PLAYLIST] Failed to fetch ratingKey=%s: %s", rating_key, str(e))
+
+        if not tracks_to_add:
+            for item in group_data['tracks']:
+                progress['tracks_processed'] += 1
+                progress['tracks_failed'] += 1
+                update_job_progress(job_id, {'progress': progress})
+            continue
+
+        with _playlist_operation_lock:
+            playlist, created = _get_or_create_playlist(plex, playlist_name, items=tracks_to_add)
+            if created:
+                for item in group_data['tracks']:
+                    progress['tracks_processed'] += 1
+                    progress['tracks_added'] += 1
+                    successful_ids.append(item['id'])
+                    update_job_progress(job_id, {'progress': progress})
+                continue
+
+            added, skipped, failed = _add_items_to_playlist(playlist, tracks_to_add)
+            for item in group_data['tracks']:
+                progress['tracks_processed'] += 1
+                if added > 0:
+                    progress['tracks_added'] += 1
+                    successful_ids.append(item['id'])
+                elif skipped > 0:
+                    progress['tracks_skipped'] += 1
+                    successful_ids.append(item['id'])
+                else:
+                    progress['tracks_failed'] += 1
+                update_job_progress(job_id, {'progress': progress})
+
+    stages['adding_to_playlists'] = 'done'
+    update_job_progress(job_id, {'stages': stages})
+
+    if successful_ids:
+        delete_pending_playlist_adds(successful_ids)
+
+    summary = (
+        f"{progress['tracks_processed']}/{total} tracks processed • "
+        f"{progress['tracks_added']} added • "
+        f"{progress['tracks_skipped']} skipped • "
+        f"{progress['tracks_failed']} failed"
+    )
+
+    return {
+        'total_tracks': total,
+        'tracks_processed': progress['tracks_processed'],
+        'tracks_added': progress['tracks_added'],
+        'tracks_skipped': progress['tracks_skipped'],
+        'tracks_failed': progress['tracks_failed'],
+        'summary': summary,
+    }
 
 
 def _is_plex_library_scan_active(plex, library):

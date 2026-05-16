@@ -4019,6 +4019,8 @@ class App {
                 return 'Listen History Sync';
             case 'generate_recommendations':
                 return 'Fresh Finds';
+            case 'bulk_playlist_add':
+                return 'Playlist Update';
             case 'download_track':
                 return 'Download';
             default:
@@ -5314,6 +5316,50 @@ class App {
             `;
         }
 
+        if (job.job_type === 'bulk_playlist_add') {
+            const stageRows = [
+                { key: 'resolving_tracks', label: 'Resolving Tracks' },
+                { key: 'adding_to_playlists', label: 'Adding to Playlists' }
+            ];
+
+            const stageHtml = stageRows.map(stage => {
+                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
+                const stageLabel = this.formatStageStatus(status);
+                return `
+                    <div class="job-stage">
+                        <span>${stage.label}</span>
+                        <span class="job-stage-status status-${status}">${stageLabel}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const total = Number(progress.total_tracks || 0);
+            const processed = Number(progress.tracks_processed || 0);
+            const added = Number(progress.tracks_added || 0);
+            const skipped = Number(progress.tracks_skipped || 0);
+            const failed = Number(progress.tracks_failed || 0);
+            const progressText = total > 0
+                ? `Processing ${processed}/${total} tracks • ${added} added • ${skipped} skipped • ${failed} failed`
+                : 'Waiting to start...';
+
+            return `
+                <div class="job-item">
+                    <div class="job-main">
+                        <div class="job-title">${this.escapeHtml(title)}</div>
+                        <div class="${actionsClass}">
+                            <div class="job-status ${statusClass}">${statusLabel}</div>
+                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                    <div class="job-stages">
+                        ${stageHtml}
+                    </div>
+                </div>
+            `;
+        }
+
         const stageRows = [
             { key: 'downloaded', label: 'Downloaded' },
             { key: 'tagged', label: 'Tagged' },
@@ -5411,6 +5457,13 @@ class App {
             if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled) #${job.id}`;
             if (trigger === 'manual') return `Fresh Finds - ${username} (Manual) #${job.id}`;
             return `Fresh Finds - ${username} #${job.id}`;
+        }
+
+        if (job.job_type === 'bulk_playlist_add') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'post_library_sync') return `Playlist Update (Auto) #${job.id}`;
+            if (trigger === 'manual') return `Playlist Update (Manual) #${job.id}`;
+            return `Playlist Update #${job.id}`;
         }
 
         const artist = job.result?.artist || job.payload?.artist;

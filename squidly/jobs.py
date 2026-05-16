@@ -88,322 +88,93 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     return job_id
 
 
-def queue_pending_playlist_addition(artist, album, title, file_path, playlist_name, parent_job_id=None, plex_user_id=None):
-    """Add a track to the pending playlist additions queue."""
-    payload = {
-        'artist': artist,
-        'album': album,
-        'title': title,
-        'file_path': file_path,
-        'playlist_name': playlist_name,
-        'parent_job_id': parent_job_id,
-        'plex_user_id': plex_user_id
-    }
-    payload_json = serialize_job_payload(payload)
+def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None, plex_user_id=None):
+    """Insert a row into pending_playlist_adds table. Idempotent via unique index."""
     conn = get_db_connection()
     cur = conn.cursor()
-
-    # Check if this track is already queued
     cur.execute(
         """
-        SELECT id FROM jobs
-        WHERE job_type = %s
-          AND payload_json = %s
-                    AND (
-                                status IN ('queued', 'in_progress')
-                                OR (status = 'failed' AND attempt_count < max_attempts)
-                            )
+        INSERT INTO pending_playlist_adds (parent_job_id, file_path, playlist_name, plex_user_id)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT DO NOTHING
         """,
-        ('plex_playlist_add', payload_json)
+        (parent_job_id, file_path, playlist_name, plex_user_id)
     )
-    existing = cur.fetchone()
+    conn.commit()
+    conn.close()
+
+
+def count_pending_playlist_adds():
+    """Return the number of pending playlist additions."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS count FROM pending_playlist_adds")
+    row = cur.fetchone() or {}
+    count = row.get('count', 0)
+    conn.close()
+    return count
+
+
+def get_pending_playlist_adds():
+    """Return all rows from pending_playlist_adds, ordered for processing."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, parent_job_id, file_path, playlist_name, plex_user_id
+        FROM pending_playlist_adds
+        ORDER BY playlist_name, COALESCE(plex_user_id, ''), id
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return rows
+
+
+def delete_pending_playlist_adds(ids):
+    """Delete successfully processed rows from pending_playlist_adds."""
+    if not ids:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    placeholders = ','.join(['%s'] * len(ids))
+    cur.execute(
+        f"DELETE FROM pending_playlist_adds WHERE id IN ({placeholders})",
+        tuple(ids)
+    )
+    conn.commit()
+    conn.close()
+
+
+def queue_bulk_playlist_add_job(trigger='post_library_sync'):
+    """Queue a single bulk_playlist_add job if one is not already queued/in progress."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count FROM jobs
+        WHERE job_type = 'bulk_playlist_add'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    existing = row.get('count', 0) > 0
+    conn.close()
 
     if existing:
-        logger.info("[PLEX_QUEUE] Track already in queue: %s - %s", artist, title)
-        conn.close()
-        return
-    conn.close()
-    job_id = enqueue_job('plex_playlist_add', payload)
-    logger.info("[PLEX_QUEUE] Queued for retry (job %s, parent %s): %s - %s", job_id, parent_job_id, artist, title)
+        return None
 
+    pending_count = count_pending_playlist_adds()
+    if pending_count == 0:
+        return None
 
-def update_parent_playlist_stage(parent_job_id, playlist_stage_status):
-    """Update playlist_added stage on a parent download_track job."""
-    if parent_job_id is None:
-        return
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT job_type, result_json
-        FROM jobs
-        WHERE id = %s
-        """,
-        (parent_job_id,)
-    )
-    row = cur.fetchone()
-    conn.close()
-
-    if not row or row['job_type'] != 'download_track':
-        return
-
-    try:
-        current = json.loads(row['result_json']) if row['result_json'] else {}
-    except (TypeError, ValueError):
-        current = {}
-
-    if not isinstance(current, dict):
-        current = {}
-
-    stages = current.get('stages') if isinstance(current.get('stages'), dict) else {}
-    stages['playlist_added'] = playlist_stage_status
-    update_job_progress(parent_job_id, {'stages': stages})
-
-    if playlist_stage_status == 'done' and _download_track_all_stages_done(stages):
-        now = datetime.utcnow().isoformat() + 'Z'
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE jobs
-            SET status = 'succeeded',
-                error_message = NULL,
-                updated_at = %s,
-                finished_at = %s,
-                locked_at = NULL,
-                locked_by = NULL
-            WHERE id = %s
-              AND job_type = 'download_track'
-              AND status <> 'cancelled'
-            """,
-            (now, now, parent_job_id)
-        )
-        transitioned = (cur.rowcount or 0) > 0
-        conn.commit()
-        conn.close()
-
-        if transitioned:
-            set_library_update_needed(True)
-            set_last_job_finished_at(datetime.utcnow())
-
-    if playlist_stage_status == 'failed':
-        now = datetime.utcnow().isoformat() + 'Z'
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE jobs
-            SET status = 'failed',
-                error_message = COALESCE(error_message, %s),
-                updated_at = %s,
-                finished_at = %s,
-                locked_at = NULL,
-                locked_by = NULL
-            WHERE id = %s
-              AND job_type = 'download_track'
-              AND status <> 'cancelled'
-            """,
-            ('playlist_added stage failed', now, now, parent_job_id)
-        )
-        conn.commit()
-        conn.close()
-
-
-def backfill_plex_playlist_add_parent_links():
-    """One-time repair for legacy plex_playlist_add jobs missing parent_job_id in payload."""
-    logger.info("[PLEX_REPAIR] Starting parent link backfill")
-    now = datetime.utcnow().isoformat() + 'Z'
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, payload_json, status, attempt_count, max_attempts, created_at
-        FROM jobs
-        WHERE job_type = %s
-        ORDER BY created_at ASC
-        """,
-        ('plex_playlist_add',)
-    )
-    additions = cur.fetchall()
-
-    cur.execute(
-        """
-        SELECT id, result_json, created_at
-        FROM jobs
-        WHERE job_type = %s
-          AND result_json IS NOT NULL
-        ORDER BY created_at ASC
-        """,
-        ('download_track',)
-    )
-    parents = cur.fetchall()
-
-    parent_index = {}
-    for row in parents:
-        try:
-            result = json.loads(row['result_json']) if row['result_json'] else {}
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(result, dict):
-            continue
-
-        artist = str(result.get('artist') or '').strip().casefold()
-        album = str(result.get('album') or '').strip().casefold()
-        title = str(result.get('title') or '').strip().casefold()
-        playlist = str(result.get('playlist_name') or '').strip().casefold()
-        stages = result.get('stages') if isinstance(result.get('stages'), dict) else {}
-        playlist_stage = str(stages.get('playlist_added') or '').strip().casefold()
-
-        if not artist or not title or not playlist:
-            continue
-        if playlist_stage not in ('queued', 'done', 'failed'):
-            continue
-
-        key = (artist, album, title, playlist)
-        parent_index.setdefault(key, []).append({
-            'id': row['id'],
-            'created_at': row['created_at'] or '',
-            'playlist_stage': playlist_stage
-        })
-
-    linked_count = 0
-    reconciled_count = 0
-
-    for addition in additions:
-        try:
-            payload = json.loads(addition['payload_json']) if addition['payload_json'] else {}
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if payload.get('parent_job_id'):
-            continue
-
-        artist = str(payload.get('artist') or '').strip().casefold()
-        album = str(payload.get('album') or '').strip().casefold()
-        title = str(payload.get('title') or '').strip().casefold()
-        playlist = str(payload.get('playlist_name') or '').strip().casefold()
-        if not artist or not title or not playlist:
-            continue
-
-        key = (artist, album, title, playlist)
-        candidates = parent_index.get(key, [])
-        if not candidates:
-            continue
-
-        addition_created = addition['created_at'] or ''
-        best = None
-        for candidate in candidates:
-            candidate_created = candidate['created_at']
-            if not candidate_created or candidate_created <= addition_created:
-                best = candidate
-        if best is None:
-            best = candidates[0]
-
-        payload['parent_job_id'] = best['id']
-        cur.execute(
-            """
-            UPDATE jobs
-            SET payload_json = %s,
-                updated_at = %s
-            WHERE id = %s AND job_type = %s
-            """,
-            (serialize_job_payload(payload), now, addition['id'], 'plex_playlist_add')
-        )
-        linked_count += 1
-
-        if addition['status'] == 'succeeded':
-            update_parent_playlist_stage(best['id'], 'done')
-            reconciled_count += 1
-        elif addition['status'] == 'failed' and addition['attempt_count'] >= addition['max_attempts']:
-            update_parent_playlist_stage(best['id'], 'failed')
-            reconciled_count += 1
-
-    conn.commit()
-    conn.close()
-    logger.info(
-        "[PLEX_REPAIR] Backfill complete: linked=%d, reconciled=%d",
-        linked_count,
-        reconciled_count,
-    )
-
-
-def get_pending_playlist_additions():
-    """Get all pending playlist additions that haven't exceeded max attempts."""
-    now = datetime.utcnow().isoformat() + 'Z'
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, payload_json, attempt_count, max_attempts
-        FROM jobs
-        WHERE job_type = %s
-          AND status IN ('queued', 'failed')
-          AND attempt_count < max_attempts
-          AND (run_after IS NULL OR run_after <= %s)
-        ORDER BY created_at ASC
-        """,
-        ('plex_playlist_add', now)
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    additions = []
-    for row in rows:
-        try:
-            payload = json.loads(row['payload_json'])
-        except (TypeError, ValueError):
-            payload = {}
-        additions.append({
-            'id': row['id'],
-            'attempt_count': row['attempt_count'],
-            'max_attempts': row['max_attempts'],
-            'payload': payload
-        })
-
-    return additions
-
-
-def update_pending_addition_attempt(addition_id, error_message=None):
-    """Increment the attempt count and update last_attempt_at."""
-    now = datetime.utcnow().isoformat() + 'Z'
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE jobs
-        SET attempt_count = attempt_count + 1,
-            status = 'failed',
-            updated_at = %s,
-            run_after = %s,
-            error_message = COALESCE(%s, error_message)
-        WHERE id = %s AND job_type = %s
-        """,
-        (now, now, error_message, addition_id, 'plex_playlist_add')
-    )
-    conn.commit()
-    conn.close()
-
-
-def remove_pending_addition(addition_id):
-    """Remove a successfully added track from the queue."""
-    now = datetime.utcnow().isoformat() + 'Z'
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE jobs
-        SET status = 'succeeded',
-            updated_at = %s,
-            finished_at = %s
-        WHERE id = %s AND job_type = %s
-        """,
-        (now, now, addition_id, 'plex_playlist_add')
-    )
-    conn.commit()
-    conn.close()
+    payload = {
+        'trigger': trigger,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    job_id = enqueue_job('bulk_playlist_add', payload, max_attempts=5)
+    logger.info("[PLEX_QUEUE] Queued bulk playlist add job %s (%d pending tracks)", job_id, pending_count)
+    return job_id
 
 
 def compute_job_backoff_seconds(attempt_count):
@@ -718,7 +489,7 @@ def _download_track_all_stages_done(stages):
     if stages.get('converted') not in ('done', 'skipped'):
         return False
 
-    return stages.get('playlist_added') in ('done', 'skipped')
+    return True
 
 
 def mark_job_in_progress(job_id):
@@ -783,23 +554,11 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
 
     recovered = 0
     exhausted = 0
-    skipped_waiting_playlist = 0
     recovered_immediately = 0
 
     for row in rows:
         job_id = row.get('id')
         job_type = str(row.get('job_type') or '').strip()
-
-        # download_track jobs can intentionally stay in_progress while waiting on queued playlist_add.
-        if job_type == 'download_track':
-            try:
-                result = json.loads(row.get('result_json')) if row.get('result_json') else {}
-            except (TypeError, ValueError):
-                result = {}
-            stages = result.get('stages') if isinstance(result, dict) and isinstance(result.get('stages'), dict) else {}
-            if stages.get('playlist_added') == 'queued':
-                skipped_waiting_playlist += 1
-                continue
 
         lock_time = normalize_db_timestamp(row.get('locked_at'))
         started_at = normalize_db_timestamp(row.get('started_at'))
@@ -857,12 +616,11 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
     conn.close()
 
     logger.info(
-        "[JOB_RECOVERY] stale_cutoff_minutes=%d recovered=%d immediate=%d exhausted=%d skipped_waiting_playlist=%d",
+        "[JOB_RECOVERY] stale_cutoff_minutes=%d recovered=%d immediate=%d exhausted=%d",
         max(1, int(stale_after_minutes)),
         recovered,
         recovered_immediately,
         exhausted,
-        skipped_waiting_playlist,
     )
 
 
