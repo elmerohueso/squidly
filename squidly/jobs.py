@@ -535,11 +535,9 @@ def requeue_claimed_job(job_id, delay_seconds=30, error_message=None):
     conn.close()
 
 
-def recover_stale_in_progress_jobs(stale_after_minutes=15):
+def recover_stale_in_progress_jobs():
     now = datetime.utcnow()
-    stale_cutoff = now - timedelta(minutes=max(1, int(stale_after_minutes)))
     now_iso = now.isoformat() + 'Z'
-    immediate_recovery_job_types = {'hifi_match', 'plex_library_sync', 'automatic_matching'}
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -554,7 +552,6 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
 
     recovered = 0
     exhausted = 0
-    recovered_immediately = 0
 
     for row in rows:
         job_id = row.get('id')
@@ -563,12 +560,6 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
         lock_time = normalize_db_timestamp(row.get('locked_at'))
         started_at = normalize_db_timestamp(row.get('started_at'))
         updated_at = normalize_db_timestamp(row.get('updated_at'))
-        reference_ts = lock_time or started_at or updated_at
-
-        should_recover_immediately = job_type in immediate_recovery_job_types
-
-        if not should_recover_immediately and reference_ts and reference_ts > stale_cutoff:
-            continue
 
         attempt_count = int(row.get('attempt_count') or 0)
         max_attempts = int(row.get('max_attempts') or 0)
@@ -602,24 +593,20 @@ def recover_stale_in_progress_jobs(stale_after_minutes=15):
             WHERE id = %s
             """,
             (
-                'Recovered interrupted in_progress job on startup' if should_recover_immediately else 'Recovered stale in_progress job on startup',
+                'Recovered stale in_progress job on startup',
                 now_iso,
                 now_iso,
                 job_id
             )
         )
         recovered += 1
-        if should_recover_immediately:
-            recovered_immediately += 1
 
     conn.commit()
     conn.close()
 
     logger.info(
-        "[JOB_RECOVERY] stale_cutoff_minutes=%d recovered=%d immediate=%d exhausted=%d",
-        max(1, int(stale_after_minutes)),
+        "[JOB_RECOVERY] recovered=%d exhausted=%d",
         recovered,
-        recovered_immediately,
         exhausted,
     )
 

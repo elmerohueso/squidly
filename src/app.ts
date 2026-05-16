@@ -3598,7 +3598,7 @@ class App {
         try {
             const params = new URLSearchParams({
                 jobs_filter: filter,
-                exclude_plex_playlist_add: '1'
+                exclude_bulk_playlist_add: '1'
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
@@ -4036,7 +4036,7 @@ class App {
         try {
             const params = new URLSearchParams({
                 job_type: 'automatic_matching',
-                exclude_plex_playlist_add: '1',
+                exclude_bulk_playlist_add: '1',
                 limit: '1'
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
@@ -9700,7 +9700,7 @@ class App {
     private async pollForFreshFindsCompletion(userId: string): Promise<void> {
         const poll = async (): Promise<void> => {
             try {
-                const response = await fetch(`/api/jobs?jobs_filter=incomplete&exclude_plex_playlist_add=0`);
+                const response = await fetch(`/api/jobs?jobs_filter=incomplete&exclude_bulk_playlist_add=0`);
                 if (!response.ok) throw new Error('Failed to check job status');
                 const data = await response.json();
                 const jobs = Array.isArray(data.jobs) ? data.jobs : [];

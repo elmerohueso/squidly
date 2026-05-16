@@ -1551,7 +1551,7 @@ def process_download_job(job_id, payload):
 # Initialize database and mirror data (skip during testing)
 if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
-    jobs.recover_stale_in_progress_jobs(stale_after_minutes=15)
+    jobs.recover_stale_in_progress_jobs()
     downloads.seed_mirrors_from_json()
 
     # Initialize URL list and round-robin iterator
