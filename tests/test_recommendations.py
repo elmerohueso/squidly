@@ -81,7 +81,7 @@ class TestStorageFunctions:
         from squidly.storage import has_listen_history
 
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (True,)
+        mock_cursor.fetchone.return_value = {'has_history': True}
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
         mock_conn.return_value = mock_connection
@@ -99,7 +99,7 @@ class TestStorageFunctions:
         from squidly.storage import has_listen_history
 
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (False,)
+        mock_cursor.fetchone.return_value = {'has_history': False}
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
         mock_conn.return_value = mock_connection

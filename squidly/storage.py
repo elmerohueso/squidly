@@ -818,12 +818,12 @@ def has_listen_history(plex_account_id):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "SELECT EXISTS(SELECT 1 FROM listen_history WHERE plex_account_id = %s)",
+        "SELECT EXISTS(SELECT 1 FROM listen_history WHERE plex_account_id = %s) AS has_history",
         (plex_account_id,)
     )
     row = cur.fetchone()
     conn.close()
-    return row[0] if row else False
+    return bool(row['has_history']) if row else False
 
 
 def get_recent_listen_history_seeds(plex_account_id, limit=20):

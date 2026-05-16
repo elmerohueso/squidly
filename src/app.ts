@@ -2917,6 +2917,7 @@ class App {
         // --- SQUIDLY Playlists ---
         const squidlySection = createSection('SQUIDLY', 'sidebar_section_squidly');
         playlistNavItems.appendChild(squidlySection.header);
+        playlistNavItems.appendChild(squidlySection.container);
 
         void this.loadSquidlySection(squidlySection.container);
     }
