@@ -5413,8 +5413,8 @@ class App {
             return `Fresh Finds - ${username} #${job.id}`;
         }
 
-        const artist = job.result?.artist;
-        const title = job.result?.title;
+        const artist = job.result?.artist || job.payload?.artist;
+        const title = job.result?.title || job.payload?.title;
 
         if (artist && title) {
             return `${artist} - ${title}`;
