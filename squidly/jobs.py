@@ -43,6 +43,9 @@ def serialize_job_payload(payload):
 
 
 def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
+    import logging
+    logger = logging.getLogger(__name__)
+
     now = datetime.utcnow().isoformat() + 'Z'
     payload_json = serialize_job_payload(payload)
     scheduled_at = run_after or now
@@ -85,11 +88,21 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     job_id = cur.fetchone()['id']
     conn.commit()
     conn.close()
+
+    track_id = payload.get('trackId') if isinstance(payload, dict) else None
+    logger.info("[JOB_ENQUEUE] job_id=%s type=%s track_id=%s", job_id, job_type, track_id)
     return job_id
 
 
 def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None, plex_user_id=None):
-    """Insert a row into pending_playlist_adds table. Idempotent via unique index."""
+    """Insert a row into pending_playlist_adds table. Idempotent via unique index.
+
+    If a duplicate is detected (ON CONFLICT), marks the parent download job's
+    playlist_added stage as 'done' since the track is already queued for bulk add.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -100,7 +113,48 @@ def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None
         """,
         (parent_job_id, file_path, playlist_name, plex_user_id)
     )
+
+    affected = cur.rowcount
     conn.commit()
+
+    if affected == 0:
+        logger.info(
+            "[PLAYLIST_QUEUE] Duplicate skipped for file_path=%s playlist=%s (parent_job_id=%s) — already queued",
+            file_path, playlist_name, parent_job_id
+        )
+        if parent_job_id:
+            try:
+                cur.execute(
+                    """
+                    SELECT result_json FROM jobs WHERE id = %s AND job_type = 'download_track'
+                    """,
+                    (parent_job_id,),
+                )
+                row = cur.fetchone()
+                if row and row.get('result_json'):
+                    result = json.loads(row['result_json'])
+                    if isinstance(result, dict):
+                        stages = result.get('stages', {})
+                        if isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
+                            stages['playlist_added'] = 'done'
+                            result['stages'] = stages
+                            cur.execute(
+                                """
+                                UPDATE jobs SET result_json = %s, updated_at = NOW()
+                                WHERE id = %s AND status <> 'cancelled'
+                                """,
+                                (json.dumps(result, separators=(',', ':'), sort_keys=True), parent_job_id),
+                            )
+                            conn.commit()
+                            logger.info("[PLAYLIST_QUEUE] Marked parent job %s playlist_added as done (was duplicate)", parent_job_id)
+            except Exception as e:
+                logger.info("[PLAYLIST_QUEUE] Failed to update parent job %s for duplicate: %s", parent_job_id, str(e))
+    else:
+        logger.info(
+            "[PLAYLIST_QUEUE] Queued playlist add for file_path=%s playlist=%s (parent_job_id=%s)",
+            file_path, playlist_name, parent_job_id
+        )
+
     conn.close()
 
 
@@ -162,10 +216,12 @@ def queue_bulk_playlist_add_job(trigger='post_library_sync'):
     conn.close()
 
     if existing:
+        logger.info("[BULK_PLAYLIST_QUEUE] bulk_playlist_add already queued/in progress; not queueing another")
         return None
 
     pending_count = count_pending_playlist_adds()
     if pending_count == 0:
+        logger.info("[BULK_PLAYLIST_QUEUE] No pending playlist adds; not queueing bulk job")
         return None
 
     payload = {
@@ -173,7 +229,7 @@ def queue_bulk_playlist_add_job(trigger='post_library_sync'):
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
     job_id = enqueue_job('bulk_playlist_add', payload, max_attempts=5)
-    logger.info("[PLEX_QUEUE] Queued bulk playlist add job %s (%d pending tracks)", job_id, pending_count)
+    logger.info("[BULK_PLAYLIST_QUEUE] Queued bulk playlist add job %s (%d pending tracks, trigger=%s)", job_id, pending_count, trigger)
     return job_id
 
 
@@ -219,7 +275,9 @@ def queue_plex_library_sync(trigger='manual'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('plex_library_sync', payload, max_attempts=5)
+    job_id = enqueue_job('plex_library_sync', payload, max_attempts=5)
+    logger.info("[PLEX_QUEUE] Queued plex_library_sync job %s (trigger=%s)", job_id, trigger)
+    return job_id
 
 
 def start_plex_sync_job(trigger='manual'):
@@ -674,7 +732,9 @@ def queue_plex_listen_history_sync(trigger='scheduled'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('plex_listen_history_sync', payload, max_attempts=5)
+    job_id = enqueue_job('plex_listen_history_sync', payload, max_attempts=5)
+    logger.info("[LISTEN_HISTORY_QUEUE] Queued plex_listen_history_sync job %s (trigger=%s)", job_id, trigger)
+    return job_id
 
 
 def queue_recommendation_generation(slug, plex_account_id, plex_username, trigger='scheduled'):

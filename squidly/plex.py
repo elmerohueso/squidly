@@ -413,6 +413,10 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
     progress['total_tracks'] = total
     update_job_progress(job_id, {'progress': progress})
 
+    logger.info("[BULK_PLAYLIST] Job %s: found %d pending playlist adds", job_id, total)
+    for item in pending:
+        logger.info("[BULK_PLAYLIST] Job %s: pending add parent_job_id=%s file_path=%s playlist=%s", job_id, item.get('parent_job_id'), item.get('file_path'), item.get('playlist_name'))
+
     if total == 0:
         stages['resolving_tracks'] = 'skipped'
         stages['adding_to_playlists'] = 'skipped'
@@ -688,7 +692,9 @@ def queue_plex_library_update(trigger='scheduled'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
+    job_id = jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
+    logger.info("[LIBRARY_UPDATE_QUEUE] Queued plex_library_update job %s (trigger=%s)", job_id, trigger)
+    return job_id
 
 
 def start_plex_library_update_job(trigger='scheduled'):
@@ -830,6 +836,8 @@ def plex_library_update_job_worker():
             if not job:
                 time.sleep(5)
                 continue
+
+            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Claimed plex_library_update job %s", job['id'])
 
             try:
                 payload = json.loads(job['payload_json']) if job['payload_json'] else {}

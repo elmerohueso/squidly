@@ -1321,6 +1321,7 @@ def process_download_job(job_id, payload):
 
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
+            logger.info("[DOWNLOAD] Job %s: queuing playlist add (existing match) for path=%s playlist=%s", job_id, full_path, playlist_name)
             jobs.queue_pending_playlist_addition(
                 full_path,
                 playlist_name,
@@ -1505,6 +1506,7 @@ def process_download_job(job_id, payload):
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
+        logger.info("[DOWNLOAD] Job %s: queuing playlist add for path=%s playlist=%s", job_id, full_path, playlist_name)
         jobs.queue_pending_playlist_addition(
             full_path,
             playlist_name,
@@ -2584,6 +2586,14 @@ def download_track():
         ignore_matches = settings.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False))
     ignore_matches = bool(ignore_matches)
 
+    plex_playlist = payload.get('plex_playlist')
+    plex_user_id = payload.get('plex_user_id')
+
+    logger.info(
+        "[DOWNLOAD_ENQUEUE] track_id=%s quality=%s playlist=%s user_id=%s ignore_matches=%s",
+        track_id, quality_choice, plex_playlist, plex_user_id, ignore_matches
+    )
+
     artist_name = None
     title_name = None
     try:
@@ -2604,8 +2614,8 @@ def download_track():
         'trackId': track_id,
         'fileNaming': file_naming,
         'fileNamingAlbum': payload.get('fileNamingAlbum') or file_naming_album,
-        'plex_playlist': payload.get('plex_playlist'),
-        'plex_user_id': payload.get('plex_user_id'),
+        'plex_playlist': plex_playlist,
+        'plex_user_id': plex_user_id,
         'ignore_matches': ignore_matches,
         'downloadQuality': quality_choice,
     }
@@ -2618,19 +2628,20 @@ def download_track():
     job_id = jobs.enqueue_job('download_track', job_payload)
     set_last_download_activity_at(datetime.utcnow())
 
+    logger.info("[DOWNLOAD_ENQUEUE] Queued download job %s for track %s", job_id, track_id)
+
     update_job_id = queue_plex_library_update(trigger='download_enqueue')
     if update_job_id:
-        logger.info("[DOWNLOAD] Queued plex_library_update job %s (download enqueue)", update_job_id)
+        logger.info("[DOWNLOAD_ENQUEUE] Queued plex_library_update job %s (download enqueue)", update_job_id)
     else:
-        logger.info("[DOWNLOAD] plex_library_update already queued/in progress; not queueing another")
+        logger.info("[DOWNLOAD_ENQUEUE] plex_library_update already queued/in progress; not queueing another")
 
     sync_job_id = jobs.queue_plex_library_sync(trigger='download_enqueue')
     if sync_job_id:
-        logger.info("[DOWNLOAD] Queued plex_library_sync job %s (download enqueue)", sync_job_id)
+        logger.info("[DOWNLOAD_ENQUEUE] Queued plex_library_sync job %s (download enqueue)", sync_job_id)
     else:
-        logger.info("[DOWNLOAD] plex_library_sync already queued/in progress; not queueing another")
+        logger.info("[DOWNLOAD_ENQUEUE] plex_library_sync already queued/in progress; not queueing another")
 
-    logger.info("[DOWNLOAD] Queued download job %s for track %s", job_id, track_id)
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
 @app.route('/api/jobs', methods=['GET'])

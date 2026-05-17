@@ -49,6 +49,8 @@ def download_job_worker():
                 time.sleep(2)
                 continue
 
+            logger.info("[DOWNLOAD_WORKER] Claimed download job %s", job['id'])
+
             try:
                 payload = json.loads(job['payload_json']) if job['payload_json'] else {}
             except (TypeError, ValueError):
@@ -99,6 +101,8 @@ def plex_sync_job_worker():
             if not job:
                 time.sleep(5)
                 continue
+
+            logger.info("[PLEX_SYNC_WORKER] Claimed plex_library_sync job %s", job['id'])
 
             try:
                 payload = json.loads(job['payload_json']) if job['payload_json'] else {}
@@ -190,6 +194,8 @@ def bulk_playlist_add_job_worker():
             if not job:
                 time.sleep(5)
                 continue
+
+            logger.info("[BULK_PLAYLIST_WORKER] Claimed bulk playlist add job %s", job['id'])
 
             try:
                 payload = json.loads(job['payload_json']) if job['payload_json'] else {}
