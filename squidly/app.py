@@ -3034,6 +3034,11 @@ def retry_job(job_id):
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'})
 
+@app.route('/api/app/config', methods=['GET'])
+def app_config():
+    from squidly.config import app_timezone
+    return jsonify({'timezone': app_timezone})
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 def download_settings():
     """Get or update download settings stored in SQLite."""
@@ -5359,10 +5364,15 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
 
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    now_tz = datetime.now(ZoneInfo(app_timezone))
+    playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
+
     save_recommendation_playlist(
         plex_account_id=plex_account_id,
         slug=slug,
-        name='Fresh Finds',
+        name=playlist_name,
         strategy='fresh-finds',
         seed_count=len(seeds),
         tracks=top_tracks

@@ -186,7 +186,7 @@ class TestStorageFunctions:
         from datetime import datetime
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            {'id': 1, 'name': 'Fresh Finds', 'slug': 'fresh-finds', 'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 25, 'generated_at': datetime(2024, 1, 15)},
+            {'id': 1, 'name': 'Fresh Finds (1-15)', 'slug': 'fresh-finds', 'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 25, 'generated_at': datetime(2024, 1, 15)},
         ]
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
@@ -220,7 +220,7 @@ class TestStorageFunctions:
 
         from datetime import datetime
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = {'id': 1, 'name': 'Fresh Finds', 'slug': 'fresh-finds', 'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 2, 'generated_at': datetime(2024, 1, 15)}
+        mock_cursor.fetchone.return_value = {'id': 1, 'name': 'Fresh Finds (1-15)', 'slug': 'fresh-finds', 'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 2, 'generated_at': datetime(2024, 1, 15)}
         mock_cursor.fetchall.return_value = [
             {'position': 1, 'hifi_id': 100, 'title': 'Track A', 'artist': 'Artist A', 'album': 'Album A', 'duration': 210, 'cover': 'cover1', 'seed_hifi_id': 50, 'score': 3.0},
             {'position': 2, 'hifi_id': 200, 'title': 'Track B', 'artist': 'Artist B', 'album': 'Album B', 'duration': 180, 'cover': 'cover2', 'seed_hifi_id': 60, 'score': 2.0},
@@ -271,7 +271,7 @@ class TestSaveRecommendationPlaylist:
         result = save_recommendation_playlist(
             plex_account_id=123,
             slug='fresh-finds',
-            name='Fresh Finds',
+            name='Fresh Finds (1-15)',
             strategy='fresh-finds',
             seed_count=20,
             tracks=tracks
@@ -298,7 +298,7 @@ class TestSaveRecommendationPlaylist:
             save_recommendation_playlist(
                 plex_account_id=123,
                 slug='fresh-finds',
-                name='Fresh Finds',
+                name='Fresh Finds (1-15)',
                 strategy='fresh-finds',
                 seed_count=20,
                 tracks=tracks

@@ -17,6 +17,8 @@ services:
     container_name: squidly-dev
     env_file:
       - .env.dev
+    environment:
+      - TZ=UTC
     ports:
       - "5000:5000"
     volumes:

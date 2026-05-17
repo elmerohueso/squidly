@@ -72,3 +72,6 @@ DEFAULT_DOWNLOAD_SETTINGS = {
 
 # Temporary scratch directory used during downloads
 TEMP_FOLDER = '/app/temp'
+
+# Application timezone (default UTC)
+app_timezone = os.environ.get('TZ', 'UTC')
