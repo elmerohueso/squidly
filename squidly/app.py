@@ -14,6 +14,7 @@ import os
 import json
 import base64
 import requests
+import concurrent.futures
 import psycopg2
 import psycopg2.extras
 from squidly.utils import (
@@ -927,23 +928,21 @@ def process_plex_sync_job(job_id, payload):
         logger.info("[PLEX_SYNC] Job %s: Adding 'Explicit' label to %s albums", job_id, len(explicit_album_keys))
         for album_key in explicit_album_keys:
             try:
-                # Use a shorter timeout for label operations to prevent hanging
-                plex._session.timeout = 5
                 # album_key format is /library/metadata/ID, extract the ID
                 album_id = int(album_key.split('/')[-1])
                 album = plex.fetchItem(album_id)
                 if album and hasattr(album, 'addLabel'):
-                    album.addLabel('Explicit')
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(album.addLabel, 'Explicit')
+                        future.result(timeout=10)
                     labeled_count += 1
                     logger.info("[PLEX_SYNC] Job %s: Added 'Explicit' label to album %s", job_id, album_key)
+            except concurrent.futures.TimeoutError:
+                logger.info("[PLEX_SYNC] Job %s: Timed out adding label to album %s", job_id, album_key)
+                continue
             except Exception as e:
                 logger.info("[PLEX_SYNC] Job %s: Failed to add 'Explicit' label to album %s: %s", job_id, album_key, str(e))
-                # Continue to next album instead of failing the entire job
                 continue
-        
-        # Reset timeout back to default
-        if hasattr(plex, '_session'):
-            plex._session.timeout = 20
         logger.info("[PLEX_SYNC] Job %s: Successfully labeled %s albums as Explicit", job_id, labeled_count)
 
     progress['explicit_albums_labeled'] = labeled_count

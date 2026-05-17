@@ -106,7 +106,7 @@ def plex_healthcheck():
         name = getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'
         set_plex_health_status(True, name)
         return True, name
-    except Exception as e:
+    except BaseException as e:
         msg = str(e)
         set_plex_health_status(False, msg)
         return False, msg
