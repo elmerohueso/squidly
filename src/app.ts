@@ -2986,7 +2986,7 @@ class App {
                 a.href = '#';
                 a.className = 'nav-item';
                 const ff = playlists.find((p: any) => p.slug === 'fresh-finds');
-                a.textContent = 'Fresh Finds';
+                a.textContent = ff ? ff.name : 'Fresh Finds';
                 a.style.fontSize = '0.875rem';
                 a.style.paddingTop = '0.25rem';
                 a.style.paddingBottom = '0.25rem';
