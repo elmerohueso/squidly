@@ -55,6 +55,7 @@ from io import BytesIO
 from squidly.plex import (
     _get_plex_server_for_user,
     _is_plex_library_scan_active,
+    _plex_call_with_timeout,
     any_plex_library_update_jobs_running_or_queued,
     get_all_plex_users,
     get_plex_health_status,
@@ -711,7 +712,8 @@ def process_plex_sync_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
 
     library = None
-    for section in plex.library.sections():
+    sections = _plex_call_with_timeout(plex.library.sections, timeout=30, label="library.sections")
+    for section in sections:
         _raise_if_job_cancelled(job_id)
         if section.title == library_name and section.type == 'artist':
             library = section
@@ -724,10 +726,10 @@ def process_plex_sync_job(job_id, payload):
     tracks = []
     try:
         _raise_if_job_cancelled(job_id)
-        tracks = library.all(libtype='track')
+        tracks = _plex_call_with_timeout(library.all, libtype='track', timeout=120, label="library.all")
     except Exception:
         _raise_if_job_cancelled(job_id)
-        tracks = library.search(libtype='track')
+        tracks = _plex_call_with_timeout(library.search, libtype='track', timeout=120, label="library.search")
 
     progress['total_tracks'] = len(tracks)
     stages['reading_plex_library'] = 'done'
