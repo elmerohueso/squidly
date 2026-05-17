@@ -6651,12 +6651,19 @@ class App {
         const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
         settingsSections.forEach(section => {
             const sectionEl = section as HTMLElement;
-            if (sectionEl.id === 'listenbrainzSettings' || sectionEl.id === 'youtubeMusicSettings' || sectionEl.id === 'freshFindsSettings') {
+            if (sectionEl.id === 'integrationsSettings') {
+                // Always show integrations section — it contains per-user integration groups
                 sectionEl.style.display = '';
             } else {
                 sectionEl.style.display = isOwner ? '' : 'none';
             }
         });
+
+        // Within integrations, hide Plex settings from non-owners
+        const plexSettingsGroup = document.querySelector('#integrationsSettings #plexSettings') as HTMLElement | null;
+        if (plexSettingsGroup) {
+            plexSettingsGroup.style.display = isOwner ? '' : 'none';
+        }
 
         if (!isOwner && hidePages.includes(this.currentPage)) {
             this.switchPage('explore', false);
