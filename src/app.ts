@@ -2814,6 +2814,7 @@ class App {
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
                     if (playlist.ratingKey) {
+                        this.closeMobileMenu();
                         void this.navigateToLibraryPlaylistTracks(playlist.ratingKey, playlist.name);
                     }
                 });
@@ -2858,6 +2859,7 @@ class App {
                     a.addEventListener('click', (e: Event) => {
                         e.preventDefault();
                         if (playlist.identifier) {
+                            this.closeMobileMenu();
                             this.switchPage('explore');
                             this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId: playlist.identifier, username });
                             void this.fetchListenbrainzPlaylistTracks(playlist.identifier, false, username);
@@ -2914,6 +2916,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.closeMobileMenu();
                     this.switchPage('explore');
                     void this.fetchYtmPlaylistTracks(playlist.playlistId, playlist.title);
                 });
@@ -2968,6 +2971,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.closeMobileMenu();
                     this.switchPage('explore');
                     void this.fetchFreshFindsPlaylist();
                 });
@@ -2985,6 +2989,7 @@ class App {
                 a.style.paddingBottom = '0.25rem';
                 a.addEventListener('click', (e: Event) => {
                     e.preventDefault();
+                    this.closeMobileMenu();
                     this.switchPage('explore');
                     void this.fetchFreshFindsPlaylist();
                 });

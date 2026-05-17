@@ -90,6 +90,7 @@ body {
     left: 0;
     top: 0;
     height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
     z-index: 100;
 }
@@ -139,6 +140,7 @@ body {
 
 .sidebar-nav {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 2rem;
@@ -3263,6 +3265,7 @@ body {
         top: 0;
         width: 280px;
         height: 100vh;
+        height: 100dvh;
         z-index: 100;
         transform: translateX(-100%);
         transition: transform var(--transition-normal);
