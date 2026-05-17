@@ -392,3 +392,37 @@ def recommendation_scheduler_worker():
             logger.info("[RECOMMENDATION_SCHEDULER] Error: %s", str(e))
 
         time.sleep(60)
+
+
+def fresh_finds_auto_download_worker():
+    from squidly.app import process_fresh_finds_auto_download_job
+
+    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD_WORKER] Background worker started")
+
+    while True:
+        try:
+            job = claim_next_job('fresh_finds_auto_download')
+            if not job:
+                time.sleep(5)
+                continue
+
+            try:
+                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
+            except (TypeError, ValueError):
+                payload = {}
+
+            try:
+                result = process_fresh_finds_auto_download_job(job['id'], payload)
+                mark_job_succeeded(job['id'], result)
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD_WORKER] Job %s completed", job['id'])
+            except JobCancelledError:
+                mark_job_cancelled(job['id'])
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD_WORKER] Job %s cancelled", job['id'])
+                time.sleep(1)
+            except Exception as e:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD_WORKER] Job %s failed: %s", job['id'], str(e))
+                mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
+                time.sleep(1)
+        except Exception as e:
+            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD_WORKER] Error in background worker: %s", str(e))
+            time.sleep(5)

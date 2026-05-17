@@ -163,6 +163,8 @@ def init_db():
         cur.execute('ALTER TABLE user_settings ADD COLUMN ytm_headers TEXT')
     if 'plex_account_id' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN plex_account_id INTEGER')
+    if 'auto_download_fresh_finds' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN auto_download_fresh_finds BOOLEAN NOT NULL DEFAULT FALSE')
 
     cur.execute(
         """

@@ -699,6 +699,40 @@ def get_all_plex_account_mappings():
     return rows
 
 
+def get_fresh_finds_auto_download_users():
+    """Return all user_settings rows where auto_download_fresh_finds is TRUE and plex_account_id is set."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT username, plex_client_id, plex_account_id, plex_owner
+        FROM user_settings
+        WHERE auto_download_fresh_finds = TRUE
+          AND plex_account_id IS NOT NULL
+        ORDER BY plex_owner DESC, username ASC
+        """
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return rows
+
+
+def set_fresh_finds_auto_download(plex_client_id, enabled):
+    """Set the auto_download_fresh_finds flag for a specific user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE user_settings
+        SET auto_download_fresh_finds = %s
+        WHERE plex_client_id = %s
+        """,
+        (bool(enabled), plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_listen_history(plex_account_id=None, limit=100, since=None):
     conn = get_db_connection()
     cur = conn.cursor()

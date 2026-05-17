@@ -615,6 +615,8 @@ class App {
     private ytmCookieInput: HTMLInputElement;
     private saveYtmConfigButton: HTMLButtonElement;
     private ytmConfigStatusEl: HTMLElement;
+    private autoDownloadFreshFindsCheckbox: HTMLInputElement;
+    private freshFindsAutoDownloadStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -925,6 +927,8 @@ class App {
         this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
         this.saveYtmConfigButton = document.getElementById('saveYtmConfig') as HTMLButtonElement;
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
+        this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
+        this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -998,6 +1002,7 @@ class App {
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
+        void this.loadFreshFindsAutoDownload();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1257,6 +1262,9 @@ class App {
         }
         if (this.saveYtmConfigButton) {
             this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
+        }
+        if (this.autoDownloadFreshFindsCheckbox) {
+            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsAutoDownload());
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2576,6 +2584,8 @@ class App {
         if (this.currentPage === 'history') {
             void this.loadListenHistory();
         }
+
+        void this.loadFreshFindsAutoDownload();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -5964,6 +5974,64 @@ class App {
         }
     }
 
+    private async loadFreshFindsAutoDownload(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.autoDownloadFreshFindsCheckbox.checked = false;
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/auto-download?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.autoDownloadFreshFindsCheckbox.checked = data.enabled;
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds auto-download setting.', error);
+        }
+    }
+
+    private async saveFreshFindsAutoDownload(): Promise<void> {
+        const enabled = this.autoDownloadFreshFindsCheckbox.checked;
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.freshFindsAutoDownloadStatusEl.textContent = '⚠ Select a Plex user first';
+                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
+                return;
+            }
+
+            const response = await fetch('/api/fresh-finds/auto-download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    enabled: enabled
+                })
+            });
+
+            if (response.ok) {
+                this.freshFindsAutoDownloadStatusEl.textContent = enabled ? '✓ Auto-download enabled' : '✓ Auto-download disabled';
+                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--accent-primary)';
+                setTimeout(() => {
+                    this.freshFindsAutoDownloadStatusEl.textContent = '';
+                }, 3000);
+            } else {
+                this.freshFindsAutoDownloadStatusEl.textContent = '✗ Failed to save setting';
+                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
+                // Revert checkbox on failure
+                this.autoDownloadFreshFindsCheckbox.checked = !enabled;
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds auto-download setting:', error);
+            this.freshFindsAutoDownloadStatusEl.textContent = '✗ Error saving setting';
+            this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
+            this.autoDownloadFreshFindsCheckbox.checked = !enabled;
+        }
+    }
+
     private async loadYtmConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
@@ -6539,6 +6607,7 @@ class App {
                     await this.loadPlexPlaylists();
                     this.updateUserTypeAccess();
                     await this.updatePlexLoginOnlyState();
+                    void this.loadFreshFindsAutoDownload();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });
@@ -6582,7 +6651,7 @@ class App {
         const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
         settingsSections.forEach(section => {
             const sectionEl = section as HTMLElement;
-            if (sectionEl.id === 'listenbrainzSettings' || sectionEl.id === 'youtubeMusicSettings') {
+            if (sectionEl.id === 'listenbrainzSettings' || sectionEl.id === 'youtubeMusicSettings' || sectionEl.id === 'freshFindsSettings') {
                 sectionEl.style.display = '';
             } else {
                 sectionEl.style.display = isOwner ? '' : 'none';

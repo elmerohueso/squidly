@@ -746,3 +746,15 @@ def queue_recommendation_generation(slug, plex_account_id, plex_username, trigge
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
     return enqueue_job('generate_recommendations', payload, max_attempts=3)
+
+
+def queue_fresh_finds_auto_download(plex_account_id, plex_username, parent_job_id=None, trigger='scheduled'):
+    payload = {
+        'plex_account_id': plex_account_id,
+        'plex_username': plex_username,
+        'slug': 'fresh-finds',
+        'trigger': trigger,
+        'parent_job_id': parent_job_id,
+        'requested_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    return enqueue_job('fresh_finds_auto_download', payload, max_attempts=3)
