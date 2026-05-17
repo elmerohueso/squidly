@@ -1,5 +1,6 @@
 """Plex-related helpers and utilities."""
 
+import concurrent.futures
 import json
 import logging
 import re
@@ -31,6 +32,17 @@ _plex_health_status = {
 }
 _plex_health_status_lock = threading.Lock()
 _playlist_operation_lock = threading.Lock()
+
+
+def _plex_call_with_timeout(fn, *args, timeout=30, label="Plex operation", **kwargs):
+    """Execute a Plex API call with a hard timeout.
+
+    If the call doesn't complete within `timeout` seconds, raises TimeoutError.
+    This prevents individual Plex API calls from hanging indefinitely.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(fn, *args, **kwargs)
+        return future.result(timeout=timeout)
 
 
 def _get_or_create_playlist(plex, playlist_name, items=None):
@@ -106,7 +118,7 @@ def plex_healthcheck():
         name = getattr(plex, 'friendlyName', None) or getattr(plex, 'title', None) or 'Plex'
         set_plex_health_status(True, name)
         return True, name
-    except Exception as e:
+    except BaseException as e:
         msg = str(e)
         set_plex_health_status(False, msg)
         return False, msg
@@ -341,7 +353,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         for rating_key in rating_keys:
             metadata_key = rating_key if rating_key.startswith('/library/metadata/') else f'/library/metadata/{rating_key}'
             try:
-                candidate = plex.fetchItem(metadata_key)
+                candidate = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
                 if candidate is not None:
                     track = candidate
                     logger.info("[PLEX] Resolved track using ratingKey=%s", rating_key)
@@ -485,7 +497,7 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
         for rating_key in unique_library_ids:
             metadata_key = rating_key if rating_key.startswith('/library/metadata/') else f'/library/metadata/{rating_key}'
             try:
-                candidate = plex.fetchItem(metadata_key)
+                candidate = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
                 if candidate is not None:
                     tracks_to_add.append(candidate)
             except Exception as e:
@@ -582,7 +594,7 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
 def _is_plex_library_scan_active(plex, library):
     """Best-effort check for whether the target Plex library is actively scanning."""
     try:
-        library.reload()
+        _plex_call_with_timeout(library.reload, timeout=10, label="library.reload")
         if bool(getattr(library, 'refreshing', False)):
             return True
     except Exception:
@@ -591,7 +603,7 @@ def _is_plex_library_scan_active(plex, library):
     section_id = str(getattr(library, 'key', '') or '').strip('/')
 
     try:
-        activities = plex.activities() or []
+        activities = _plex_call_with_timeout(plex.activities, timeout=10, label="plex.activities") or []
     except Exception:
         activities = []
 
@@ -735,7 +747,8 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
 
     library = None
-    for section in plex.library.sections():
+    sections = _plex_call_with_timeout(plex.library.sections, timeout=30, label="library.sections")
+    for section in sections:
         if section.title == library_name and section.type == 'artist':
             library = section
             break
@@ -744,7 +757,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         raise ValueError(f'Plex music library "{library_name}" not found')
 
     logger.info("[LIBRARY_UPDATE_JOB] Job %s triggering scan on library '%s'", job_id, library_name)
-    library.update()
+    _plex_call_with_timeout(library.update, timeout=30, label="library.update")
 
     completed, saw_active = wait_for_plex_library_scan_completion(
         plex,

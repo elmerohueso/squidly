@@ -734,6 +734,8 @@ class App {
     private historyEntries: ListenHistoryEntry[] = [];
     private historyLoading: boolean = false;
 
+    private timezone: string = 'UTC';
+
     private getSearchTypeName(searchType?: string): string {
         const normalized = (searchType || 's').toLowerCase();
         const labels: Record<string, string> = {
@@ -992,6 +994,7 @@ class App {
 
         this.initializeHistoryNavigation();
         this.initializeHistoryControls();
+        void this.fetchAppConfig();
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
@@ -5655,6 +5658,22 @@ class App {
         };
     }
 
+    private async fetchAppConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/app/config');
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            if (data.timezone) {
+                this.timezone = data.timezone;
+            }
+        } catch (error) {
+            console.warn('Failed to load app config.', error);
+        }
+    }
+
     private async fetchDownloadSettingsFromServer(): Promise<void> {
         try {
             const response = await fetch('/api/settings');
@@ -6777,7 +6796,7 @@ class App {
                 ? `${endpoint.responseTime.toFixed(0)}ms`
                 : 'N/A';
             const lastChecked = endpoint.lastChecked
-                ? new Date(endpoint.lastChecked).toLocaleTimeString()
+                ? new Date(endpoint.lastChecked).toLocaleTimeString(undefined, { timeZone: this.timezone })
                 : 'Never';
             const disabledClass = endpoint.enabled ? '' : ' disabled';
 
@@ -9790,11 +9809,11 @@ class App {
             }
 
             this.updatePlexPlaylistContainerVisibility(true);
-            const generatedDate = playlist.generated_at ? new Date(playlist.generated_at).toLocaleDateString() : '';
+            const playlistName = playlist.name || 'Fresh Finds';
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
-                        <h2>Fresh Finds${generatedDate ? ` — ${generatedDate}` : ''}</h2>
+                        <h2>${this.escapeHtml(playlistName)}</h2>
                     </div>
                 </div>
                 <div class="results-list">
@@ -11447,7 +11466,7 @@ class App {
             if (diffDays < 7) {
                 return `${Math.floor(diffDays)}d ago`;
             }
-            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: this.timezone });
         } catch {
             return isoString;
         }

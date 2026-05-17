@@ -21,6 +21,8 @@ from squidly.jobs import (
     queue_plex_library_sync,
 )
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from squidly.config import app_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -340,10 +342,11 @@ def recommendation_scheduler_worker():
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
 
     last_run_date = None
+    tz = ZoneInfo(app_timezone)
 
     while True:
         try:
-            now = datetime.utcnow()
+            now = datetime.now(tz)
             today = now.date()
 
             if last_run_date == today:

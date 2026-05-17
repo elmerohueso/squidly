@@ -14,6 +14,7 @@ import os
 import json
 import base64
 import requests
+import concurrent.futures
 import psycopg2
 import psycopg2.extras
 from squidly.utils import (
@@ -54,6 +55,7 @@ from io import BytesIO
 from squidly.plex import (
     _get_plex_server_for_user,
     _is_plex_library_scan_active,
+    _plex_call_with_timeout,
     any_plex_library_update_jobs_running_or_queued,
     get_all_plex_users,
     get_plex_health_status,
@@ -710,7 +712,8 @@ def process_plex_sync_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
 
     library = None
-    for section in plex.library.sections():
+    sections = _plex_call_with_timeout(plex.library.sections, timeout=30, label="library.sections")
+    for section in sections:
         _raise_if_job_cancelled(job_id)
         if section.title == library_name and section.type == 'artist':
             library = section
@@ -723,10 +726,10 @@ def process_plex_sync_job(job_id, payload):
     tracks = []
     try:
         _raise_if_job_cancelled(job_id)
-        tracks = library.all(libtype='track')
+        tracks = _plex_call_with_timeout(library.all, libtype='track', timeout=120, label="library.all")
     except Exception:
         _raise_if_job_cancelled(job_id)
-        tracks = library.search(libtype='track')
+        tracks = _plex_call_with_timeout(library.search, libtype='track', timeout=120, label="library.search")
 
     progress['total_tracks'] = len(tracks)
     stages['reading_plex_library'] = 'done'
@@ -927,23 +930,21 @@ def process_plex_sync_job(job_id, payload):
         logger.info("[PLEX_SYNC] Job %s: Adding 'Explicit' label to %s albums", job_id, len(explicit_album_keys))
         for album_key in explicit_album_keys:
             try:
-                # Use a shorter timeout for label operations to prevent hanging
-                plex._session.timeout = 5
                 # album_key format is /library/metadata/ID, extract the ID
                 album_id = int(album_key.split('/')[-1])
                 album = plex.fetchItem(album_id)
                 if album and hasattr(album, 'addLabel'):
-                    album.addLabel('Explicit')
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(album.addLabel, 'Explicit')
+                        future.result(timeout=10)
                     labeled_count += 1
                     logger.info("[PLEX_SYNC] Job %s: Added 'Explicit' label to album %s", job_id, album_key)
+            except concurrent.futures.TimeoutError:
+                logger.info("[PLEX_SYNC] Job %s: Timed out adding label to album %s", job_id, album_key)
+                continue
             except Exception as e:
                 logger.info("[PLEX_SYNC] Job %s: Failed to add 'Explicit' label to album %s: %s", job_id, album_key, str(e))
-                # Continue to next album instead of failing the entire job
                 continue
-        
-        # Reset timeout back to default
-        if hasattr(plex, '_session'):
-            plex._session.timeout = 20
         logger.info("[PLEX_SYNC] Job %s: Successfully labeled %s albums as Explicit", job_id, labeled_count)
 
     progress['explicit_albums_labeled'] = labeled_count
@@ -3033,6 +3034,11 @@ def retry_job(job_id):
     conn.close()
 
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'})
+
+@app.route('/api/app/config', methods=['GET'])
+def app_config():
+    from squidly.config import app_timezone
+    return jsonify({'timezone': app_timezone})
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def download_settings():
@@ -5359,10 +5365,15 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
 
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    now_tz = datetime.now(ZoneInfo(app_timezone))
+    playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
+
     save_recommendation_playlist(
         plex_account_id=plex_account_id,
         slug=slug,
-        name='Fresh Finds',
+        name=playlist_name,
         strategy='fresh-finds',
         seed_count=len(seeds),
         tracks=top_tracks
