@@ -748,13 +748,31 @@ def queue_recommendation_generation(slug, plex_account_id, plex_username, trigge
     return enqueue_job('generate_recommendations', payload, max_attempts=3)
 
 
-def queue_fresh_finds_auto_download(plex_account_id, plex_username, parent_job_id=None, trigger='scheduled'):
+def queue_fresh_finds_auto_download(trigger='scheduled'):
+    """Queue a fresh_finds_auto_download job if one is not already queued/in progress.
+
+    Processes all users with auto-download enabled — no per-user parameters needed.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count FROM jobs
+        WHERE job_type = 'fresh_finds_auto_download'
+          AND status IN ('queued', 'in_progress')
+        """
+    )
+    row = cur.fetchone() or {}
+    existing = row.get('count', 0) > 0
+    conn.close()
+
+    if existing:
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job already queued/in progress; not queueing another")
+        return None
+
     payload = {
-        'plex_account_id': plex_account_id,
-        'plex_username': plex_username,
         'slug': 'fresh-finds',
         'trigger': trigger,
-        'parent_job_id': parent_job_id,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
     return enqueue_job('fresh_finds_auto_download', payload, max_attempts=3)

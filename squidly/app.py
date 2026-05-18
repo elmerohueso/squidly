@@ -5448,28 +5448,13 @@ def process_recommendation_job(job_id, payload):
     stages['saving_playlist'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    # Chain auto-download for scheduled Fresh Finds
+    # Chain auto-download for scheduled Fresh Finds (single job for all enabled users)
     if slug == 'fresh-finds' and trigger == 'scheduled':
         try:
-            from squidly.storage import get_fresh_finds_auto_download_users
             from squidly.jobs import queue_fresh_finds_auto_download
-            auto_download_users = get_fresh_finds_auto_download_users()
-            for user in auto_download_users:
-                user_plex_account_id = user.get('plex_account_id')
-                user_plex_username = user.get('username')
-                if user_plex_account_id is None:
-                    continue
-                try:
-                    auto_job_id = queue_fresh_finds_auto_download(
-                        plex_account_id=user_plex_account_id,
-                        plex_username=user_plex_username or 'Unknown',
-                        parent_job_id=job_id,
-                        trigger='scheduled'
-                    )
-                    if auto_job_id:
-                        logger.info("[RECOMMENDATION] Queued Fresh Finds auto-download for %s (job %s)", user_plex_username, auto_job_id)
-                except Exception as e:
-                    logger.info("[RECOMMENDATION] Failed to queue auto-download for %s: %s", user_plex_username, e)
+            auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
+            if auto_job_id:
+                logger.info("[RECOMMENDATION] Queued Fresh Finds auto-download (job %s)", auto_job_id)
         except Exception as e:
             logger.info("[RECOMMENDATION] Error chaining auto-download: %s", str(e))
 
@@ -5482,32 +5467,21 @@ def process_recommendation_job(job_id, payload):
 
 
 def process_fresh_finds_auto_download_job(job_id, payload):
-    """Process a fresh_finds_auto_download job: read the playlist and queue download_track jobs for each track."""
-    from squidly.storage import get_recommendation_playlist, get_download_settings
-    from squidly.jobs import enqueue_job, queue_bulk_playlist_add_job
+    """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
+    from squidly.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
+    from squidly.jobs import enqueue_job, queue_bulk_playlist_add_job, queue_plex_library_sync
+    from squidly.plex import queue_plex_library_update
 
-    plex_account_id = payload.get('plex_account_id')
-    plex_username = payload.get('plex_username', 'Unknown')
     slug = payload.get('slug', 'fresh-finds')
 
-    if plex_account_id is None:
-        raise ValueError('plex_account_id is required in payload')
+    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s processing for all enabled users", job_id)
 
-    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s processing for user %s (account %s)", job_id, plex_username, plex_account_id)
+    # Get all users with auto-download enabled
+    auto_download_users = get_fresh_finds_auto_download_users()
 
-    # Read the Fresh Finds playlist for this user
-    playlist = get_recommendation_playlist(plex_account_id, slug)
-
-    if not playlist:
-        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: no playlist found for account %s", job_id, plex_account_id)
-        return {'tracks_queued': 0, 'reason': 'no_playlist', 'plex_username': plex_username}
-
-    tracks = playlist.get('tracks', [])
-    playlist_name = playlist.get('name', 'Fresh Finds')
-
-    if not tracks:
-        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: empty playlist for account %s", job_id, plex_account_id)
-        return {'tracks_queued': 0, 'reason': 'empty_playlist', 'plex_username': plex_username}
+    if not auto_download_users:
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: no users with auto-download enabled", job_id)
+        return {'tracks_queued': 0, 'reason': 'no_users'}
 
     # Get global download settings for quality and naming
     settings = get_download_settings()
@@ -5515,56 +5489,103 @@ def process_fresh_finds_auto_download_job(job_id, payload):
     file_naming = settings.get('file_naming_album', '{artist}/{album}/{track} - {title}.{ext}')
     file_naming_album = settings.get('file_naming_album', '{artist}/{album}/{track} - {title}.{ext}')
 
-    # Queue a download_track job for each track
-    tracks_queued = 0
-    for track in tracks:
-        hifi_id = track.get('hifi_id')
-        if not hifi_id:
+    total_tracks_queued = 0
+    users_processed = []
+
+    for user in auto_download_users:
+        plex_account_id = user.get('plex_account_id')
+        plex_username = user.get('username', 'Unknown')
+
+        if plex_account_id is None:
             continue
 
-        job_payload = {
-            'trackId': hifi_id,
-            'fileNaming': file_naming,
-            'fileNamingAlbum': file_naming_album,
-            'plex_playlist': playlist_name,
-            'plex_user_id': plex_account_id,
-            'downloadQuality': quality,
-        }
+        # Read the Fresh Finds playlist for this user
+        playlist = get_recommendation_playlist(plex_account_id, slug)
 
-        artist = track.get('artist')
-        title = track.get('title')
-        if artist:
-            job_payload['artist'] = artist
-        if title:
-            job_payload['title'] = title
+        if not playlist:
+            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: no playlist found for user %s (account %s)", job_id, plex_username, plex_account_id)
+            continue
+
+        tracks = playlist.get('tracks', [])
+        playlist_name = playlist.get('name', 'Fresh Finds')
+
+        if not tracks:
+            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: empty playlist for user %s (account %s)", job_id, plex_username, plex_account_id)
+            continue
+
+        # Queue a download_track job for each track
+        tracks_queued = 0
+        for track in tracks:
+            hifi_id = track.get('hifi_id')
+            if not hifi_id:
+                continue
+
+            job_payload = {
+                'trackId': hifi_id,
+                'fileNaming': file_naming,
+                'fileNamingAlbum': file_naming_album,
+                'plex_playlist': playlist_name,
+                'plex_user_id': plex_account_id,
+                'downloadQuality': quality,
+            }
+
+            artist = track.get('artist')
+            title = track.get('title')
+            if artist:
+                job_payload['artist'] = artist
+            if title:
+                job_payload['title'] = title
+
+            try:
+                download_job_id = enqueue_job('download_track', job_payload)
+                if download_job_id:
+                    tracks_queued += 1
+                    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued download_track %s for track %s - %s (user: %s)",
+                                job_id, download_job_id, artist or 'Unknown', title or str(hifi_id), plex_username)
+            except Exception as e:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue download for track %s: %s",
+                            job_id, hifi_id, str(e))
+
+        total_tracks_queued += tracks_queued
+        users_processed.append(plex_username)
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d/%d tracks for %s",
+                    job_id, tracks_queued, len(tracks), plex_username)
+
+    # Chain library update, plex sync, and bulk playlist add
+    if total_tracks_queued > 0:
+        try:
+            update_job_id = queue_plex_library_update(trigger='fresh_finds_auto_download')
+            if update_job_id:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued plex_library_update job %s", job_id, update_job_id)
+            else:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: plex_library_update already queued/in progress", job_id)
+        except Exception as e:
+            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue plex_library_update: %s", job_id, str(e))
 
         try:
-            download_job_id = enqueue_job('download_track', job_payload)
-            if download_job_id:
-                tracks_queued += 1
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued download_track %s for track %s - %s",
-                            job_id, download_job_id, artist or 'Unknown', title or str(hifi_id))
+            sync_job_id = queue_plex_library_sync(trigger='fresh_finds_auto_download')
+            if sync_job_id:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued plex_library_sync job %s", job_id, sync_job_id)
+            else:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: plex_library_sync already queued/in progress", job_id)
         except Exception as e:
-            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue download for track %s: %s",
-                        job_id, hifi_id, str(e))
+            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue plex_library_sync: %s", job_id, str(e))
 
-    # Queue a bulk playlist add job to process pending playlist additions
-    if tracks_queued > 0:
         try:
             bulk_job_id = queue_bulk_playlist_add_job(trigger='fresh_finds_auto_download')
             if bulk_job_id:
                 logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued bulk_playlist_add job %s", job_id, bulk_job_id)
+            else:
+                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: bulk_playlist_add already queued or no pending adds", job_id)
         except Exception as e:
             logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue bulk_playlist_add: %s", job_id, str(e))
 
-    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d/%d tracks for %s",
-                job_id, tracks_queued, len(tracks), plex_username)
+    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d total tracks for %d users (%s)",
+                job_id, total_tracks_queued, len(users_processed), ', '.join(users_processed))
 
     return {
-        'tracks_queued': tracks_queued,
-        'total_tracks': len(tracks),
-        'playlist_name': playlist_name,
-        'plex_username': plex_username,
+        'tracks_queued': total_tracks_queued,
+        'users_processed': users_processed,
     }
 
 
