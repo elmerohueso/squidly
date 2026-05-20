@@ -407,6 +407,16 @@ def recommendation_scheduler_worker():
                 except Exception as e:
                     logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue for %s: %s", plex_username, e)
 
+            # Queue a single auto-download job after all recommendation jobs.
+            # The auto-download job will wait for recommendations to finish before processing.
+            try:
+                from squidly.orchestration import queue_fresh_finds_auto_download
+                auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
+                if auto_job_id:
+                    logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds auto-download (job %s)", auto_job_id)
+            except Exception as e:
+                logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue auto-download: %s", e)
+
         except Exception as e:
             logger.info("[RECOMMENDATION_SCHEDULER] Error: %s", str(e))
 

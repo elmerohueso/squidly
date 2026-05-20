@@ -55,7 +55,7 @@ JOB_TYPES = {
         'process_fn': 'squidly.app.process_automatic_matching_job',
     },
     'fresh_finds_auto_download': {
-        'max_attempts': 3,
+        'max_attempts': 10,
         'idle_sleep': 5,
         'process_fn': 'squidly.app.process_fresh_finds_auto_download_job',
     },

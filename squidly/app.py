@@ -1314,6 +1314,8 @@ def process_download_job(job_id, payload):
 
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
+            stages['playlist_added'] = 'queued'
+            jobs.update_job_progress(job_id, {'stages': stages})
             logger.info("[DOWNLOAD] Job %s: queuing playlist add (existing match) for path=%s playlist=%s", job_id, full_path, playlist_name)
             queue_pending_playlist_addition(
                 full_path,
@@ -1321,12 +1323,11 @@ def process_download_job(job_id, payload):
                 parent_job_id=job_id,
                 plex_user_id=payload.get('plex_user_id')
             )
-            stages['playlist_added'] = 'queued'
             logger.info("[DOWNLOAD] Playlist requested - queued for bulk playlist add")
         else:
             logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
             stages['playlist_added'] = 'skipped'
-        jobs.update_job_progress(job_id, {'stages': stages})
+            jobs.update_job_progress(job_id, {'stages': stages})
 
         upsert_download_match_hint(
             track_title=track_title,
@@ -1499,6 +1500,8 @@ def process_download_job(job_id, payload):
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
+        stages['playlist_added'] = 'queued'
+        jobs.update_job_progress(job_id, {'stages': stages})
         logger.info("[DOWNLOAD] Job %s: queuing playlist add for path=%s playlist=%s", job_id, full_path, playlist_name)
         queue_pending_playlist_addition(
             full_path,
@@ -1506,12 +1509,11 @@ def process_download_job(job_id, payload):
             parent_job_id=job_id,
             plex_user_id=payload.get('plex_user_id')
         )
-        stages['playlist_added'] = 'queued'
         logger.info("[DOWNLOAD] Playlist requested - queued for bulk playlist add")
     else:
         logger.info("[DOWNLOAD] Plex playlist update skipped. No playlist requested.")
         stages['playlist_added'] = 'skipped'
-    jobs.update_job_progress(job_id, {'stages': stages})
+        jobs.update_job_progress(job_id, {'stages': stages})
 
     final_audio_format = output_format
     upsert_download_match_hint(
@@ -5354,16 +5356,6 @@ def process_recommendation_job(job_id, payload):
     stages['saving_playlist'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    # Chain auto-download for scheduled Fresh Finds (single job for all enabled users)
-    if slug == 'fresh-finds' and trigger == 'scheduled':
-        try:
-            from squidly.orchestration import queue_fresh_finds_auto_download
-            auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
-            if auto_job_id:
-                logger.info("[RECOMMENDATION] Queued Fresh Finds auto-download (job %s)", auto_job_id)
-        except Exception as e:
-            logger.info("[RECOMMENDATION] Error chaining auto-download: %s", str(e))
-
     return {
         'stages': stages,
         'progress': progress,
@@ -5375,10 +5367,17 @@ def process_recommendation_job(job_id, payload):
 def process_fresh_finds_auto_download_job(job_id, payload):
     """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
     from squidly.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
-    from squidly.orchestration import queue_bulk_playlist_add_job, queue_plex_library_sync, queue_plex_library_update
-    from squidly.jobs import enqueue_job
+    from squidly.orchestration import queue_bulk_playlist_add_job, queue_plex_library_sync, queue_plex_library_update, is_job_type_running_or_queued
+    from squidly.jobs import enqueue_job, RetryableError
 
     slug = payload.get('slug', 'fresh-finds')
+
+    # If generate_recommendations jobs are still running, retry later.
+    # The scheduler queues this job alongside recommendation jobs, so we need
+    # to wait for them to finish before reading the playlists.
+    if is_job_type_running_or_queued('generate_recommendations'):
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: generate_recommendations still running, retrying later", job_id)
+        raise RetryableError("generate_recommendations jobs still in progress")
 
     logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s processing for all enabled users", job_id)
 
