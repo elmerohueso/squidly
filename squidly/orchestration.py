@@ -140,22 +140,6 @@ def queue_plex_library_sync(trigger='manual'):
     return job_id
 
 
-def start_plex_sync_job(trigger='manual'):
-    """Queue a Plex library sync job if one is not already queued/in progress.
-
-    Validates Plex config before enqueuing.
-    """
-    config = get_plex_config()
-    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
-        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
-
-    job_id = queue_plex_library_sync(trigger=trigger)
-    if job_id is None:
-        return {'ok': False, 'status_code': 409, 'error': 'A Plex sync job is already queued or in progress'}
-
-    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
-
-
 def queue_plex_library_update(trigger='scheduled'):
     """Queue a plex_library_update job if one is not already queued/in progress."""
     job_id = queue_if_not_running(
@@ -251,10 +235,7 @@ def queue_fresh_finds_auto_download(trigger='scheduled'):
 # Convenience aliases (matching old function names for backward compat)
 # ---------------------------------------------------------------------------
 
-# These are the same as the generic function but kept as explicit aliases
-# for readability at call sites that check specific job types.
-any_plex_sync_jobs_running_or_queued = lambda: is_job_type_running_or_queued('plex_library_sync')
-any_plex_listen_history_sync_jobs_running_or_queued = lambda: is_job_type_running_or_queued('plex_listen_history_sync')
+# Convenience alias for readability at call sites that check specific job types.
 any_plex_library_update_jobs_running_or_queued = lambda: is_job_type_running_or_queued('plex_library_update')
 
 

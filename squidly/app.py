@@ -65,7 +65,6 @@ from squidly.plex import (
     set_plex_health_status,
     test_plex_connection,
     wait_for_plex_library_scan_completion,
-    get_last_successful_plex_sync_finished_at,
 )
 
 from squidly.matching import (

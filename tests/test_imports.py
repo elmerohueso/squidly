@@ -77,14 +77,11 @@ def test_import_orchestration():
     from squidly.orchestration import (
         JOB_TYPES,
         any_plex_library_update_jobs_running_or_queued,
-        any_plex_listen_history_sync_jobs_running_or_queued,
-        any_plex_sync_jobs_running_or_queued,
         count_pending_playlist_adds,
         delete_pending_playlist_adds,
         get_pending_playlist_adds,
         is_job_type_running_or_queued,
         queue_bulk_playlist_add_job,
-        queue_fresh_finds_auto_download,
         queue_if_not_running,
         queue_plex_library_sync,
         queue_plex_library_update,
@@ -92,7 +89,6 @@ def test_import_orchestration():
         queue_pending_playlist_addition,
         queue_recommendation_generation,
         start_plex_library_update_job,
-        start_plex_sync_job,
         wait_for_job_type,
     )
 
