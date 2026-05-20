@@ -140,15 +140,10 @@ from squidly import jobs
 
 from squidly.orchestration import (
     is_job_type_running_or_queued,
-    queue_bulk_playlist_add_job,
-    queue_fresh_finds_auto_download,
     queue_pending_playlist_addition,
-    queue_plex_library_sync,
-    queue_plex_library_update,
     queue_plex_listen_history_sync,
     queue_recommendation_generation,
     start_plex_library_update_job,
-    start_plex_sync_job,
     wait_for_job_type,
 )
 
@@ -567,14 +562,10 @@ def process_automatic_matching_job(job_id, payload):
     4. Run HiFi gap-fill for remaining unmatched records
     """
     stages = {
-        'plex_library_update': 'pending',
-        'plex_sync': 'pending',
         'tag_analysis': 'pending',
         'hifi_gap_fill': 'pending',
     }
     progress = {
-        'plex_update_queued': False,
-        'plex_sync_tracks': 0,
         'tag_scanned': 0,
         'tag_filled': 0,
         'hifi_tracks_matched': 0,
@@ -585,55 +576,7 @@ def process_automatic_matching_job(job_id, payload):
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else 'manual'
 
-    # Stage 1: Queue Plex library update
-    stages['plex_library_update'] = 'in_progress'
-    jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[AUTO_MATCH] Job %s queueing Plex library update", job_id)
-
-    from squidly.orchestration import queue_plex_library_update, wait_for_job_type
-
-    update_job_id = queue_plex_library_update(trigger='automatic_matching')
-    if update_job_id:
-        progress['plex_update_queued'] = True
-        logger.info("[AUTO_MATCH] Job %s queued Plex library update job %s", job_id, update_job_id)
-    else:
-        logger.info("[AUTO_MATCH] Job %s no Plex library update needed or already queued", job_id)
-
-    # Wait for Plex library update to finish
-    wait_for_job_type('plex_library_update', timeout=600, poll_interval=5, check_cancelled_job_id=job_id)
-
-    stages['plex_library_update'] = 'done'
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-    # Stage 2: Run Plex sync
-    stages['plex_sync'] = 'in_progress'
-    jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[AUTO_MATCH] Job %s running Plex sync", job_id)
-
-    from squidly.plex import get_last_successful_plex_sync_finished_at
-
-    sync_job_id = queue_plex_library_sync(trigger='automatic_matching')
-    if sync_job_id:
-        logger.info("[AUTO_MATCH] Job %s queued Plex sync job %s", job_id, sync_job_id)
-    else:
-        logger.info("[AUTO_MATCH] Job %s Plex sync already running or queued", job_id)
-
-    # Wait for Plex sync to finish
-    wait_for_job_type('plex_library_sync', timeout=600, poll_interval=5, check_cancelled_job_id=job_id)
-
-    # Report sync progress
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS cnt FROM tracks WHERE library_id IS NOT NULL")
-    row = cur.fetchone()
-    progress['plex_sync_tracks'] = _safe_int(row.get('cnt')) if row else 0
-    conn.close()
-
-    stages['plex_sync'] = 'done'
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-    logger.info("[AUTO_MATCH] Job %s Plex sync complete, %s tracks in library", job_id, progress['plex_sync_tracks'])
-
-    # Stage 3: Tag analysis
+    # Stage 1: Tag analysis
     stages['tag_analysis'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[AUTO_MATCH] Job %s running tag analysis", job_id)
@@ -650,7 +593,7 @@ def process_automatic_matching_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
     logger.info("[AUTO_MATCH] Job %s tag analysis complete, scanned=%s, filled=%s", job_id, progress['tag_scanned'], progress['tag_filled'])
 
-    # Stage 4: HiFi gap-fill
+    # Stage 2: HiFi gap-fill
     stages['hifi_gap_fill'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[AUTO_MATCH] Job %s running HiFi gap-fill", job_id)
@@ -2578,18 +2521,6 @@ def download_track():
 
     logger.info("[DOWNLOAD_ENQUEUE] Queued download job %s for track %s", job_id, track_id)
 
-    update_job_id = queue_plex_library_update(trigger='download_enqueue')
-    if update_job_id:
-        logger.info("[DOWNLOAD_ENQUEUE] Queued plex_library_update job %s (download enqueue)", update_job_id)
-    else:
-        logger.info("[DOWNLOAD_ENQUEUE] plex_library_update already queued/in progress; not queueing another")
-
-    sync_job_id = queue_plex_library_sync(trigger='download_enqueue')
-    if sync_job_id:
-        logger.info("[DOWNLOAD_ENQUEUE] Queued plex_library_sync job %s (download enqueue)", sync_job_id)
-    else:
-        logger.info("[DOWNLOAD_ENQUEUE] plex_library_sync already queued/in progress; not queueing another")
-
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
 @app.route('/api/jobs', methods=['GET'])
@@ -3782,8 +3713,8 @@ def save_plex_config_endpoint():
 
 @app.route('/api/plex/syncs', methods=['POST'])
 def start_plex_sync_endpoint():
-    """Queue a manual Plex library sync job."""
-    result = start_plex_sync_job(trigger='manual')
+    """Queue a manual Plex library update and sync job."""
+    result = start_plex_library_update_job(trigger='manual')
     if not result.get('ok'):
         status_code = result.get('status_code', 500)
         return jsonify({'error': result.get('error')}), int(status_code)
@@ -3792,7 +3723,7 @@ def start_plex_sync_endpoint():
 
 @app.route('/api/plex/library-updates', methods=['POST'])
 def start_plex_library_update_endpoint():
-    """Queue a manual Plex library update job."""
+    """Queue a manual Plex library update and sync job."""
     result = start_plex_library_update_job(trigger='manual')
     if not result.get('ok'):
         status_code = result.get('status_code', 500)
@@ -3803,16 +3734,13 @@ def start_plex_library_update_endpoint():
 
 @app.route('/api/hifi/matches', methods=['POST'])
 def start_hifi_match_endpoint():
-    """Queue an automatic matching job: Plex update → sync → tag analysis → HiFi gap-fill."""
-    from squidly.jobs import enqueue_job
+    """Queue a Plex library update, which chains to sync → automatic matching."""
+    result = start_plex_library_update_job(trigger='manual')
+    if not result.get('ok'):
+        status_code = result.get('status_code', 500)
+        return jsonify({'error': result.get('error')}), int(status_code)
 
-    existing = is_job_type_running_or_queued('hifi_match') or is_job_type_running_or_queued('automatic_matching')
-    if existing:
-        return jsonify({'error': 'A matching job is already queued or in progress'}), 409
-
-    payload = {'trigger': 'manual'}
-    job_id = enqueue_job('automatic_matching', payload, max_attempts=1)
-    return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
+    return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
 
 
@@ -5367,7 +5295,7 @@ def process_recommendation_job(job_id, payload):
 def process_fresh_finds_auto_download_job(job_id, payload):
     """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
     from squidly.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
-    from squidly.orchestration import queue_bulk_playlist_add_job, queue_plex_library_sync, queue_plex_library_update, is_job_type_running_or_queued
+    from squidly.orchestration import is_job_type_running_or_queued
     from squidly.jobs import enqueue_job, RetryableError
 
     slug = payload.get('slug', 'fresh-finds')
@@ -5455,35 +5383,6 @@ def process_fresh_finds_auto_download_job(job_id, payload):
         users_processed.append(plex_username)
         logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d/%d tracks for %s",
                     job_id, tracks_queued, len(tracks), plex_username)
-
-    # Chain library update, plex sync, and bulk playlist add
-    if total_tracks_queued > 0:
-        try:
-            update_job_id = queue_plex_library_update(trigger='fresh_finds_auto_download')
-            if update_job_id:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued plex_library_update job %s", job_id, update_job_id)
-            else:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: plex_library_update already queued/in progress", job_id)
-        except Exception as e:
-            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue plex_library_update: %s", job_id, str(e))
-
-        try:
-            sync_job_id = queue_plex_library_sync(trigger='fresh_finds_auto_download')
-            if sync_job_id:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued plex_library_sync job %s", job_id, sync_job_id)
-            else:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: plex_library_sync already queued/in progress", job_id)
-        except Exception as e:
-            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue plex_library_sync: %s", job_id, str(e))
-
-        try:
-            bulk_job_id = queue_bulk_playlist_add_job(trigger='fresh_finds_auto_download')
-            if bulk_job_id:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued bulk_playlist_add job %s", job_id, bulk_job_id)
-            else:
-                logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: bulk_playlist_add already queued or no pending adds", job_id)
-        except Exception as e:
-            logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: failed to queue bulk_playlist_add: %s", job_id, str(e))
 
     logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d total tracks for %d users (%s)",
                 job_id, total_tracks_queued, len(users_processed), ', '.join(users_processed))

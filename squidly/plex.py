@@ -12,9 +12,6 @@ from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
 from squidly import jobs
 from squidly.db import get_db_connection
-from squidly.orchestration import (
-    start_plex_sync_job,
-)
 from squidly.storage import (
     can_start_plex_library_update,
     get_plex_config,
@@ -740,26 +737,14 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     stages['scanning_plex_library'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    sync_result = start_plex_sync_job(trigger='post_library_update')
-    if sync_result.get('ok'):
-        progress['sync_job_id'] = sync_result.get('job_id')
-        progress['sync_queue_status'] = 'queued'
-    elif sync_result.get('status_code') == 409:
-        progress['sync_queue_status'] = 'already_queued'
-    else:
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-        raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
-
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
     set_last_library_update_time(datetime.utcnow())
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
     logger.info(
-        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s sync_queue_status=%s",
+        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s",
         job_id,
         scan_outcome,
-        progress['sync_queue_status'],
     )
 
     return {
@@ -767,8 +752,6 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         'stages': stages,
         'progress': progress,
         'scan_outcome': scan_outcome,
-        'sync_job_id': progress.get('sync_job_id'),
-        'sync_queue_status': progress.get('sync_queue_status')
     }
 
 

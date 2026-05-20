@@ -21,18 +21,25 @@ JOB_TYPES = {
         'max_attempts': 20,
         'idle_sleep': 2,
         'process_fn': 'squidly.app.process_download_job',
-    },
-    'plex_library_sync': {
-        'max_attempts': 5,
-        'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_plex_sync_job',
-        'on_success': ['plex_listen_history_sync', 'bulk_playlist_add'],
+        'on_success': ['plex_library_update'],
     },
     'plex_library_update': {
         'max_attempts': 5,
         'idle_sleep': 5,
         'process_fn': 'squidly.plex.process_plex_library_update_job',
         'on_success': ['plex_library_sync'],
+    },
+    'plex_library_sync': {
+        'max_attempts': 5,
+        'idle_sleep': 5,
+        'process_fn': 'squidly.app.process_plex_sync_job',
+        'on_success': ['automatic_matching'],
+    },
+    'automatic_matching': {
+        'max_attempts': 1,
+        'idle_sleep': 5,
+        'process_fn': 'squidly.app.process_automatic_matching_job',
+        'on_success': ['bulk_playlist_add'],
     },
     'bulk_playlist_add': {
         'max_attempts': 5,
@@ -48,11 +55,6 @@ JOB_TYPES = {
         'max_attempts': 3,
         'idle_sleep': 5,
         'process_fn': 'squidly.app.process_recommendation_job',
-    },
-    'automatic_matching': {
-        'max_attempts': 1,
-        'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_automatic_matching_job',
     },
     'fresh_finds_auto_download': {
         'max_attempts': 10,
@@ -370,7 +372,8 @@ def delete_pending_playlist_adds(ids):
 def handle_on_success(job_type, result):
     """Enqueue follow-up jobs after a job succeeds, based on JOB_TYPES on_success rules.
 
-    Called by the generic worker loop after mark_job_succeeded.
+    Called by workers after mark_job_succeeded. Uses per-type dispatch
+    for queue functions that have special pre-conditions.
     """
     config = JOB_TYPES.get(job_type, {})
     on_success = config.get('on_success', [])
@@ -378,20 +381,30 @@ def handle_on_success(job_type, result):
         return
 
     for followup_type in on_success:
-        if followup_type == 'plex_listen_history_sync':
-            job_id = queue_plex_listen_history_sync(trigger=f'post_{job_type}')
+        if followup_type == 'plex_library_update':
+            job_id = queue_plex_library_update(trigger=f'post_{job_type}')
             if job_id:
-                logger.info("[ON_SUCCESS] %s → queued plex_listen_history_sync job %s", job_type, job_id)
+                logger.info("[ON_SUCCESS] %s → queued plex_library_update job %s", job_type, job_id)
+
+        elif followup_type == 'plex_library_sync':
+            job_id = queue_plex_library_sync(trigger=f'post_{job_type}')
+            if job_id:
+                logger.info("[ON_SUCCESS] %s → queued plex_library_sync job %s", job_type, job_id)
+
+        elif followup_type == 'automatic_matching':
+            job_id = queue_if_not_running('automatic_matching', {'trigger': f'post_{job_type}'}, max_attempts=1)
+            if job_id:
+                logger.info("[ON_SUCCESS] %s → queued automatic_matching job %s", job_type, job_id)
 
         elif followup_type == 'bulk_playlist_add':
             job_id = queue_bulk_playlist_add_job(trigger=f'post_{job_type}')
             if job_id:
                 logger.info("[ON_SUCCESS] %s → queued bulk_playlist_add job %s", job_type, job_id)
 
-        elif followup_type == 'plex_library_sync':
-            job_id = queue_plex_library_sync(trigger=f'post_{job_type}')
+        elif followup_type == 'plex_listen_history_sync':
+            job_id = queue_plex_listen_history_sync(trigger=f'post_{job_type}')
             if job_id:
-                logger.info("[ON_SUCCESS] %s → queued plex_library_sync job %s", job_type, job_id)
+                logger.info("[ON_SUCCESS] %s → queued plex_listen_history_sync job %s", job_type, job_id)
 
         else:
             logger.warning("[ON_SUCCESS] Unknown follow-up job type: %s", followup_type)

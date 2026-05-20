@@ -24,11 +24,7 @@ from squidly.jobs import (
 from squidly.orchestration import (
     JOB_TYPES,
     any_plex_library_update_jobs_running_or_queued,
-    any_plex_sync_jobs_running_or_queued,
     handle_on_success,
-    queue_bulk_playlist_add_job,
-    queue_plex_library_sync,
-    queue_plex_listen_history_sync,
     queue_recommendation_generation,
 )
 from squidly.plex import get_last_successful_plex_sync_finished_at
@@ -165,6 +161,7 @@ def download_track_worker():
                 if download_track_all_stages_done(stages):
                     mark_job_succeeded(job['id'], result)
                     logger.info("%s Job %s completed", log_prefix, job['id'])
+                    handle_on_success('download_track', result)
                 else:
                     stage_state = stages if isinstance(stages, dict) else {}
                     error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
@@ -231,10 +228,7 @@ def plex_sync_worker():
                 result = process_plex_sync_job(job['id'], payload)
                 mark_job_succeeded(job['id'], result)
                 logger.info("%s Job %s completed", log_prefix, job['id'])
-                queue_plex_listen_history_sync(trigger='post_library_sync')
-                bulk_job_id = queue_bulk_playlist_add_job(trigger='post_library_sync')
-                if bulk_job_id:
-                    logger.info("%s Queued bulk playlist add job %s", log_prefix, bulk_job_id)
+                handle_on_success('plex_library_sync', result)
             except JobCancelledError:
                 mark_job_cancelled(job['id'])
                 logger.info("%s Job %s cancelled", log_prefix, job['id'])
@@ -301,6 +295,7 @@ def plex_library_update_worker():
                 result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
                 jobs_module.mark_job_succeeded(job['id'], result)
                 logger.info("%s Job %s completed", log_prefix, job['id'])
+                handle_on_success('plex_library_update', result)
             except Exception as e:
                 logger.info("%s Job %s failed: %s", log_prefix, job['id'], str(e))
                 jobs_module.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
@@ -315,7 +310,13 @@ def plex_library_update_worker():
 # ---------------------------------------------------------------------------
 
 def plex_sync_scheduler_worker():
-    """Periodically queue plex_library_sync jobs based on configured interval."""
+    """Periodically queue plex_library_update jobs based on configured interval.
+
+    The update chains to plex_library_sync → automatic_matching → bulk_playlist_add
+    via on_success rules.
+    """
+    from squidly.orchestration import queue_plex_library_update
+
     logger.info("[PLEX_SYNC_SCHEDULER] Background scheduler started")
 
     while True:
@@ -337,7 +338,7 @@ def plex_sync_scheduler_worker():
             if interval_hours < 1:
                 interval_hours = 1
 
-            if any_plex_sync_jobs_running_or_queued():
+            if any_plex_library_update_jobs_running_or_queued():
                 time.sleep(60)
                 continue
 
@@ -350,9 +351,9 @@ def plex_sync_scheduler_worker():
                 should_enqueue = now - last_finished >= timedelta(hours=interval_hours)
 
             if should_enqueue:
-                queued = queue_plex_library_sync(trigger='interval')
+                queued = queue_plex_library_update(trigger='interval')
                 if queued:
-                    logger.info("[PLEX_SYNC_SCHEDULER] Queued interval sync job %s", queued)
+                    logger.info("[PLEX_SYNC_SCHEDULER] Queued interval library update job %s", queued)
 
         except Exception as e:
             logger.info("[PLEX_SYNC_SCHEDULER] Error: %s", str(e))
