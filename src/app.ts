@@ -1144,11 +1144,11 @@ class App {
         if (this.matchReviewRunScanButton) {
             this.matchReviewRunScanButton.addEventListener('click', () => {
                 if (this.activeMatchActivityJobId) {
-                    void this.cancelHifiMatchScan(this.activeMatchActivityJobId);
+                    void this.cancelLibraryUpdate(this.activeMatchActivityJobId);
                     return;
                 }
 
-                void this.startHifiMatchScan();
+                void this.startLibraryUpdate();
             });
         }
         if (this.matchReviewRefreshButton) {
@@ -3890,8 +3890,8 @@ class App {
         this.matchReviewRunScanButton.disabled = false;
         this.matchReviewRunScanButton.classList.toggle('is-cancel', isActive);
         this.matchReviewRunScanButton.textContent = isActive
-            ? 'Cancel Automatic Matching'
-            : 'Start Automatic Matching';
+            ? 'Cancel Update & Sync'
+            : 'Update & Sync Library';
     }
 
     private startMatchReviewPollingInterval(): void {
@@ -3931,7 +3931,7 @@ class App {
 
         this.matchReviewSummary.innerHTML = '';
         this.matchReviewContent.innerHTML = `
-            <div class="match-review-empty">Hifi Match is currently running. Review cards will load after the scan completes.</div>
+            <div class="match-review-empty">Library update is currently running. Review cards will load after it completes.</div>
         `;
     }
 
@@ -4028,7 +4028,7 @@ class App {
             case 'automatic_matching':
                 return 'Automatic Matching';
             case 'hifi_match':
-                return 'HiFi Match';
+                return 'HiFi Match (Legacy)';
             case 'plex_library_sync':
                 return 'Plex Sync';
             case 'plex_library_update':
@@ -4059,7 +4059,7 @@ class App {
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
-                throw new Error('Failed to load match scan activity');
+                throw new Error('Failed to load library update activity');
             }
 
             const data = await response.json() as { jobs?: JobItem[] };
@@ -4067,7 +4067,7 @@ class App {
             const latestJob = jobs[0] || null;
 
             if (!latestJob) {
-                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No match scans have been run yet.</div>';
+                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No library updates have been run yet.</div>';
                 this.activeMatchActivityJobId = null;
                 this.updateMatchReviewRunScanButton(false);
                 this.lastMatchActivityJobId = null;
@@ -4086,7 +4086,7 @@ class App {
             this.updateMatchReviewRunScanButton(isActive);
             if (isActive) {
                 this.startMatchReviewPollingInterval();
-                this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+                this.setMatchReviewStatus(`Library update ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
                 if (this.currentPage === 'matches') {
                     this.renderMatchReviewBlockedByActiveScan();
                 }
@@ -4104,15 +4104,15 @@ class App {
 
             if (completedNow) {
                 if (currentStatus === 'succeeded') {
-                    this.setMatchReviewStatus(`Manual scan completed for job ${latestJob.id}. Review results updated.`);
+                    this.setMatchReviewStatus(`Library update completed for job ${latestJob.id}. Review results updated.`);
                 } else {
-                    this.setMatchReviewStatus(`Manual scan finished with status ${currentStatus}.`, currentStatus === 'failed');
+                    this.setMatchReviewStatus(`Library update finished with status ${currentStatus}.`, currentStatus === 'failed');
                 }
                 await this.loadMatchReview();
             }
         } catch (error) {
             console.error('Failed to load match activity:', error);
-            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load match scan activity.</div>';
+            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load library update activity.</div>';
             this.stopMatchReviewPollingInterval();
         }
     }
@@ -4700,22 +4700,22 @@ class App {
         }
     }
 
-    private async startHifiMatchScan(): Promise<void> {
+    private async startLibraryUpdate(): Promise<void> {
         if (!this.matchReviewRunScanButton) {
             return;
         }
 
-        const originalText = this.matchReviewRunScanButton.textContent || 'Start Automatic Matching';
+        const originalText = this.matchReviewRunScanButton.textContent || 'Update & Sync Library';
         this.matchReviewRunScanButton.disabled = true;
         this.matchReviewRunScanButton.textContent = 'Queueing...';
         this.setMatchReviewStatus('');
         let queuedJobIsActive = false;
 
         try {
-            const response = await fetch('/api/hifi/matches', { method: 'POST' });
+            const response = await fetch('/api/plex/library-updates', { method: 'POST' });
             const data = await response.json().catch(() => ({} as { error?: string; job_id?: number | string; status?: string }));
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to queue manual scan');
+                throw new Error(data.error || 'Failed to queue library update');
             }
 
             const queuedJobId = Number(data.job_id);
@@ -4726,12 +4726,12 @@ class App {
                 this.updateMatchReviewRunScanButton(true);
             }
 
-            this.setMatchReviewStatus(`Manual scan queued as job ${data.job_id || 'unknown'}. Check Jobs for progress.`);
+            this.setMatchReviewStatus(`Library update queued as job ${data.job_id || 'unknown'}. Sync and matching will follow automatically.`);
             await this.loadMatchActivity();
             await this.loadJobs();
         } catch (error) {
-            console.error('Failed to queue hifi match scan:', error);
-            this.setMatchReviewStatus((error as Error).message || 'Failed to queue manual scan', true);
+            console.error('Failed to queue library update:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to queue library update', true);
         } finally {
             if (queuedJobIsActive || this.activeMatchActivityJobId) {
                 this.updateMatchReviewRunScanButton(true);
@@ -4742,19 +4742,19 @@ class App {
         }
     }
 
-    private async cancelHifiMatchScan(jobId: number): Promise<void> {
+    private async cancelLibraryUpdate(jobId: number): Promise<void> {
         if (!this.matchReviewRunScanButton) {
             return;
         }
 
-        const originalText = this.matchReviewRunScanButton.textContent || 'Cancel Automatic Matching';
+        const originalText = this.matchReviewRunScanButton.textContent || 'Cancel Update & Sync';
         this.matchReviewRunScanButton.disabled = true;
         this.matchReviewRunScanButton.textContent = 'Cancelling...';
 
         try {
             const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
             if (!response.ok) {
-                let message = 'Failed to cancel automatic matching';
+                let message = 'Failed to cancel library update';
                 try {
                     const data = await response.json() as { error?: string };
                     if (data?.error) {
@@ -4768,14 +4768,14 @@ class App {
 
             this.activeMatchActivityJobId = null;
             this.updateMatchReviewRunScanButton(false);
-            this.setMatchReviewStatus(`Automatic matching cancelled for job ${jobId}.`);
+            this.setMatchReviewStatus(`Library update cancelled for job ${jobId}.`);
             await this.loadMatchActivity();
             await this.loadJobs();
         } catch (error) {
-            console.error('Failed to cancel hifi match scan:', error);
+            console.error('Failed to cancel library update:', error);
             this.matchReviewRunScanButton.disabled = false;
             this.matchReviewRunScanButton.textContent = originalText;
-            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel automatic matching', true);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel library update', true);
         }
     }
 
@@ -5445,9 +5445,9 @@ class App {
         if (job.job_type === 'hifi_match') {
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
             if (trigger === 'manual') {
-                return 'Hifi Match (Manual)';
+                return 'HiFi Match (Legacy, Manual)';
             }
-            return 'Hifi Match';
+            return 'HiFi Match (Legacy)';
         }
 
         if (job.job_type === 'automatic_matching') {
