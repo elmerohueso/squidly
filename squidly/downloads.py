@@ -23,6 +23,48 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Download-specific error classes
+# ---------------------------------------------------------------------------
+
+class ManifestDownloadError(Exception):
+    """Raised when a manifest fetch fails (triggers retry)."""
+    pass
+
+
+class TransientDownloadError(Exception):
+    """Raised when a temporary/download failure occurs (triggers retry)."""
+    pass
+
+
+class PermanentDownloadError(Exception):
+    """Raised when a non-retryable download failure occurs (immediate fail)."""
+    pass
+
+
+def download_track_all_stages_done(stages):
+    """Check if all required download track stages are complete.
+
+    Returns True if downloaded, tagged, and written are 'done',
+    and converted is either 'done' or 'skipped'.
+    """
+    if not isinstance(stages, dict):
+        return False
+
+    required_stages = (
+        'downloaded',
+        'tagged',
+        'written'
+    )
+    if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
+        return False
+
+    if stages.get('converted') not in ('done', 'skipped'):
+        return False
+
+    return True
+
+
 def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
     """Format a Tidal CDN image URL from a UUID/path and requested square size."""
     if not image_id_or_path:

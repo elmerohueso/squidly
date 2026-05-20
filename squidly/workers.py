@@ -5,21 +5,26 @@ import logging
 import time
 
 from squidly.jobs import (
-    any_plex_sync_jobs_running_or_queued,
     claim_next_job,
     mark_job_cancelled,
     mark_job_failed,
     mark_job_retrying,
     mark_job_succeeded,
-    queue_plex_listen_history_sync,
     requeue_claimed_job,
     serialize_job_payload,
 )
-from squidly.plex import any_plex_library_update_jobs_running_or_queued, get_last_successful_plex_sync_finished_at
-from squidly.storage import get_plex_config
-from squidly.jobs import (
+from squidly.orchestration import (
+    any_plex_library_update_jobs_running_or_queued,
+    any_plex_sync_jobs_running_or_queued,
+    delete_pending_playlist_adds,
+    get_pending_playlist_adds,
+    queue_bulk_playlist_add_job,
     queue_plex_library_sync,
+    queue_plex_listen_history_sync,
+    queue_recommendation_generation,
 )
+from squidly.plex import get_last_successful_plex_sync_finished_at
+from squidly.storage import get_plex_config
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from squidly.config import app_timezone
@@ -60,8 +65,8 @@ def download_job_worker():
                 result = process_download_job(job['id'], payload)
                 stages = result.get('stages') if isinstance(result, dict) else {}
 
-                from squidly.jobs import _download_track_all_stages_done
-                if _download_track_all_stages_done(stages):
+                from squidly.downloads import download_track_all_stages_done
+                if download_track_all_stages_done(stages):
                     mark_job_succeeded(job['id'], result)
                     logger.info("[DOWNLOAD_WORKER] Job %s completed", job['id'])
                 else:
@@ -124,7 +129,6 @@ def plex_sync_job_worker():
                 mark_job_succeeded(job['id'], result)
                 logger.info("[PLEX_SYNC_WORKER] Job %s completed", job['id'])
                 queue_plex_listen_history_sync(trigger='post_library_sync')
-                from squidly.jobs import queue_bulk_playlist_add_job
                 bulk_job_id = queue_bulk_playlist_add_job(trigger='post_library_sync')
                 if bulk_job_id:
                     logger.info("[PLEX_SYNC_WORKER] Queued bulk playlist add job %s", bulk_job_id)
@@ -176,13 +180,6 @@ def automatic_matching_job_worker():
 
 
 def bulk_playlist_add_job_worker():
-    from squidly.jobs import (
-        claim_next_job,
-        mark_job_succeeded,
-        mark_job_failed,
-        get_pending_playlist_adds,
-        delete_pending_playlist_adds,
-    )
     from squidly.plex import bulk_add_tracks_to_playlists
     from squidly.storage import get_plex_config
 
@@ -342,7 +339,6 @@ def recommendation_job_worker():
 
 
 def recommendation_scheduler_worker():
-    from squidly.jobs import queue_recommendation_generation
     from squidly.storage import get_all_plex_account_mappings, has_listen_history
 
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")

@@ -12,6 +12,10 @@ from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
 from squidly import jobs
 from squidly.db import get_db_connection
+from squidly.orchestration import (
+    any_plex_library_update_jobs_running_or_queued,
+    start_plex_sync_job,
+)
 from squidly.storage import (
     can_start_plex_library_update,
     get_plex_config,
@@ -389,10 +393,10 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
 
     Returns a result dict with progress fields for the job card.
     """
-    from squidly.jobs import (
+    from squidly.jobs import update_job_progress
+    from squidly.orchestration import (
         get_pending_playlist_adds,
         delete_pending_playlist_adds,
-        update_job_progress,
     )
 
     stages = {
@@ -668,47 +672,6 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
         time.sleep(max(1, poll_interval_seconds))
 
 
-def any_plex_library_update_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'plex_library_update'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def queue_plex_library_update(trigger='scheduled'):
-    if any_plex_library_update_jobs_running_or_queued():
-        return None
-
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    job_id = jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
-    logger.info("[LIBRARY_UPDATE_QUEUE] Queued plex_library_update job %s (trigger=%s)", job_id, trigger)
-    return job_id
-
-
-def start_plex_library_update_job(trigger='scheduled'):
-    """Queue a Plex library update job if one is not already queued/in progress."""
-    config = get_plex_config()
-    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
-        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
-
-    job_id = queue_plex_library_update(trigger=trigger)
-    if job_id is None:
-        return {'ok': False, 'status_code': 409, 'error': 'A Plex library update job is already queued or in progress'}
-
-    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
-
 
 def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     config = get_plex_config()
@@ -778,7 +741,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     stages['scanning_plex_library'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    sync_result = jobs.start_plex_sync_job(trigger='post_library_update')
+    sync_result = start_plex_sync_job(trigger='post_library_update')
     if sync_result.get('ok'):
         progress['sync_job_id'] = sync_result.get('job_id')
         progress['sync_queue_status'] = 'queued'

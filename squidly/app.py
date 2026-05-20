@@ -56,7 +56,6 @@ from squidly.plex import (
     _get_plex_server_for_user,
     _is_plex_library_scan_active,
     _plex_call_with_timeout,
-    any_plex_library_update_jobs_running_or_queued,
     get_all_plex_users,
     get_plex_health_status,
     get_plex_music_playlists,
@@ -64,9 +63,7 @@ from squidly.plex import (
     plex_library_update_job_worker,
     plex_pin_sessions,
     process_plex_library_update_job,
-    queue_plex_library_update,
     set_plex_health_status,
-    start_plex_library_update_job,
     test_plex_connection,
     wait_for_plex_library_scan_completion,
     get_last_successful_plex_sync_finished_at,
@@ -154,6 +151,20 @@ from ytmusicapi import YTMusic
 
 from squidly import downloads
 from squidly import jobs
+
+from squidly.orchestration import (
+    any_plex_library_update_jobs_running_or_queued,
+    any_plex_sync_jobs_running_or_queued,
+    queue_bulk_playlist_add_job,
+    queue_fresh_finds_auto_download,
+    queue_pending_playlist_addition,
+    queue_plex_library_sync,
+    queue_plex_library_update,
+    queue_plex_listen_history_sync,
+    queue_recommendation_generation,
+    start_plex_library_update_job,
+    start_plex_sync_job,
+)
 
 from squidly.storage import (
     any_download_jobs_running,
@@ -593,7 +604,7 @@ def process_automatic_matching_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[AUTO_MATCH] Job %s queueing Plex library update", job_id)
 
-    from squidly.plex import queue_plex_library_update, any_plex_library_update_jobs_running_or_queued
+    from squidly.orchestration import queue_plex_library_update, any_plex_library_update_jobs_running_or_queued
 
     update_job_id = queue_plex_library_update(trigger='automatic_matching')
     if update_job_id:
@@ -616,9 +627,9 @@ def process_automatic_matching_job(job_id, payload):
     logger.info("[AUTO_MATCH] Job %s running Plex sync", job_id)
 
     from squidly.plex import get_last_successful_plex_sync_finished_at
-    from squidly.jobs import any_plex_sync_jobs_running_or_queued
+    from squidly.orchestration import any_plex_sync_jobs_running_or_queued
 
-    sync_job_id = jobs.queue_plex_library_sync(trigger='automatic_matching')
+    sync_job_id = queue_plex_library_sync(trigger='automatic_matching')
     if sync_job_id:
         logger.info("[AUTO_MATCH] Job %s queued Plex sync job %s", job_id, sync_job_id)
     else:
@@ -1075,10 +1086,10 @@ def process_download_job(job_id, payload):
             audio_quality=quality_choice
         )
     except Exception as e:
-        raise jobs.TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
+        raise downloads.TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
 
     if not isinstance(track_object, dict):
-        raise jobs.TransientDownloadError("Failed to build normalized track object")
+        raise downloads.TransientDownloadError("Failed to build normalized track object")
 
     file_naming = payload.get('fileNaming')
     if not file_naming:
@@ -1112,13 +1123,13 @@ def process_download_job(job_id, payload):
             usage='DOWNLOAD'
         )
     except Exception as e:
-        raise jobs.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+        raise downloads.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
 
     expected_duration = track_data.get('duration')
     try:
         downloads.validate_audio_duration(temp_source_path, expected_duration)
     except RuntimeError as e:
-        raise jobs.TransientDownloadError(str(e)) from e
+        raise downloads.TransientDownloadError(str(e)) from e
 
     with open(temp_source_path, 'rb') as tmp_file:
         audio_format = downloads.detect_audio_format(tmp_file.read(32))
@@ -1323,7 +1334,7 @@ def process_download_job(job_id, payload):
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
             logger.info("[DOWNLOAD] Job %s: queuing playlist add (existing match) for path=%s playlist=%s", job_id, full_path, playlist_name)
-            jobs.queue_pending_playlist_addition(
+            queue_pending_playlist_addition(
                 full_path,
                 playlist_name,
                 parent_job_id=job_id,
@@ -1508,7 +1519,7 @@ def process_download_job(job_id, payload):
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
         logger.info("[DOWNLOAD] Job %s: queuing playlist add for path=%s playlist=%s", job_id, full_path, playlist_name)
-        jobs.queue_pending_playlist_addition(
+        queue_pending_playlist_addition(
             full_path,
             playlist_name,
             parent_job_id=job_id,
@@ -2642,7 +2653,7 @@ def download_track():
     else:
         logger.info("[DOWNLOAD_ENQUEUE] plex_library_update already queued/in progress; not queueing another")
 
-    sync_job_id = jobs.queue_plex_library_sync(trigger='download_enqueue')
+    sync_job_id = queue_plex_library_sync(trigger='download_enqueue')
     if sync_job_id:
         logger.info("[DOWNLOAD_ENQUEUE] Queued plex_library_sync job %s (download enqueue)", sync_job_id)
     else:
@@ -3841,7 +3852,7 @@ def save_plex_config_endpoint():
 @app.route('/api/plex/syncs', methods=['POST'])
 def start_plex_sync_endpoint():
     """Queue a manual Plex library sync job."""
-    result = jobs.start_plex_sync_job(trigger='manual')
+    result = start_plex_sync_job(trigger='manual')
     if not result.get('ok'):
         status_code = result.get('status_code', 500)
         return jsonify({'error': result.get('error')}), int(status_code)
@@ -5206,7 +5217,7 @@ def get_listen_history_users():
 @app.route('/api/listen-history/sync', methods=['POST'])
 def trigger_listen_history_sync():
     trigger = request.json.get('trigger', 'manual') if request.is_json else 'manual'
-    result = jobs.queue_plex_listen_history_sync(trigger=trigger)
+    result = queue_plex_listen_history_sync(trigger=trigger)
     if result is None:
         return jsonify({'ok': False, 'error': 'A listen history sync job is already queued or in progress'}), 409
     return jsonify({'ok': True, 'job_id': result, 'status': 'queued'}), 202
@@ -5302,7 +5313,7 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s syncing listen history for %s", job_id, plex_username)
 
-    sync_job_id = jobs.queue_plex_listen_history_sync('recommendation')
+    sync_job_id = queue_plex_listen_history_sync('recommendation')
     if sync_job_id:
         _wait_for_history_sync(timeout=120)
 
@@ -5451,7 +5462,7 @@ def process_recommendation_job(job_id, payload):
     # Chain auto-download for scheduled Fresh Finds (single job for all enabled users)
     if slug == 'fresh-finds' and trigger == 'scheduled':
         try:
-            from squidly.jobs import queue_fresh_finds_auto_download
+            from squidly.orchestration import queue_fresh_finds_auto_download
             auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
             if auto_job_id:
                 logger.info("[RECOMMENDATION] Queued Fresh Finds auto-download (job %s)", auto_job_id)
@@ -5469,8 +5480,8 @@ def process_recommendation_job(job_id, payload):
 def process_fresh_finds_auto_download_job(job_id, payload):
     """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
     from squidly.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
-    from squidly.jobs import enqueue_job, queue_bulk_playlist_add_job, queue_plex_library_sync
-    from squidly.plex import queue_plex_library_update
+    from squidly.orchestration import queue_bulk_playlist_add_job, queue_plex_library_sync, queue_plex_library_update
+    from squidly.jobs import enqueue_job
 
     slug = payload.get('slug', 'fresh-finds')
 
@@ -5644,7 +5655,7 @@ def generate_recommendation_playlist():
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
-    job_id = jobs.queue_recommendation_generation(
+    job_id = queue_recommendation_generation(
         slug=slug,
         plex_account_id=plex_account_id,
         plex_username=plex_username or 'Unknown',
