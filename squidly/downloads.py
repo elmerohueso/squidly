@@ -26,18 +26,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Download-specific error classes
 # ---------------------------------------------------------------------------
+# These inherit from the generic RetryableError/PermanentError in jobs.py
+# so the generic worker_loop() catches them correctly.
 
-class ManifestDownloadError(Exception):
+from squidly.jobs import RetryableError, PermanentError
+
+
+class ManifestDownloadError(RetryableError):
     """Raised when a manifest fetch fails (triggers retry)."""
     pass
 
 
-class TransientDownloadError(Exception):
+class TransientDownloadError(RetryableError):
     """Raised when a temporary/download failure occurs (triggers retry)."""
     pass
 
 
-class PermanentDownloadError(Exception):
+class PermanentDownloadError(PermanentError):
     """Raised when a non-retryable download failure occurs (immediate fail)."""
     pass
 

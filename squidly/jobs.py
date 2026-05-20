@@ -15,6 +15,20 @@ from squidly.storage import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Exception classes for worker error handling
+# ---------------------------------------------------------------------------
+
+class RetryableError(Exception):
+    """Raised by process functions to indicate a transient failure that should be retried."""
+    pass
+
+
+class PermanentError(Exception):
+    """Raised by process functions to indicate a non-retryable failure — fail immediately."""
+    pass
+
+
 def serialize_job_payload(payload):
     try:
         return json.dumps(payload, separators=(',', ':'), sort_keys=True)

@@ -55,6 +55,8 @@ def test_import_plex():
 
 def test_import_jobs():
     from squidly.jobs import (
+        RetryableError,
+        PermanentError,
         claim_next_job,
         compute_job_backoff_seconds,
         enqueue_job,
@@ -175,16 +177,19 @@ def test_import_workers():
     from squidly.workers import (
         JobCancelledError,
         _raise_if_job_cancelled,
-        download_job_worker,
-        plex_sync_job_worker,
-        automatic_matching_job_worker,
-        bulk_playlist_add_job_worker,
+        start_workers,
+        worker_loop,
+        download_track_worker,
+        plex_sync_worker,
+        plex_library_update_worker,
         plex_sync_scheduler_worker,
+        recommendation_scheduler_worker,
     )
 
     assert issubclass(JobCancelledError, Exception)
     assert callable(_raise_if_job_cancelled)
-    assert callable(download_job_worker)
+    assert callable(start_workers)
+    assert callable(worker_loop)
 
 
 def test_import_hifi():

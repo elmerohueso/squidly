@@ -60,7 +60,6 @@ from squidly.plex import (
     get_plex_health_status,
     get_plex_music_playlists,
     plex_healthcheck,
-    plex_library_update_job_worker,
     plex_pin_sessions,
     process_plex_library_update_job,
     set_plex_health_status,
@@ -136,15 +135,7 @@ from squidly.hifi import (
 from squidly.workers import (
     JobCancelledError,
     _raise_if_job_cancelled,
-    download_job_worker,
-    plex_sync_job_worker,
-    automatic_matching_job_worker,
-    bulk_playlist_add_job_worker,
-    plex_sync_scheduler_worker,
-    listen_history_sync_worker,
-    recommendation_job_worker,
-    recommendation_scheduler_worker,
-    fresh_finds_auto_download_worker,
+    start_workers,
 )
 
 from ytmusicapi import YTMusic
@@ -1579,60 +1570,8 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     downloads.validate_all_endpoints()
     plex_healthcheck()
 
-    # Start background worker for bulk playlist additions
-    bulk_playlist_thread = threading.Thread(target=bulk_playlist_add_job_worker, daemon=True)
-    bulk_playlist_thread.start()
-    logger.info("Bulk playlist add worker started ")
-
-    # Start background worker for processing download jobs
-
-    # Start background worker for processing download jobs
-    download_worker_thread = threading.Thread(target=download_job_worker, daemon=True)
-    download_worker_thread.start()
-    logger.info("Download job worker started ")
-
-    # Start background worker for Plex library sync jobs
-    plex_sync_worker_thread = threading.Thread(target=plex_sync_job_worker, daemon=True)
-    plex_sync_worker_thread.start()
-    logger.info("Plex library sync job worker started ")
-
-    # Start background worker for Plex library update jobs
-    plex_library_update_worker_thread = threading.Thread(target=plex_library_update_job_worker, daemon=True)
-    plex_library_update_worker_thread.start()
-    logger.info("Plex library update job worker started ")
-
-    # Start background worker for automatic matching jobs
-    automatic_matching_worker_thread = threading.Thread(target=automatic_matching_job_worker, daemon=True)
-    automatic_matching_worker_thread.start()
-    logger.info("Automatic matching job worker started ")
-
-    # Start scheduler for interval-based Plex sync jobs
-    plex_sync_scheduler_thread = threading.Thread(target=plex_sync_scheduler_worker, daemon=True)
-    plex_sync_scheduler_thread.start()
-    logger.info("Plex library sync scheduler started ")
-
-    # Start background worker for listen history sync jobs
-    listen_history_sync_thread = threading.Thread(target=listen_history_sync_worker, daemon=True)
-    listen_history_sync_thread.start()
-    logger.info("Listen history sync worker started ")
-
-    # Start background worker for recommendation generation jobs
-    recommendation_worker_thread = threading.Thread(target=recommendation_job_worker, daemon=True)
-    recommendation_worker_thread.start()
-    logger.info("Recommendation job worker started ")
-
-    # Start scheduler for daily recommendation generation
-    recommendation_scheduler_thread = threading.Thread(target=recommendation_scheduler_worker, daemon=True)
-    recommendation_scheduler_thread.start()
-    logger.info("Recommendation scheduler started ")
-
-    # Start background worker for Fresh Finds auto-download jobs
-    fresh_finds_auto_download_thread = threading.Thread(target=fresh_finds_auto_download_worker, daemon=True)
-    fresh_finds_auto_download_thread.start()
-    logger.info("Fresh Finds auto-download worker started ")
-
-    # Legacy timed library update worker is intentionally disabled.
-    # Updates are now queued on download enqueue and gated in process_plex_library_update_job.
+    # Start all background workers and schedulers
+    start_workers()
 
     # Download folders already created and validated at module level above
 

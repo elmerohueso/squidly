@@ -4,11 +4,11 @@ import json
 from datetime import datetime
 
 from squidly.jobs import (
-    _download_track_all_stages_done,
     compute_job_backoff_seconds,
     serialize_job_payload,
 )
 from squidly.downloads import (
+    download_track_all_stages_done,
     detect_audio_format,
     format_tidal_image_url,
 )
@@ -64,7 +64,7 @@ class TestDownloadTrackAllStagesDone:
             "written": "done",
             "playlist_added": "done",
         }
-        assert _download_track_all_stages_done(stages) is True
+        assert download_track_all_stages_done(stages) is True
 
     def test_converted_skipped(self):
         stages = {
@@ -74,7 +74,7 @@ class TestDownloadTrackAllStagesDone:
             "written": "done",
             "playlist_added": "done",
         }
-        assert _download_track_all_stages_done(stages) is True
+        assert download_track_all_stages_done(stages) is True
 
     def test_playlist_added_skipped(self):
         stages = {
@@ -84,11 +84,11 @@ class TestDownloadTrackAllStagesDone:
             "written": "done",
             "playlist_added": "skipped",
         }
-        assert _download_track_all_stages_done(stages) is True
+        assert download_track_all_stages_done(stages) is True
 
     def test_missing_stage(self):
         stages = {"downloaded": "done", "tagged": "done"}
-        assert _download_track_all_stages_done(stages) is False
+        assert download_track_all_stages_done(stages) is False
 
     def test_stage_pending(self):
         stages = {
@@ -98,12 +98,12 @@ class TestDownloadTrackAllStagesDone:
             "written": "done",
             "playlist_added": "done",
         }
-        assert _download_track_all_stages_done(stages) is False
+        assert download_track_all_stages_done(stages) is False
 
     def test_not_a_dict(self):
-        assert _download_track_all_stages_done(None) is False
-        assert _download_track_all_stages_done([]) is False
-        assert _download_track_all_stages_done("done") is False
+        assert download_track_all_stages_done(None) is False
+        assert download_track_all_stages_done([]) is False
+        assert download_track_all_stages_done("done") is False
 
 
 class TestFormatTidalImageUrl:
