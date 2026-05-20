@@ -1256,7 +1256,7 @@ def process_download_job(job_id, payload):
 
         playlist_name = payload.get('plex_playlist')
         if playlist_name:
-            stages['playlist_added'] = 'queued'
+            stages['playlist_added'] = 'done'
             jobs.update_job_progress(job_id, {'stages': stages})
             logger.info("[DOWNLOAD] Job %s: queuing playlist add (existing match) for path=%s playlist=%s", job_id, full_path, playlist_name)
             queue_pending_playlist_addition(
@@ -1442,7 +1442,7 @@ def process_download_job(job_id, payload):
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:
-        stages['playlist_added'] = 'queued'
+        stages['playlist_added'] = 'done'
         jobs.update_job_progress(job_id, {'stages': stages})
         logger.info("[DOWNLOAD] Job %s: queuing playlist add for path=%s playlist=%s", job_id, full_path, playlist_name)
         queue_pending_playlist_addition(
@@ -2530,14 +2530,14 @@ def list_jobs():
     - status: filter by raw job status
     - job_type: filter by job type
     - jobs_filter: one of incomplete|complete|completed_with_errors|failed
-    - exclude_bulk_playlist_add: default true
+    - exclude_bulk_playlist_add: default false
     - limit: optional max number of rows (no backend-enforced maximum)
     - offset: pagination offset (default 0)
     """
     status_filter = request.args.get('status')
     job_type_filter = request.args.get('job_type')
     jobs_filter = request.args.get('jobs_filter')
-    exclude_bulk_playlist_add = request.args.get('exclude_bulk_playlist_add', '1').lower() not in ('0', 'false', 'no')
+    exclude_bulk_playlist_add = request.args.get('exclude_bulk_playlist_add', '0').lower() in ('1', 'true', 'yes')
 
     limit = None
     limit_raw = request.args.get('limit')
@@ -2671,12 +2671,9 @@ def _effective_job_status(job_type, status, result_json):
     if stages.get('playlist_added') == 'failed':
         return 'completed_with_errors'
 
-    if status == 'succeeded' and stages.get('playlist_added') == 'queued':
-        return 'in_progress'
-
     return status
 
-def get_jobs_filter_totals(exclude_bulk_playlist_add=True):
+def get_jobs_filter_totals(exclude_bulk_playlist_add=False):
     where_sql = 'WHERE job_type <> %s' if exclude_bulk_playlist_add else ''
     params = ('bulk_playlist_add',) if exclude_bulk_playlist_add else ()
 

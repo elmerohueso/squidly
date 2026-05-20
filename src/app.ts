@@ -3615,8 +3615,7 @@ class App {
 
         try {
             const params = new URLSearchParams({
-                jobs_filter: filter,
-                exclude_bulk_playlist_add: '1'
+                jobs_filter: filter
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
@@ -3789,10 +3788,6 @@ class App {
 
         if (stages?.playlist_added === 'failed') {
             return 'completed_with_errors';
-        }
-
-        if (job.status === 'succeeded' && stages?.playlist_added === 'queued') {
-            return 'in_progress';
         }
 
         return job.status;
@@ -4054,7 +4049,6 @@ class App {
         try {
             const params = new URLSearchParams({
                 job_type: 'automatic_matching',
-                exclude_bulk_playlist_add: '1',
                 limit: '1'
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
@@ -5351,7 +5345,7 @@ class App {
                 `;
             }).join('');
 
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const progress = (job.result || {}) as Record<string, unknown>;
             const total = Number(progress.total_tracks || 0);
             const processed = Number(progress.tracks_processed || 0);
             const added = Number(progress.tracks_added || 0);
@@ -5384,8 +5378,8 @@ class App {
             { key: 'written', label: 'Written to Disk' },
             ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
             ...(playlistName ? [{
-                key: 'playlist_added',
-                label: `Added to Playlist "${this.escapeHtml(String(playlistName))}"`
+key: 'playlist_added',
+                 label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"`
             }] : []),
         ];
 

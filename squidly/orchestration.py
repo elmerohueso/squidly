@@ -1,6 +1,5 @@
 """Job orchestration: type registry, chaining rules, dedup guards, schedulers, and playlist side-channel."""
 
-import json
 import logging
 import time
 from datetime import datetime
@@ -244,11 +243,7 @@ any_plex_library_update_jobs_running_or_queued = lambda: is_job_type_running_or_
 # ---------------------------------------------------------------------------
 
 def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None, plex_user_id=None):
-    """Insert a row into pending_playlist_adds table. Idempotent via unique index.
-
-    If a duplicate is detected (ON CONFLICT), marks the parent download job's
-    playlist_added stage as 'done' since the track is already queued for bulk add.
-    """
+    """Insert a row into pending_playlist_adds table. Idempotent via unique index."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -268,33 +263,6 @@ def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None
             "[PLAYLIST_QUEUE] Duplicate skipped for file_path=%s playlist=%s (parent_job_id=%s) — already queued",
             file_path, playlist_name, parent_job_id
         )
-        if parent_job_id:
-            try:
-                cur.execute(
-                    """
-                    SELECT result_json FROM jobs WHERE id = %s AND job_type = 'download_track'
-                    """,
-                    (parent_job_id,),
-                )
-                row = cur.fetchone()
-                if row and row.get('result_json'):
-                    result = json.loads(row['result_json'])
-                    if isinstance(result, dict):
-                        stages = result.get('stages', {})
-                        if isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                            stages['playlist_added'] = 'done'
-                            result['stages'] = stages
-                            cur.execute(
-                                """
-                                UPDATE jobs SET result_json = %s, updated_at = NOW()
-                                WHERE id = %s AND status <> 'cancelled'
-                                """,
-                                (json.dumps(result, separators=(',', ':'), sort_keys=True), parent_job_id),
-                            )
-                            conn.commit()
-                            logger.info("[PLAYLIST_QUEUE] Marked parent job %s playlist_added as done (was duplicate)", parent_job_id)
-            except Exception as e:
-                logger.info("[PLAYLIST_QUEUE] Failed to update parent job %s for duplicate: %s", parent_job_id, str(e))
     else:
         logger.info(
             "[PLAYLIST_QUEUE] Queued playlist add for file_path=%s playlist=%s (parent_job_id=%s)",

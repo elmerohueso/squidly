@@ -384,7 +384,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         return False, f'Unexpected error: {str(e)}'
 
 
-def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
+def bulk_add_tracks_to_playlists(job_id, payload):
     """Process all rows in pending_playlist_adds, grouped by (user_id, playlist_name).
 
     Returns a result dict with progress fields for the job card.
@@ -394,6 +394,13 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
         get_pending_playlist_adds,
         delete_pending_playlist_adds,
     )
+
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+
+    if not (server_url and api_token):
+        raise ValueError('Plex is not fully configured')
 
     stages = {
         'resolving_tracks': 'pending',
@@ -541,41 +548,6 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
     update_job_progress(job_id, {'stages': stages})
 
     if successful_ids:
-        parent_ids = set()
-        for item in pending:
-            if item['id'] in successful_ids and item.get('parent_job_id'):
-                parent_ids.add(item['parent_job_id'])
-
-        for pid in parent_ids:
-            try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT result_json FROM jobs WHERE id = %s AND job_type = 'download_track'
-                    """,
-                    (pid,),
-                )
-                row = cur.fetchone()
-                if row and row.get('result_json'):
-                    result = json.loads(row['result_json'])
-                    if isinstance(result, dict):
-                        stages = result.get('stages', {})
-                        if isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                            stages['playlist_added'] = 'done'
-                            result['stages'] = stages
-                            cur.execute(
-                                """
-                                UPDATE jobs SET result_json = %s, updated_at = NOW()
-                                WHERE id = %s AND status <> 'cancelled'
-                                """,
-                                (json.dumps(result, separators=(',', ':'), sort_keys=True), pid),
-                            )
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                logger.info("[BULK_PLAYLIST] Failed to update parent job %s: %s", pid, str(e))
-
         delete_pending_playlist_adds(successful_ids)
 
     summary = (
@@ -586,6 +558,8 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
     )
 
     return {
+        'stages': stages,
+        'progress': progress,
         'total_tracks': total,
         'tracks_processed': progress['tracks_processed'],
         'tracks_added': progress['tracks_added'],
