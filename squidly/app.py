@@ -139,8 +139,6 @@ from squidly import downloads
 from squidly import jobs
 
 from squidly.orchestration import (
-    any_plex_library_update_jobs_running_or_queued,
-    any_plex_sync_jobs_running_or_queued,
     is_job_type_running_or_queued,
     queue_bulk_playlist_add_job,
     queue_fresh_finds_auto_download,
@@ -151,6 +149,7 @@ from squidly.orchestration import (
     queue_recommendation_generation,
     start_plex_library_update_job,
     start_plex_sync_job,
+    wait_for_job_type,
 )
 
 from squidly.storage import (
@@ -591,7 +590,7 @@ def process_automatic_matching_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[AUTO_MATCH] Job %s queueing Plex library update", job_id)
 
-    from squidly.orchestration import queue_plex_library_update, any_plex_library_update_jobs_running_or_queued
+    from squidly.orchestration import queue_plex_library_update, wait_for_job_type
 
     update_job_id = queue_plex_library_update(trigger='automatic_matching')
     if update_job_id:
@@ -601,9 +600,7 @@ def process_automatic_matching_job(job_id, payload):
         logger.info("[AUTO_MATCH] Job %s no Plex library update needed or already queued", job_id)
 
     # Wait for Plex library update to finish
-    while any_plex_library_update_jobs_running_or_queued():
-        _raise_if_job_cancelled(job_id)
-        time.sleep(5)
+    wait_for_job_type('plex_library_update', timeout=600, poll_interval=5, check_cancelled_job_id=job_id)
 
     stages['plex_library_update'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -614,7 +611,6 @@ def process_automatic_matching_job(job_id, payload):
     logger.info("[AUTO_MATCH] Job %s running Plex sync", job_id)
 
     from squidly.plex import get_last_successful_plex_sync_finished_at
-    from squidly.orchestration import any_plex_sync_jobs_running_or_queued
 
     sync_job_id = queue_plex_library_sync(trigger='automatic_matching')
     if sync_job_id:
@@ -623,9 +619,7 @@ def process_automatic_matching_job(job_id, payload):
         logger.info("[AUTO_MATCH] Job %s Plex sync already running or queued", job_id)
 
     # Wait for Plex sync to finish
-    while any_plex_sync_jobs_running_or_queued():
-        _raise_if_job_cancelled(job_id)
-        time.sleep(5)
+    wait_for_job_type('plex_library_sync', timeout=600, poll_interval=5, check_cancelled_job_id=job_id)
 
     # Report sync progress
     conn = get_db_connection()
@@ -5182,28 +5176,6 @@ def get_listen_history_sync_status_route():
 
 # --- Recommendations ---
 
-def _wait_for_history_sync(timeout=120):
-    """Poll until any running/queued listen history sync job completes, or timeout."""
-    import time
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COUNT(*) AS count FROM jobs
-            WHERE job_type = 'plex_listen_history_sync'
-              AND status IN ('queued', 'in_progress')
-            """
-        )
-        row = cur.fetchone()
-        conn.close()
-        if row and row['count'] == 0:
-            return True
-        time.sleep(2)
-    return False
-
-
 def process_recommendation_job(job_id, payload):
     from urllib.parse import urlencode
 
@@ -5237,7 +5209,8 @@ def process_recommendation_job(job_id, payload):
 
     sync_job_id = queue_plex_listen_history_sync('recommendation')
     if sync_job_id:
-        _wait_for_history_sync(timeout=120)
+        from squidly.orchestration import wait_for_job_type
+        wait_for_job_type('plex_listen_history_sync', timeout=120, poll_interval=2, check_cancelled_job_id=job_id)
 
     stages['syncing_listen_history'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})

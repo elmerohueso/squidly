@@ -93,6 +93,7 @@ def test_import_orchestration():
         queue_recommendation_generation,
         start_plex_library_update_job,
         start_plex_sync_job,
+        wait_for_job_type,
     )
 
 

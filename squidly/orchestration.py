@@ -2,10 +2,11 @@
 
 import json
 import logging
+import time
 from datetime import datetime
 
 from squidly.db import get_db_connection
-from squidly.jobs import enqueue_job, serialize_job_payload
+from squidly.jobs import enqueue_job, is_job_cancelled, serialize_job_payload
 from squidly.storage import get_plex_config
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,30 @@ def is_job_type_running_or_queued(job_type):
     row = cur.fetchone() or {}
     conn.close()
     return (row.get('count') or 0) > 0
+
+
+def wait_for_job_type(job_type, timeout=300, poll_interval=5, check_cancelled_job_id=None):
+    """Block until no jobs of the given type are running or queued, or timeout.
+
+    Args:
+        job_type: The job type string to wait for (e.g. 'plex_library_update').
+        timeout: Maximum seconds to wait (default 300). Raises TimeoutError on expiry.
+        poll_interval: Seconds between polls (default 5).
+        check_cancelled_job_id: If set, check if this job ID was cancelled and raise
+            JobCancelledError if so.
+
+    Returns True when no more jobs of the type are running/queued.
+    Raises TimeoutError if timeout expires, JobCancelledError if the caller job is cancelled.
+    """
+    deadline = time.time() + timeout
+    while is_job_type_running_or_queued(job_type):
+        if check_cancelled_job_id and is_job_cancelled(check_cancelled_job_id):
+            from squidly.workers import JobCancelledError
+            raise JobCancelledError(f'Job {check_cancelled_job_id} was cancelled while waiting for {job_type}')
+        if time.time() > deadline:
+            raise TimeoutError(f'Timed out waiting for {job_type} jobs to complete after {timeout}s')
+        time.sleep(poll_interval)
+    return True
 
 
 def queue_if_not_running(job_type, payload, max_attempts=None, priority=0, run_after=None):
