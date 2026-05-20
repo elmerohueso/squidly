@@ -164,12 +164,6 @@ def test_import_matching():
         _build_artist_match_candidates,
         _build_album_match_candidates,
         _build_track_match_candidates,
-        _fetch_hifi_match_coverage_counts,
-        _refresh_hifi_match_coverage_progress,
-        any_hifi_match_jobs_running_or_queued,
-        has_hifi_match_seed_data,
-        queue_hifi_match_job,
-        start_hifi_match_job,
     )
 
 

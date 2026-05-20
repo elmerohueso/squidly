@@ -4,7 +4,7 @@ import re
 
 from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
 from squidly.db import get_db_connection
-from squidly.jobs import enqueue_job, update_job_progress
+from squidly.jobs import update_job_progress
 from squidly.hifi import (
     _extract_hifi_album_track_items,
     _get_hifi_audio_quality_rank,
@@ -1299,106 +1299,4 @@ def _build_track_match_candidates(row, limit=10, query_override=None):
     return candidates[:limit]
 
 
-def _fetch_hifi_match_coverage_counts(cur):
-    def fetch_counts(table_name):
-        cur.execute(
-            f"""
-            SELECT
-                COUNT(*) AS total,
-                SUM(
-                    CASE
-                        WHEN hifi_id IS NULL OR confidence < 0.95 THEN 1
-                        ELSE 0
-                    END
-                ) AS missing
-            FROM {table_name}
-            WHERE library_id IS NOT NULL
-            """
-        )
-        row = cur.fetchone() or {}
-        return {
-            'total': _safe_int(row.get('total')) or 0,
-            'missing': _safe_int(row.get('missing')) or 0,
-        }
 
-    artists = fetch_counts('artists')
-    albums = fetch_counts('albums')
-    tracks = fetch_counts('tracks')
-    return {
-        'artists_total': artists['total'],
-        'artists_missing': artists['missing'],
-        'albums_total': albums['total'],
-        'albums_missing': albums['missing'],
-        'tracks_total': tracks['total'],
-        'tracks_missing': tracks['missing'],
-    }
-
-
-def _refresh_hifi_match_coverage_progress(cur, progress):
-    counts = _fetch_hifi_match_coverage_counts(cur)
-    progress['artists_missing_current'] = counts['artists_missing']
-    progress['albums_missing_current'] = counts['albums_missing']
-    progress['tracks_missing_current'] = counts['tracks_missing']
-
-    progress['artists_matched_current_job'] = max(0, (progress.get('artists_missing_start') or 0) - counts['artists_missing'])
-    progress['albums_matched_current_job'] = max(0, (progress.get('albums_missing_start') or 0) - counts['albums_missing'])
-    progress['tracks_matched_current_job'] = max(0, (progress.get('tracks_missing_start') or 0) - counts['tracks_missing'])
-
-    progress['artists_matched'] = progress['artists_matched_current_job']
-
-
-def any_hifi_match_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'hifi_match'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def has_hifi_match_seed_data():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM tracks
-        WHERE library_id IS NOT NULL
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def queue_hifi_match_job(trigger='manual'):
-    if any_hifi_match_jobs_running_or_queued():
-        return None
-
-    from datetime import datetime
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    return enqueue_job('hifi_match', payload, max_attempts=3)
-
-
-def start_hifi_match_job(trigger='manual'):
-    if not has_hifi_match_seed_data():
-        return {
-            'ok': False,
-            'status_code': 409,
-            'error': 'No seeded Plex match index exists yet. Run a Plex Library Sync first, then retry the manual match scan.'
-        }
-
-    job_id = queue_hifi_match_job(trigger=trigger)
-    if job_id is None:
-        return {'ok': False, 'status_code': 409, 'error': 'A hifi match job is already queued or in progress'}
-    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}

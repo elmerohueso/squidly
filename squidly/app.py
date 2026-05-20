@@ -106,11 +106,6 @@ from squidly.matching import (
     _build_artist_match_candidates,
     _build_album_match_candidates,
     _build_track_match_candidates,
-    _fetch_hifi_match_coverage_counts,
-    _refresh_hifi_match_coverage_progress,
-    any_hifi_match_jobs_running_or_queued,
-    has_hifi_match_seed_data,
-    queue_hifi_match_job,
 )
 
 from squidly.playlist_matching import (
@@ -146,6 +141,7 @@ from squidly import jobs
 from squidly.orchestration import (
     any_plex_library_update_jobs_running_or_queued,
     any_plex_sync_jobs_running_or_queued,
+    is_job_type_running_or_queued,
     queue_bulk_playlist_add_job,
     queue_fresh_finds_auto_download,
     queue_pending_playlist_addition,
@@ -3814,7 +3810,7 @@ def start_hifi_match_endpoint():
     """Queue an automatic matching job: Plex update → sync → tag analysis → HiFi gap-fill."""
     from squidly.jobs import enqueue_job
 
-    existing = any_hifi_match_jobs_running_or_queued() or _any_automatic_matching_jobs_running_or_queued()
+    existing = is_job_type_running_or_queued('hifi_match') or is_job_type_running_or_queued('automatic_matching')
     if existing:
         return jsonify({'error': 'A matching job is already queued or in progress'}), 409
 
@@ -3823,20 +3819,7 @@ def start_hifi_match_endpoint():
     return jsonify({'success': True, 'job_id': job_id, 'status': 'queued'}), 202
 
 
-def _any_automatic_matching_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'automatic_matching'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
+
 
 
 @app.route('/api/hifi/matches/lookup', methods=['POST'])
@@ -4112,7 +4095,7 @@ def update_hifi_match_review_endpoint():
     if not entity_id:
         return jsonify({'error': 'id is required'}), 400
 
-    if any_hifi_match_jobs_running_or_queued():
+    if is_job_type_running_or_queued('hifi_match'):
         return jsonify({'error': 'Manual matching is disabled while Hifi Match is running. Please wait for the current scan to finish.'}), 409
 
     table_name = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]

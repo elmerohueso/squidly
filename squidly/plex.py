@@ -13,7 +13,6 @@ from plexapi.server import PlexServer
 from squidly import jobs
 from squidly.db import get_db_connection
 from squidly.orchestration import (
-    any_plex_library_update_jobs_running_or_queued,
     start_plex_sync_job,
 )
 from squidly.storage import (
@@ -771,64 +770,6 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         'sync_job_id': progress.get('sync_job_id'),
         'sync_queue_status': progress.get('sync_queue_status')
     }
-
-
-def plex_library_update_job_worker():
-    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Background worker started")
-    gate_poll_seconds = 15
-
-    while True:
-        try:
-            gate = can_start_plex_library_update(required_idle_seconds=180)
-            if not gate.get('can_start'):
-                if any_plex_library_update_jobs_running_or_queued():
-                    gate_state = gate.get('gate_state') or {}
-                    blocking_count = gate_state.get('blocking_count') or 0
-                    idle_seconds = gate.get('idle_seconds')
-                    required_idle = gate.get('required_idle_seconds') or 180
-                    logger.info(
-                        "[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking=%d idle_seconds=%s required_idle=%s",
-                        blocking_count,
-                        idle_seconds,
-                        required_idle,
-                    )
-                time.sleep(gate_poll_seconds)
-                continue
-
-            job = jobs.claim_next_job('plex_library_update')
-            if not job:
-                time.sleep(5)
-                continue
-
-            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Claimed plex_library_update job %s", job['id'])
-
-            try:
-                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
-            except (TypeError, ValueError):
-                payload = {}
-
-            try:
-                gate_after_claim = can_start_plex_library_update(required_idle_seconds=180)
-                if not gate_after_claim.get('can_start'):
-                    jobs.requeue_claimed_job(
-                        job['id'],
-                        delay_seconds=gate_poll_seconds,
-                        error_message='Waiting for downloads gate before starting Plex library update'
-                    )
-                    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s deferred until downloads gate is ready", job['id'])
-                    time.sleep(1)
-                    continue
-
-                result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
-                jobs.mark_job_succeeded(job['id'], result)
-                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s completed", job['id'])
-            except Exception as e:
-                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s failed: %s", job['id'], str(e))
-                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
-                time.sleep(1)
-        except Exception as e:
-            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: %s", str(e))
-            time.sleep(5)
 
 
 def get_last_successful_plex_sync_finished_at():
