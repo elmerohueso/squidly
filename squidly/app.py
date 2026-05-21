@@ -1151,6 +1151,26 @@ def process_download_job(job_id, payload):
 
     logger.info("[DOWNLOAD] Extracted metadata: TrackArtist='%s', AlbumArtist='%s', EffectiveArtistForPath='%s', Album='%s', Title='%s', TrackNum='%s', DiscNum='%s', Year='%s', Cover='%s'", track_artist_name, album_artist_name or '', effective_artist_name, album_name, track_title, track_num, disc_num, release_year, cover_url)
 
+    # --- Compute file path (shared by both match-found and download branches) ---
+
+    file_ext = output_format
+
+    safe_artist = sanitize_filename_component(effective_artist_name)
+    safe_album = sanitize_filename_component(album_name)
+    safe_title = sanitize_filename_component(track_title)
+    safe_track = sanitize_filename_component(track_num)
+
+    if album_has_multiple_discs and disc_num:
+        prefixed_track = f"{disc_num}-{safe_track}"
+        safe_track = sanitize_filename_component(prefixed_track)
+
+    file_path = file_naming.replace('{artist}', safe_artist)
+    file_path = file_path.replace('{album}', safe_album)
+    file_path = file_path.replace('{track}', safe_track)
+    file_path = file_path.replace('{title}', safe_title)
+    file_path = file_path.replace('{ext}', file_ext)
+    file_path = clean_path_components(file_path)
+
     # --- Check for existing matches before downloading ---
 
     conn = get_db_connection()
@@ -1175,23 +1195,6 @@ def process_download_job(job_id, payload):
     if matching_rows:
         matched_row = matching_rows[0]
         matched_path = str(matched_row.get('file_path') or '').strip()
-
-        file_ext = output_format
-        safe_artist = sanitize_filename_component(effective_artist_name)
-        safe_album = sanitize_filename_component(album_name)
-        safe_title = sanitize_filename_component(track_title)
-        safe_track = sanitize_filename_component(track_num)
-
-        if album_has_multiple_discs and disc_num:
-            prefixed_track = f"{disc_num}-{safe_track}"
-            safe_track = sanitize_filename_component(prefixed_track)
-
-        file_path = file_naming.replace('{artist}', safe_artist)
-        file_path = file_path.replace('{album}', safe_album)
-        file_path = file_path.replace('{track}', safe_track)
-        file_path = file_path.replace('{title}', safe_title)
-        file_path = file_path.replace('{ext}', file_ext)
-        file_path = clean_path_components(file_path)
 
         full_path = matched_path if matched_path else os.path.join(downloads_folder, file_path)
         full_path = os.path.normpath(full_path)
@@ -1257,6 +1260,13 @@ def process_download_job(job_id, payload):
         }
 
     logger.info("[DOWNLOAD_DECISION] Job %s: downloading because no existing Plex inventory metadata matched selected format '%s'", job_id, output_format)
+
+    full_path = os.path.join(downloads_folder, file_path)
+    full_path = os.path.normpath(full_path)
+
+    logger.info("[DOWNLOAD_DEBUG] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
+    logger.info("[DOWNLOAD_DEBUG] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
+    logger.info("[DOWNLOAD_DECISION] Job %s: selected_format='%s', title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, output_format, track_title, artist_name, album_name, effective_artist_name)
 
     # --- Download track to temp ---
 
