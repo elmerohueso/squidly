@@ -528,6 +528,7 @@ interface AppRouteState {
     username?: string;
     playlistUrl?: string;
     playlistType?: string;
+    freshFindsPlaylistId?: number;
 }
 
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
@@ -731,6 +732,7 @@ class App {
     private exploreYoutubePlaylistName: string | null = null;
     private listenbrainzCurrentUsername: string | null = null;
     private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
+    private freshFindsPlaylistName: string | null = null;
 
     private historyTableContainer: HTMLElement;
     private historyEntries: ListenHistoryEntry[] = [];
@@ -826,7 +828,7 @@ class App {
         } else if (route.view === 'fresh_finds') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'Squidly' });
-            crumbs.push({ label: 'Fresh Finds' });
+            crumbs.push({ label: this.freshFindsPlaylistName || 'Fresh Finds' });
         } else {
             crumbs.push({ label: 'Explore' });
         }
@@ -2991,23 +2993,24 @@ class App {
                 li.appendChild(a);
                 container.appendChild(li);
             } else {
-                const li = document.createElement('li');
-                const a = document.createElement('a');
-                a.href = '#';
-                a.className = 'nav-item';
-                const ff = playlists.find((p: any) => p.slug === 'fresh-finds');
-                a.textContent = ff ? ff.name : 'Fresh Finds';
-                a.style.fontSize = '0.875rem';
-                a.style.paddingTop = '0.25rem';
-                a.style.paddingBottom = '0.25rem';
-                a.addEventListener('click', (e: Event) => {
-                    e.preventDefault();
-                    this.closeMobileMenu();
-                    this.switchPage('explore');
-                    void this.fetchFreshFindsPlaylist();
-                });
-                li.appendChild(a);
-                container.appendChild(li);
+                for (const playlist of playlists) {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'nav-item';
+                    a.textContent = playlist.name || 'Fresh Finds';
+                    a.style.fontSize = '0.875rem';
+                    a.style.paddingTop = '0.25rem';
+                    a.style.paddingBottom = '0.25rem';
+                    a.addEventListener('click', (e: Event) => {
+                        e.preventDefault();
+                        this.closeMobileMenu();
+                        this.switchPage('explore');
+                        void this.fetchFreshFindsPlaylist(false, playlist.id);
+                    });
+                    li.appendChild(a);
+                    container.appendChild(li);
+                }
             }
         } catch {
             const li = document.createElement('li');
@@ -3193,7 +3196,11 @@ class App {
         }
 
         if (view === 'fresh_finds') {
-            return { view: 'fresh_finds' };
+            const playlistIdParam = params.get('playlist_id');
+            const playlistId = playlistIdParam ? Number(playlistIdParam) : undefined;
+            return playlistId && Number.isFinite(playlistId) && playlistId > 0
+                ? { view: 'fresh_finds', freshFindsPlaylistId: playlistId }
+                : { view: 'fresh_finds' };
         }
 
         return view === 'home' ? { view: 'home' } : null;
@@ -3325,6 +3332,10 @@ class App {
 
             if (route.view === 'similar_artists' && route.artistId) {
                 params.set('id', String(route.artistId));
+            }
+
+            if (route.view === 'fresh_finds' && route.freshFindsPlaylistId) {
+                params.set('playlist_id', String(route.freshFindsPlaylistId));
             }
         } else {
             params.set('tab', tab);
@@ -3570,7 +3581,7 @@ class App {
         }
 
         if (route.view === 'fresh_finds') {
-            await this.fetchFreshFindsPlaylist(updateHistory);
+            await this.fetchFreshFindsPlaylist(updateHistory, route.freshFindsPlaylistId);
             return;
         }
     }
@@ -9785,14 +9796,20 @@ key: 'playlist_added',
         }
     }
 
-    private async fetchFreshFindsPlaylist(updateHistory: boolean = true): Promise<void> {
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: number): Promise<void> {
         this.downloadAllScope = 'loose';
-        this.currentExploreRoute = { view: 'fresh_finds' };
+        this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'fresh_finds' });
+            this.pushHistoryRoute({ view: 'fresh_finds', freshFindsPlaylistId: playlistId });
         }
         this.stopPlayback();
+
+        if (playlistId) {
+            await this.renderFreshFindsTracks(this.getSelectedPlexUserId() || '', playlistId);
+            return;
+        }
+
         this.displayMessage('Loading Fresh Finds...');
 
         const userId = this.getSelectedPlexUserId();
@@ -9925,9 +9942,13 @@ key: 'playlist_added',
         `;
     }
 
-    private async renderFreshFindsTracks(userId: string): Promise<void> {
+    private async renderFreshFindsTracks(userId: string, playlistId?: number): Promise<void> {
         try {
-            const response = await fetch(`/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`);
+            let url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
+            if (playlistId) {
+                url += `&playlist_id=${playlistId}`;
+            }
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error('Failed to fetch Fresh Finds tracks');
             }
@@ -9942,6 +9963,9 @@ key: 'playlist_added',
 
             this.updatePlexPlaylistContainerVisibility(true);
             const playlistName = playlist.name || 'Fresh Finds';
+            this.freshFindsPlaylistName = playlistName;
+            this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
@@ -9970,19 +9994,23 @@ key: 'playlist_added',
                 const buttonsContainer = document.createElement('div');
                 buttonsContainer.className = 'add-all-buttons-container';
 
-                const refreshBtn = document.createElement('button');
-                refreshBtn.id = 'refreshFreshFindsBtn';
-                refreshBtn.className = 'add-all-btn';
-                refreshBtn.title = 'Refresh Fresh Finds';
-                refreshBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <polyline points="1 20 1 14 7 14"></polyline>
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                `;
-                refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
-                buttonsContainer.appendChild(refreshBtn);
+                const generatedAt = playlist.generated_at as string | undefined;
+                const isToday = this.isPlaylistFromToday(generatedAt);
+                if (isToday) {
+                    const refreshBtn = document.createElement('button');
+                    refreshBtn.id = 'refreshFreshFindsBtn';
+                    refreshBtn.className = 'add-all-btn';
+                    refreshBtn.title = 'Refresh Fresh Finds';
+                    refreshBtn.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    `;
+                    refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
+                    buttonsContainer.appendChild(refreshBtn);
+                }
 
                 const addPlaylistBtn = document.createElement('button');
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
@@ -11578,6 +11606,14 @@ key: 'playlist_added',
                 <tbody>${rows}</tbody>
             </table>
         `;
+    }
+
+    private isPlaylistFromToday(generatedAt?: string): boolean {
+        if (!generatedAt) return false;
+        const genDate = new Date(generatedAt);
+        const genDay = genDate.toLocaleDateString('en-US', { timeZone: this.timezone });
+        const nowDay = new Date().toLocaleDateString('en-US', { timeZone: this.timezone });
+        return genDay === nowDay;
     }
 
     private formatHistoryDate(isoString: string): string {

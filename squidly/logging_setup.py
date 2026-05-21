@@ -12,7 +12,7 @@ import logging
 import os
 from logging.handlers import TimedRotatingFileHandler
 
-LOG_DIR = '/logs'
+LOG_DIR = os.environ.get('SQUIDLY_LOG_DIR_OVERRIDE', '/logs')
 SQUIDLY_LOG = os.path.join(LOG_DIR, 'squidly.log')
 GUNICORN_ACCESS_LOG = os.path.join(LOG_DIR, 'gunicorn_access.log')
 GUNICORN_ERROR_LOG = os.path.join(LOG_DIR, 'gunicorn_error.log')

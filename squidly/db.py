@@ -165,6 +165,8 @@ def init_db():
         cur.execute('ALTER TABLE user_settings ADD COLUMN plex_account_id INTEGER')
     if 'auto_download_fresh_finds' not in user_settings_columns:
         cur.execute('ALTER TABLE user_settings ADD COLUMN auto_download_fresh_finds BOOLEAN NOT NULL DEFAULT FALSE')
+    if 'fresh_finds_retention_days' not in user_settings_columns:
+        cur.execute('ALTER TABLE user_settings ADD COLUMN fresh_finds_retention_days INTEGER')
 
     cur.execute(
         """
@@ -523,6 +525,28 @@ def init_db():
         ON recommendation_playlist_tracks (playlist_id)
         """
     )
+
+    # Migration: add playlist_date for history retention
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlists' AND column_name = 'playlist_date'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "ALTER TABLE recommendation_playlists DROP CONSTRAINT IF EXISTS recommendation_playlists_plex_account_id_slug_key"
+        )
+        cur.execute("ALTER TABLE recommendation_playlists ADD COLUMN playlist_date DATE")
+        cur.execute("UPDATE recommendation_playlists SET playlist_date = DATE(generated_at) WHERE playlist_date IS NULL")
+        cur.execute("ALTER TABLE recommendation_playlists ALTER COLUMN playlist_date SET NOT NULL")
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_rec_playlists_unique ON recommendation_playlists (plex_account_id, slug, playlist_date)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_rec_playlists_history ON recommendation_playlists (plex_account_id, generated_at DESC)"
+        )
 
     cur.execute(
         """

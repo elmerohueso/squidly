@@ -733,6 +733,88 @@ def set_fresh_finds_auto_download(plex_client_id, enabled):
     conn.close()
 
 
+def get_fresh_finds_retention_days(plex_account_id):
+    """Get the Fresh Finds retention days for a user. Default 30 if not set."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_retention_days FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_retention_days') if row else None
+    return val if val is not None else 30
+
+
+def set_fresh_finds_retention_days(plex_client_id, days):
+    """Set the Fresh Finds retention days for a specific user. Clamps to [0, 365]."""
+    days = max(0, min(365, int(days)))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_retention_days = %s WHERE plex_client_id = %s",
+        (days, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def cleanup_old_fresh_finds(plex_account_id):
+    """Delete Fresh Finds playlists older than the user's retention limit from DB and Plex.
+    
+    Returns dict with 'deleted_count' and 'plex_deleted' counts.
+    """
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    from datetime import date, timedelta
+
+    retention_days = get_fresh_finds_retention_days(plex_account_id)
+    today = date.today()
+    cutoff_date = today - timedelta(days=retention_days)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, name, playlist_date
+        FROM recommendation_playlists
+        WHERE plex_account_id = %s
+          AND slug = 'fresh-finds'
+          AND playlist_date < %s
+        ORDER BY playlist_date ASC
+        """,
+        (plex_account_id, cutoff_date)
+    )
+    old_playlists = cur.fetchall() or []
+
+    if not old_playlists:
+        conn.close()
+        return {'deleted_count': 0, 'plex_deleted': 0}
+
+    playlist_ids = [p['id'] for p in old_playlists]
+    playlist_names = [p['name'] for p in old_playlists]
+
+    # CASCADE on recommendation_playlist_tracks handles child rows
+    cur.execute(
+        "DELETE FROM recommendation_playlists WHERE id = ANY(%s)",
+        (playlist_ids,)
+    )
+    conn.commit()
+    conn.close()
+
+    # Best-effort Plex cleanup
+    from squidly.plex import delete_stale_fresh_finds_playlists
+    plex_deleted = delete_stale_fresh_finds_playlists(playlist_names)
+
+    logger.info(
+        "[FRESH_FINDS_CLEANUP] Deleted %d old playlists from DB, %d from Plex for plex_account_id=%s",
+        len(playlist_ids), plex_deleted, plex_account_id
+    )
+
+    return {'deleted_count': len(playlist_ids), 'plex_deleted': plex_deleted}
+
+
 def get_listen_history(plex_account_id=None, limit=100, since=None):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -919,24 +1001,45 @@ def get_existing_artist_titles():
 
 
 def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    now_tz = datetime.now(ZoneInfo(app_timezone))
+    playlist_date = now_tz.date()
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute(
             """
-            INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (plex_account_id, slug) DO UPDATE SET
-                name = excluded.name,
-                strategy = excluded.strategy,
-                seed_count = excluded.seed_count,
-                track_count = excluded.track_count,
-                generated_at = NOW()
-            RETURNING id
+            SELECT id FROM recommendation_playlists
+            WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
             """,
-            (plex_account_id, name, slug, strategy, seed_count, len(tracks))
+            (plex_account_id, slug, playlist_date)
         )
-        playlist_id = cur.fetchone()['id']
+        existing = cur.fetchone()
+
+        if existing:
+            cur.execute(
+                """
+                UPDATE recommendation_playlists
+                SET name = %s, strategy = %s, seed_count = %s, track_count = %s, generated_at = NOW()
+                WHERE id = %s
+                """,
+                (name, strategy, seed_count, len(tracks), existing['id'])
+            )
+            playlist_id = existing['id']
+        else:
+            cur.execute(
+                """
+                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at, playlist_date)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
+                RETURNING id
+                """,
+                (plex_account_id, name, slug, strategy, seed_count, len(tracks), playlist_date)
+            )
+            playlist_id = cur.fetchone()['id']
 
         cur.execute(
             "DELETE FROM recommendation_playlist_tracks WHERE playlist_id = %s",
@@ -976,16 +1079,91 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
         conn.close()
 
 
-def get_recommendation_playlist(plex_account_id, slug):
+def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    if playlist_id is not None:
+        cur.execute(
+            """
+            SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+            FROM recommendation_playlists
+            WHERE id = %s
+            """,
+            (playlist_id,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+            FROM recommendation_playlists
+            WHERE plex_account_id = %s AND slug = %s
+            ORDER BY generated_at DESC
+            LIMIT 1
+            """,
+            (plex_account_id, slug)
+        )
+    playlist = cur.fetchone()
+    if not playlist:
+        conn.close()
+        return None
+
+    cur.execute(
+        """
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
+        FROM recommendation_playlist_tracks
+        WHERE playlist_id = %s
+        ORDER BY position
+        """,
+        (playlist['id'],)
+    )
+    tracks = cur.fetchall() or []
+    conn.close()
+
+    return {
+        'id': playlist['id'],
+        'name': playlist['name'],
+        'slug': playlist['slug'],
+        'strategy': playlist['strategy'],
+        'seed_count': playlist['seed_count'],
+        'track_count': playlist['track_count'],
+        'generated_at': playlist['generated_at'],
+        'tracks': [
+            {
+                'position': t['position'],
+                'hifi_id': t['hifi_id'],
+                'title': t['title'],
+                'artist': t['artist'],
+                'album': t['album'],
+                'duration': t['duration'],
+                'cover': t['cover'],
+                'seed_hifi_id': t['seed_hifi_id'],
+                'score': t['score'],
+                'quality': t['quality'],
+                'artist_id': t['artist_id'],
+                'album_id': t['album_id'],
+            }
+            for t in tracks
+        ]
+    }
+
+
+def get_todays_recommendation_playlist(plex_account_id, slug):
+    """Get today's recommendation playlist for a user/slug using app_timezone for the date."""
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    today = datetime.now(ZoneInfo(app_timezone)).date()
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
         SELECT id, name, slug, strategy, seed_count, track_count, generated_at
         FROM recommendation_playlists
-        WHERE plex_account_id = %s AND slug = %s
+        WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
         """,
-        (plex_account_id, slug)
+        (plex_account_id, slug, today)
     )
     playlist = cur.fetchone()
     if not playlist:

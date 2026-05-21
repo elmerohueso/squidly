@@ -757,3 +757,43 @@ def get_last_successful_plex_sync_finished_at():
     if finished_at and hasattr(finished_at, 'replace'):
         finished_at = finished_at.replace(tzinfo=None)
     return finished_at
+
+
+def delete_stale_fresh_finds_playlists(playlist_names):
+    """Delete Plex playlists matching the given names. Best-effort: logs failures but doesn't raise.
+    
+    Also matches any playlist whose title matches the Fresh Finds naming pattern
+    (e.g., "Fresh Finds (5-17)") to catch orphaned playlists.
+    
+    Returns count of successfully deleted playlists.
+    """
+    import re
+    
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+    
+    if not server_url or not api_token:
+        logger.info("[PLEX] Cannot delete old Fresh Finds playlists: Plex not configured")
+        return 0
+    
+    fresh_finds_pattern = re.compile(r'^Fresh Finds\s*\(\d+-\d+\)$')
+    names_to_delete = set(playlist_names)
+    deleted = 0
+    
+    try:
+        plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+        playlists = plex.playlists()
+        
+        for pl in playlists:
+            if pl.title in names_to_delete or fresh_finds_pattern.match(pl.title):
+                try:
+                    pl.delete()
+                    logger.info("[PLEX] Deleted old Fresh Finds playlist: '%s'", pl.title)
+                    deleted += 1
+                except Exception as e:
+                    logger.info("[PLEX] Failed to delete playlist '%s': %s", pl.title, str(e))
+    except Exception as e:
+        logger.info("[PLEX] Failed to list playlists for Fresh Finds cleanup: %s", str(e))
+    
+    return deleted
