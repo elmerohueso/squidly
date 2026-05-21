@@ -2844,9 +2844,31 @@ def cancel_all_pending_jobs():
 
     return jsonify({'success': True, 'deleted_count': deleted_count})
 
+@app.route('/api/jobs/cancel-failed', methods=['POST'])
+def cancel_failed_jobs():
+    """Cancel all failed jobs?"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE jobs
+        SET status = 'cancelled',
+            updated_at = %s,
+            finished_at = %s
+        WHERE status = 'failed'
+        """,
+        (datetime.utcnow().isoformat() + 'Z', datetime.utcnow().isoformat() + 'Z')
+    )
+    cancelled_count = cur.rowcount if cur.rowcount is not None else 0
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True, 'cancelled_count': cancelled_count})
+
 @app.route('/api/jobs/<int:job_id>/retry', methods=['POST'])
 def retry_job(job_id):
-    """Retry an existing failed/completed-with-errors download job by re-queueing it."""
+    """Retry an existing failed/completed-with-errors job by re-queueing it."""
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2865,26 +2887,6 @@ def retry_job(job_id):
         conn.close()
         return jsonify({'error': 'Job not found'}), 404
 
-    if row['job_type'] != 'download_track':
-        conn.close()
-        return jsonify({'error': 'Only download_track jobs can be retried'}), 400
-
-    try:
-        result = json.loads(row['result_json']) if row['result_json'] else {}
-    except (TypeError, ValueError):
-        result = {}
-
-    try:
-        payload = json.loads(row['payload_json']) if row.get('payload_json') else {}
-    except (TypeError, ValueError):
-        payload = {}
-
-    playlist_name = ''
-    if isinstance(payload, dict):
-        playlist_name = str(payload.get('plex_playlist') or '').strip()
-    if not playlist_name and isinstance(result, dict):
-        playlist_name = str(result.get('playlist_name') or '').strip()
-
     effective_status = _effective_job_status(row['job_type'], row['status'], row.get('result_json'))
     retryable = effective_status in ('failed', 'completed_with_errors')
 
@@ -2892,13 +2894,31 @@ def retry_job(job_id):
         conn.close()
         return jsonify({'error': f"Job is not retryable (status={row['status']}, effective_status={effective_status})"}), 400
 
-    if not playlist_name and _download_job_exists_in_plex(cur, result, payload):
-        conn.close()
-        return jsonify({
-            'error': 'Track already exists in Plex for the selected format. Retry skipped.',
-            'job_id': job_id,
-            'status': 'already_exists_in_plex'
-        }), 409
+    # For download_track jobs, check if the track already exists in Plex
+    if row['job_type'] == 'download_track':
+        try:
+            result = json.loads(row['result_json']) if row['result_json'] else {}
+        except (TypeError, ValueError):
+            result = {}
+
+        try:
+            payload = json.loads(row['payload_json']) if row.get('payload_json') else {}
+        except (TypeError, ValueError):
+            payload = {}
+
+        playlist_name = ''
+        if isinstance(payload, dict):
+            playlist_name = str(payload.get('plex_playlist') or '').strip()
+        if not playlist_name and isinstance(result, dict):
+            playlist_name = str(result.get('playlist_name') or '').strip()
+
+        if not playlist_name and _download_job_exists_in_plex(cur, result, payload):
+            conn.close()
+            return jsonify({
+                'error': 'Track already exists in Plex for the selected format. Retry skipped.',
+                'job_id': job_id,
+                'status': 'already_exists_in_plex'
+            }), 409
 
     cur.execute(
         """

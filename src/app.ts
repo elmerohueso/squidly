@@ -1128,7 +1128,7 @@ class App {
         }
         if (this.cancelPendingJobsButton) {
             this.cancelPendingJobsButton.addEventListener('click', () => {
-                void this.cancelAllPendingJobs();
+                void this.cancelAllJobs();
             });
         }
         if (this.retryAllJobsButton) {
@@ -3647,45 +3647,62 @@ class App {
     }
 
     private updateJobsActionButtons(incompleteCount: number, filter: string, retryableCount: number): void {
-        const showCancelIncomplete = filter === 'incomplete';
-        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancelIncomplete);
-
-        if (!showCancelIncomplete) {
-            this.cancelPendingJobsButton.disabled = true;
-            this.cancelPendingJobsButton.textContent = 'Cancel all incomplete';
-        } else {
-            this.cancelPendingJobsButton.disabled = incompleteCount === 0;
-            this.cancelPendingJobsButton.textContent = incompleteCount > 0
-                ? `Cancel all incomplete (${incompleteCount})`
-                : 'Cancel all incomplete';
+        let cancelCount = 0;
+        if (filter === 'incomplete') {
+            cancelCount = incompleteCount;
+        } else if (filter === 'failed' || filter === 'completed_with_errors') {
+            cancelCount = this.jobsListCache.length;
         }
 
-        const showRetryAll = filter === 'completed_with_errors' || filter === 'failed';
-        this.retryAllJobsButton.classList.toggle('hidden', !showRetryAll);
+        const showCancel = cancelCount > 0;
+        const showRetry = retryableCount > 0;
 
-        if (!showRetryAll) {
+        // Cancel all button
+        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancel);
+        if (showCancel) {
+            this.cancelPendingJobsButton.disabled = cancelCount === 0;
+            this.cancelPendingJobsButton.textContent = cancelCount > 0
+                ? `Cancel all (${cancelCount})`
+                : 'Cancel all';
+        } else {
+            this.cancelPendingJobsButton.disabled = true;
+            this.cancelPendingJobsButton.textContent = 'Cancel all';
+        }
+
+        // Retry all button
+        this.retryAllJobsButton.classList.toggle('hidden', !showRetry);
+        if (showRetry) {
+            this.retryAllJobsButton.disabled = retryableCount === 0;
+            this.retryAllJobsButton.textContent = retryableCount > 0
+                ? `Retry all (${retryableCount})`
+                : 'Retry all';
+        } else {
             this.retryAllJobsButton.disabled = true;
             this.retryAllJobsButton.textContent = 'Retry all';
-            return;
         }
-
-        this.retryAllJobsButton.disabled = retryableCount === 0;
-        this.retryAllJobsButton.textContent = retryableCount > 0
-            ? `Retry all (${retryableCount})`
-            : 'Retry all';
     }
 
-    private async cancelAllPendingJobs(): Promise<void> {
-        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all incomplete';
+    private async cancelAllJobs(): Promise<void> {
         if (this.cancelPendingJobsButton.disabled) {
             return;
         }
 
+        const selectedFilter = this.jobsFilterSelect.value;
+
+        if (selectedFilter === 'incomplete') {
+            await this.cancelIncompleteJobs();
+        } else if (selectedFilter === 'failed' || selectedFilter === 'completed_with_errors') {
+            await this.cancelFailedJobs();
+        }
+    }
+
+    private async cancelIncompleteJobs(): Promise<void> {
         const shouldProceed = window.confirm('Cancel and remove all incomplete jobs from the queue?');
         if (!shouldProceed) {
             return;
         }
 
+        const originalText = this.cancelPendingJobsButton.textContent || 'Cancel all';
         this.cancelPendingJobsButton.disabled = true;
         this.cancelPendingJobsButton.textContent = 'Cancelling...';
 
@@ -3709,7 +3726,46 @@ class App {
             console.error('Cancel incomplete jobs failed:', error);
             window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
             this.cancelPendingJobsButton.disabled = false;
-            this.cancelPendingJobsButton.textContent = pendingCountLabel;
+            this.cancelPendingJobsButton.textContent = originalText;
+        }
+    }
+
+    private async cancelFailedJobs(): Promise<void> {
+        const shouldProceed = window.confirm('Cancel all failed jobs? They will be superseded by retried downloads or nightly runs.');
+        if (!shouldProceed) {
+            return;
+        }
+
+        const originalText = this.cancelPendingJobsButton.textContent || 'Cancel all';
+        this.cancelPendingJobsButton.disabled = true;
+        this.cancelPendingJobsButton.textContent = 'Cancelling...';
+
+        try {
+            const response = await fetch('/api/jobs/cancel-failed', { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to cancel jobs';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            const data = await response.json() as { cancelled_count?: number };
+            const cancelledCount = data?.cancelled_count ?? 0;
+            if (cancelledCount > 0) {
+                window.alert(`Cancelled ${cancelledCount} job${cancelledCount === 1 ? '' : 's'}.`);
+            }
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Cancel failed jobs failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel jobs');
+            this.cancelPendingJobsButton.disabled = false;
+            this.cancelPendingJobsButton.textContent = originalText;
         }
     }
 
@@ -3763,14 +3819,20 @@ class App {
 
         await this.loadJobs();
 
-        if (failures.length > 0 || skippedExistingCount > 0) {
-            const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
+        const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
+        const parts: string[] = [`Retried ${retriedCount} of ${retryableJobs.length} jobs.`];
+
+        if (skippedExistingCount > 0) {
+            parts.push(`Skipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`);
+        }
+
+        if (failures.length > 0) {
             const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
-            const skipLine = skippedExistingCount > 0
-                ? `\nSkipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`
-                : '';
-            const failureLine = failures.length > 0 ? `\n${summary}` : '';
-            window.alert(`Retried ${retriedCount} of ${retryableJobs.length} jobs.${skipLine}${failureLine}`);
+            parts.push(summary);
+        }
+
+        if (parts.length > 1 || failures.length > 0 || skippedExistingCount > 0) {
+            window.alert(parts.join('\n'));
             this.retryAllJobsButton.disabled = false;
             this.retryAllJobsButton.textContent = originalText;
         }
