@@ -165,6 +165,7 @@ from squidly.storage import (
     get_plex_user_settings,
     get_recent_listen_history_seeds,
     get_recommendation_playlist,
+    get_todays_recommendation_playlist,
     get_ytm_config,
     has_listen_history,
     list_recommendation_playlists,
@@ -3218,6 +3219,43 @@ def save_fresh_finds_auto_download_config():
     return jsonify({'success': True, 'enabled': bool(enabled)})
 
 
+@app.route('/api/fresh-finds/retention', methods=['GET'])
+def get_fresh_finds_retention():
+    """Get the Fresh Finds retention count setting for a specific user."""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import get_fresh_finds_retention_count
+    mappings = get_all_plex_account_mappings()
+    plex_account_id = None
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            plex_account_id = m.get('plex_account_id')
+            break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    count = get_fresh_finds_retention_count(plex_account_id)
+    return jsonify({'count': count})
+
+
+@app.route('/api/fresh-finds/retention', methods=['POST'])
+def save_fresh_finds_retention():
+    """Set the Fresh Finds retention count for a specific user. Clamps to [1, 100]."""
+    payload = request.get_json(silent=True) or {}
+    user_id = payload.get('user_id')
+    count = payload.get('count', 10)
+
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import set_fresh_finds_retention_count
+    set_fresh_finds_retention_count(user_id, count)
+    return jsonify({'success': True, 'count': max(1, min(100, int(count)))})
+
+
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
 def get_listenbrainz_playlists():
     """Fetch recommended playlists created for user from ListenBrainz"""
@@ -5288,7 +5326,8 @@ def process_recommendation_job(job_id, payload):
     now_tz = datetime.now(ZoneInfo(app_timezone))
     playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
 
-    save_recommendation_playlist(
+    # Save playlist to DB first, then create in Plex
+    playlist_id = save_recommendation_playlist(
         plex_account_id=plex_account_id,
         slug=slug,
         name=playlist_name,
@@ -5296,6 +5335,48 @@ def process_recommendation_job(job_id, payload):
         seed_count=len(seeds),
         tracks=top_tracks
     )
+
+    # Stage 6: Create Plex playlist and store key
+    from squidly.plex import create_fresh_finds_plex_playlist
+    plex_playlist_key = None
+    try:
+        success, result = create_fresh_finds_plex_playlist(
+            plex_account_id=plex_account_id,
+            playlist_name=playlist_name,
+            tracks=top_tracks
+        )
+        if success:
+            plex_playlist_key = result
+            logger.info("[RECOMMENDATION] Job %s created Plex playlist with key=%s", job_id, plex_playlist_key)
+        else:
+            logger.info("[RECOMMENDATION] Job %s Plex playlist creation failed (non-fatal): %s", job_id, result)
+    except Exception as e:
+        logger.info("[RECOMMENDATION] Job %s Plex playlist creation error (non-fatal): %s", job_id, str(e))
+
+    # Update the playlist record with the Plex key
+    if plex_playlist_key and playlist_id:
+        try:
+            conn_inner = get_db_connection()
+            cur_inner = conn_inner.cursor()
+            cur_inner.execute(
+                "UPDATE recommendation_playlists SET plex_playlist_key = %s WHERE id = %s",
+                (plex_playlist_key, playlist_id)
+            )
+            conn_inner.commit()
+            conn_inner.close()
+        except Exception as e:
+            logger.info("[RECOMMENDATION] Job %s failed to save playlist key (non-fatal): %s", job_id, str(e))
+
+    # Stage 7: Cleanup old Fresh Finds playlists
+    from squidly.storage import cleanup_old_fresh_finds
+    try:
+        cleanup_result = cleanup_old_fresh_finds(plex_account_id)
+        logger.info(
+            "[RECOMMENDATION] Job %s cleanup: deleted %d old DB playlists, %d Plex playlists",
+            job_id, cleanup_result.get('deleted_count', 0), cleanup_result.get('plex_deleted', 0)
+        )
+    except Exception as e:
+        logger.info("[RECOMMENDATION] Job %s cleanup failed (non-fatal): %s", job_id, str(e))
 
     progress['tracks_saved'] = len(top_tracks)
     stages['saving_playlist'] = 'done'
@@ -5350,7 +5431,7 @@ def process_fresh_finds_auto_download_job(job_id, payload):
             continue
 
         # Read the Fresh Finds playlist for this user
-        playlist = get_recommendation_playlist(plex_account_id, slug)
+        playlist = get_todays_recommendation_playlist(plex_account_id, slug)
 
         if not playlist:
             logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: no playlist found for user %s (account %s)", job_id, plex_username, plex_account_id)
@@ -5492,7 +5573,10 @@ def get_recommendation_playlist_route(slug):
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
-    playlist_data = get_recommendation_playlist(plex_account_id, slug)
+    playlist_id_param = request.args.get('playlist_id', '').strip()
+    playlist_id = int(playlist_id_param) if playlist_id_param.isdigit() else None
+
+    playlist_data = get_recommendation_playlist(plex_account_id, slug, playlist_id=playlist_id)
     if not playlist_data:
         return jsonify({'error': 'Playlist not found'}), 404
 

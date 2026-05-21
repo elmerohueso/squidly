@@ -528,6 +528,7 @@ interface AppRouteState {
     username?: string;
     playlistUrl?: string;
     playlistType?: string;
+    freshFindsPlaylistId?: number;
 }
 
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
@@ -617,6 +618,8 @@ class App {
     private ytmConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsAutoDownloadStatusEl: HTMLElement;
+    private freshFindsRetentionInput: HTMLInputElement;
+    private freshFindsRetentionStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -731,6 +734,7 @@ class App {
     private exploreYoutubePlaylistName: string | null = null;
     private listenbrainzCurrentUsername: string | null = null;
     private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
+    private freshFindsPlaylistName: string | null = null;
 
     private historyTableContainer: HTMLElement;
     private historyEntries: ListenHistoryEntry[] = [];
@@ -826,7 +830,7 @@ class App {
         } else if (route.view === 'fresh_finds') {
             crumbs.push({ label: 'Explore', route: { view: 'home' } });
             crumbs.push({ label: 'Squidly' });
-            crumbs.push({ label: 'Fresh Finds' });
+            crumbs.push({ label: this.freshFindsPlaylistName || 'Fresh Finds' });
         } else {
             crumbs.push({ label: 'Explore' });
         }
@@ -929,6 +933,8 @@ class App {
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
+        this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
+        this.freshFindsRetentionStatusEl = document.getElementById('freshFindsRetentionStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -1003,6 +1009,7 @@ class App {
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
         void this.loadFreshFindsAutoDownload();
+        void this.loadFreshFindsRetention();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1265,6 +1272,9 @@ class App {
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsAutoDownload());
+        }
+        if (this.freshFindsRetentionInput) {
+            this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsRetention());
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2586,6 +2596,7 @@ class App {
         }
 
         void this.loadFreshFindsAutoDownload();
+        void this.loadFreshFindsRetention();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -2991,23 +3002,24 @@ class App {
                 li.appendChild(a);
                 container.appendChild(li);
             } else {
-                const li = document.createElement('li');
-                const a = document.createElement('a');
-                a.href = '#';
-                a.className = 'nav-item';
-                const ff = playlists.find((p: any) => p.slug === 'fresh-finds');
-                a.textContent = ff ? ff.name : 'Fresh Finds';
-                a.style.fontSize = '0.875rem';
-                a.style.paddingTop = '0.25rem';
-                a.style.paddingBottom = '0.25rem';
-                a.addEventListener('click', (e: Event) => {
-                    e.preventDefault();
-                    this.closeMobileMenu();
-                    this.switchPage('explore');
-                    void this.fetchFreshFindsPlaylist();
-                });
-                li.appendChild(a);
-                container.appendChild(li);
+                for (const playlist of playlists) {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'nav-item';
+                    a.textContent = playlist.name || 'Fresh Finds';
+                    a.style.fontSize = '0.875rem';
+                    a.style.paddingTop = '0.25rem';
+                    a.style.paddingBottom = '0.25rem';
+                    a.addEventListener('click', (e: Event) => {
+                        e.preventDefault();
+                        this.closeMobileMenu();
+                        this.switchPage('explore');
+                        void this.fetchFreshFindsPlaylist(false, playlist.id);
+                    });
+                    li.appendChild(a);
+                    container.appendChild(li);
+                }
             }
         } catch {
             const li = document.createElement('li');
@@ -3193,7 +3205,11 @@ class App {
         }
 
         if (view === 'fresh_finds') {
-            return { view: 'fresh_finds' };
+            const playlistIdParam = params.get('playlist_id');
+            const playlistId = playlistIdParam ? Number(playlistIdParam) : undefined;
+            return playlistId && Number.isFinite(playlistId) && playlistId > 0
+                ? { view: 'fresh_finds', freshFindsPlaylistId: playlistId }
+                : { view: 'fresh_finds' };
         }
 
         return view === 'home' ? { view: 'home' } : null;
@@ -3325,6 +3341,10 @@ class App {
 
             if (route.view === 'similar_artists' && route.artistId) {
                 params.set('id', String(route.artistId));
+            }
+
+            if (route.view === 'fresh_finds' && route.freshFindsPlaylistId) {
+                params.set('playlist_id', String(route.freshFindsPlaylistId));
             }
         } else {
             params.set('tab', tab);
@@ -3570,7 +3590,7 @@ class App {
         }
 
         if (route.view === 'fresh_finds') {
-            await this.fetchFreshFindsPlaylist(updateHistory);
+            await this.fetchFreshFindsPlaylist(updateHistory, route.freshFindsPlaylistId);
             return;
         }
     }
@@ -6088,6 +6108,77 @@ key: 'playlist_added',
         }
     }
 
+    private async loadFreshFindsRetention(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsRetentionInput) {
+                    this.freshFindsRetentionInput.value = '7';
+                }
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/retention?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (this.freshFindsRetentionInput && data.count) {
+                    this.freshFindsRetentionInput.value = String(data.count);
+                    this.freshFindsRetentionInput.dispatchEvent(new Event('change'));
+                }
+            } else {
+                if (this.freshFindsRetentionStatusEl) {
+                    this.freshFindsRetentionStatusEl.textContent = '✗ Failed to load retention setting';
+                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds retention setting.', error);
+            if (this.freshFindsRetentionStatusEl) {
+                this.freshFindsRetentionStatusEl.textContent = '✗ Error loading retention setting';
+                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    private async saveFreshFindsRetention(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsRetentionStatusEl) {
+                    this.freshFindsRetentionStatusEl.textContent = '⚠ Select a Plex user first';
+                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                }
+                return;
+            }
+
+            const count = parseInt(this.freshFindsRetentionInput.value, 10);
+            const response = await fetch('/api/fresh-finds/retention', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    count: count
+                })
+            });
+
+            if (response.ok) {
+                this.freshFindsRetentionStatusEl.textContent = `✓ Retention set to ${count} playlists`;
+                this.freshFindsRetentionStatusEl.style.color = 'var(--accent-primary)';
+                setTimeout(() => {
+                    this.freshFindsRetentionStatusEl.textContent = '';
+                }, 3000);
+            } else {
+                this.freshFindsRetentionStatusEl.textContent = '✗ Failed to save setting';
+                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds retention setting:', error);
+            this.freshFindsRetentionStatusEl.textContent = '✗ Error saving setting';
+            this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+        }
+    }
+
     private async loadYtmConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
@@ -6664,6 +6755,7 @@ key: 'playlist_added',
                     this.updateUserTypeAccess();
                     await this.updatePlexLoginOnlyState();
                     void this.loadFreshFindsAutoDownload();
+                    void this.loadFreshFindsRetention();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });
@@ -9785,14 +9877,20 @@ key: 'playlist_added',
         }
     }
 
-    private async fetchFreshFindsPlaylist(updateHistory: boolean = true): Promise<void> {
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: number): Promise<void> {
         this.downloadAllScope = 'loose';
-        this.currentExploreRoute = { view: 'fresh_finds' };
+        this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'fresh_finds' });
+            this.pushHistoryRoute({ view: 'fresh_finds', freshFindsPlaylistId: playlistId });
         }
         this.stopPlayback();
+
+        if (playlistId) {
+            await this.renderFreshFindsTracks(this.getSelectedPlexUserId() || '', playlistId);
+            return;
+        }
+
         this.displayMessage('Loading Fresh Finds...');
 
         const userId = this.getSelectedPlexUserId();
@@ -9925,9 +10023,13 @@ key: 'playlist_added',
         `;
     }
 
-    private async renderFreshFindsTracks(userId: string): Promise<void> {
+    private async renderFreshFindsTracks(userId: string, playlistId?: number): Promise<void> {
         try {
-            const response = await fetch(`/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`);
+            let url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
+            if (playlistId) {
+                url += `&playlist_id=${playlistId}`;
+            }
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error('Failed to fetch Fresh Finds tracks');
             }
@@ -9942,6 +10044,9 @@ key: 'playlist_added',
 
             this.updatePlexPlaylistContainerVisibility(true);
             const playlistName = playlist.name || 'Fresh Finds';
+            this.freshFindsPlaylistName = playlistName;
+            this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
@@ -9970,19 +10075,23 @@ key: 'playlist_added',
                 const buttonsContainer = document.createElement('div');
                 buttonsContainer.className = 'add-all-buttons-container';
 
-                const refreshBtn = document.createElement('button');
-                refreshBtn.id = 'refreshFreshFindsBtn';
-                refreshBtn.className = 'add-all-btn';
-                refreshBtn.title = 'Refresh Fresh Finds';
-                refreshBtn.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="23 4 23 10 17 10"></polyline>
-                        <polyline points="1 20 1 14 7 14"></polyline>
-                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                `;
-                refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
-                buttonsContainer.appendChild(refreshBtn);
+                const generatedAt = playlist.generated_at as string | undefined;
+                const isToday = this.isPlaylistFromToday(generatedAt);
+                if (isToday) {
+                    const refreshBtn = document.createElement('button');
+                    refreshBtn.id = 'refreshFreshFindsBtn';
+                    refreshBtn.className = 'add-all-btn';
+                    refreshBtn.title = 'Refresh Fresh Finds';
+                    refreshBtn.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    `;
+                    refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
+                    buttonsContainer.appendChild(refreshBtn);
+                }
 
                 const addPlaylistBtn = document.createElement('button');
                 addPlaylistBtn.id = 'addAllPlaylistBtn';
@@ -11578,6 +11687,14 @@ key: 'playlist_added',
                 <tbody>${rows}</tbody>
             </table>
         `;
+    }
+
+    private isPlaylistFromToday(generatedAt?: string): boolean {
+        if (!generatedAt) return false;
+        const genDate = new Date(generatedAt);
+        const genDay = genDate.toLocaleDateString('en-US', { timeZone: this.timezone });
+        const nowDay = new Date().toLocaleDateString('en-US', { timeZone: this.timezone });
+        return genDay === nowDay;
     }
 
     private formatHistoryDate(isoString: string): string {

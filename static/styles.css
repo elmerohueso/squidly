@@ -2544,6 +2544,79 @@ body {
     margin-top: 0.75rem;
 }
 
+/* === Retention Number Spinner === */
+.retention-spinner {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    overflow: hidden;
+    transition: border-color var(--transition-fast);
+}
+
+.retention-spinner:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
+}
+
+.retention-spinner-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 36px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.retention-spinner-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.retention-spinner-btn:active {
+    background: rgba(0, 212, 255, 0.1);
+}
+
+.retention-spinner-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.retention-spinner-btn:disabled:hover {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.retention-spinner-input {
+    width: 40px;
+    height: 36px;
+    padding: 0;
+    text-align: center;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    outline: none;
+    -moz-appearance: textfield;
+    flex-shrink: 0;
+}
+
+.retention-spinner-input::-webkit-outer-spin-button,
+.retention-spinner-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 .settings-danger-zone {
     border-color: rgba(216, 39, 39, 0.35);
     background: rgba(216, 39, 39, 0.06);

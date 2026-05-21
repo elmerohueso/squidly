@@ -7,9 +7,12 @@ status).
 
 from datetime import datetime
 import json
+import logging
 
 from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.db import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 def get_library_update_status():
@@ -733,6 +736,96 @@ def set_fresh_finds_auto_download(plex_client_id, enabled):
     conn.close()
 
 
+def get_fresh_finds_retention_count(plex_account_id):
+    """Get the Fresh Finds retention count for a user. Default 7 if not set."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_retention_count FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_retention_count') if row else None
+    return val if val is not None else 7
+
+
+def set_fresh_finds_retention_count(plex_client_id, count):
+    """Set the Fresh Finds retention count for a specific user. Clamps to [1, 7]."""
+    count = max(1, min(7, int(count)))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_retention_count = %s WHERE plex_client_id = %s",
+        (count, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def cleanup_old_fresh_finds(plex_account_id):
+    """Delete Fresh Finds playlists beyond the user's retention count from DB and Plex.
+    
+    Keeps the N most recent playlists (by playlist_date) where N is the retention count.
+    Returns dict with 'deleted_count' and 'plex_deleted' counts.
+    """
+    retention_count = get_fresh_finds_retention_count(plex_account_id)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Fetch all fresh-finds playlists ordered by date descending
+    cur.execute(
+        """
+        SELECT id, name, plex_playlist_key, playlist_date
+        FROM recommendation_playlists
+        WHERE plex_account_id = %s
+          AND slug = 'fresh-finds'
+        ORDER BY playlist_date DESC
+        """,
+        (plex_account_id,)
+    )
+    all_playlists = cur.fetchall() or []
+
+    if len(all_playlists) <= retention_count:
+        conn.close()
+        return {'deleted_count': 0, 'plex_deleted': 0}
+
+    # Keep the N most recent, delete the rest
+    playlists_to_keep = all_playlists[:retention_count]
+    playlists_to_delete = all_playlists[retention_count:]
+
+    playlist_ids = [p['id'] for p in playlists_to_delete]
+    playlist_names = [p['name'] for p in playlists_to_delete]
+    playlist_keys = [p['plex_playlist_key'] for p in playlists_to_delete if p.get('plex_playlist_key')]
+
+    # CASCADE on recommendation_playlist_tracks handles child rows
+    cur.execute(
+        "DELETE FROM recommendation_playlists WHERE id = ANY(%s)",
+        (playlist_ids,)
+    )
+    conn.commit()
+    conn.close()
+
+    # Best-effort Plex cleanup using keys first, fallback to names
+    plex_deleted = 0
+    try:
+        from squidly.plex import delete_plex_playlists_by_keys_or_names
+        plex_deleted = delete_plex_playlists_by_keys_or_names(
+            plex_playlist_keys=playlist_keys,
+            fallback_names=playlist_names
+        )
+    except Exception as e:
+        logger.info("[FRESH_FINDS_CLEANUP] Plex cleanup failed (non-fatal): %s", str(e))
+
+    logger.info(
+        "[FRESH_FINDS_CLEANUP] Deleted %d old playlists from DB, %d from Plex for plex_account_id=%s (retention_count=%d, total_before=%d)",
+        len(playlist_ids), plex_deleted, plex_account_id, retention_count, len(all_playlists)
+    )
+
+    return {'deleted_count': len(playlist_ids), 'plex_deleted': plex_deleted}
+
+
 def get_listen_history(plex_account_id=None, limit=100, since=None):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -918,25 +1011,51 @@ def get_existing_artist_titles():
     }
 
 
-def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
+def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks, plex_playlist_key=None):
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    now_tz = datetime.now(ZoneInfo(app_timezone))
+    playlist_date = now_tz.date()
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute(
             """
-            INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (plex_account_id, slug) DO UPDATE SET
-                name = excluded.name,
-                strategy = excluded.strategy,
-                seed_count = excluded.seed_count,
-                track_count = excluded.track_count,
-                generated_at = NOW()
-            RETURNING id
+            SELECT id, plex_playlist_key FROM recommendation_playlists
+            WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
             """,
-            (plex_account_id, name, slug, strategy, seed_count, len(tracks))
+            (plex_account_id, slug, playlist_date)
         )
-        playlist_id = cur.fetchone()['id']
+        existing = cur.fetchone()
+
+        # If key was already set on a previous save and we don't have a new one, keep it
+        existing_key = existing.get('plex_playlist_key') if existing else None
+        effective_key = plex_playlist_key or existing_key
+
+        if existing:
+            cur.execute(
+                """
+                UPDATE recommendation_playlists
+                SET name = %s, strategy = %s, seed_count = %s, track_count = %s,
+                    plex_playlist_key = %s, generated_at = NOW()
+                WHERE id = %s
+                """,
+                (name, strategy, seed_count, len(tracks), effective_key, existing['id'])
+            )
+            playlist_id = existing['id']
+        else:
+            cur.execute(
+                """
+                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, plex_playlist_key, generated_at, playlist_date)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                RETURNING id
+                """,
+                (plex_account_id, name, slug, strategy, seed_count, len(tracks), effective_key, playlist_date)
+            )
+            playlist_id = cur.fetchone()['id']
 
         cur.execute(
             "DELETE FROM recommendation_playlist_tracks WHERE playlist_id = %s",
@@ -976,16 +1095,91 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
         conn.close()
 
 
-def get_recommendation_playlist(plex_account_id, slug):
+def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    if playlist_id is not None:
+        cur.execute(
+            """
+            SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+            FROM recommendation_playlists
+            WHERE id = %s
+            """,
+            (playlist_id,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, name, slug, strategy, seed_count, track_count, generated_at
+            FROM recommendation_playlists
+            WHERE plex_account_id = %s AND slug = %s
+            ORDER BY generated_at DESC
+            LIMIT 1
+            """,
+            (plex_account_id, slug)
+        )
+    playlist = cur.fetchone()
+    if not playlist:
+        conn.close()
+        return None
+
+    cur.execute(
+        """
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
+        FROM recommendation_playlist_tracks
+        WHERE playlist_id = %s
+        ORDER BY position
+        """,
+        (playlist['id'],)
+    )
+    tracks = cur.fetchall() or []
+    conn.close()
+
+    return {
+        'id': playlist['id'],
+        'name': playlist['name'],
+        'slug': playlist['slug'],
+        'strategy': playlist['strategy'],
+        'seed_count': playlist['seed_count'],
+        'track_count': playlist['track_count'],
+        'generated_at': playlist['generated_at'],
+        'tracks': [
+            {
+                'position': t['position'],
+                'hifi_id': t['hifi_id'],
+                'title': t['title'],
+                'artist': t['artist'],
+                'album': t['album'],
+                'duration': t['duration'],
+                'cover': t['cover'],
+                'seed_hifi_id': t['seed_hifi_id'],
+                'score': t['score'],
+                'quality': t['quality'],
+                'artist_id': t['artist_id'],
+                'album_id': t['album_id'],
+            }
+            for t in tracks
+        ]
+    }
+
+
+def get_todays_recommendation_playlist(plex_account_id, slug):
+    """Get today's recommendation playlist for a user/slug using app_timezone for the date."""
+    from squidly.config import app_timezone
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+
+    today = datetime.now(ZoneInfo(app_timezone)).date()
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
         SELECT id, name, slug, strategy, seed_count, track_count, generated_at
         FROM recommendation_playlists
-        WHERE plex_account_id = %s AND slug = %s
+        WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
         """,
-        (plex_account_id, slug)
+        (plex_account_id, slug, today)
     )
     playlist = cur.fetchone()
     if not playlist:
