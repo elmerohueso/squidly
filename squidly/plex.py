@@ -759,41 +759,158 @@ def get_last_successful_plex_sync_finished_at():
     return finished_at
 
 
-def delete_stale_fresh_finds_playlists(playlist_names):
-    """Delete Plex playlists matching the given names. Best-effort: logs failures but doesn't raise.
+def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
+    """Delete Plex playlists by their ratingKey, falling back to name matching.
     
-    Also matches any playlist whose title matches the Fresh Finds naming pattern
-    (e.g., "Fresh Finds (5-17)") to catch orphaned playlists.
+    First tries to delete each playlist by its ratingKey. If a key doesn't match,
+    falls back to matching against fallback_names and the Fresh Finds naming pattern.
+    Best-effort: logs failures but doesn't raise.
     
     Returns count of successfully deleted playlists.
     """
     import re
-    
+
     config = get_plex_config()
     server_url = (config.get('server_url') or '').strip()
     api_token = (config.get('api_token') or '').strip()
-    
+
     if not server_url or not api_token:
-        logger.info("[PLEX] Cannot delete old Fresh Finds playlists: Plex not configured")
+        logger.info("[PLEX] Cannot delete playlists: Plex not configured")
         return 0
-    
-    fresh_finds_pattern = re.compile(r'^Fresh Finds\s*\(\d+-\d+\)$')
-    names_to_delete = set(playlist_names)
+
     deleted = 0
-    
+    fresh_finds_pattern = re.compile(r'^Fresh Finds\s*\(\d+-\d+\)$')
+
     try:
         plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
         playlists = plex.playlists()
-        
+
+        # Build lookup by title for fallback matching
+        playlists_by_title = {}
         for pl in playlists:
-            if pl.title in names_to_delete or fresh_finds_pattern.match(pl.title):
+            playlists_by_title[pl.title] = pl
+
+        # Build lookup by ratingKey for key-based deletion
+        playlists_by_key = {}
+        for pl in playlists:
+            key = getattr(pl, 'ratingKey', None)
+            if key:
+                playlists_by_key[str(key)] = pl
+
+        # Keys that were provided but not found — fallback to name matching
+        keys_to_delete = set(str(k) for k in plex_playlist_keys if k)
+
+        for key in list(keys_to_delete):
+            pl = playlists_by_key.get(key)
+            if pl:
                 try:
                     pl.delete()
-                    logger.info("[PLEX] Deleted old Fresh Finds playlist: '%s'", pl.title)
+                    logger.info("[PLEX] Deleted playlist by key '%s': '%s'", key, pl.title)
                     deleted += 1
                 except Exception as e:
-                    logger.info("[PLEX] Failed to delete playlist '%s': %s", pl.title, str(e))
+                    logger.info("[PLEX] Failed to delete playlist by key '%s': %s", key, str(e))
+                keys_to_delete.discard(key)
+
+        # Fallback name matching for keys that weren't resolved and provided fallback names
+        names_to_delete = set(str(n) for n in fallback_names if n)
+        for title, pl in playlists_by_title.items():
+            if title in names_to_delete or fresh_finds_pattern.match(title):
+                # Skip if already deleted by key
+                pl_key = str(getattr(pl, 'ratingKey', '') or '')
+                if pl_key in plex_playlist_keys:
+                    continue
+                try:
+                    pl.delete()
+                    logger.info("[PLEX] Deleted playlist by name: '%s'", title)
+                    deleted += 1
+                except Exception as e:
+                    logger.info("[PLEX] Failed to delete playlist '%s': %s", title, str(e))
     except Exception as e:
-        logger.info("[PLEX] Failed to list playlists for Fresh Finds cleanup: %s", str(e))
-    
+        logger.info("[PLEX] Failed to list playlists for key/name deletion: %s", str(e))
+
     return deleted
+
+
+def create_fresh_finds_plex_playlist(plex_account_id, playlist_name, tracks):
+    """Create a Fresh Finds playlist in Plex and return the playlist's ratingKey.
+    
+    Resolves track hifi_ids to Plex library items via the tracks table,
+    creates the playlist, and returns (success, key_or_error).
+    Best-effort: returns (False, error_message) on failure.
+    """
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+
+    if not server_url or not api_token:
+        logger.info("[PLEX] Cannot create Fresh Finds playlist: Plex not configured")
+        return False, 'Plex not configured'
+
+    try:
+        plex = _get_plex_server_for_user(server_url, api_token, plex_account_id)
+    except Exception as e:
+        logger.info("[PLEX] Cannot create Fresh Finds playlist: failed to connect for user %s: %s", plex_account_id, str(e))
+        return False, f'Failed to connect to Plex: {str(e)}'
+
+    # Look up track hifi_ids in the local tracks table to get Plex library_ids
+    hifi_ids = [t.get('hifi_id') for t in tracks if t.get('hifi_id')]
+    if not hifi_ids:
+        return False, 'No tracks with hifi_ids provided'
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT library_id, hifi_id
+        FROM tracks
+        WHERE hifi_id = ANY(%s)
+          AND library_id IS NOT NULL
+          AND library_id <> ''
+        """,
+        (hifi_ids,)
+    )
+    library_rows = cur.fetchall() or []
+    conn.close()
+
+    if not library_rows:
+        logger.info("[PLEX] No matching tracks found in library for %d hifi_ids", len(hifi_ids))
+        return False, 'No tracks found in Plex library matching these recommendations'
+
+    # Fetch actual Plex items
+    plex_items = []
+    for row in library_rows:
+        library_id = str(row['library_id']).strip()
+        if not library_id:
+            continue
+        metadata_key = library_id if library_id.startswith('/library/metadata/') else f'/library/metadata/{library_id}'
+        try:
+            item = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
+            if item is not None:
+                plex_items.append(item)
+        except Exception as e:
+            logger.info("[PLEX] Failed to fetch Plex item for library_id=%s: %s", library_id, str(e))
+
+    if not plex_items:
+        return False, 'Could not resolve any tracks to Plex items'
+
+    # Create or replace the playlist
+    with _playlist_operation_lock:
+        playlist, created = _get_or_create_playlist(plex, playlist_name, items=plex_items)
+        if not created:
+            # Replace existing playlist content
+            try:
+                playlist.removeItems(playlist.items())
+                _add_items_to_playlist(playlist, plex_items)
+            except Exception as e:
+                logger.info("[PLEX] Failed to replace playlist items: %s", str(e))
+
+    rating_key = str(getattr(playlist, 'ratingKey', '') or '')
+    logger.info(
+        "[PLEX] Created Fresh Finds playlist '%s' (key=%s) with %d tracks for user %s",
+        playlist_name, rating_key, len(plex_items), plex_account_id
+    )
+
+    return True, rating_key
+
+
+

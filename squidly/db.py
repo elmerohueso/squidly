@@ -597,5 +597,45 @@ def init_db():
         """
     )
 
+    # Migration: replace fresh_finds_retention_days with fresh_finds_retention_count
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_retention_days'
+        """
+    )
+    if cur.fetchone():
+        cur.execute("ALTER TABLE user_settings DROP COLUMN fresh_finds_retention_days")
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_retention_count'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_retention_count INTEGER NOT NULL DEFAULT 10")
+
+    # Migration: add plex_playlist_key to recommendation_playlists
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlists' AND column_name = 'plex_playlist_key'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlists ADD COLUMN plex_playlist_key TEXT")
+
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_rec_playlists_plex_key
+        ON recommendation_playlists (plex_account_id, plex_playlist_key)
+        WHERE plex_playlist_key IS NOT NULL
+        """
+    )
+
     conn.commit()
     conn.close()

@@ -485,6 +485,47 @@
                                 </div>
                                 <p class="settings-hint">Automatically download all tracks from your nightly Fresh Finds playlist to Plex.</p>
                                 <p class="settings-note" id="freshFindsAutoDownloadStatus"></p>
+                                <div class="retention-setting" style="margin: 1rem 0 0.75rem;">
+                                    <label class="settings-label" for="freshFindsRetentionCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
+                                        Keep up to
+                                    </label>
+                                    <div class="retention-spinner">
+                                        <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                        <input type="number" id="freshFindsRetentionCount" class="retention-spinner-input" min="1" max="7" value="7" readonly>
+                                        <button type="button" class="retention-spinner-btn" id="retentionInc" aria-label="Increase retention">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                    </div>
+                                    <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">Fresh Finds playlists</span>
+                                </div>
+                                <script>
+                                (function() {
+                                    var input = document.getElementById('freshFindsRetentionCount');
+                                    var dec = document.getElementById('retentionDec');
+                                    var inc = document.getElementById('retentionInc');
+                                    function updateButtons() {
+                                        var v = parseInt(input.value, 10);
+                                        dec.disabled = v <= 1;
+                                        inc.disabled = v >= 7;
+                                    }
+                                    dec.addEventListener('click', function() {
+                                        var v = parseInt(input.value, 10);
+                                        if (v > 1) { input.value = String(v - 1); input.dispatchEvent(new Event('change')); }
+                                        updateButtons();
+                                    });
+                                    inc.addEventListener('click', function() {
+                                        var v = parseInt(input.value, 10);
+                                        if (v < 7) { input.value = String(v + 1); input.dispatchEvent(new Event('change')); }
+                                        updateButtons();
+                                    });
+                                    input.addEventListener('change', updateButtons);
+                                    updateButtons();
+                                })();
+                                </script>
+                                <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
+                                <p class="settings-note" id="freshFindsRetentionStatus"></p>
                             </div>
                         </div>
                         <div class="settings-section" id="uiPreferencesSettings">

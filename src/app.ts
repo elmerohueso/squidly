@@ -618,6 +618,8 @@ class App {
     private ytmConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsAutoDownloadStatusEl: HTMLElement;
+    private freshFindsRetentionInput: HTMLInputElement;
+    private freshFindsRetentionStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -931,6 +933,8 @@ class App {
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
+        this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
+        this.freshFindsRetentionStatusEl = document.getElementById('freshFindsRetentionStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -1005,6 +1009,7 @@ class App {
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
         void this.loadFreshFindsAutoDownload();
+        void this.loadFreshFindsRetention();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1267,6 +1272,9 @@ class App {
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsAutoDownload());
+        }
+        if (this.freshFindsRetentionInput) {
+            this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsRetention());
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2588,6 +2596,7 @@ class App {
         }
 
         void this.loadFreshFindsAutoDownload();
+        void this.loadFreshFindsRetention();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -6099,6 +6108,77 @@ key: 'playlist_added',
         }
     }
 
+    private async loadFreshFindsRetention(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsRetentionInput) {
+                    this.freshFindsRetentionInput.value = '7';
+                }
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/retention?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (this.freshFindsRetentionInput && data.count) {
+                    this.freshFindsRetentionInput.value = String(data.count);
+                    this.freshFindsRetentionInput.dispatchEvent(new Event('change'));
+                }
+            } else {
+                if (this.freshFindsRetentionStatusEl) {
+                    this.freshFindsRetentionStatusEl.textContent = '✗ Failed to load retention setting';
+                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds retention setting.', error);
+            if (this.freshFindsRetentionStatusEl) {
+                this.freshFindsRetentionStatusEl.textContent = '✗ Error loading retention setting';
+                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    private async saveFreshFindsRetention(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsRetentionStatusEl) {
+                    this.freshFindsRetentionStatusEl.textContent = '⚠ Select a Plex user first';
+                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                }
+                return;
+            }
+
+            const count = parseInt(this.freshFindsRetentionInput.value, 10);
+            const response = await fetch('/api/fresh-finds/retention', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    count: count
+                })
+            });
+
+            if (response.ok) {
+                this.freshFindsRetentionStatusEl.textContent = `✓ Retention set to ${count} playlists`;
+                this.freshFindsRetentionStatusEl.style.color = 'var(--accent-primary)';
+                setTimeout(() => {
+                    this.freshFindsRetentionStatusEl.textContent = '';
+                }, 3000);
+            } else {
+                this.freshFindsRetentionStatusEl.textContent = '✗ Failed to save setting';
+                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds retention setting:', error);
+            this.freshFindsRetentionStatusEl.textContent = '✗ Error saving setting';
+            this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+        }
+    }
+
     private async loadYtmConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
@@ -6675,6 +6755,7 @@ key: 'playlist_added',
                     this.updateUserTypeAccess();
                     await this.updatePlexLoginOnlyState();
                     void this.loadFreshFindsAutoDownload();
+                    void this.loadFreshFindsRetention();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });

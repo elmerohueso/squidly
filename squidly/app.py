@@ -3221,12 +3221,12 @@ def save_fresh_finds_auto_download_config():
 
 @app.route('/api/fresh-finds/retention', methods=['GET'])
 def get_fresh_finds_retention():
-    """Get the Fresh Finds retention days setting for a specific user."""
+    """Get the Fresh Finds retention count setting for a specific user."""
     user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    from squidly.storage import get_fresh_finds_retention_days
+    from squidly.storage import get_fresh_finds_retention_count
     mappings = get_all_plex_account_mappings()
     plex_account_id = None
     for m in mappings:
@@ -3237,23 +3237,23 @@ def get_fresh_finds_retention():
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
-    days = get_fresh_finds_retention_days(plex_account_id)
-    return jsonify({'days': days})
+    count = get_fresh_finds_retention_count(plex_account_id)
+    return jsonify({'count': count})
 
 
 @app.route('/api/fresh-finds/retention', methods=['POST'])
 def save_fresh_finds_retention():
-    """Set the Fresh Finds retention days for a specific user."""
+    """Set the Fresh Finds retention count for a specific user. Clamps to [1, 100]."""
     payload = request.get_json(silent=True) or {}
     user_id = payload.get('user_id')
-    days = payload.get('days', 30)
+    count = payload.get('count', 10)
 
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    from squidly.storage import set_fresh_finds_retention_days
-    set_fresh_finds_retention_days(user_id, days)
-    return jsonify({'success': True, 'days': max(0, min(365, int(days)))})
+    from squidly.storage import set_fresh_finds_retention_count
+    set_fresh_finds_retention_count(user_id, count)
+    return jsonify({'success': True, 'count': max(1, min(100, int(count)))})
 
 
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
@@ -5326,7 +5326,8 @@ def process_recommendation_job(job_id, payload):
     now_tz = datetime.now(ZoneInfo(app_timezone))
     playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
 
-    save_recommendation_playlist(
+    # Save playlist to DB first, then create in Plex
+    playlist_id = save_recommendation_playlist(
         plex_account_id=plex_account_id,
         slug=slug,
         name=playlist_name,
@@ -5335,7 +5336,38 @@ def process_recommendation_job(job_id, payload):
         tracks=top_tracks
     )
 
-    # Stage 6: Cleanup old Fresh Finds playlists
+    # Stage 6: Create Plex playlist and store key
+    from squidly.plex import create_fresh_finds_plex_playlist
+    plex_playlist_key = None
+    try:
+        success, result = create_fresh_finds_plex_playlist(
+            plex_account_id=plex_account_id,
+            playlist_name=playlist_name,
+            tracks=top_tracks
+        )
+        if success:
+            plex_playlist_key = result
+            logger.info("[RECOMMENDATION] Job %s created Plex playlist with key=%s", job_id, plex_playlist_key)
+        else:
+            logger.info("[RECOMMENDATION] Job %s Plex playlist creation failed (non-fatal): %s", job_id, result)
+    except Exception as e:
+        logger.info("[RECOMMENDATION] Job %s Plex playlist creation error (non-fatal): %s", job_id, str(e))
+
+    # Update the playlist record with the Plex key
+    if plex_playlist_key and playlist_id:
+        try:
+            conn_inner = get_db_connection()
+            cur_inner = conn_inner.cursor()
+            cur_inner.execute(
+                "UPDATE recommendation_playlists SET plex_playlist_key = %s WHERE id = %s",
+                (plex_playlist_key, playlist_id)
+            )
+            conn_inner.commit()
+            conn_inner.close()
+        except Exception as e:
+            logger.info("[RECOMMENDATION] Job %s failed to save playlist key (non-fatal): %s", job_id, str(e))
+
+    # Stage 7: Cleanup old Fresh Finds playlists
     from squidly.storage import cleanup_old_fresh_finds
     try:
         cleanup_result = cleanup_old_fresh_finds(plex_account_id)
