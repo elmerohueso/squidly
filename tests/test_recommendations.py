@@ -12,13 +12,13 @@ import pytest
 
 
 class TestQueueRecommendationGeneration:
-    @patch('squidly.jobs.enqueue_job')
-    @patch('squidly.jobs.datetime')
+    @patch('squidly.orchestration.enqueue_job')
+    @patch('squidly.orchestration.datetime')
     def test_queues_with_correct_payload(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 42
 
-        from squidly.jobs import queue_recommendation_generation
+        from squidly.orchestration import queue_recommendation_generation
 
         job_id = queue_recommendation_generation(
             slug='fresh-finds',
@@ -39,13 +39,13 @@ class TestQueueRecommendationGeneration:
         assert 'requested_at' in payload
         assert args[1]['max_attempts'] == 3
 
-    @patch('squidly.jobs.enqueue_job')
-    @patch('squidly.jobs.datetime')
+    @patch('squidly.orchestration.enqueue_job')
+    @patch('squidly.orchestration.datetime')
     def test_default_trigger_is_scheduled(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 1
 
-        from squidly.jobs import queue_recommendation_generation
+        from squidly.orchestration import queue_recommendation_generation
 
         queue_recommendation_generation(
             slug='fresh-finds',
@@ -56,13 +56,13 @@ class TestQueueRecommendationGeneration:
         payload = mock_enqueue.call_args[0][1]
         assert payload['trigger'] == 'scheduled'
 
-    @patch('squidly.jobs.enqueue_job')
-    @patch('squidly.jobs.datetime')
+    @patch('squidly.orchestration.enqueue_job')
+    @patch('squidly.orchestration.datetime')
     def test_manual_trigger(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 2
 
-        from squidly.jobs import queue_recommendation_generation
+        from squidly.orchestration import queue_recommendation_generation
 
         queue_recommendation_generation(
             slug='fresh-finds',

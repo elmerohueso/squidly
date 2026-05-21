@@ -1,38 +1,32 @@
-"""Job queue and worker logic for Squidly."""
+"""Job queue infrastructure for Squidly — state transitions, claiming, recovery, and progress tracking."""
 
 import json
 import logging
-import os
-import time
-import threading
 from datetime import datetime, timedelta
 
-from squidly.config import (
-    DEFAULT_DOWNLOAD_SETTINGS,
-    DOWNLOADS_ROOT,
-    WORKER_ID,
-)
+from squidly.config import WORKER_ID
 from squidly.db import get_db_connection
-from squidly.downloads import (
-    clean_path_components,
-    convert_to_mp3,
-    detect_audio_format,
-    download_cover_image,
-    format_tidal_image_url,
-    make_request_with_retry,
-    make_request_with_retry_rotating_mirrors,
-    sanitize_filename_component,
-    extract_year_from_text,
-)
 from squidly.storage import (
     normalize_db_timestamp,
-    set_last_download_activity_at,
     set_library_update_needed,
     set_last_job_finished_at,
-    get_plex_config,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Exception classes for worker error handling
+# ---------------------------------------------------------------------------
+
+class RetryableError(Exception):
+    """Raised by process functions to indicate a transient failure that should be retried."""
+    pass
+
+
+class PermanentError(Exception):
+    """Raised by process functions to indicate a non-retryable failure — fail immediately."""
+    pass
 
 
 def serialize_job_payload(payload):
@@ -43,9 +37,6 @@ def serialize_job_payload(payload):
 
 
 def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
-    import logging
-    logger = logging.getLogger(__name__)
-
     now = datetime.utcnow().isoformat() + 'Z'
     payload_json = serialize_job_payload(payload)
     scheduled_at = run_after or now
@@ -94,203 +85,10 @@ def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, 
     return job_id
 
 
-def queue_pending_playlist_addition(file_path, playlist_name, parent_job_id=None, plex_user_id=None):
-    """Insert a row into pending_playlist_adds table. Idempotent via unique index.
-
-    If a duplicate is detected (ON CONFLICT), marks the parent download job's
-    playlist_added stage as 'done' since the track is already queued for bulk add.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO pending_playlist_adds (parent_job_id, file_path, playlist_name, plex_user_id)
-        VALUES (%s, %s, %s, %s)
-        ON CONFLICT DO NOTHING
-        """,
-        (parent_job_id, file_path, playlist_name, plex_user_id)
-    )
-
-    affected = cur.rowcount
-    conn.commit()
-
-    if affected == 0:
-        logger.info(
-            "[PLAYLIST_QUEUE] Duplicate skipped for file_path=%s playlist=%s (parent_job_id=%s) — already queued",
-            file_path, playlist_name, parent_job_id
-        )
-        if parent_job_id:
-            try:
-                cur.execute(
-                    """
-                    SELECT result_json FROM jobs WHERE id = %s AND job_type = 'download_track'
-                    """,
-                    (parent_job_id,),
-                )
-                row = cur.fetchone()
-                if row and row.get('result_json'):
-                    result = json.loads(row['result_json'])
-                    if isinstance(result, dict):
-                        stages = result.get('stages', {})
-                        if isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                            stages['playlist_added'] = 'done'
-                            result['stages'] = stages
-                            cur.execute(
-                                """
-                                UPDATE jobs SET result_json = %s, updated_at = NOW()
-                                WHERE id = %s AND status <> 'cancelled'
-                                """,
-                                (json.dumps(result, separators=(',', ':'), sort_keys=True), parent_job_id),
-                            )
-                            conn.commit()
-                            logger.info("[PLAYLIST_QUEUE] Marked parent job %s playlist_added as done (was duplicate)", parent_job_id)
-            except Exception as e:
-                logger.info("[PLAYLIST_QUEUE] Failed to update parent job %s for duplicate: %s", parent_job_id, str(e))
-    else:
-        logger.info(
-            "[PLAYLIST_QUEUE] Queued playlist add for file_path=%s playlist=%s (parent_job_id=%s)",
-            file_path, playlist_name, parent_job_id
-        )
-
-    conn.close()
-
-
-def count_pending_playlist_adds():
-    """Return the number of pending playlist additions."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS count FROM pending_playlist_adds")
-    row = cur.fetchone() or {}
-    count = row.get('count', 0)
-    conn.close()
-    return count
-
-
-def get_pending_playlist_adds():
-    """Return all rows from pending_playlist_adds, ordered for processing."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, parent_job_id, file_path, playlist_name, plex_user_id
-        FROM pending_playlist_adds
-        ORDER BY playlist_name, COALESCE(plex_user_id, ''), id
-        """
-    )
-    rows = cur.fetchall() or []
-    conn.close()
-    return rows
-
-
-def delete_pending_playlist_adds(ids):
-    """Delete successfully processed rows from pending_playlist_adds."""
-    if not ids:
-        return
-    conn = get_db_connection()
-    cur = conn.cursor()
-    placeholders = ','.join(['%s'] * len(ids))
-    cur.execute(
-        f"DELETE FROM pending_playlist_adds WHERE id IN ({placeholders})",
-        tuple(ids)
-    )
-    conn.commit()
-    conn.close()
-
-
-def queue_bulk_playlist_add_job(trigger='post_library_sync'):
-    """Queue a single bulk_playlist_add job if one is not already queued/in progress."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count FROM jobs
-        WHERE job_type = 'bulk_playlist_add'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    existing = row.get('count', 0) > 0
-    conn.close()
-
-    if existing:
-        logger.info("[BULK_PLAYLIST_QUEUE] bulk_playlist_add already queued/in progress; not queueing another")
-        return None
-
-    pending_count = count_pending_playlist_adds()
-    if pending_count == 0:
-        logger.info("[BULK_PLAYLIST_QUEUE] No pending playlist adds; not queueing bulk job")
-        return None
-
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    job_id = enqueue_job('bulk_playlist_add', payload, max_attempts=5)
-    logger.info("[BULK_PLAYLIST_QUEUE] Queued bulk playlist add job %s (%d pending tracks, trigger=%s)", job_id, pending_count, trigger)
-    return job_id
-
-
 def compute_job_backoff_seconds(attempt_count):
     base = 30
     delay = base * (2 ** max(0, attempt_count - 1))
     return min(delay, 3600)
-
-
-class ManifestDownloadError(Exception):
-    pass
-
-
-class TransientDownloadError(Exception):
-    pass
-
-
-class PermanentDownloadError(Exception):
-    pass
-
-
-def any_plex_sync_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'plex_library_sync'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def queue_plex_library_sync(trigger='manual'):
-    if any_plex_sync_jobs_running_or_queued():
-        return None
-
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    job_id = enqueue_job('plex_library_sync', payload, max_attempts=5)
-    logger.info("[PLEX_QUEUE] Queued plex_library_sync job %s (trigger=%s)", job_id, trigger)
-    return job_id
-
-
-def start_plex_sync_job(trigger='manual'):
-    """Queue a Plex library sync job if one is not already queued/in progress."""
-    config = get_plex_config()
-    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
-        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
-
-    job_id = queue_plex_library_sync(trigger=trigger)
-    if job_id is None:
-        return {'ok': False, 'status_code': 409, 'error': 'A Plex sync job is already queued or in progress'}
-
-    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
 
 
 def claim_next_job(job_type):
@@ -531,25 +329,6 @@ def mark_job_cancelled(job_id):
     conn.close()
 
 
-
-def _download_track_all_stages_done(stages):
-    if not isinstance(stages, dict):
-        return False
-
-    required_stages = (
-        'downloaded',
-        'tagged',
-        'written'
-    )
-    if not all(stages.get(stage_name) == 'done' for stage_name in required_stages):
-        return False
-
-    if stages.get('converted') not in ('done', 'skipped'):
-        return False
-
-    return True
-
-
 def mark_job_in_progress(job_id):
     now = datetime.utcnow().isoformat() + 'Z'
     conn = get_db_connection()
@@ -706,73 +485,3 @@ def update_job_progress(job_id, updates):
     )
     conn.commit()
     conn.close()
-
-
-def any_plex_listen_history_sync_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'plex_listen_history_sync'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def queue_plex_listen_history_sync(trigger='scheduled'):
-    if any_plex_listen_history_sync_jobs_running_or_queued():
-        return None
-
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    job_id = enqueue_job('plex_listen_history_sync', payload, max_attempts=5)
-    logger.info("[LISTEN_HISTORY_QUEUE] Queued plex_listen_history_sync job %s (trigger=%s)", job_id, trigger)
-    return job_id
-
-
-def queue_recommendation_generation(slug, plex_account_id, plex_username, trigger='scheduled'):
-    payload = {
-        'slug': slug,
-        'plex_account_id': plex_account_id,
-        'plex_username': plex_username,
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    return enqueue_job('generate_recommendations', payload, max_attempts=3)
-
-
-def queue_fresh_finds_auto_download(trigger='scheduled'):
-    """Queue a fresh_finds_auto_download job if one is not already queued/in progress.
-
-    Processes all users with auto-download enabled — no per-user parameters needed.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count FROM jobs
-        WHERE job_type = 'fresh_finds_auto_download'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    existing = row.get('count', 0) > 0
-    conn.close()
-
-    if existing:
-        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job already queued/in progress; not queueing another")
-        return None
-
-    payload = {
-        'slug': 'fresh-finds',
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    return enqueue_job('fresh_finds_auto_download', payload, max_attempts=3)

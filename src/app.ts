@@ -1128,7 +1128,7 @@ class App {
         }
         if (this.cancelPendingJobsButton) {
             this.cancelPendingJobsButton.addEventListener('click', () => {
-                void this.cancelAllPendingJobs();
+                void this.cancelAllJobs();
             });
         }
         if (this.retryAllJobsButton) {
@@ -1144,11 +1144,11 @@ class App {
         if (this.matchReviewRunScanButton) {
             this.matchReviewRunScanButton.addEventListener('click', () => {
                 if (this.activeMatchActivityJobId) {
-                    void this.cancelHifiMatchScan(this.activeMatchActivityJobId);
+                    void this.cancelLibraryUpdate(this.activeMatchActivityJobId);
                     return;
                 }
 
-                void this.startHifiMatchScan();
+                void this.startLibraryUpdate();
             });
         }
         if (this.matchReviewRefreshButton) {
@@ -3615,8 +3615,7 @@ class App {
 
         try {
             const params = new URLSearchParams({
-                jobs_filter: filter,
-                exclude_bulk_playlist_add: '1'
+                jobs_filter: filter
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
@@ -3648,45 +3647,62 @@ class App {
     }
 
     private updateJobsActionButtons(incompleteCount: number, filter: string, retryableCount: number): void {
-        const showCancelIncomplete = filter === 'incomplete';
-        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancelIncomplete);
-
-        if (!showCancelIncomplete) {
-            this.cancelPendingJobsButton.disabled = true;
-            this.cancelPendingJobsButton.textContent = 'Cancel all incomplete';
-        } else {
-            this.cancelPendingJobsButton.disabled = incompleteCount === 0;
-            this.cancelPendingJobsButton.textContent = incompleteCount > 0
-                ? `Cancel all incomplete (${incompleteCount})`
-                : 'Cancel all incomplete';
+        let cancelCount = 0;
+        if (filter === 'incomplete') {
+            cancelCount = incompleteCount;
+        } else if (filter === 'failed' || filter === 'completed_with_errors') {
+            cancelCount = this.jobsListCache.length;
         }
 
-        const showRetryAll = filter === 'completed_with_errors' || filter === 'failed';
-        this.retryAllJobsButton.classList.toggle('hidden', !showRetryAll);
+        const showCancel = cancelCount > 0;
+        const showRetry = retryableCount > 0;
 
-        if (!showRetryAll) {
+        // Cancel all button
+        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancel);
+        if (showCancel) {
+            this.cancelPendingJobsButton.disabled = cancelCount === 0;
+            this.cancelPendingJobsButton.textContent = cancelCount > 0
+                ? `Cancel all (${cancelCount})`
+                : 'Cancel all';
+        } else {
+            this.cancelPendingJobsButton.disabled = true;
+            this.cancelPendingJobsButton.textContent = 'Cancel all';
+        }
+
+        // Retry all button
+        this.retryAllJobsButton.classList.toggle('hidden', !showRetry);
+        if (showRetry) {
+            this.retryAllJobsButton.disabled = retryableCount === 0;
+            this.retryAllJobsButton.textContent = retryableCount > 0
+                ? `Retry all (${retryableCount})`
+                : 'Retry all';
+        } else {
             this.retryAllJobsButton.disabled = true;
             this.retryAllJobsButton.textContent = 'Retry all';
-            return;
         }
-
-        this.retryAllJobsButton.disabled = retryableCount === 0;
-        this.retryAllJobsButton.textContent = retryableCount > 0
-            ? `Retry all (${retryableCount})`
-            : 'Retry all';
     }
 
-    private async cancelAllPendingJobs(): Promise<void> {
-        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all incomplete';
+    private async cancelAllJobs(): Promise<void> {
         if (this.cancelPendingJobsButton.disabled) {
             return;
         }
 
+        const selectedFilter = this.jobsFilterSelect.value;
+
+        if (selectedFilter === 'incomplete') {
+            await this.cancelIncompleteJobs();
+        } else if (selectedFilter === 'failed' || selectedFilter === 'completed_with_errors') {
+            await this.cancelFailedJobs();
+        }
+    }
+
+    private async cancelIncompleteJobs(): Promise<void> {
         const shouldProceed = window.confirm('Cancel and remove all incomplete jobs from the queue?');
         if (!shouldProceed) {
             return;
         }
 
+        const originalText = this.cancelPendingJobsButton.textContent || 'Cancel all';
         this.cancelPendingJobsButton.disabled = true;
         this.cancelPendingJobsButton.textContent = 'Cancelling...';
 
@@ -3710,7 +3726,46 @@ class App {
             console.error('Cancel incomplete jobs failed:', error);
             window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
             this.cancelPendingJobsButton.disabled = false;
-            this.cancelPendingJobsButton.textContent = pendingCountLabel;
+            this.cancelPendingJobsButton.textContent = originalText;
+        }
+    }
+
+    private async cancelFailedJobs(): Promise<void> {
+        const shouldProceed = window.confirm('Cancel all failed jobs? They will be superseded by retried downloads or nightly runs.');
+        if (!shouldProceed) {
+            return;
+        }
+
+        const originalText = this.cancelPendingJobsButton.textContent || 'Cancel all';
+        this.cancelPendingJobsButton.disabled = true;
+        this.cancelPendingJobsButton.textContent = 'Cancelling...';
+
+        try {
+            const response = await fetch('/api/jobs/cancel-failed', { method: 'POST' });
+            if (!response.ok) {
+                let message = 'Failed to cancel jobs';
+                try {
+                    const data = await response.json() as { error?: string };
+                    if (data?.error) {
+                        message = data.error;
+                    }
+                } catch {
+                    // Ignore parse errors and keep fallback message
+                }
+                throw new Error(message);
+            }
+
+            const data = await response.json() as { cancelled_count?: number };
+            const cancelledCount = data?.cancelled_count ?? 0;
+            if (cancelledCount > 0) {
+                window.alert(`Cancelled ${cancelledCount} job${cancelledCount === 1 ? '' : 's'}.`);
+            }
+            await this.loadJobs();
+        } catch (error) {
+            console.error('Cancel failed jobs failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel jobs');
+            this.cancelPendingJobsButton.disabled = false;
+            this.cancelPendingJobsButton.textContent = originalText;
         }
     }
 
@@ -3764,14 +3819,20 @@ class App {
 
         await this.loadJobs();
 
-        if (failures.length > 0 || skippedExistingCount > 0) {
-            const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
+        const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
+        const parts: string[] = [`Retried ${retriedCount} of ${retryableJobs.length} jobs.`];
+
+        if (skippedExistingCount > 0) {
+            parts.push(`Skipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`);
+        }
+
+        if (failures.length > 0) {
             const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
-            const skipLine = skippedExistingCount > 0
-                ? `\nSkipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`
-                : '';
-            const failureLine = failures.length > 0 ? `\n${summary}` : '';
-            window.alert(`Retried ${retriedCount} of ${retryableJobs.length} jobs.${skipLine}${failureLine}`);
+            parts.push(summary);
+        }
+
+        if (parts.length > 1 || failures.length > 0 || skippedExistingCount > 0) {
+            window.alert(parts.join('\n'));
             this.retryAllJobsButton.disabled = false;
             this.retryAllJobsButton.textContent = originalText;
         }
@@ -3789,10 +3850,6 @@ class App {
 
         if (stages?.playlist_added === 'failed') {
             return 'completed_with_errors';
-        }
-
-        if (job.status === 'succeeded' && stages?.playlist_added === 'queued') {
-            return 'in_progress';
         }
 
         return job.status;
@@ -3890,8 +3947,8 @@ class App {
         this.matchReviewRunScanButton.disabled = false;
         this.matchReviewRunScanButton.classList.toggle('is-cancel', isActive);
         this.matchReviewRunScanButton.textContent = isActive
-            ? 'Cancel Automatic Matching'
-            : 'Start Automatic Matching';
+            ? 'Cancel Update & Sync'
+            : 'Update & Sync Library';
     }
 
     private startMatchReviewPollingInterval(): void {
@@ -3931,7 +3988,7 @@ class App {
 
         this.matchReviewSummary.innerHTML = '';
         this.matchReviewContent.innerHTML = `
-            <div class="match-review-empty">Hifi Match is currently running. Review cards will load after the scan completes.</div>
+            <div class="match-review-empty">Library update is currently running. Review cards will load after it completes.</div>
         `;
     }
 
@@ -4028,7 +4085,7 @@ class App {
             case 'automatic_matching':
                 return 'Automatic Matching';
             case 'hifi_match':
-                return 'HiFi Match';
+                return 'HiFi Match (Legacy)';
             case 'plex_library_sync':
                 return 'Plex Sync';
             case 'plex_library_update':
@@ -4054,12 +4111,11 @@ class App {
         try {
             const params = new URLSearchParams({
                 job_type: 'automatic_matching',
-                exclude_bulk_playlist_add: '1',
                 limit: '1'
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
-                throw new Error('Failed to load match scan activity');
+                throw new Error('Failed to load library update activity');
             }
 
             const data = await response.json() as { jobs?: JobItem[] };
@@ -4067,7 +4123,7 @@ class App {
             const latestJob = jobs[0] || null;
 
             if (!latestJob) {
-                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No match scans have been run yet.</div>';
+                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No library updates have been run yet.</div>';
                 this.activeMatchActivityJobId = null;
                 this.updateMatchReviewRunScanButton(false);
                 this.lastMatchActivityJobId = null;
@@ -4086,7 +4142,7 @@ class App {
             this.updateMatchReviewRunScanButton(isActive);
             if (isActive) {
                 this.startMatchReviewPollingInterval();
-                this.setMatchReviewStatus(`Manual scan ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+                this.setMatchReviewStatus(`Library update ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
                 if (this.currentPage === 'matches') {
                     this.renderMatchReviewBlockedByActiveScan();
                 }
@@ -4104,15 +4160,15 @@ class App {
 
             if (completedNow) {
                 if (currentStatus === 'succeeded') {
-                    this.setMatchReviewStatus(`Manual scan completed for job ${latestJob.id}. Review results updated.`);
+                    this.setMatchReviewStatus(`Library update completed for job ${latestJob.id}. Review results updated.`);
                 } else {
-                    this.setMatchReviewStatus(`Manual scan finished with status ${currentStatus}.`, currentStatus === 'failed');
+                    this.setMatchReviewStatus(`Library update finished with status ${currentStatus}.`, currentStatus === 'failed');
                 }
                 await this.loadMatchReview();
             }
         } catch (error) {
             console.error('Failed to load match activity:', error);
-            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load match scan activity.</div>';
+            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load library update activity.</div>';
             this.stopMatchReviewPollingInterval();
         }
     }
@@ -4700,22 +4756,22 @@ class App {
         }
     }
 
-    private async startHifiMatchScan(): Promise<void> {
+    private async startLibraryUpdate(): Promise<void> {
         if (!this.matchReviewRunScanButton) {
             return;
         }
 
-        const originalText = this.matchReviewRunScanButton.textContent || 'Start Automatic Matching';
+        const originalText = this.matchReviewRunScanButton.textContent || 'Update & Sync Library';
         this.matchReviewRunScanButton.disabled = true;
         this.matchReviewRunScanButton.textContent = 'Queueing...';
         this.setMatchReviewStatus('');
         let queuedJobIsActive = false;
 
         try {
-            const response = await fetch('/api/hifi/matches', { method: 'POST' });
+            const response = await fetch('/api/plex/library-updates', { method: 'POST' });
             const data = await response.json().catch(() => ({} as { error?: string; job_id?: number | string; status?: string }));
             if (!response.ok) {
-                throw new Error(data.error || 'Failed to queue manual scan');
+                throw new Error(data.error || 'Failed to queue library update');
             }
 
             const queuedJobId = Number(data.job_id);
@@ -4726,12 +4782,12 @@ class App {
                 this.updateMatchReviewRunScanButton(true);
             }
 
-            this.setMatchReviewStatus(`Manual scan queued as job ${data.job_id || 'unknown'}. Check Jobs for progress.`);
+            this.setMatchReviewStatus(`Library update queued as job ${data.job_id || 'unknown'}. Sync and matching will follow automatically.`);
             await this.loadMatchActivity();
             await this.loadJobs();
         } catch (error) {
-            console.error('Failed to queue hifi match scan:', error);
-            this.setMatchReviewStatus((error as Error).message || 'Failed to queue manual scan', true);
+            console.error('Failed to queue library update:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to queue library update', true);
         } finally {
             if (queuedJobIsActive || this.activeMatchActivityJobId) {
                 this.updateMatchReviewRunScanButton(true);
@@ -4742,19 +4798,19 @@ class App {
         }
     }
 
-    private async cancelHifiMatchScan(jobId: number): Promise<void> {
+    private async cancelLibraryUpdate(jobId: number): Promise<void> {
         if (!this.matchReviewRunScanButton) {
             return;
         }
 
-        const originalText = this.matchReviewRunScanButton.textContent || 'Cancel Automatic Matching';
+        const originalText = this.matchReviewRunScanButton.textContent || 'Cancel Update & Sync';
         this.matchReviewRunScanButton.disabled = true;
         this.matchReviewRunScanButton.textContent = 'Cancelling...';
 
         try {
             const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
             if (!response.ok) {
-                let message = 'Failed to cancel automatic matching';
+                let message = 'Failed to cancel library update';
                 try {
                     const data = await response.json() as { error?: string };
                     if (data?.error) {
@@ -4768,14 +4824,14 @@ class App {
 
             this.activeMatchActivityJobId = null;
             this.updateMatchReviewRunScanButton(false);
-            this.setMatchReviewStatus(`Automatic matching cancelled for job ${jobId}.`);
+            this.setMatchReviewStatus(`Library update cancelled for job ${jobId}.`);
             await this.loadMatchActivity();
             await this.loadJobs();
         } catch (error) {
-            console.error('Failed to cancel hifi match scan:', error);
+            console.error('Failed to cancel library update:', error);
             this.matchReviewRunScanButton.disabled = false;
             this.matchReviewRunScanButton.textContent = originalText;
-            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel automatic matching', true);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel library update', true);
         }
     }
 
@@ -5351,7 +5407,7 @@ class App {
                 `;
             }).join('');
 
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
+            const progress = (job.result || {}) as Record<string, unknown>;
             const total = Number(progress.total_tracks || 0);
             const processed = Number(progress.tracks_processed || 0);
             const added = Number(progress.tracks_added || 0);
@@ -5384,8 +5440,8 @@ class App {
             { key: 'written', label: 'Written to Disk' },
             ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
             ...(playlistName ? [{
-                key: 'playlist_added',
-                label: `Added to Playlist "${this.escapeHtml(String(playlistName))}"`
+key: 'playlist_added',
+                 label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"`
             }] : []),
         ];
 
@@ -5445,9 +5501,9 @@ class App {
         if (job.job_type === 'hifi_match') {
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
             if (trigger === 'manual') {
-                return 'Hifi Match (Manual)';
+                return 'HiFi Match (Legacy, Manual)';
             }
-            return 'Hifi Match';
+            return 'HiFi Match (Legacy)';
         }
 
         if (job.job_type === 'automatic_matching') {

@@ -40,7 +40,6 @@ def test_import_plex():
         _get_plex_server_for_user,
         _is_plex_library_scan_active,
         add_tracks_to_plex_playlist,
-        any_plex_library_update_jobs_running_or_queued,
         get_all_plex_users,
         get_last_successful_plex_sync_finished_at,
         get_plex_health_status,
@@ -48,9 +47,7 @@ def test_import_plex():
         plex_healthcheck,
         plex_pin_sessions,
         process_plex_library_update_job,
-        queue_plex_library_update,
         set_plex_health_status,
-        start_plex_library_update_job,
         test_plex_connection,
         wait_for_plex_library_scan_completion,
     )
@@ -58,38 +55,54 @@ def test_import_plex():
 
 def test_import_jobs():
     from squidly.jobs import (
-        ManifestDownloadError,
-        PermanentDownloadError,
-        TransientDownloadError,
-        _download_track_all_stages_done,
+        RetryableError,
+        PermanentError,
         claim_next_job,
         compute_job_backoff_seconds,
-        count_pending_playlist_adds,
-        delete_pending_playlist_adds,
         enqueue_job,
-        get_pending_playlist_adds,
         is_job_cancelled,
         mark_job_failed,
         mark_job_in_progress,
         mark_job_retrying,
         mark_job_succeeded,
-        queue_bulk_playlist_add_job,
-        queue_pending_playlist_addition,
-        queue_plex_library_sync,
+        mark_job_cancelled,
         recover_stale_in_progress_jobs,
         requeue_claimed_job,
         serialize_job_payload,
-        start_plex_sync_job,
         update_job_progress,
+    )
+
+
+def test_import_orchestration():
+    from squidly.orchestration import (
+        JOB_TYPES,
+        any_plex_library_update_jobs_running_or_queued,
+        count_pending_playlist_adds,
+        delete_pending_playlist_adds,
+        get_pending_playlist_adds,
+        is_job_type_running_or_queued,
+        queue_bulk_playlist_add_job,
+        queue_if_not_running,
+        queue_plex_library_sync,
+        queue_plex_library_update,
+        queue_plex_listen_history_sync,
+        queue_pending_playlist_addition,
+        queue_recommendation_generation,
+        start_plex_library_update_job,
+        wait_for_job_type,
     )
 
 
 def test_import_downloads():
     from squidly.downloads import (
+        ManifestDownloadError,
+        PermanentDownloadError,
+        TransientDownloadError,
         cleanup_file,
         convert_to_mp3,
         detect_audio_format,
         download_cover_image,
+        download_track_all_stages_done,
         format_tidal_image_url,
         make_request_with_retry,
         make_request_with_retry_rotating_mirrors,
@@ -148,12 +161,6 @@ def test_import_matching():
         _build_artist_match_candidates,
         _build_album_match_candidates,
         _build_track_match_candidates,
-        _fetch_hifi_match_coverage_counts,
-        _refresh_hifi_match_coverage_progress,
-        any_hifi_match_jobs_running_or_queued,
-        has_hifi_match_seed_data,
-        queue_hifi_match_job,
-        start_hifi_match_job,
     )
 
 
@@ -161,16 +168,19 @@ def test_import_workers():
     from squidly.workers import (
         JobCancelledError,
         _raise_if_job_cancelled,
-        download_job_worker,
-        plex_sync_job_worker,
-        automatic_matching_job_worker,
-        bulk_playlist_add_job_worker,
+        start_workers,
+        worker_loop,
+        download_track_worker,
+        plex_sync_worker,
+        plex_library_update_worker,
         plex_sync_scheduler_worker,
+        recommendation_scheduler_worker,
     )
 
     assert issubclass(JobCancelledError, Exception)
     assert callable(_raise_if_job_cancelled)
-    assert callable(download_job_worker)
+    assert callable(start_workers)
+    assert callable(worker_loop)
 
 
 def test_import_hifi():

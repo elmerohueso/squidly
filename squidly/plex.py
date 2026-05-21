@@ -384,16 +384,23 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         return False, f'Unexpected error: {str(e)}'
 
 
-def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
+def bulk_add_tracks_to_playlists(job_id, payload):
     """Process all rows in pending_playlist_adds, grouped by (user_id, playlist_name).
 
     Returns a result dict with progress fields for the job card.
     """
-    from squidly.jobs import (
+    from squidly.jobs import update_job_progress
+    from squidly.orchestration import (
         get_pending_playlist_adds,
         delete_pending_playlist_adds,
-        update_job_progress,
     )
+
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+
+    if not (server_url and api_token):
+        raise ValueError('Plex is not fully configured')
 
     stages = {
         'resolving_tracks': 'pending',
@@ -541,41 +548,6 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
     update_job_progress(job_id, {'stages': stages})
 
     if successful_ids:
-        parent_ids = set()
-        for item in pending:
-            if item['id'] in successful_ids and item.get('parent_job_id'):
-                parent_ids.add(item['parent_job_id'])
-
-        for pid in parent_ids:
-            try:
-                conn = get_db_connection()
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT result_json FROM jobs WHERE id = %s AND job_type = 'download_track'
-                    """,
-                    (pid,),
-                )
-                row = cur.fetchone()
-                if row and row.get('result_json'):
-                    result = json.loads(row['result_json'])
-                    if isinstance(result, dict):
-                        stages = result.get('stages', {})
-                        if isinstance(stages, dict) and stages.get('playlist_added') == 'queued':
-                            stages['playlist_added'] = 'done'
-                            result['stages'] = stages
-                            cur.execute(
-                                """
-                                UPDATE jobs SET result_json = %s, updated_at = NOW()
-                                WHERE id = %s AND status <> 'cancelled'
-                                """,
-                                (json.dumps(result, separators=(',', ':'), sort_keys=True), pid),
-                            )
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                logger.info("[BULK_PLAYLIST] Failed to update parent job %s: %s", pid, str(e))
-
         delete_pending_playlist_adds(successful_ids)
 
     summary = (
@@ -586,6 +558,8 @@ def bulk_add_tracks_to_playlists(job_id, server_url, api_token, library_name):
     )
 
     return {
+        'stages': stages,
+        'progress': progress,
         'total_tracks': total,
         'tracks_processed': progress['tracks_processed'],
         'tracks_added': progress['tracks_added'],
@@ -668,47 +642,6 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
         time.sleep(max(1, poll_interval_seconds))
 
 
-def any_plex_library_update_jobs_running_or_queued():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM jobs
-        WHERE job_type = 'plex_library_update'
-          AND status IN ('queued', 'in_progress')
-        """
-    )
-    row = cur.fetchone() or {}
-    conn.close()
-    return (row.get('count') or 0) > 0
-
-
-def queue_plex_library_update(trigger='scheduled'):
-    if any_plex_library_update_jobs_running_or_queued():
-        return None
-
-    payload = {
-        'trigger': trigger,
-        'requested_at': datetime.utcnow().isoformat() + 'Z'
-    }
-    job_id = jobs.enqueue_job('plex_library_update', payload, max_attempts=5)
-    logger.info("[LIBRARY_UPDATE_QUEUE] Queued plex_library_update job %s (trigger=%s)", job_id, trigger)
-    return job_id
-
-
-def start_plex_library_update_job(trigger='scheduled'):
-    """Queue a Plex library update job if one is not already queued/in progress."""
-    config = get_plex_config()
-    if not config.get('server_url') or not config.get('api_token') or not config.get('library_name'):
-        return {'ok': False, 'status_code': 400, 'error': 'Plex is not fully configured'}
-
-    job_id = queue_plex_library_update(trigger=trigger)
-    if job_id is None:
-        return {'ok': False, 'status_code': 409, 'error': 'A Plex library update job is already queued or in progress'}
-
-    return {'ok': True, 'status_code': 202, 'job_id': job_id, 'status': 'queued'}
-
 
 def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     config = get_plex_config()
@@ -778,26 +711,14 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
     stages['scanning_plex_library'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
-    sync_result = jobs.start_plex_sync_job(trigger='post_library_update')
-    if sync_result.get('ok'):
-        progress['sync_job_id'] = sync_result.get('job_id')
-        progress['sync_queue_status'] = 'queued'
-    elif sync_result.get('status_code') == 409:
-        progress['sync_queue_status'] = 'already_queued'
-    else:
-        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
-        raise RuntimeError(sync_result.get('error') or 'Failed to queue Plex sync after library update')
-
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
     set_last_library_update_time(datetime.utcnow())
 
     trigger = payload.get('trigger') if isinstance(payload, dict) else None
     scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
     logger.info(
-        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s sync_queue_status=%s",
+        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s",
         job_id,
         scan_outcome,
-        progress['sync_queue_status'],
     )
 
     return {
@@ -805,67 +726,7 @@ def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
         'stages': stages,
         'progress': progress,
         'scan_outcome': scan_outcome,
-        'sync_job_id': progress.get('sync_job_id'),
-        'sync_queue_status': progress.get('sync_queue_status')
     }
-
-
-def plex_library_update_job_worker():
-    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Background worker started")
-    gate_poll_seconds = 15
-
-    while True:
-        try:
-            gate = can_start_plex_library_update(required_idle_seconds=180)
-            if not gate.get('can_start'):
-                if any_plex_library_update_jobs_running_or_queued():
-                    gate_state = gate.get('gate_state') or {}
-                    blocking_count = gate_state.get('blocking_count') or 0
-                    idle_seconds = gate.get('idle_seconds')
-                    required_idle = gate.get('required_idle_seconds') or 180
-                    logger.info(
-                        "[LIBRARY_UPDATE_JOB_WORKER] Waiting to claim update job: blocking=%d idle_seconds=%s required_idle=%s",
-                        blocking_count,
-                        idle_seconds,
-                        required_idle,
-                    )
-                time.sleep(gate_poll_seconds)
-                continue
-
-            job = jobs.claim_next_job('plex_library_update')
-            if not job:
-                time.sleep(5)
-                continue
-
-            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Claimed plex_library_update job %s", job['id'])
-
-            try:
-                payload = json.loads(job['payload_json']) if job['payload_json'] else {}
-            except (TypeError, ValueError):
-                payload = {}
-
-            try:
-                gate_after_claim = can_start_plex_library_update(required_idle_seconds=180)
-                if not gate_after_claim.get('can_start'):
-                    jobs.requeue_claimed_job(
-                        job['id'],
-                        delay_seconds=gate_poll_seconds,
-                        error_message='Waiting for downloads gate before starting Plex library update'
-                    )
-                    logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s deferred until downloads gate is ready", job['id'])
-                    time.sleep(1)
-                    continue
-
-                result = process_plex_library_update_job(job['id'], payload, gate_snapshot=gate_after_claim)
-                jobs.mark_job_succeeded(job['id'], result)
-                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s completed", job['id'])
-            except Exception as e:
-                logger.info("[LIBRARY_UPDATE_JOB_WORKER] Job %s failed: %s", job['id'], str(e))
-                jobs.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
-                time.sleep(1)
-        except Exception as e:
-            logger.info("[LIBRARY_UPDATE_JOB_WORKER] Error in background worker: %s", str(e))
-            time.sleep(5)
 
 
 def get_last_successful_plex_sync_finished_at():
