@@ -1032,48 +1032,10 @@ def process_download_job(job_id, payload):
     output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
     logger.info("[DOWNLOAD] Selected output format=%s for quality='%s'", output_format, quality_choice)
 
-    temp_folder = '/app/temp'
-    os.makedirs(temp_folder, exist_ok=True)
-    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
-
-    logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
-    try:
-        downloads.download_track_manifest(
-            track_id=track_id,
-            output_path=temp_source_path,
-            quality=quality_choice,
-            url_list=SQUID_URLS,
-            usage='DOWNLOAD'
-        )
-    except Exception as e:
-        raise downloads.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
-
-    expected_duration = track_data.get('duration')
-    try:
-        downloads.validate_audio_duration(temp_source_path, expected_duration)
-    except RuntimeError as e:
-        raise downloads.TransientDownloadError(str(e)) from e
-
-    with open(temp_source_path, 'rb') as tmp_file:
-        audio_format = downloads.detect_audio_format(tmp_file.read(32))
-
-    logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-    if audio_format == 'unknown':
-        logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
-        audio_format = 'flac'
-
-    logger.info(" [DOWNLOAD] Job %s starting for track %s", job_id, track_id)
-    logger.info("[DOWNLOAD] Quality: %s", quality_choice)
-    logger.info("[DOWNLOAD] Output format: %s", output_format)
-    logger.info("[DOWNLOAD] File naming template: %s", file_naming)
-    logger.info("[DOWNLOAD] Downloads folder: %s", downloads_folder)
-
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
 
-    logger.info("[DOWNLOAD_DEBUG] raw track_object keys=%s", list(track_object.keys()))
-    logger.info("[DOWNLOAD_DEBUG] read track fields id=%s title=%s version=%s explicit=%s trackNumber=%s discNumber=%s volumeNumber=%s isrc=%s maxAudioQuality=%s audioQuality=%s copyright=%s artists=%s", track_data.get('id'), track_data.get('title'), track_data.get('version'), track_data.get('explicit'), track_data.get('trackNumber'), track_data.get('discNumber'), track_data.get('volumeNumber'), track_data.get('isrc'), track_data.get('maxAudioQuality'), track_data.get('audioQuality'), track_data.get('copyright'), [a.get('name') if isinstance(a, dict) else None for a in (track_data.get('artists') or [])])
-    logger.info("[DOWNLOAD_DEBUG] read album fields id=%s title=%s cover=%s releaseDate=%s explicit=%s numberOfDiscs=%s numberOfVolumes=%s numberOfTracks=%s maxAudioQuality=%s copyright=%s artists=%s", album_data.get('id'), album_data.get('title'), album_data.get('cover'), album_data.get('releaseDate'), album_data.get('explicit'), album_data.get('numberOfDiscs'), album_data.get('numberOfVolumes'), album_data.get('numberOfTracks'), album_data.get('maxAudioQuality'), album_data.get('copyright'), [a.get('name') if isinstance(a, dict) else None for a in (album_data.get('artists') or [])])
+    # --- Extract metadata before downloading (needed for match check and file naming) ---
 
     track_artist_name = 'Unknown Artist'
     track_artist_id = None
@@ -1189,31 +1151,7 @@ def process_download_job(job_id, payload):
 
     logger.info("[DOWNLOAD] Extracted metadata: TrackArtist='%s', AlbumArtist='%s', EffectiveArtistForPath='%s', Album='%s', Title='%s', TrackNum='%s', DiscNum='%s', Year='%s', Cover='%s'", track_artist_name, album_artist_name or '', effective_artist_name, album_name, track_title, track_num, disc_num, release_year, cover_url)
 
-    file_ext = output_format
-
-    safe_artist = sanitize_filename_component(effective_artist_name)
-    safe_album = sanitize_filename_component(album_name)
-    safe_title = sanitize_filename_component(track_title)
-    safe_track = sanitize_filename_component(track_num)
-
-    if album_has_multiple_discs and disc_num:
-        prefixed_track = f"{disc_num}-{safe_track}"
-        safe_track = sanitize_filename_component(prefixed_track)
-
-    file_path = file_naming.replace('{artist}', safe_artist)
-    file_path = file_path.replace('{album}', safe_album)
-    file_path = file_path.replace('{track}', safe_track)
-    file_path = file_path.replace('{title}', safe_title)
-    file_path = file_path.replace('{ext}', file_ext)
-
-    file_path = clean_path_components(file_path)
-
-    full_path = os.path.join(downloads_folder, file_path)
-    full_path = os.path.normpath(full_path)
-
-    logger.info("[DOWNLOAD_DEBUG] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
-    logger.info("[DOWNLOAD_DEBUG] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
-    logger.info("[DOWNLOAD_DECISION] Job %s: selected_format='%s', title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, output_format, track_title, artist_name, album_name, effective_artist_name)
+    # --- Check for existing matches before downloading ---
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1237,8 +1175,27 @@ def process_download_job(job_id, payload):
     if matching_rows:
         matched_row = matching_rows[0]
         matched_path = str(matched_row.get('file_path') or '').strip()
-        if matched_path:
-            full_path = matched_path
+
+        file_ext = output_format
+        safe_artist = sanitize_filename_component(effective_artist_name)
+        safe_album = sanitize_filename_component(album_name)
+        safe_title = sanitize_filename_component(track_title)
+        safe_track = sanitize_filename_component(track_num)
+
+        if album_has_multiple_discs and disc_num:
+            prefixed_track = f"{disc_num}-{safe_track}"
+            safe_track = sanitize_filename_component(prefixed_track)
+
+        file_path = file_naming.replace('{artist}', safe_artist)
+        file_path = file_path.replace('{album}', safe_album)
+        file_path = file_path.replace('{track}', safe_track)
+        file_path = file_path.replace('{title}', safe_title)
+        file_path = file_path.replace('{ext}', file_ext)
+        file_path = clean_path_components(file_path)
+
+        full_path = matched_path if matched_path else os.path.join(downloads_folder, file_path)
+        full_path = os.path.normpath(full_path)
+
         logger.info("[DOWNLOAD_DECISION] Job %s: skipping download because existing Plex inventory metadata matches selected format and quality (format='%s', bitrate='%s')", job_id, matched_row.get('format'), matched_row.get('bitrate'))
         logger.info("[DOWNLOAD] Existing metadata match found - skipping download pipeline")
         stages['downloaded'] = 'done'
@@ -1300,6 +1257,40 @@ def process_download_job(job_id, payload):
         }
 
     logger.info("[DOWNLOAD_DECISION] Job %s: downloading because no existing Plex inventory metadata matched selected format '%s'", job_id, output_format)
+
+    # --- Download track to temp ---
+
+    temp_folder = '/app/temp'
+    os.makedirs(temp_folder, exist_ok=True)
+    temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
+
+    logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
+    try:
+        downloads.download_track_manifest(
+            track_id=track_id,
+            output_path=temp_source_path,
+            quality=quality_choice,
+            url_list=SQUID_URLS,
+            usage='DOWNLOAD'
+        )
+    except Exception as e:
+        raise downloads.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+
+    expected_duration = track_data.get('duration')
+    try:
+        downloads.validate_audio_duration(temp_source_path, expected_duration)
+    except RuntimeError as e:
+        raise downloads.TransientDownloadError(str(e)) from e
+
+    with open(temp_source_path, 'rb') as tmp_file:
+        audio_format = downloads.detect_audio_format(tmp_file.read(32))
+
+    logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+    if audio_format == 'unknown':
+        logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
+        audio_format = 'flac'
+
+    logger.info(" [DOWNLOAD] Job %s starting for track %s", job_id, track_id)
 
     jobs.update_job_progress(job_id, {
         'artist': artist_name,
