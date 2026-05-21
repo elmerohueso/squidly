@@ -312,6 +312,7 @@ interface Endpoint {
     responseTime: number | null;
     lastChecked: string | null;
     enabled: boolean;
+    mirrorType: string;
 }
 
 interface MirrorRateLimitStatus {
@@ -490,6 +491,7 @@ interface JobFilterTotals {
 type DownloadQuality = 'LOSSLESS' | 'HIGH' | 'LOW';
 
 interface DownloadSettings {
+    downloadSource: string;
     quality: DownloadQuality;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
@@ -607,6 +609,8 @@ class App {
     private qualityLosslessInput: HTMLInputElement;
     private qualityHighInput: HTMLInputElement;
     private qualityLowInput: HTMLInputElement;
+    private downloadSourceTidalInput: HTMLInputElement;
+    private downloadSourceQobuzInput: HTMLInputElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
@@ -922,6 +926,8 @@ class App {
         this.qualityLosslessInput = document.getElementById('qualityLossless') as HTMLInputElement;
         this.qualityHighInput = document.getElementById('qualityHigh') as HTMLInputElement;
         this.qualityLowInput = document.getElementById('qualityLow') as HTMLInputElement;
+        this.downloadSourceTidalInput = document.getElementById('downloadSourceTidal') as HTMLInputElement;
+        this.downloadSourceQobuzInput = document.getElementById('downloadSourceQobuz') as HTMLInputElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
@@ -1203,6 +1209,12 @@ class App {
         }
         if (this.qualityLowInput) {
             this.qualityLowInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.downloadSourceTidalInput) {
+            this.downloadSourceTidalInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.downloadSourceQobuzInput) {
+            this.downloadSourceQobuzInput.addEventListener('change', () => this.updateSettingsFromForm());
         }
         if (this.fileNamingAlbumInput) {
             this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
@@ -5177,6 +5189,7 @@ class App {
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
         const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
         const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
+        const downloadMirror = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.download_mirror as string | null ?? null) : null;
 
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
@@ -5488,6 +5501,7 @@ key: 'playlist_added',
                 </div>
                 ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
                 ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
+                ${downloadMirror ? `<div class="job-sync-progress">Downloaded via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>` : ''}
                 <div class="job-stages">
                     ${stageHtml}
                 </div>
@@ -5658,6 +5672,7 @@ key: 'playlist_added',
 
     private defaultDownloadSettings(): DownloadSettings {
         return {
+            downloadSource: 'tidal',
             quality: 'LOSSLESS',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
             jobsRefreshIntervalSeconds: 30,
@@ -5707,6 +5722,11 @@ key: 'playlist_added',
         }
 
         return {
+            downloadSource: typeof (raw as DownloadSettings).downloadSource === 'string'
+                ? (raw as DownloadSettings).downloadSource
+                : typeof (raw as { download_source?: string }).download_source === 'string'
+                    ? (raw as { download_source?: string }).download_source!
+                    : fallback.downloadSource,
             quality,
             fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
                 ? (raw as DownloadSettings).fileNamingAlbum
@@ -5779,6 +5799,12 @@ key: 'playlist_added',
         this.qualityLosslessInput.checked = settings.quality === 'LOSSLESS';
         this.qualityHighInput.checked = settings.quality === 'HIGH';
         this.qualityLowInput.checked = settings.quality === 'LOW';
+        if (this.downloadSourceTidalInput) {
+            this.downloadSourceTidalInput.checked = settings.downloadSource === 'tidal';
+        }
+        if (this.downloadSourceQobuzInput) {
+            this.downloadSourceQobuzInput.checked = settings.downloadSource === 'qobuz';
+        }
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
@@ -5817,6 +5843,7 @@ key: 'playlist_added',
         }
 
         return {
+            downloadSource: this.downloadSourceTidalInput?.checked ? 'tidal' : this.downloadSourceQobuzInput?.checked ? 'qobuz' : (this.downloadSettings?.downloadSource ?? 'tidal'),
             quality,
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
@@ -5970,6 +5997,8 @@ key: 'playlist_added',
         const highLabel = this.qualityHighInput.closest('label');
         const lowLabel = this.qualityLowInput.closest('label');
 
+        const isQobuz = this.downloadSourceQobuzInput?.checked ?? false;
+
         if (losslessLabel) {
             losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
         }
@@ -5977,8 +6006,31 @@ key: 'playlist_added',
             highLabel.classList.toggle('active', this.qualityHighInput.checked);
         }
         if (lowLabel) {
+            const lowInput = this.qualityLowInput;
+            if (isQobuz) {
+                lowInput.disabled = true;
+                lowInput.title = 'Qobuz does not support LOW quality';
+                lowLabel.title = 'Qobuz does not support LOW quality';
+                lowLabel.classList.add('disabled');
+                if (lowInput.checked) {
+                    this.qualityLosslessInput.checked = true;
+                    lowInput.checked = false;
+                    if (losslessLabel) losslessLabel.classList.add('active');
+                    lowLabel.classList.remove('active');
+                }
+            } else {
+                lowInput.disabled = false;
+                lowInput.title = '';
+                lowLabel.title = '';
+                lowLabel.classList.remove('disabled');
+            }
             lowLabel.classList.toggle('active', this.qualityLowInput.checked);
         }
+
+        const tidalLabel = this.downloadSourceTidalInput?.closest('label');
+        const qobuzLabel = this.downloadSourceQobuzInput?.closest('label');
+        if (tidalLabel) tidalLabel.classList.toggle('active', this.downloadSourceTidalInput?.checked ?? false);
+        if (qobuzLabel) qobuzLabel.classList.toggle('active', this.downloadSourceQobuzInput?.checked ?? false);
     }
 
     private async loadListenbrainzConfig(): Promise<void> {
@@ -6935,19 +6987,48 @@ key: 'playlist_added',
 
             const data: EndpointStatus = await response.json();
             this.displayEndpointStatus(data);
+
+            const hasQobuzMirrors = data.endpoints.some(e => e.mirrorType === 'qobuz');
+            if (this.downloadSourceQobuzInput) {
+                this.downloadSourceQobuzInput.disabled = !hasQobuzMirrors;
+                this.downloadSourceQobuzInput.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
+                const qobuzLabel = this.downloadSourceQobuzInput.closest('label');
+                if (qobuzLabel) {
+                    qobuzLabel.classList.toggle('disabled', !hasQobuzMirrors);
+                    qobuzLabel.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
+                }
+                if (!hasQobuzMirrors && this.downloadSourceQobuzInput.checked) {
+                    this.downloadSourceTidalInput.checked = true;
+                    this.downloadSourceQobuzInput.checked = false;
+                    this.updateSettingsFromForm();
+                }
+            }
         } catch (error) {
             console.error('Error fetching endpoint status:', error);
         }
     }
 
     private displayEndpointStatus(data: EndpointStatus): void {
-        // Update button
-        const statusCount = document.querySelector('.status-count');
-        if (statusCount) {
-            statusCount.textContent = `${data.summary.online}/${data.summary.total}`;
-        }
+        // Split endpoints by type
+        const tidalEndpoints = data.endpoints.filter(e => e.mirrorType !== 'qobuz');
+        const qobuzEndpoints = data.endpoints.filter(e => e.mirrorType === 'qobuz');
 
-        // Update summary
+        // Compute separate stats
+        const tidalOnline = tidalEndpoints.filter(e => e.online).length;
+        const qobuzOnline = qobuzEndpoints.filter(e => e.online).length;
+
+        // Update per-type stat elements
+        const tidalOnlineCount = document.getElementById('tidalOnlineCount');
+        const tidalTotalCount = document.getElementById('tidalTotalCount');
+        const qobuzOnlineCount = document.getElementById('qobuzOnlineCount');
+        const qobuzTotalCount = document.getElementById('qobuzTotalCount');
+
+        if (tidalOnlineCount) tidalOnlineCount.textContent = tidalOnline.toString();
+        if (tidalTotalCount) tidalTotalCount.textContent = tidalEndpoints.length.toString();
+        if (qobuzOnlineCount) qobuzOnlineCount.textContent = qobuzOnline.toString();
+        if (qobuzTotalCount) qobuzTotalCount.textContent = qobuzEndpoints.length.toString();
+
+        // Legacy: update old stat elements if they still exist
         const totalCount = document.getElementById('totalCount');
         const onlineCount = document.getElementById('onlineCount');
         const offlineCount = document.getElementById('offlineCount');
@@ -7012,7 +7093,7 @@ key: 'playlist_added',
             `
             : '';
 
-        const endpointMarkup = data.endpoints.map(endpoint => {
+        const renderEndpointItem = (endpoint: Endpoint): string => {
             const url = atob(endpoint.encodedUrl);
             const statusClass = endpoint.online ? 'online' : 'offline';
             const statusText = endpoint.online ? 'Online' : 'Offline';
@@ -7059,9 +7140,30 @@ key: 'playlist_added',
                     </div>
                 </div>
             `;
-        }).join('');
+        };
 
-        this.flyoutContent.innerHTML = `${rateLimitSummary}${endpointMarkup}`;
+        const renderMirrorGroup = (label: string, endpoints: Endpoint[], emptyMessage: string): string => {
+            if (endpoints.length === 0) {
+                return `
+                    <div class="mirror-group">
+                        <div class="mirror-group-header">${this.escapeHtml(label)}</div>
+                        <div class="mirror-group-empty">${this.escapeHtml(emptyMessage)}</div>
+                    </div>
+                `;
+            }
+            const items = endpoints.map(renderEndpointItem).join('');
+            return `
+                <div class="mirror-group">
+                    <div class="mirror-group-header">${this.escapeHtml(label)}</div>
+                    <div class="mirror-group-list">${items}</div>
+                </div>
+            `;
+        };
+
+        const tidalGroup = renderMirrorGroup('Tidal Mirrors', tidalEndpoints, 'No Tidal mirrors configured');
+        const qobuzGroup = renderMirrorGroup('Qobuz Mirrors', qobuzEndpoints, 'No Qobuz mirrors configured');
+
+        this.flyoutContent.innerHTML = `${rateLimitSummary}${tidalGroup}${qobuzGroup}`;
     }
 
     private openAddMirrorModal(): void {
@@ -7089,6 +7191,46 @@ key: 'playlist_added',
         const content = document.createElement('div');
         content.className = 'playlist-modal-content';
 
+        const mirrorTypeGroup = document.createElement('div');
+        mirrorTypeGroup.className = 'settings-group';
+        const mirrorTypeLabel = document.createElement('label');
+        mirrorTypeLabel.className = 'settings-label';
+        mirrorTypeLabel.textContent = 'Mirror Type';
+        const mirrorTypeToggle = document.createElement('div');
+        mirrorTypeToggle.className = 'format-toggle';
+        mirrorTypeToggle.setAttribute('role', 'radiogroup');
+        mirrorTypeToggle.setAttribute('aria-label', 'Mirror type');
+
+        const tidalLabel = document.createElement('label');
+        tidalLabel.className = 'toggle-option';
+        const tidalRadio = document.createElement('input');
+        tidalRadio.type = 'radio';
+        tidalRadio.name = 'mirrorType';
+        tidalRadio.value = 'tidal';
+        tidalRadio.id = 'mirrorTypeTidal';
+        tidalRadio.checked = true;
+        const tidalSpan = document.createElement('span');
+        tidalSpan.textContent = 'Tidal';
+        tidalLabel.appendChild(tidalRadio);
+        tidalLabel.appendChild(tidalSpan);
+
+        const qobuzLabel = document.createElement('label');
+        qobuzLabel.className = 'toggle-option';
+        const qobuzRadio = document.createElement('input');
+        qobuzRadio.type = 'radio';
+        qobuzRadio.name = 'mirrorType';
+        qobuzRadio.value = 'qobuz';
+        qobuzRadio.id = 'mirrorTypeQobuz';
+        const qobuzSpan = document.createElement('span');
+        qobuzSpan.textContent = 'Qobuz';
+        qobuzLabel.appendChild(qobuzRadio);
+        qobuzLabel.appendChild(qobuzSpan);
+
+        mirrorTypeToggle.appendChild(tidalLabel);
+        mirrorTypeToggle.appendChild(qobuzLabel);
+        mirrorTypeGroup.appendChild(mirrorTypeLabel);
+        mirrorTypeGroup.appendChild(mirrorTypeToggle);
+
         const urlGroup = document.createElement('div');
         urlGroup.className = 'settings-group';
         const urlLabel = document.createElement('label');
@@ -7101,6 +7243,7 @@ key: 'playlist_added',
         urlGroup.appendChild(urlLabel);
         urlGroup.appendChild(urlInput);
 
+        content.appendChild(mirrorTypeGroup);
         content.appendChild(urlGroup);
 
         const footer = document.createElement('div');
@@ -7121,13 +7264,14 @@ key: 'playlist_added',
             if (!url) {
                 return;
             }
+            const mirrorType = tidalRadio.checked ? 'tidal' : 'qobuz';
             submitBtn.disabled = true;
             submitBtn.textContent = 'Adding...';
             try {
                 const resp = await fetch('/api/endpoints', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url }),
+                    body: JSON.stringify({ url, mirrorType }),
                 });
                 if (!resp.ok) {
                     const err = await resp.json();

@@ -17,6 +17,7 @@ from mutagen.mp4 import MP4, MP4Cover
 import requests
 from squidly.db import get_db_connection
 from squidly.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
+from squidly import qobuz
 
 import logging
 
@@ -262,7 +263,7 @@ def download_track_manifest(
         'uriScheme': 'HTTPS',
     }
 
-    response, _target = make_request_with_retry_rotating_mirrors(
+    response, target = make_request_with_retry_rotating_mirrors(
         f"/trackManifests/?{urlencode(params)}",
         url_list,
         method='GET',
@@ -358,7 +359,7 @@ def download_track_manifest(
                 pass
         raise
 
-    return str(output_path)
+    return str(output_path), target
 
 
 def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
@@ -393,17 +394,31 @@ def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backof
     return None
 
 
-def get_online_mirror_names():
-    """Return set of mirror names that are currently marked online and enabled."""
+def get_online_mirror_names(mirror_type=None):
+    """Return set of mirror names that are currently marked online and enabled.
+
+    Args:
+        mirror_type: Optional filter for mirror type ('tidal' or 'qobuz').
+    """
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT name
-        FROM mirror_endpoints
-        WHERE online = 1 AND enabled = 1
-        """
-    )
+    if mirror_type:
+        cur.execute(
+            """
+            SELECT name
+            FROM mirror_endpoints
+            WHERE online = 1 AND enabled = 1 AND mirror_type = %s
+            """,
+            (mirror_type,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT name
+            FROM mirror_endpoints
+            WHERE online = 1 AND enabled = 1
+            """
+        )
     rows = cur.fetchall()
     conn.close()
     return {row['name'] for row in rows}
@@ -439,16 +454,26 @@ _mirror_preference_state = {
 }
 
 
-def _get_ordered_online_mirrors(url_list):
+def _get_ordered_online_mirrors(url_list, mirror_type=None):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT name, response_time
-        FROM mirror_endpoints
-        WHERE online = 1 AND enabled = 1
-        """
-    )
+    if mirror_type:
+        cur.execute(
+            """
+            SELECT name, response_time
+            FROM mirror_endpoints
+            WHERE online = 1 AND enabled = 1 AND mirror_type = %s
+            """,
+            (mirror_type,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT name, response_time
+            FROM mirror_endpoints
+            WHERE online = 1 AND enabled = 1
+            """
+        )
     online_rows = cur.fetchall()
     conn.close()
 
@@ -679,24 +704,38 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     return None, None
 
 
-def load_enabled_mirror_urls():
-    """Load enabled mirror URLs from the database."""
+def load_enabled_mirror_urls(mirror_type=None):
+    """Load enabled mirror URLs from the database.
+
+    Args:
+        mirror_type: Optional filter for mirror type ('tidal' or 'qobuz').
+    """
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT name, encoded_url
-        FROM mirror_endpoints
-        WHERE enabled = 1
-        """
-    )
+    if mirror_type:
+        cur.execute(
+            """
+            SELECT name, encoded_url, mirror_type
+            FROM mirror_endpoints
+            WHERE enabled = 1 AND mirror_type = %s
+            """,
+            (mirror_type,)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT name, encoded_url, mirror_type
+            FROM mirror_endpoints
+            WHERE enabled = 1
+            """
+        )
     rows = cur.fetchall()
     conn.close()
 
     decoded_urls = []
     for row in rows:
         decoded_url = base64.b64decode(row['encoded_url']).decode('utf-8')
-        decoded_urls.append({'name': row['name'], 'url': decoded_url})
+        decoded_urls.append({'name': row['name'], 'url': decoded_url, 'mirror_type': row['mirror_type']})
 
     return decoded_urls
 
@@ -727,45 +766,31 @@ def seed_mirrors_from_json():
         name = derive_mirror_name(decoded_url)
         cur.execute(
             """
-            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled, mirror_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (name, entry['encodedUrl'], 0, None, None, 1)
+            (name, entry['encodedUrl'], 0, None, None, 1, 'tidal')
         )
 
 
-def add_mirror(url):
-    """Add a new mirror endpoint to the database from a plain URL."""
+def add_mirror(url, mirror_type='tidal'):
+    """Add a new mirror endpoint to the database from a plain URL.
+
+    Args:
+        url: The plain URL of the mirror endpoint.
+        mirror_type: The type of mirror ('tidal' or 'qobuz'). Defaults to 'tidal'.
+    """
     name = derive_mirror_name(url)
     encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled, mirror_type)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (name) DO NOTHING
         """,
-        (name, encoded_url, 0, None, None, 1)
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def add_mirror(url):
-    """Add a new mirror endpoint to the database from a plain URL."""
-    name = derive_mirror_name(url)
-    encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked)
-        VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (name) DO NOTHING
-        """,
-        (name, encoded_url, 0, None, None)
+        (name, encoded_url, 0, None, None, 1, mirror_type)
     )
     conn.commit()
     conn.close()
@@ -800,13 +825,19 @@ def validate_single_endpoint(name):
     """Validate a single mirror endpoint by name."""
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT name, encoded_url FROM mirror_endpoints WHERE name = %s', (name,))
+    cur.execute('SELECT name, encoded_url, mirror_type FROM mirror_endpoints WHERE name = %s', (name,))
     mirror = cur.fetchone()
     if mirror is None:
         conn.close()
         raise ValueError(f'Mirror "{name}" not found')
     decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
-    result = validate_endpoint(decoded_url, name, timeout=5)
+    mirror_type = mirror.get('mirror_type', 'tidal')
+
+    if mirror_type == 'qobuz':
+        result = qobuz.validate_qobuz_endpoint(decoded_url, timeout=5)
+    else:
+        result = validate_endpoint(decoded_url, name, timeout=5)
+
     cur.execute(
         """
         UPDATE mirror_endpoints
@@ -833,7 +864,7 @@ def validate_all_endpoints_from_db():
 
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute('SELECT name, encoded_url FROM mirror_endpoints WHERE enabled = 1')
+    cur.execute('SELECT name, encoded_url, mirror_type FROM mirror_endpoints WHERE enabled = 1')
     mirrors = cur.fetchall()
     conn.close()
 
@@ -845,10 +876,15 @@ def validate_all_endpoints_from_db():
 
     for mirror in mirrors:
         name = mirror['name']
+        mirror_type = mirror['mirror_type']
         decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
 
-        logger.info("\n[%s] Checking %s...", name, decoded_url)
-        result = validate_endpoint(decoded_url, name, timeout=5)
+        logger.info("\n[%s] Checking %s (type: %s)...", name, decoded_url, mirror_type)
+
+        if mirror_type == 'qobuz':
+            result = qobuz.validate_qobuz_endpoint(decoded_url, timeout=5)
+        else:
+            result = validate_endpoint(decoded_url, name, timeout=5)
 
         cur.execute(
             """

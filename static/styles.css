@@ -2400,6 +2400,33 @@ body {
     font-weight: 500;
 }
 
+.toggle-option.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.mirror-type-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    vertical-align: middle;
+    margin-left: 0.3rem;
+}
+
+.mirror-type-tidal {
+    background: rgba(0, 200, 255, 0.15);
+    color: #00c8ff;
+}
+
+.mirror-type-qobuz {
+    background: rgba(255, 165, 0, 0.15);
+    color: #ffa500;
+}
+
 .settings-label {
     display: block;
     font-weight: 600;
@@ -3255,6 +3282,125 @@ body {
     font-weight: 500;
 }
 
+/* === Mirror Page Stats === */
+.mirror-stats-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.mirror-stats-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.mirror-stats-tidal {
+    border-color: rgba(0, 200, 255, 0.25);
+}
+
+.mirror-stats-qobuz {
+    border-color: rgba(255, 165, 0, 0.25);
+}
+
+.mirror-stats-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.mirror-stats-tidal .mirror-stats-header {
+    color: #00c8ff;
+}
+
+.mirror-stats-qobuz .mirror-stats-header {
+    color: #ffa500;
+}
+
+.mirror-stats-header svg {
+    flex-shrink: 0;
+}
+
+.mirror-stats-values {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-left: auto;
+}
+
+.mirror-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+}
+
+.mirror-stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent-primary);
+    line-height: 1;
+}
+
+.mirror-stats-tidal .mirror-stat-value {
+    color: #00c8ff;
+}
+
+.mirror-stats-qobuz .mirror-stat-value {
+    color: #ffa500;
+}
+
+.mirror-stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* === Mirror Groups === */
+.mirror-group {
+    margin-bottom: 1.5rem;
+}
+
+.mirror-group:last-child {
+    margin-bottom: 0;
+}
+
+.mirror-group-header {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 0.5rem 0;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mirror-group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.mirror-group-empty {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-style: italic;
+    padding: 1rem 0;
+}
+
 .flyout-content {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
@@ -3780,6 +3926,23 @@ body {
 
     .stat-value {
         font-size: 1.5rem;
+    }
+
+    .mirror-stats-row {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+
+    .mirror-stats-card {
+        padding: 1rem 1.25rem;
+    }
+
+    .mirror-stats-values {
+        gap: 1rem;
+    }
+
+    .mirror-stat-value {
+        font-size: 1.25rem;
     }
 
     /* Breadcrumbs */
@@ -4347,6 +4510,12 @@ body {
     margin-top: 0.75rem;
     font-size: 0.85rem;
     color: var(--text-secondary);
+}
+
+.job-sync-progress .mirror-url {
+    color: var(--text-primary);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
 }
 
 .job-stages {

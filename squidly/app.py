@@ -135,6 +135,7 @@ from squidly.workers import (
 from ytmusicapi import YTMusic
 
 from squidly import downloads
+from squidly import qobuz
 from squidly import jobs
 
 from squidly.orchestration import (
@@ -1021,6 +1022,8 @@ def process_download_job(job_id, payload):
 
     tag_settings = get_download_settings()
 
+    download_source = tag_settings.get('download_source', 'tidal').lower()
+
     downloads_folder = DOWNLOADS_ROOT
 
     if not os.path.exists(downloads_folder):
@@ -1275,31 +1278,98 @@ def process_download_job(job_id, payload):
     os.makedirs(temp_folder, exist_ok=True)
     temp_source_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
 
-    logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
-    try:
-        downloads.download_track_manifest(
-            track_id=track_id,
-            output_path=temp_source_path,
-            quality=quality_choice,
-            url_list=SQUID_URLS,
-            usage='DOWNLOAD'
-        )
-    except Exception as e:
-        raise downloads.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+    download_mirror = None  # Track which mirror was used
 
-    expected_duration = track_data.get('duration')
-    try:
-        downloads.validate_audio_duration(temp_source_path, expected_duration)
-    except RuntimeError as e:
-        raise downloads.TransientDownloadError(str(e)) from e
+    # --- Download branch: Qobuz vs Tidal ---
+    if download_source == 'qobuz':
+        # Qobuz download path: search by ISRC, validate match, get stream URL, download directly
+        isrc = track_data.get('isrc')
+        if not isrc:
+            raise ValueError(f"Cannot download from Qobuz: track {track_id} has no ISRC")
 
-    with open(temp_source_path, 'rb') as tmp_file:
-        audio_format = downloads.detect_audio_format(tmp_file.read(32))
+        # Validate quality is supported for Qobuz
+        if quality_choice not in qobuz.QOBUZ_SUPPORTED_QUALITIES:
+            logger.info("[DOWNLOAD] Qobuz does not support quality '%s', falling back to LOSSLESS", quality_choice)
+            quality_choice = 'LOSSLESS'
+            output_format = 'flac'
 
-    logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-    if audio_format == 'unknown':
-        logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
-        audio_format = 'flac'
+        # Get Qobuz mirrors
+        qobuz_mirrors = downloads.load_enabled_mirror_urls(mirror_type='qobuz')
+        if not qobuz_mirrors:
+            raise ValueError("Cannot download from Qobuz: no Qobuz mirrors configured")
+
+        # Try each Qobuz mirror until one works
+        qobuz_result = None
+        last_error = None
+        for mirror in qobuz_mirrors:
+            base_url = mirror['url']
+            logger.info("[QOBUZ] Trying mirror: %s", base_url)
+            try:
+                qobuz_result = qobuz.download_qobuz_track(
+                    base_url=base_url,
+                    isrc=isrc,
+                    tidal_quality=quality_choice,
+                    output_path=temp_source_path,
+                )
+                if qobuz_result:
+                    break
+            except Exception as e:
+                logger.warning("[QOBUZ] Mirror %s failed: %s", base_url, e)
+                last_error = e
+                continue
+
+        if qobuz_result is None:
+            error_msg = f"Failed to download from Qobuz (ISRC: {isrc})"
+            if last_error:
+                error_msg += f": {last_error}"
+            raise ValueError(error_msg)
+
+        download_mirror = base_url
+        logger.info("[QOBUZ] Successfully downloaded track via Qobuz (ISRC: %s)", isrc)
+
+        # Detect format of downloaded file
+        with open(temp_source_path, 'rb') as tmp_file:
+            audio_format = downloads.detect_audio_format(tmp_file.read(32))
+        logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+        if audio_format == 'unknown':
+            logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
+            audio_format = 'flac'
+
+        # Validate duration
+        expected_duration = track_data.get('duration')
+        try:
+            downloads.validate_audio_duration(temp_source_path, expected_duration)
+        except RuntimeError as e:
+            raise downloads.TransientDownloadError(str(e)) from e
+
+    else:
+        # Tidal download path (original behavior)
+        logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
+        try:
+            _, tidal_target = downloads.download_track_manifest(
+                track_id=track_id,
+                output_path=temp_source_path,
+                quality=quality_choice,
+                url_list=SQUID_URLS,
+                usage='DOWNLOAD'
+            )
+            download_mirror = tidal_target['url'].rstrip('/')
+        except Exception as e:
+            raise downloads.TransientDownloadError(f"Failed to download track from trackManifests: {str(e)}") from e
+
+        expected_duration = track_data.get('duration')
+        try:
+            downloads.validate_audio_duration(temp_source_path, expected_duration)
+        except RuntimeError as e:
+            raise downloads.TransientDownloadError(str(e)) from e
+
+        with open(temp_source_path, 'rb') as tmp_file:
+            audio_format = downloads.detect_audio_format(tmp_file.read(32))
+
+        logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+        if audio_format == 'unknown':
+            logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
+            audio_format = 'flac'
 
     logger.info(" [DOWNLOAD] Job %s starting for track %s", job_id, track_id)
 
@@ -1484,6 +1554,7 @@ def process_download_job(job_id, payload):
         'album': album_name,
         'title': track_title,
         'playlist_name': playlist_name,
+        'download_mirror': download_mirror,
         'stages': stages
     }
     return result
@@ -2982,6 +3053,7 @@ def download_settings():
         'file_naming_album': file_naming_album,
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
+        'download_source': payload.get('downloadSource', payload.get('download_source', current.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']))),
     }
 
     for key in tag_keys:
@@ -2992,6 +3064,9 @@ def download_settings():
 
     if updated['quality'] not in ('LOSSLESS', 'HIGH', 'LOW'):
         return jsonify({'error': 'Invalid quality value'}), 400
+
+    if updated['download_source'] not in ('tidal', 'qobuz'):
+        return jsonify({'error': 'Invalid download source'}), 400
 
     if not isinstance(updated['file_naming_album'], str):
         return jsonify({'error': 'Invalid settings payload'}), 400
@@ -3019,6 +3094,7 @@ def download_settings():
         'file_naming_album': updated['file_naming_album'],
         'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
         'ignore_matches': updated['ignore_matches'],
+        'download_source': updated['download_source'],
     }
     for key in tag_keys:
         result[key] = updated[key]
@@ -3034,7 +3110,7 @@ def endpoints_status():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT name, encoded_url, online, response_time, last_checked, enabled
+        SELECT name, encoded_url, online, response_time, last_checked, enabled, mirror_type
         FROM mirror_endpoints
         ORDER BY response_time ASC NULLS LAST, name ASC
         """
@@ -3051,6 +3127,7 @@ def endpoints_status():
             'responseTime': row['response_time'],
             'lastChecked': row['last_checked'],
             'enabled': bool(row['enabled']),
+            'mirrorType': row.get('mirror_type', 'tidal'),
         })
 
     mirror_rate_limit_status = {}
@@ -3096,15 +3173,19 @@ def add_endpoint():
     if not url:
         return jsonify({'error': 'url is required'}), 400
 
+    mirror_type = payload.get('mirrorType', 'tidal').strip().lower()
+    if mirror_type not in ('tidal', 'qobuz'):
+        return jsonify({'error': 'mirrorType must be "tidal" or "qobuz"'}), 400
+
     try:
-        downloads.add_mirror(url)
+        downloads.add_mirror(url, mirror_type=mirror_type)
     except Exception as e:
         logger.info("[ENDPOINTS] Failed to add mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
     _run_async(lambda: downloads.validate_all_endpoints_from_db())
 
-    return jsonify({'url': url, 'added': True}), 201
+    return jsonify({'url': url, 'added': True, 'mirrorType': mirror_type}), 201
 
 
 @app.route('/api/endpoints/<name>', methods=['DELETE'])

@@ -113,7 +113,7 @@
                                         d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
                                     </path>
                                 </svg>
-                                <span>Hi-Fi Mirrors</span>
+                                <span>Source Mirrors</span>
                             </a></li>
                         <li><a href="#" class="nav-item" data-page="matches">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
@@ -232,6 +232,18 @@
                     <div class="settings-content">
                         <div class="settings-section" id="downloadsSettings">
                             <h3>Downloads</h3>
+                            <label class="settings-label" for="downloadSourceTidal" style="margin-bottom: 0.5rem;">Download Source</label>
+                            <div class="format-toggle" role="radiogroup" aria-label="Download source">
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadSource" value="tidal" id="downloadSourceTidal">
+                                    <span>Tidal</span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadSource" value="qobuz" id="downloadSourceQobuz">
+                                    <span>Qobuz</span>
+                                </label>
+                            </div>
+                            <label class="settings-label" for="qualityLossless" style="margin-top: 1rem; margin-bottom: 0.5rem;">Quality</label>
                             <div class="format-toggle" role="radiogroup" aria-label="Download quality">
                                 <label class="toggle-option">
                                     <input type="radio" name="downloadQuality" value="LOSSLESS" id="qualityLossless">
@@ -545,25 +557,45 @@
                     </div>
                 </div>
 
-                <!-- Hi-Fi Mirrors Page -->
+                <!-- Source Mirrors Page -->
                 <div class="page" id="mirrorsPage" data-page="mirrors">
-                    <h2>Hi-Fi Mirrors</h2>
+                    <h2>Source Mirrors</h2>
                     <div class="mirrors-actions">
                         <button type="button" id="addMirrorButton" class="save-button">Add Mirror</button>
                     </div>
                     <div id="mirrorsContent" class="mirrors-content">
-                        <div class="flyout-summary" id="flyoutSummary">
-                            <div class="summary-stat">
-                                <span class="stat-value" id="totalCount">-</span>
-                                <span class="stat-label">Total</span>
+                        <div class="mirror-stats-row">
+                            <div class="mirror-stats-card mirror-stats-tidal">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <span>Tidal</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="tidalOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="tidalTotalCount">-</span>
+                                        <span class="mirror-stat-label">Total</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="summary-stat online">
-                                <span class="stat-value" id="onlineCount">-</span>
-                                <span class="stat-label">Online</span>
-                            </div>
-                            <div class="summary-stat offline">
-                                <span class="stat-value" id="offlineCount">-</span>
-                                <span class="stat-label">Offline</span>
+                            <div class="mirror-stats-card mirror-stats-qobuz">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                                    <span>Qobuz</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="qobuzOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="qobuzTotalCount">-</span>
+                                        <span class="mirror-stat-label">Total</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div id="flyoutContent" class="flyout-content">

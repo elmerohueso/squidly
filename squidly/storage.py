@@ -454,7 +454,7 @@ def get_download_settings():
                tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                tag_explicit, tag_explicit_suffix,
-               penalty_compilation, penalty_karaoke, penalty_live
+               penalty_compilation, penalty_karaoke, penalty_live, download_source
         FROM download_settings
         WHERE id = 1
         """
@@ -471,7 +471,7 @@ def get_download_settings():
                 tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                 tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                 tag_explicit, tag_explicit_suffix,
-                penalty_compilation, penalty_karaoke, penalty_live,
+                penalty_compilation, penalty_karaoke, penalty_live, download_source,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s, %s,
@@ -479,7 +479,7 @@ def get_download_settings():
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['format'],
@@ -509,6 +509,7 @@ def get_download_settings():
                 DEFAULT_DOWNLOAD_SETTINGS['penalty_compilation'],
                 DEFAULT_DOWNLOAD_SETTINGS['penalty_karaoke'],
                 DEFAULT_DOWNLOAD_SETTINGS['penalty_live'],
+                DEFAULT_DOWNLOAD_SETTINGS['download_source'],
                 now
             )
         )
@@ -520,7 +521,7 @@ def get_download_settings():
                    tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                    tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                    tag_explicit, tag_explicit_suffix,
-                   penalty_compilation, penalty_karaoke, penalty_live
+                   penalty_compilation, penalty_karaoke, penalty_live, download_source
             FROM download_settings
             WHERE id = 1
             """
@@ -579,6 +580,7 @@ def get_download_settings():
         'penalty_compilation': bool(row.get('penalty_compilation', DEFAULT_DOWNLOAD_SETTINGS['penalty_compilation'])),
         'penalty_karaoke': bool(row.get('penalty_karaoke', DEFAULT_DOWNLOAD_SETTINGS['penalty_karaoke'])),
         'penalty_live': bool(row.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
+        'download_source': row.get('download_source') or DEFAULT_DOWNLOAD_SETTINGS['download_source'],
     }
 
 
@@ -594,7 +596,7 @@ def save_download_settings(settings):
             tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
             tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
             tag_explicit, tag_explicit_suffix,
-            penalty_compilation, penalty_karaoke, penalty_live,
+            penalty_compilation, penalty_karaoke, penalty_live, download_source,
             updated_at
         )
         VALUES (1, %s, %s, %s, %s, %s, %s, %s,
@@ -602,7 +604,7 @@ def save_download_settings(settings):
                 %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
                 %s, %s,
-                %s, %s, %s, %s)
+                %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             format = excluded.format,
             quality = excluded.quality,
@@ -631,6 +633,7 @@ def save_download_settings(settings):
             penalty_compilation = excluded.penalty_compilation,
             penalty_karaoke = excluded.penalty_karaoke,
             penalty_live = excluded.penalty_live,
+            download_source = excluded.download_source,
             updated_at = excluded.updated_at
         """,
         (
@@ -661,6 +664,7 @@ def save_download_settings(settings):
             bool(settings.get('penalty_compilation', DEFAULT_DOWNLOAD_SETTINGS['penalty_compilation'])),
             bool(settings.get('penalty_karaoke', DEFAULT_DOWNLOAD_SETTINGS['penalty_karaoke'])),
             bool(settings.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
+            settings.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']),
             now
         )
     )

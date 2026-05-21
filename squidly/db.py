@@ -96,6 +96,8 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_karaoke BOOLEAN NOT NULL DEFAULT TRUE")
     if 'penalty_live' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_live BOOLEAN NOT NULL DEFAULT TRUE")
+    if 'download_source' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN download_source TEXT NOT NULL DEFAULT 'tidal'")
 
     cur.execute(
         """
@@ -118,6 +120,8 @@ def init_db():
     mirror_columns = {row['column_name'] for row in cur.fetchall()}
     if 'enabled' not in mirror_columns:
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    if 'mirror_type' not in mirror_columns:
+        cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN mirror_type TEXT NOT NULL DEFAULT 'tidal'")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS plex_config (
