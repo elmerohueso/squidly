@@ -739,6 +739,7 @@ class App {
     private listenbrainzCurrentUsername: string | null = null;
     private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
     private freshFindsPlaylistName: string | null = null;
+    private plexUserNameById: Record<string, string> = {};
 
     private historyTableContainer: HTMLElement;
     private historyEntries: ListenHistoryEntry[] = [];
@@ -5191,6 +5192,10 @@ class App {
         const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
         const downloadMirror = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.download_mirror as string | null ?? null) : null;
 
+        const resolvedPlexUserName = job.payload?.plex_user_id
+            ? this.resolvePlexUserName(String(job.payload.plex_user_id))
+            : null;
+
         if (job.job_type === 'plex_library_sync') {
             const stageRows = [
                 { key: 'reading_plex_library', label: 'Reading Plex Library' },
@@ -5472,9 +5477,9 @@ class App {
             { key: 'tagged', label: 'Tagged' },
             { key: 'written', label: 'Written to Disk' },
             ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
-            ...(playlistName ? [{
+             ...(playlistName ? [{
 key: 'playlist_added',
-                 label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"`
+                 label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"${resolvedPlexUserName ? ` for ${this.escapeHtml(resolvedPlexUserName)}` : ''}`
             }] : []),
         ];
 
@@ -6767,6 +6772,13 @@ key: 'playlist_added',
             const data = await response.json();
             const users = Array.isArray(data.users) ? data.users : [];
 
+            this.plexUserNameById = {};
+            for (const user of users) {
+                const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
+                const name = String(user.username || user.title || id);
+                if (id) this.plexUserNameById[id] = name;
+            }
+
             this.plexLoginOnlyUserList.innerHTML = '';
             if (users.length === 0) {
                 const emptyMessage = document.createElement('div');
@@ -6950,6 +6962,16 @@ key: 'playlist_added',
         const stored = window.localStorage.getItem('plexSelectedUserId');
         if (stored && stored.trim()) {
             return stored.trim();
+        }
+        return null;
+    }
+
+    private resolvePlexUserName(userId: string): string | null {
+        if (this.plexUserNameById[userId]) {
+            return this.plexUserNameById[userId];
+        }
+        if (userId === window.localStorage.getItem('plexSelectedUserId')) {
+            return window.localStorage.getItem('plexSelectedUserName');
         }
         return null;
     }
