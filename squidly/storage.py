@@ -985,13 +985,13 @@ def get_recent_listen_history_seeds(plex_account_id, limit=20):
     ]
 
 
-def get_existing_hifi_ids():
+def get_existing_isrcs():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT hifi_id FROM tracks WHERE hifi_id IS NOT NULL")
+    cur.execute("SELECT DISTINCT isrc FROM tracks WHERE isrc IS NOT NULL AND isrc != ''")
     rows = cur.fetchall() or []
     conn.close()
-    return {int(row['hifi_id']) for row in rows}
+    return {str(row['isrc']).strip().upper() for row in rows}
 
 
 def get_existing_artist_titles():

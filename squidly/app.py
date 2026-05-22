@@ -156,7 +156,7 @@ from squidly.storage import (
     get_download_settings,
     get_download_write_gate_state,
     get_existing_artist_titles,
-    get_existing_hifi_ids,
+    get_existing_isrcs,
     get_last_download_activity_at,
     get_library_update_status,
     get_listen_history,
@@ -5336,6 +5336,7 @@ def process_recommendation_job(job_id, payload):
                             'cover': album.get('cover') if isinstance(album, dict) else track.get('cover'),
                             'quality': track.get('maxAudioQuality') or track.get('audioQuality') or '',
                             'seed_hifi_id': hifi_id,
+                            'isrc': track.get('isrc'),
                         })
                 progress['recommendations_fetched'] = len(raw_recommendations)
                 jobs.update_job_progress(job_id, {'progress': progress})
@@ -5373,12 +5374,13 @@ def process_recommendation_job(job_id, payload):
         else:
             deduped[hid]['score'] += 1
 
-    # Filter out tracks already in library by hifi_id or normalized artist-title
-    existing_hifi_ids = get_existing_hifi_ids()
+    # Filter out tracks already in library by isrc or normalized artist-title
+    existing_isrcs = get_existing_isrcs()
     existing_artist_titles = get_existing_artist_titles()
     filtered = []
     for rec in deduped.values():
-        if rec['hifi_id'] in existing_hifi_ids:
+        rec_isrc = str(rec.get('isrc') or '').strip().upper()
+        if rec_isrc and rec_isrc in existing_isrcs:
             continue
         artist_title = (
             normalize_match_text(rec.get('artist', '')),
