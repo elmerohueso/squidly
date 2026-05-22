@@ -148,26 +148,26 @@ class TestStorageFunctions:
         assert call_args[1] == (123, 20)
 
     @patch('squidly.storage.get_db_connection')
-    def test_get_existing_hifi_ids(self, mock_conn):
-        from squidly.storage import get_existing_hifi_ids
+    def test_get_existing_isrcs(self, mock_conn):
+        from squidly.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
-            {'hifi_id': '100'},
-            {'hifi_id': '200'},
-            {'hifi_id': '300'},
+            {'isrc': 'USRC17607839'},
+            {'isrc': 'GBUM71505078'},
+            {'isrc': 'usrc17607840'},
         ]
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
         mock_conn.return_value = mock_connection
 
-        result = get_existing_hifi_ids()
+        result = get_existing_isrcs()
 
-        assert result == {100, 200, 300}
+        assert result == {'USRC17607839', 'GBUM71505078', 'USRC17607840'}
 
     @patch('squidly.storage.get_db_connection')
-    def test_get_existing_hifi_ids_empty(self, mock_conn):
-        from squidly.storage import get_existing_hifi_ids
+    def test_get_existing_isrcs_empty(self, mock_conn):
+        from squidly.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -175,7 +175,7 @@ class TestStorageFunctions:
         mock_connection.cursor.return_value = mock_cursor
         mock_conn.return_value = mock_connection
 
-        result = get_existing_hifi_ids()
+        result = get_existing_isrcs()
 
         assert result == set()
 
