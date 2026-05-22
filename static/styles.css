@@ -4518,6 +4518,12 @@ body {
     font-size: 0.8rem;
 }
 
+.job-error {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: #ff4466;
+}
+
 .job-stages {
     position: absolute;
     right: 1rem;

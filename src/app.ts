@@ -5502,6 +5502,7 @@ key: 'playlist_added',
                 ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
                 ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
                 ${downloadMirror ? `<div class="job-sync-progress">Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>` : ''}
+                ${effectiveStatus === 'failed' && job.error_message ? `<div class="job-error">${this.escapeHtml(job.error_message)}</div>` : ''}
                 <div class="job-stages">
                     ${stageHtml}
                 </div>
