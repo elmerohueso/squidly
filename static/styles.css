@@ -4516,6 +4516,29 @@ body {
     border-left-width: 2px;
 }
 
+.job-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.job-id-badge {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 0 6px;
+    line-height: 1.6;
+    flex-shrink: 0;
+    white-space: nowrap;
+    cursor: default;
+    user-select: none;
+}
+
 .job-title {
     font-size: 0.95rem;
     font-weight: 600;

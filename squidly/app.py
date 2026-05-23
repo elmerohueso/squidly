@@ -5581,12 +5581,13 @@ def process_fresh_finds_auto_download_job(job_id, payload):
             if not hifi_id:
                 continue
 
+            plex_client_id = user.get('plex_client_id')
             job_payload = {
                 'trackId': hifi_id,
                 'fileNaming': file_naming,
                 'fileNamingAlbum': file_naming_album,
                 'plex_playlist': playlist_name,
-                'plex_user_id': plex_account_id,
+                'plex_user_id': plex_client_id if plex_client_id is not None else plex_account_id,
                 'downloadQuality': quality,
             }
 

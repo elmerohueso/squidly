@@ -342,6 +342,12 @@ interface JobStageMap {
     upgraded_existing?: string;
 }
 
+interface StageDef {
+    key: string;
+    label: string;
+    condition?: (job: JobItem) => boolean;
+}
+
 interface JobResult {
     artist?: string;
     title?: string;
@@ -4125,7 +4131,7 @@ class App {
                 </div>
                 <div class="match-activity-stages">
                     ${stageRows.map(stage => {
-            const stageStatus = this.resolvePlexSyncStageStatus(job, stage.key, stages);
+            const stageStatus = this.resolveStageStatus(job, stage.key, stages);
             return `
                             <div class="job-stage">
                                 <span>${stage.label}</span>
@@ -5202,6 +5208,54 @@ class App {
         }
     }
 
+    /** Shared: render stage pills from stage definitions */
+    private renderStageHtml(stageDefs: StageDef[], job: JobItem, stages: Record<string, string>): string {
+        return stageDefs.map(stage => {
+            if (stage.condition && !stage.condition(job)) {
+                return '';
+            }
+            const status = this.resolveStageStatus(job, stage.key, stages);
+            const stageLabel = this.formatStageStatus(status);
+            return `
+                <div class="job-stage">
+                    <span>${this.escapeHtml(stage.label)}</span>
+                    <span class="job-stage-status status-${status}">${stageLabel}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /** Shared: build card shell with standardized #N badge */
+    private renderCardShell(
+        title: string,
+        jobId: number,
+        actionsClass: string,
+        statusLabel: string,
+        statusClass: string,
+        showCancelButton: boolean,
+        showRetryButton: boolean,
+        bodyHtml: string,
+        stageHtml: string,
+    ): string {
+        return `
+            <div class="job-item">
+                <div class="job-main">
+                    <div class="job-title-row">
+                        <span class="job-title">${this.escapeHtml(title)}</span>
+                        <span class="job-id-badge">#${jobId}</span>
+                    </div>
+                    <div class="${actionsClass}">
+                        <div class="job-status ${statusClass}">${statusLabel}</div>
+                        ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${jobId}">Cancel</button>` : ''}
+                        ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${jobId}">Retry</button>` : ''}
+                    </div>
+                </div>
+                ${bodyHtml}
+                <div class="job-stages">${stageHtml}</div>
+            </div>
+        `;
+    }
+
     private renderJobItem(job: JobItem): string {
         const title = this.getJobDisplayTitle(job);
         const effectiveStatus = this.getEffectiveJobStatus(job);
@@ -5210,7 +5264,7 @@ class App {
         const showCancelButton = effectiveStatus === 'queued' || effectiveStatus === 'in_progress';
         const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
         const actionsClass = `job-main-actions${showCancelButton ? ' cancel-on-hover' : ''}`;
-        const stages = job.result?.stages || {};
+        const stages = (job.result?.stages || {}) as Record<string, string>;
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
         const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
@@ -5221,323 +5275,137 @@ class App {
             ? this.resolvePlexUserName(String(job.payload.plex_user_id))
             : null;
 
+        // Build stage definitions and body sections per job type
+        let stageDefs: StageDef[];
+        let bodyHtml = '';
+
         if (job.job_type === 'plex_library_sync') {
-            const stageRows = [
+            stageDefs = [
                 { key: 'reading_plex_library', label: 'Reading Plex Library' },
                 { key: 'updating_local_index', label: 'Updating Local Index' },
                 { key: 'labeling_explicit_albums', label: 'Labeling Explicit Albums' },
                 { key: 'backfilling_track_ids_from_tags', label: 'Backfilling Track IDs from Tags' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = job.result?.progress as Record<string, unknown> || {};
-            const processed = Number(progress.processed_tracks || 0);
-            const total = Number(progress.total_tracks || 0);
-            const upserted = Number(progress.upserted_songs || 0);
-            const deleted = Number(progress.deleted_songs || 0);
-            const tagsRead = Number(progress.tags_read || 0);
-            const tagsUpdated = Number(progress.tags_updated || 0);
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const processed = Number(p.processed_tracks || 0);
+            const total = Number(p.total_tracks || 0);
+            const upserted = Number(p.upserted_songs || 0);
+            const deleted = Number(p.deleted_songs || 0);
+            const tagsRead = Number(p.tags_read || 0);
+            const tagsUpdated = Number(p.tags_updated || 0);
             const syncText = total > 0
                 ? `${processed}/${total} tracks processed • ${upserted} upserted • ${deleted} removed`
                 : `${upserted} upserted • ${deleted} removed`;
             const tagText = `${tagsRead} tags read • ${tagsUpdated} updated`;
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(syncText)}</div>
-                    <div class="job-sync-progress">${this.escapeHtml(tagText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'plex_library_update') {
-            const stageRows = [
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(syncText)}</div>\n<div class="job-sync-progress">${this.escapeHtml(tagText)}</div>`;
+        } else if (job.job_type === 'plex_library_update') {
+            stageDefs = [
                 { key: 'scanning_plex_library', label: 'Scanning Plex Library' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexLibraryUpdateStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const scanCompleted = progress.scan_completed === true;
-            const syncQueueStatus = String(progress.sync_queue_status || 'pending');
-            const syncJobId = Number(progress.sync_job_id || 0);
-
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const scanCompleted = p.scan_completed === true;
             const progressText = scanCompleted ? 'Library scan completed' : '';
-
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'automatic_matching') {
-            const stageRows = [
+            if (progressText) {
+                bodyHtml = `<div class="job-sync-progress success">${this.escapeHtml(progressText)}</div>`;
+            }
+        } else if (job.job_type === 'automatic_matching') {
+            stageDefs = [
                 { key: 'plex_library_update', label: 'Plex Library Update' },
                 { key: 'plex_sync', label: 'Plex Sync' },
                 { key: 'tag_analysis', label: 'Tag Analysis' },
                 { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
-            const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
-            const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
-            const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
-            const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
-            const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const plexSyncTracks = typeof p.plex_sync_tracks === 'number' ? p.plex_sync_tracks : 0;
+            const tagScanned = typeof p.tag_scanned === 'number' ? p.tag_scanned : 0;
+            const tagFilled = typeof p.tag_filled === 'number' ? p.tag_filled : 0;
+            const hifiTracks = typeof p.hifi_tracks_matched === 'number' ? p.hifi_tracks_matched : 0;
+            const hifiAlbums = typeof p.hifi_albums_matched === 'number' ? p.hifi_albums_matched : 0;
+            const hifiArtists = typeof p.hifi_artists_matched === 'number' ? p.hifi_artists_matched : 0;
             const progressText = `Plex: ${plexSyncTracks} tracks synced • Tags: ${tagScanned} scanned • ${tagFilled} filled • HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched`;
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'plex_listen_history_sync') {
-            const stageRows = [
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'plex_listen_history_sync') {
+            stageDefs = [
                 { key: 'resolving_accounts', label: 'Resolving Accounts' },
                 { key: 'fetching_history', label: 'Fetching History' },
                 { key: 'storing_entries', label: 'Storing Entries' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const usersProcessed = Number(progress.users_processed || 0);
-            const totalUsers = Number(progress.total_users || 0);
-            const entriesFetched = Number(progress.entries_fetched || 0);
-            const entriesStored = Number(progress.entries_stored || 0);
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const usersProcessed = Number(p.users_processed || 0);
+            const totalUsers = Number(p.total_users || 0);
+            const entriesFetched = Number(p.entries_fetched || 0);
+            const entriesStored = Number(p.entries_stored || 0);
             const resultData = (job.result || {}) as Record<string, unknown>;
             const totalFetched = Number(resultData.total_entries_fetched || 0);
             const totalStored = Number(resultData.total_entries_stored || 0);
             const progressText = totalFetched > 0
                 ? `${usersProcessed}/${totalUsers} users • ${totalFetched} entries fetched • ${totalStored} stored`
                 : `${usersProcessed}/${totalUsers} users processed`;
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'generate_recommendations') {
-            const stageRows = [
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'generate_recommendations') {
+            stageDefs = [
                 { key: 'syncing_listen_history', label: 'Syncing Listen History' },
                 { key: 'gathering_seeds', label: 'Gathering Seeds' },
                 { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
                 { key: 'processing_tracks', label: 'Processing Tracks' },
                 { key: 'saving_playlist', label: 'Saving Playlist' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const seedsFound = Number(progress.seeds_found || 0);
-            const recsFetched = Number(progress.recommendations_fetched || 0);
-            const afterFilter = Number(progress.tracks_after_filter || 0);
-            const saved = Number(progress.tracks_saved || 0);
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const seedsFound = Number(p.seeds_found || 0);
+            const recsFetched = Number(p.recommendations_fetched || 0);
+            const afterFilter = Number(p.tracks_after_filter || 0);
+            const saved = Number(p.tracks_saved || 0);
             const progressText = seedsFound > 0
                 ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter • ${saved} tracks saved`
                 : 'Waiting to start...';
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'bulk_playlist_add') {
-            const stageRows = [
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'bulk_playlist_add') {
+            stageDefs = [
                 { key: 'resolving_tracks', label: 'Resolving Tracks' },
                 { key: 'adding_to_playlists', label: 'Adding to Playlists' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result || {}) as Record<string, unknown>;
-            const total = Number(progress.total_tracks || 0);
-            const processed = Number(progress.tracks_processed || 0);
-            const added = Number(progress.tracks_added || 0);
-            const skipped = Number(progress.tracks_skipped || 0);
-            const failed = Number(progress.tracks_failed || 0);
+            const p = (job.result || {}) as Record<string, unknown>;
+            const total = Number(p.total_tracks || 0);
+            const processed = Number(p.tracks_processed || 0);
+            const added = Number(p.tracks_added || 0);
+            const skipped = Number(p.tracks_skipped || 0);
+            const failed = Number(p.tracks_failed || 0);
             const progressText = total > 0
                 ? `Processing ${processed}/${total} tracks • ${added} added • ${skipped} skipped • ${failed} failed`
                 : 'Waiting to start...';
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else {
+            // download_track (fallthrough)
+            stageDefs = [
+                { key: 'downloaded', label: 'Downloaded' },
+                { key: 'tagged', label: 'Tagged' },
+                { key: 'written', label: 'Written to Disk' },
+                ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
+                ...(playlistName ? [{
+                    key: 'playlist_added',
+                    label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"${resolvedPlexUserName ? ` for ${this.escapeHtml(resolvedPlexUserName)}` : ''}`
+                }] : []),
+            ];
 
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
+            const sections: string[] = [];
+            if (skippedExisting) {
+                sections.push('<div class="job-sync-progress">Used existing file (download skipped)</div>');
+            }
+            if (upgradedExisting) {
+                sections.push(`<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>`);
+            }
+            if (downloadMirror) {
+                sections.push(`<div class="job-sync-progress">Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
+            }
+            if (effectiveStatus === 'failed' && job.error_message) {
+                sections.push(`<div class="job-error">${this.escapeHtml(job.error_message)}</div>`);
+            }
+            bodyHtml = sections.join('\n');
         }
 
-        const stageRows = [
-            { key: 'downloaded', label: 'Downloaded' },
-            { key: 'tagged', label: 'Tagged' },
-            { key: 'written', label: 'Written to Disk' },
-            ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
-             ...(playlistName ? [{
-key: 'playlist_added',
-                 label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"${resolvedPlexUserName ? ` for ${this.escapeHtml(resolvedPlexUserName)}` : ''}`
-            }] : []),
-        ];
-
-        const stageHtml = stageRows.map(stage => {
-            const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
-            const stageLabel = this.formatStageStatus(status);
-            return `
-                <div class="job-stage">
-                    <span>${stage.label}</span>
-                    <span class="job-stage-status status-${status}">${stageLabel}</span>
-                </div>
-            `;
-        }).filter(Boolean).join('');
-
-        return `
-            <div class="job-item">
-                <div class="job-main">
-                    <div class="job-title">${this.escapeHtml(title)}</div>
-                    <div class="${actionsClass}">
-                        <div class="job-status ${statusClass}">${statusLabel}</div>
-                        ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                        ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                    </div>
-                </div>
-                ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
-                ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
-                ${downloadMirror ? `<div class="job-sync-progress">Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>` : ''}
-                ${effectiveStatus === 'failed' && job.error_message ? `<div class="job-error">${this.escapeHtml(job.error_message)}</div>` : ''}
-                <div class="job-stages">
-                    ${stageHtml}
-                </div>
-            </div>
-        `;
+        const stageHtml = this.renderStageHtml(stageDefs, job, stages);
+        return this.renderCardShell(title, job.id, actionsClass, statusLabel, statusClass,
+            showCancelButton, showRetryButton, bodyHtml, stageHtml);
     }
 
     private getJobDisplayTitle(job: JobItem): string {
@@ -5574,35 +5442,35 @@ key: 'playlist_added',
         if (job.job_type === 'automatic_matching') {
             const trigger = String(job.payload?.trigger || '').trim();
             if (trigger === 'manual') {
-                return `Automatic Matching (Manual) #${job.id}`;
+                return 'Automatic Matching (Manual)';
             }
-            return `Automatic Matching #${job.id}`;
+            return 'Automatic Matching';
         }
 
         if (job.job_type === 'plex_listen_history_sync') {
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
             if (trigger === 'post_library_sync') {
-                return `Listen History Sync (Auto) #${job.id}`;
+                return 'Listen History Sync (Auto)';
             }
             if (trigger === 'manual') {
-                return `Listen History Sync (Manual) #${job.id}`;
+                return 'Listen History Sync (Manual)';
             }
-            return `Listen History Sync #${job.id}`;
+            return 'Listen History Sync';
         }
 
         if (job.job_type === 'generate_recommendations') {
             const username = job.payload?.plex_username || 'Unknown';
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
-            if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled) #${job.id}`;
-            if (trigger === 'manual') return `Fresh Finds - ${username} (Manual) #${job.id}`;
-            return `Fresh Finds - ${username} #${job.id}`;
+            if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled)`;
+            if (trigger === 'manual') return `Fresh Finds - ${username} (Manual)`;
+            return `Fresh Finds - ${username}`;
         }
 
         if (job.job_type === 'bulk_playlist_add') {
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
-            if (trigger === 'post_library_sync') return `Playlist Update (Auto) #${job.id}`;
-            if (trigger === 'manual') return `Playlist Update (Manual) #${job.id}`;
-            return `Playlist Update #${job.id}`;
+            if (trigger === 'post_library_sync') return 'Playlist Update (Auto)';
+            if (trigger === 'manual') return 'Playlist Update (Manual)';
+            return 'Playlist Update';
         }
 
         const artist = job.result?.artist || job.payload?.artist;
@@ -5630,7 +5498,7 @@ key: 'playlist_added',
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
 
-    private resolveStageStatus(job: JobItem, key: keyof JobStageMap, stages: JobStageMap): string {
+    private resolveStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
         const value = stages[key];
         if (value) {
             return value;
@@ -5653,40 +5521,6 @@ key: 'playlist_added',
         }
 
         return status.replace('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
-    }
-
-    private resolvePlexSyncStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
-        const value = stages[key];
-        if (value) {
-            return value;
-        }
-
-        if (job.status === 'succeeded') {
-            return 'done';
-        }
-
-        if (job.status === 'cancelled') {
-            return 'skipped';
-        }
-
-        return 'pending';
-    }
-
-    private resolvePlexLibraryUpdateStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
-        const value = stages[key];
-        if (value) {
-            return value;
-        }
-
-        if (job.status === 'succeeded') {
-            return 'done';
-        }
-
-        if (job.status === 'cancelled') {
-            return 'skipped';
-        }
-
-        return 'pending';
     }
 
     private openSettingsFlyout(): void {
