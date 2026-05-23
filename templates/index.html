@@ -232,15 +232,19 @@
                     <div class="settings-content">
                         <div class="settings-section" id="downloadsSettings">
                             <h3>Downloads</h3>
-                            <label class="settings-label" for="downloadSourceTidal" style="margin-bottom: 0.5rem;">Download Source</label>
-                            <div class="format-toggle" role="radiogroup" aria-label="Download source">
-                                <label class="toggle-option">
-                                    <input type="radio" name="downloadSource" value="tidal" id="downloadSourceTidal">
+                            <label class="settings-label" style="margin-bottom: 0.5rem;">Download Sources (priority order)</label>
+                            <div id="downloadSourceList" class="download-source-list">
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="tidal" id="downloadSourceTidal" checked>
                                     <span>Tidal</span>
+                                    <button type="button" class="source-move-up" data-source="tidal" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="tidal" title="Move down">↓</button>
                                 </label>
-                                <label class="toggle-option">
-                                    <input type="radio" name="downloadSource" value="qobuz" id="downloadSourceQobuz">
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="qobuz" id="downloadSourceQobuz">
                                     <span>Qobuz</span>
+                                    <button type="button" class="source-move-up" data-source="qobuz" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="qobuz" title="Move down">↓</button>
                                 </label>
                             </div>
                             <label class="settings-label" for="qualityLossless" style="margin-top: 1rem; margin-bottom: 0.5rem;">Quality</label>

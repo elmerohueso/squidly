@@ -610,8 +610,7 @@ class App {
     private qualityLosslessInput: HTMLInputElement;
     private qualityHighInput: HTMLInputElement;
     private qualityLowInput: HTMLInputElement;
-    private downloadSourceTidalInput: HTMLInputElement;
-    private downloadSourceQobuzInput: HTMLInputElement;
+    private downloadSourceList: HTMLElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
@@ -928,8 +927,7 @@ class App {
         this.qualityLosslessInput = document.getElementById('qualityLossless') as HTMLInputElement;
         this.qualityHighInput = document.getElementById('qualityHigh') as HTMLInputElement;
         this.qualityLowInput = document.getElementById('qualityLow') as HTMLInputElement;
-        this.downloadSourceTidalInput = document.getElementById('downloadSourceTidal') as HTMLInputElement;
-        this.downloadSourceQobuzInput = document.getElementById('downloadSourceQobuz') as HTMLInputElement;
+        this.downloadSourceList = document.getElementById('downloadSourceList') as HTMLElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
@@ -1212,11 +1210,37 @@ class App {
         if (this.qualityLowInput) {
             this.qualityLowInput.addEventListener('change', () => this.updateSettingsFromForm());
         }
-        if (this.downloadSourceTidalInput) {
-            this.downloadSourceTidalInput.addEventListener('change', () => this.updateSettingsFromForm());
-        }
-        if (this.downloadSourceQobuzInput) {
-            this.downloadSourceQobuzInput.addEventListener('change', () => this.updateSettingsFromForm());
+        // Download source checkboxes + reorder buttons
+        if (this.downloadSourceList) {
+            this.downloadSourceList.addEventListener('change', (e) => {
+                const target = e.target as HTMLInputElement;
+                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz')) {
+                    // Ensure at least one source is checked
+                    const checkedBoxes = this.downloadSourceList.querySelectorAll('input[type="checkbox"]:checked');
+                    if (checkedBoxes.length === 0) {
+                        target.checked = true;
+                        return;
+                    }
+                    this.updateSettingsFromForm();
+                }
+            });
+            this.downloadSourceList.addEventListener('click', (e) => {
+                const btn = (e.target as HTMLElement).closest('.source-move-up, .source-move-down');
+                if (!btn) return;
+                e.preventDefault();
+                const item = (btn as HTMLElement).closest('.download-source-item');
+                if (!item) return;
+                const list = item.parentElement;
+                if (!list) return;
+                const items = Array.from(list.querySelectorAll('.download-source-item'));
+                const idx = items.indexOf(item);
+                if (btn.classList.contains('source-move-up') && idx > 0) {
+                    list.insertBefore(item, items[idx - 1]);
+                } else if (btn.classList.contains('source-move-down') && idx < items.length - 1) {
+                    list.insertBefore(item, items[idx + 1].nextSibling);
+                }
+                this.updateSettingsFromForm();
+            });
         }
         if (this.fileNamingAlbumInput) {
             this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
@@ -5806,12 +5830,7 @@ key: 'playlist_added',
         this.qualityLosslessInput.checked = settings.quality === 'LOSSLESS';
         this.qualityHighInput.checked = settings.quality === 'HIGH';
         this.qualityLowInput.checked = settings.quality === 'LOW';
-        if (this.downloadSourceTidalInput) {
-            this.downloadSourceTidalInput.checked = settings.downloadSource === 'tidal';
-        }
-        if (this.downloadSourceQobuzInput) {
-            this.downloadSourceQobuzInput.checked = settings.downloadSource === 'qobuz';
-        }
+        this.applyDownloadSourceToForm(settings.downloadSource);
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
@@ -5850,7 +5869,7 @@ key: 'playlist_added',
         }
 
         return {
-            downloadSource: this.downloadSourceTidalInput?.checked ? 'tidal' : this.downloadSourceQobuzInput?.checked ? 'qobuz' : (this.downloadSettings?.downloadSource ?? 'tidal'),
+            downloadSource: this.readDownloadSourceFromForm(),
             quality,
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
@@ -6004,7 +6023,7 @@ key: 'playlist_added',
         const highLabel = this.qualityHighInput.closest('label');
         const lowLabel = this.qualityLowInput.closest('label');
 
-        const isQobuz = this.downloadSourceQobuzInput?.checked ?? false;
+        const isQobuz = this.isDownloadSourceChecked('qobuz');
 
         if (losslessLabel) {
             losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
@@ -6020,9 +6039,9 @@ key: 'playlist_added',
                 lowLabel.title = 'Qobuz does not support LOW quality';
                 lowLabel.classList.add('disabled');
                 if (lowInput.checked) {
-                    this.qualityLosslessInput.checked = true;
+                    this.qualityHighInput.checked = true;
                     lowInput.checked = false;
-                    if (losslessLabel) losslessLabel.classList.add('active');
+                    if (highLabel) highLabel.classList.add('active');
                     lowLabel.classList.remove('active');
                 }
             } else {
@@ -6034,10 +6053,92 @@ key: 'playlist_added',
             lowLabel.classList.toggle('active', this.qualityLowInput.checked);
         }
 
-        const tidalLabel = this.downloadSourceTidalInput?.closest('label');
-        const qobuzLabel = this.downloadSourceQobuzInput?.closest('label');
-        if (tidalLabel) tidalLabel.classList.toggle('active', this.downloadSourceTidalInput?.checked ?? false);
-        if (qobuzLabel) qobuzLabel.classList.toggle('active', this.downloadSourceQobuzInput?.checked ?? false);
+        this.syncDownloadSourceItemStyles();
+    }
+
+    // --- Download source helpers ---
+
+    private isDownloadSourceChecked(source: string): boolean {
+        if (!this.downloadSourceList) return false;
+        const cb = this.downloadSourceList.querySelector(`input[type="checkbox"][value="${source}"]`) as HTMLInputElement | null;
+        return cb?.checked ?? false;
+    }
+
+    private applyDownloadSourceToForm(value: string): void {
+        if (!this.downloadSourceList) return;
+        const sources = value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const items = Array.from(this.downloadSourceList.querySelectorAll('.download-source-item')) as HTMLElement[];
+
+        // Check the right boxes
+        items.forEach(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            if (cb) {
+                cb.checked = sources.includes(cb.value.toLowerCase());
+            }
+        });
+
+        // Reorder DOM to match priority: checked items first in order, then unchecked
+        const checkedItems = items.filter(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            return cb?.checked;
+        });
+        const uncheckedItems = items.filter(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            return !cb?.checked;
+        });
+
+        // Sort checked items by their priority order in the sources string
+        checkedItems.sort((a, b) => {
+            const va = (a.querySelector('input[type="checkbox"]') as HTMLInputElement)?.value.toLowerCase() || '';
+            const vb = (b.querySelector('input[type="checkbox"]') as HTMLInputElement)?.value.toLowerCase() || '';
+            return sources.indexOf(va) - sources.indexOf(vb);
+        });
+
+        // Re-append in order
+        items.forEach(item => item.remove());
+        checkedItems.forEach(item => this.downloadSourceList!.appendChild(item));
+        uncheckedItems.forEach(item => this.downloadSourceList!.appendChild(item));
+
+        this.syncDownloadSourceItemStyles();
+    }
+
+    private readDownloadSourceFromForm(): string {
+        if (!this.downloadSourceList) return 'tidal';
+        const items = Array.from(this.downloadSourceList.querySelectorAll('.download-source-item'));
+        const checked = items
+            .map(item => item.querySelector('input[type="checkbox"]') as HTMLInputElement | null)
+            .filter((cb): cb is HTMLInputElement => cb !== null && cb.checked)
+            .map(cb => cb.value.toLowerCase());
+        return checked.length > 0 ? checked.join(',') : 'tidal';
+    }
+
+    private syncDownloadSourceItemStyles(): void {
+        if (!this.downloadSourceList) return;
+        const items = this.downloadSourceList.querySelectorAll('.download-source-item');
+        items.forEach(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+            if (cb) {
+                item.classList.toggle('active', cb.checked);
+            }
+        });
+    }
+
+    private syncQobuzMirrorAvailability(hasQobuzMirrors: boolean): void {
+        if (!this.downloadSourceList) return;
+        const qobuzItem = this.downloadSourceList.querySelector('.download-source-item input[value="qobuz"]')?.closest('.download-source-item');
+        if (!qobuzItem) return;
+        const cb = qobuzItem.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        const label = qobuzItem as HTMLElement;
+
+        cb.disabled = !hasQobuzMirrors;
+        cb.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
+        label.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
+        label.classList.toggle('disabled', !hasQobuzMirrors);
+
+        if (!hasQobuzMirrors && cb.checked) {
+            cb.checked = false;
+            this.updateSettingsFromForm();
+        }
     }
 
     private async loadListenbrainzConfig(): Promise<void> {
@@ -7013,20 +7114,7 @@ key: 'playlist_added',
             this.displayEndpointStatus(data);
 
             const hasQobuzMirrors = data.endpoints.some(e => e.mirrorType === 'qobuz');
-            if (this.downloadSourceQobuzInput) {
-                this.downloadSourceQobuzInput.disabled = !hasQobuzMirrors;
-                this.downloadSourceQobuzInput.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
-                const qobuzLabel = this.downloadSourceQobuzInput.closest('label');
-                if (qobuzLabel) {
-                    qobuzLabel.classList.toggle('disabled', !hasQobuzMirrors);
-                    qobuzLabel.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
-                }
-                if (!hasQobuzMirrors && this.downloadSourceQobuzInput.checked) {
-                    this.downloadSourceTidalInput.checked = true;
-                    this.downloadSourceQobuzInput.checked = false;
-                    this.updateSettingsFromForm();
-                }
-            }
+            this.syncQobuzMirrorAvailability(hasQobuzMirrors);
         } catch (error) {
             console.error('Error fetching endpoint status:', error);
         }
