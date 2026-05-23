@@ -1382,7 +1382,7 @@ def process_download_job(job_id, payload):
             # Success — exit the source loop
             break
 
-        except (ValueError, downloads.TransientDownloadError, RuntimeError) as e:
+        except (ValueError, downloads.TransientDownloadError, RuntimeError, requests.exceptions.RequestException) as e:
             last_download_error = str(e)
             logger.info("[DOWNLOAD] Source '%s' failed, %s", current_source,
                         "trying next source..." if len(download_sources) > 1 else "no more sources")
@@ -1578,6 +1578,7 @@ def process_download_job(job_id, payload):
         'title': track_title,
         'playlist_name': playlist_name,
         'download_mirror': download_mirror,
+        'mirror_type': current_source,
         'stages': stages
     }
     return result

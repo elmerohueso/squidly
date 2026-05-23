@@ -5270,6 +5270,7 @@ class App {
         const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
         const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
         const downloadMirror = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.download_mirror as string | null ?? null) : null;
+        const mirrorType = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.mirror_type as string | null ?? null) : null;
 
         const resolvedPlexUserName = job.payload?.plex_user_id
             ? this.resolvePlexUserName(String(job.payload.plex_user_id))
@@ -5395,7 +5396,8 @@ class App {
                 sections.push(`<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>`);
             }
             if (downloadMirror) {
-                sections.push(`<div class="job-sync-progress">Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
+                const badge = mirrorType ? `<span class="mirror-type-badge mirror-type-${this.escapeHtml(mirrorType)}">${this.escapeHtml(mirrorType)}</span> ` : '';
+                sections.push(`<div class="job-sync-progress">${badge}Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
             }
             if (effectiveStatus === 'failed' && job.error_message) {
                 sections.push(`<div class="job-error">${this.escapeHtml(job.error_message)}</div>`);
