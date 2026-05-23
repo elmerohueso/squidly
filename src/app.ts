@@ -751,6 +751,8 @@ class App {
     private historyLoading: boolean = false;
 
     private timezone: string = 'UTC';
+    private readonly THEME_STORAGE_KEY = 'squidly-theme';
+    private themeSelect: HTMLSelectElement;
 
     private getSearchTypeName(searchType?: string): string {
         const normalized = (searchType || 's').toLowerCase();
@@ -925,6 +927,7 @@ class App {
         this.matchReviewSummary = document.getElementById('matchReviewSummary') as HTMLElement;
         this.matchReviewContent = document.getElementById('matchReviewContent') as HTMLElement;
         this.historyTableContainer = document.getElementById('historyTableContainer') as HTMLElement;
+        this.themeSelect = document.getElementById('themeSelect') as HTMLSelectElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
@@ -1027,12 +1030,29 @@ class App {
         // Initialize user button and sidebar playlists
         void this.initializeUserButton();
 
+        this.initializeTheme();
+
         this.updateEndpointStatus(); // Initial load
 
         // Update status every 30 seconds
         this.statusUpdateInterval = window.setInterval(() => {
             this.updateEndpointStatus();
         }, 30000);
+    }
+
+    private initializeTheme(): void {
+        const savedTheme = window.localStorage.getItem(this.THEME_STORAGE_KEY) || 'tidal';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        if (this.themeSelect) {
+            this.themeSelect.value = savedTheme;
+        }
+    }
+
+    private handleThemeChange(e: Event): void {
+        const select = e.target as HTMLSelectElement;
+        const theme = select.value;
+        document.documentElement.setAttribute('data-theme', theme);
+        window.localStorage.setItem(this.THEME_STORAGE_KEY, theme);
     }
 
     private initializeEventListeners(): void {
@@ -1204,6 +1224,10 @@ class App {
         }
         if (this.settingsOverlay) {
             this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+        }
+
+        if (this.themeSelect) {
+            this.themeSelect.addEventListener('change', (e) => this.handleThemeChange(e));
         }
 
         if (this.qualityLosslessInput) {

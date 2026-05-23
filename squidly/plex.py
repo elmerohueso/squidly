@@ -853,7 +853,7 @@ def create_fresh_finds_plex_playlist(plex_account_id, playlist_name, tracks):
         return False, f'Failed to connect to Plex: {str(e)}'
 
     # Look up track hifi_ids in the local tracks table to get Plex library_ids
-    hifi_ids = [t.get('hifi_id') for t in tracks if t.get('hifi_id')]
+    hifi_ids = [str(t.get('hifi_id')) for t in tracks if t.get('hifi_id')]
     if not hifi_ids:
         return False, 'No tracks with hifi_ids provided'
 
