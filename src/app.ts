@@ -491,7 +491,6 @@ interface JobItem {
 interface JobFilterTotals {
     incomplete: number;
     complete: number;
-    completed_with_errors: number;
     failed: number;
 }
 
@@ -3692,7 +3691,7 @@ class App {
             const totalCount = typeof data.total_count === 'number' && Number.isFinite(data.total_count)
                 ? Math.max(0, Math.floor(data.total_count))
                 : jobs.length;
-            const retryableCount = (filter === 'completed_with_errors' || filter === 'failed')
+            const retryableCount = (filter === 'failed')
                 ? jobs.length
                 : 0;
             this.jobsListCache = jobs;
@@ -3714,7 +3713,7 @@ class App {
         let cancelCount = 0;
         if (filter === 'incomplete') {
             cancelCount = incompleteCount;
-        } else if (filter === 'failed' || filter === 'completed_with_errors') {
+        } else if (filter === 'failed') {
             cancelCount = this.jobsListCache.length;
         }
 
@@ -3755,7 +3754,7 @@ class App {
 
         if (selectedFilter === 'incomplete') {
             await this.cancelIncompleteJobs();
-        } else if (selectedFilter === 'failed' || selectedFilter === 'completed_with_errors') {
+        } else if (selectedFilter === 'failed') {
             await this.cancelFailedJobs();
         }
     }
@@ -3835,7 +3834,7 @@ class App {
 
     private async retryAllFilteredJobs(): Promise<void> {
         const selectedFilter = this.jobsFilterSelect.value;
-        if (selectedFilter !== 'completed_with_errors' && selectedFilter !== 'failed') {
+        if (selectedFilter !== 'failed') {
             return;
         }
 
@@ -3912,20 +3911,12 @@ class App {
             return 'failed';
         }
 
-        if (stages?.playlist_added === 'failed') {
-            return 'completed_with_errors';
-        }
-
         return job.status;
     }
 
     private filterJobsByStatus(jobs: JobItem[], filter: string): JobItem[] {
         if (filter === 'failed') {
             return jobs.filter(job => this.getEffectiveJobStatus(job) === 'failed');
-        }
-
-        if (filter === 'completed_with_errors') {
-            return jobs.filter(job => this.getEffectiveJobStatus(job) === 'completed_with_errors');
         }
 
         if (filter === 'complete') {
@@ -5262,7 +5253,7 @@ class App {
         const statusLabel = this.formatJobStatus(effectiveStatus);
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
         const showCancelButton = effectiveStatus === 'queued' || effectiveStatus === 'in_progress';
-        const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
+        const showRetryButton = job.job_type === 'download_track' && effectiveStatus === 'failed';
         const actionsClass = `job-main-actions${showCancelButton ? ' cancel-on-hover' : ''}`;
         const stages = (job.result?.stages || {}) as Record<string, string>;
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
@@ -5493,9 +5484,6 @@ class App {
     private formatJobStatus(status: string): string {
         if (status === 'in_progress') {
             return 'In-Progress';
-        }
-        if (status === 'completed_with_errors') {
-            return 'Completed with errors';
         }
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
@@ -5774,7 +5762,6 @@ class App {
         const fallback: JobFilterTotals = {
             incomplete: this.filterJobsByStatus(fallbackJobs, 'incomplete').length,
             complete: this.filterJobsByStatus(fallbackJobs, 'complete').length,
-            completed_with_errors: this.filterJobsByStatus(fallbackJobs, 'completed_with_errors').length,
             failed: this.filterJobsByStatus(fallbackJobs, 'failed').length
         };
 
@@ -5793,7 +5780,6 @@ class App {
         return {
             incomplete: parseCount(raw.incomplete, fallback.incomplete),
             complete: parseCount(raw.complete, fallback.complete),
-            completed_with_errors: parseCount(raw.completed_with_errors, fallback.completed_with_errors),
             failed: parseCount(raw.failed, fallback.failed)
         };
     }
@@ -5801,7 +5787,6 @@ class App {
     private updateJobsFilterCounts(totals: JobFilterTotals): void {
         const incompleteCount = totals.incomplete;
         const completeCount = totals.complete;
-        const completedWithErrorsCount = totals.completed_with_errors;
         const failedCount = totals.failed;
 
         const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
@@ -5812,11 +5797,6 @@ class App {
         const completeOption = this.jobsFilterSelect.querySelector('option[value="complete"]');
         if (completeOption) {
             completeOption.textContent = `Complete (${completeCount})`;
-        }
-
-        const completedWithErrorsOption = this.jobsFilterSelect.querySelector('option[value="completed_with_errors"]');
-        if (completedWithErrorsOption) {
-            completedWithErrorsOption.textContent = `Completed with errors (${completedWithErrorsCount})`;
         }
 
         const failedOption = this.jobsFilterSelect.querySelector('option[value="failed"]');
@@ -11380,7 +11360,7 @@ class App {
         const effectiveStatus = this.getEffectiveJobStatus(job);
         this.setJobStatusIcon(context.downloadBtn, effectiveStatus);
 
-        if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed_with_errors') {
+        if (effectiveStatus === 'succeeded') {
             this.setDownloadButtonCompleted(context.downloadBtn);
             context.downloadBtn.disabled = true;
             this.activeJobMap.delete(job.id);

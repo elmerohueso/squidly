@@ -2626,7 +2626,7 @@ def list_jobs():
     Query parameters:
     - status: filter by raw job status
     - job_type: filter by job type
-    - jobs_filter: one of incomplete|complete|completed_with_errors|failed
+    - jobs_filter: one of incomplete|complete|failed
     - exclude_bulk_playlist_add: default false
     - limit: optional max number of rows (no backend-enforced maximum)
     - offset: pagination offset (default 0)
@@ -2692,8 +2692,6 @@ def list_jobs():
 
             if jobs_filter == 'failed':
                 return effective_status == 'failed'
-            if jobs_filter == 'completed_with_errors':
-                return effective_status == 'completed_with_errors'
             if jobs_filter == 'complete':
                 return effective_status == 'succeeded'
             if jobs_filter == 'incomplete':
@@ -2765,9 +2763,6 @@ def _effective_job_status(job_type, status, result_json):
     if stages.get('written') == 'failed':
         return 'failed'
 
-    if stages.get('playlist_added') == 'failed':
-        return 'completed_with_errors'
-
     return status
 
 def get_jobs_filter_totals(exclude_bulk_playlist_add=False):
@@ -2790,7 +2785,6 @@ def get_jobs_filter_totals(exclude_bulk_playlist_add=False):
     totals = {
         'incomplete': 0,
         'complete': 0,
-        'completed_with_errors': 0,
         'failed': 0
     }
 
@@ -2805,8 +2799,6 @@ def get_jobs_filter_totals(exclude_bulk_playlist_add=False):
             totals['incomplete'] += 1
         elif effective_status == 'succeeded':
             totals['complete'] += 1
-        elif effective_status == 'completed_with_errors':
-            totals['completed_with_errors'] += 1
         elif effective_status == 'failed':
             totals['failed'] += 1
 
@@ -2984,7 +2976,7 @@ def retry_job(job_id):
         return jsonify({'error': 'Job not found'}), 404
 
     effective_status = _effective_job_status(row['job_type'], row['status'], row.get('result_json'))
-    retryable = effective_status in ('failed', 'completed_with_errors')
+    retryable = effective_status == 'failed'
 
     if not retryable:
         conn.close()
