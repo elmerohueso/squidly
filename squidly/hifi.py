@@ -838,7 +838,7 @@ def _resolve_hifi_artist_details(artist_id: Any, artist_responses: Any) -> Dict[
     }
 
 
-def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_album: bool = False, audio_quality: Any = None) -> Dict[str, Any]:
+def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_album: bool = False, audio_quality: Any = None, mirror_type: Optional[str] = None) -> Dict[str, Any]:
     """Build a normalized track object by fetching HiFi track, album, and artist payloads.
 
     Args:
@@ -846,14 +846,15 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
         include_streams: If True, include `track_streams` from the manifest fetch.
         include_album: If True, include nested album metadata in the returned track.
         audio_quality: Optional requested audio quality for the manifest fetch.
+        mirror_type: If set, only query mirrors of this type ('tidal' or 'qobuz').
     """
-    track_response = _fetch_hifi_track_info_payload(track_id)
+    track_response = _fetch_hifi_track_info_payload(track_id, mirror_type=mirror_type)
     track_info = extract_hifi_track_info(track_response)
 
     album_info = {}
     if include_album:
         album_id = track_info.get('album_id')
-        album_response = _fetch_hifi_album_payload(album_id) if album_id is not None else {}
+        album_response = _fetch_hifi_album_payload(album_id, mirror_type=mirror_type) if album_id is not None else {}
         album_info = extract_hifi_album_info(album_response)
 
     missing_artist_ids = set()
@@ -876,7 +877,7 @@ def get_hifi_track_object(track_id: Any, include_streams: bool = False, include_
 
     artist_responses = {}
     for artist_id in missing_artist_ids:
-        artist_responses[artist_id] = _fetch_hifi_artist_payload(artist_id)
+        artist_responses[artist_id] = _fetch_hifi_artist_payload(artist_id, mirror_type=mirror_type)
 
     track_artists = []
     for artist_entry in track_info.get('track_artists', []):
@@ -1163,7 +1164,7 @@ def _fetch_hifi_search_results(search_type, query, limit=10):
     return data.get('items', []) or []
 
 
-def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
+def _fetch_hifi_artist_payload(artist_id, skip_tracks=False, mirror_type=None):
     params = {'f': str(artist_id)}
     if skip_tracks:
         params['skip_tracks'] = 'true'
@@ -1173,40 +1174,43 @@ def _fetch_hifi_artist_payload(artist_id, skip_tracks=False):
         _get_squid_urls(),
         method='GET',
         timeout=10,
-        max_retries=3
+        max_retries=3,
+        mirror_type=mirror_type,
     )
     if not response.ok:
         return {}
     return response.json() or {}
 
 
-def _fetch_hifi_album_payload(album_id):
+def _fetch_hifi_album_payload(album_id, mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/album/?{urlencode({'id': str(album_id)})}",
         _get_squid_urls(),
         method='GET',
         timeout=10,
-        max_retries=3
+        max_retries=3,
+        mirror_type=mirror_type,
     )
     if not response.ok:
         return {}
     return response.json() or {}
 
 
-def _fetch_hifi_track_payload(track_id, quality='LOW'):
+def _fetch_hifi_track_payload(track_id, quality='LOW', mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/track/?{urlencode({'id': str(track_id), 'quality': str(quality)})}",
         _get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
+        mirror_type=mirror_type,
     )
     if not response.ok:
         return {}
     return response.json() or {}
 
 
-def _fetch_hifi_track_manifests_payload(track_id, formats=None):
+def _fetch_hifi_track_manifests_payload(track_id, formats=None, mirror_type=None):
     params = {
         'id': str(track_id),
         'adaptive': 'true',
@@ -1223,19 +1227,21 @@ def _fetch_hifi_track_manifests_payload(track_id, formats=None):
         method='GET',
         timeout=10,
         max_retries=3,
+        mirror_type=mirror_type,
     )
     if not response.ok:
         return {}
     return response.json() or {}
 
 
-def _fetch_hifi_track_info_payload(track_id):
+def _fetch_hifi_track_info_payload(track_id, mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/info/?{urlencode({'id': str(track_id)})}",
         _get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
+        mirror_type=mirror_type,
     )
     if not response.ok:
         return {}

@@ -1008,7 +1008,8 @@ def process_download_job(job_id, payload):
             track_id,
             include_streams=False,
             include_album=True,
-            audio_quality=quality_choice
+            audio_quality=quality_choice,
+            mirror_type='tidal',
         )
     except Exception as e:
         raise downloads.TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
@@ -1351,7 +1352,8 @@ def process_download_job(job_id, payload):
                 output_path=temp_source_path,
                 quality=quality_choice,
                 url_list=SQUID_URLS,
-                usage='DOWNLOAD'
+                usage='DOWNLOAD',
+                for_download=True,
             )
             download_mirror = tidal_target['url'].rstrip('/')
         except Exception as e:
@@ -1361,6 +1363,8 @@ def process_download_job(job_id, payload):
         try:
             downloads.validate_audio_duration(temp_source_path, expected_duration)
         except RuntimeError as e:
+            if tidal_target:
+                downloads.disable_mirror_downloads(tidal_target['name'])
             raise downloads.TransientDownloadError(str(e)) from e
 
         with open(temp_source_path, 'rb') as tmp_file:
@@ -3110,7 +3114,7 @@ def endpoints_status():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT name, encoded_url, online, response_time, last_checked, enabled, mirror_type
+        SELECT name, encoded_url, online, response_time, last_checked, enabled, mirror_type, downloads_enabled
         FROM mirror_endpoints
         ORDER BY response_time ASC NULLS LAST, name ASC
         """
@@ -3128,6 +3132,7 @@ def endpoints_status():
             'lastChecked': row['last_checked'],
             'enabled': bool(row['enabled']),
             'mirrorType': row.get('mirror_type', 'tidal'),
+            'downloadsEnabled': bool(row.get('downloads_enabled', True)),
         })
 
     mirror_rate_limit_status = {}
@@ -3217,6 +3222,19 @@ def toggle_endpoint(name):
         _run_async(lambda: downloads.validate_single_endpoint(name))
 
     return jsonify({'name': name, 'enabled': bool(new_state)}), 200
+
+
+@app.route('/api/endpoints/<name>/toggle-download', methods=['POST'])
+def toggle_endpoint_downloads(name):
+    """Toggle whether a mirror is enabled for downloads."""
+    try:
+        new_state = downloads.toggle_mirror_downloads(name)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.info("[ENDPOINTS] Failed to toggle mirror downloads: %s", e)
+        return jsonify({'error': str(e)}), 500
+    return jsonify({'name': name, 'downloadsEnabled': bool(new_state)}), 200
 
 
 @app.route('/api/listenbrainz/config', methods=['GET'])

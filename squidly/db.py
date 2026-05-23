@@ -122,6 +122,8 @@ def init_db():
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
     if 'mirror_type' not in mirror_columns:
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN mirror_type TEXT NOT NULL DEFAULT 'tidal'")
+    if 'downloads_enabled' not in mirror_columns:
+        cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN downloads_enabled INTEGER NOT NULL DEFAULT 1")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS plex_config (

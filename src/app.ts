@@ -312,6 +312,7 @@ interface Endpoint {
     responseTime: number | null;
     lastChecked: string | null;
     enabled: boolean;
+    downloadsEnabled: boolean;
     mirrorType: string;
 }
 
@@ -7132,21 +7133,31 @@ key: 'playlist_added',
                 <div class="endpoint-item${disabledClass}">
                     <div class="endpoint-header">
                         <span class="endpoint-name">${this.escapeHtml(endpoint.name)}</span>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="endpoint-controls">
                             <div class="endpoint-status ${statusClass}">
                                 <span class="status-indicator ${statusClass}"></span>
                                 ${statusText}
                             </div>
-                            <label class="endpoint-toggle" title="${endpoint.enabled ? 'Disable mirror' : 'Enable mirror'}">
-                                <input type="checkbox" data-endpoint-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.enabled ? 'checked' : ''}>
-                                <span class="endpoint-toggle-slider"></span>
-                            </label>
                             <button type="button" class="endpoint-remove-btn" data-endpoint-name="${this.escapeHtml(endpoint.name)}" title="Remove mirror">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                             </button>
                         </div>
                     </div>
                     <div class="endpoint-url">${this.escapeHtml(url)}</div>
+                    <div class="endpoint-toggles">
+                        <label class="endpoint-toggle-row" title="${endpoint.enabled ? 'Disable mirror' : 'Enable mirror'}">
+                            <span class="endpoint-toggle-label">Enabled</span>
+                            <input type="checkbox" data-endpoint-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.enabled ? 'checked' : ''}>
+                            <span class="endpoint-toggle-slider"></span>
+                        </label>
+                        ${endpoint.mirrorType !== 'qobuz' ? `
+                        <label class="endpoint-toggle-row" title="${endpoint.downloadsEnabled ? 'Disable downloads' : 'Enable downloads'}">
+                            <span class="endpoint-toggle-label">Downloads</span>
+                            <input type="checkbox" data-endpoint-download-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.downloadsEnabled ? 'checked' : ''}>
+                            <span class="endpoint-toggle-slider"></span>
+                        </label>
+                        ` : ''}
+                    </div>
                     <div class="endpoint-details">
                         <div class="endpoint-detail">
                             <span class="detail-label">Response Time</span>
@@ -7351,6 +7362,31 @@ key: 'playlist_added',
                 toggleInput.checked = prevState;
                 toggleInput.disabled = false;
                 alert(err instanceof Error ? err.message : 'Failed to toggle mirror');
+            }
+            return;
+        }
+
+        const downloadToggleInput = target.closest('[data-endpoint-download-toggle]') as HTMLInputElement | null;
+        if (downloadToggleInput) {
+            const name = downloadToggleInput.getAttribute('data-endpoint-download-toggle');
+            if (!name) {
+                return;
+            }
+            const prevState = downloadToggleInput.checked;
+            downloadToggleInput.disabled = true;
+            try {
+                const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}/toggle-download`, {
+                    method: 'POST',
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to toggle downloads');
+                }
+                void this.updateEndpointStatus();
+            } catch (err) {
+                downloadToggleInput.checked = prevState;
+                downloadToggleInput.disabled = false;
+                alert(err instanceof Error ? err.message : 'Failed to toggle downloads');
             }
             return;
         }

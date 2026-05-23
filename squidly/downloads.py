@@ -252,6 +252,7 @@ def download_track_manifest(
     url_list,
     usage: str = 'DOWNLOAD',
     manifest_type: str | None = None,
+    for_download: bool = False,
 ):
     formats, manifest_type = resolve_formats_and_manifest_type(quality, manifest_type)
     params = {
@@ -269,6 +270,8 @@ def download_track_manifest(
         method='GET',
         timeout=10,
         max_retries=3,
+        for_download=for_download,
+        mirror_type='tidal',
     )
     if not response.ok:
         raise requests.exceptions.HTTPError(f"Failed to fetch track manifest for {track_id}: {response.status_code}")
@@ -454,7 +457,7 @@ _mirror_preference_state = {
 }
 
 
-def _get_ordered_online_mirrors(url_list, mirror_type=None):
+def _get_ordered_online_mirrors(url_list, mirror_type=None, for_download=False):
     conn = get_db_connection()
     cur = conn.cursor()
     if mirror_type:
@@ -463,7 +466,7 @@ def _get_ordered_online_mirrors(url_list, mirror_type=None):
             SELECT name, response_time
             FROM mirror_endpoints
             WHERE online = 1 AND enabled = 1 AND mirror_type = %s
-            """,
+            """ + (" AND downloads_enabled = 1" if for_download else ""),
             (mirror_type,)
         )
     else:
@@ -472,7 +475,7 @@ def _get_ordered_online_mirrors(url_list, mirror_type=None):
             SELECT name, response_time
             FROM mirror_endpoints
             WHERE online = 1 AND enabled = 1
-            """
+            """ + (" AND downloads_enabled = 1" if for_download else "")
         )
     online_rows = cur.fetchall()
     conn.close()
@@ -624,17 +627,19 @@ def enforce_mirror_rate_limit():
         time.sleep(needed)
 
 
-def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, **kwargs):
+def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', timeout=10, max_retries=3, backoff_factor=1.0, for_download=False, mirror_type=None, **kwargs):
     """Make an HTTP request via rotating mirrors with retry/backoff.
 
     Args:
         url_base: The URL path to append to the base mirror URL (e.g. "/search/?s=...").
         url_list: List of mirror dicts ({'name', 'url'}).
+        for_download: If True, only consider mirrors with downloads_enabled=1.
+        mirror_type: If set, only consider mirrors of this type ('tidal' or 'qobuz').
     """
     last_exception = None
     last_target = None
 
-    eligible_urls = _get_ordered_online_mirrors(url_list)
+    eligible_urls = _get_ordered_online_mirrors(url_list, mirror_type=mirror_type, for_download=for_download)
     if not eligible_urls:
         raise RuntimeError('No configured mirror URLs are currently marked online')
 
@@ -819,6 +824,35 @@ def toggle_mirror(name):
     conn.commit()
     conn.close()
     return new_state
+
+
+def toggle_mirror_downloads(name):
+    """Toggle the downloads-enabled state of a mirror. Returns the new state."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT downloads_enabled FROM mirror_endpoints WHERE name = %s', (name,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        raise ValueError(f'Mirror "{name}" not found')
+    new_state = 0 if row['downloads_enabled'] else 1
+    cur.execute('UPDATE mirror_endpoints SET downloads_enabled = %s WHERE name = %s', (new_state, name))
+    conn.commit()
+    conn.close()
+    return new_state
+
+
+def disable_mirror_downloads(name):
+    """Disable downloads for a mirror by name.
+
+    Sets downloads_enabled = 0 so the mirror is excluded from download
+    rotation but still usable for metadata/search requests.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE mirror_endpoints SET downloads_enabled = 0 WHERE name = %s', (name,))
+    conn.commit()
+    conn.close()
 
 
 def validate_single_endpoint(name):
