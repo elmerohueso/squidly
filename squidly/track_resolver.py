@@ -1,7 +1,17 @@
 """Track detection and replacement for better-quality versions.
 
 Detects tracks that are karaoke, live, singles/EPs, or on compilation
-albums, then re-searches for a clean version from a proper studio album.
+albums (using upstream Tidal type field + heuristics), then re-searches
+for a clean version from a proper studio album.
+
+Single/EP detection:
+    1. Uses Tidal's "type" field (SINGLE | EP | ALBUM) when available
+    2. Falls back to track count heuristic (<= 4 tracks)
+
+Compilation detection:
+    1. Excludes anything Tidal classifies as SINGLE or EP
+    2. Title keyword matching (greatest hits, best of, etc.)
+    3. Various-artists / track-artist-mismatch detection
 
 Usage:
     from squidly.track_resolver import resolve_track
@@ -39,6 +49,11 @@ COMPILATION_KEYWORDS = (
     'direct hits', 'original hits', 'gold', 'chronicles', 'decades',
     'icon', 'playlist',
     'grandes exitos', 'lo mejor de', 'exitos', 'lo mejor',
+    # B-sides / rarities — same-artist compilations of old material
+    'b-sides', 'b sides', 'bsides', 'rarities',
+    # Soundtracks — multi-artist compilations tied to a film/show
+    'soundtrack', 'original motion picture', 'music from',
+    'tv series', 'from the motion picture',
 )
 
 
@@ -111,6 +126,19 @@ def is_remaster(title: str, version: str, album_title: str, album_version: str) 
 
 
 def is_single_or_ep(track_data: dict, album_data: Optional[dict] = None) -> bool:
+    # Prefer Tidal's own type classification when available.
+    # The upstream response includes "type": "SINGLE" | "EP" | "ALBUM".
+    if album_data and isinstance(album_data, dict):
+        album_type = album_data.get('type')
+        if album_type in ('SINGLE', 'EP'):
+            return True
+        # If Tidal explicitly says ALBUM, it's not a single/EP — trust it
+        # (prevents false positives on short albums like 6-track K-pop EPs
+        # that labels submit as "ALBUM")
+        if album_type == 'ALBUM':
+            return False
+
+    # Fallback: track count heuristic for when type is missing/unknown
     num = None
     album = track_data.get('album') or {}
     if album.get('numberOfTracks') is not None:
@@ -123,6 +151,12 @@ def is_single_or_ep(track_data: dict, album_data: Optional[dict] = None) -> bool
 
 
 def is_compilation(track_data: dict, album_data: Optional[dict] = None) -> bool:
+    # If Tidal says it's a SINGLE or EP, it's definitely not a compilation.
+    if album_data and isinstance(album_data, dict):
+        album_type = album_data.get('type')
+        if album_type in ('SINGLE', 'EP'):
+            return False
+
     # Signal 1: album title keywords
     album = track_data.get('album') or {}
     album_title = str(album.get('title') or '')
@@ -153,6 +187,37 @@ def is_compilation(track_data: dict, album_data: Optional[dict] = None) -> bool:
         if not (track_artists & album_artist_names):
             return True
 
+    # Signal 3: album lists >=3 artists but track is only by one of them.
+    # Catches soundtracks ("13 Reasons Why (Season 3)" with 12 different
+    # track artists) where the album artist list still includes the track's
+    # artist — signal 2 above misses these because there's partial overlap.
+    if len(album_artist_names) >= 3 and track_artists:
+        if track_artists.issubset(album_artist_names) and len(track_artists) < len(album_artist_names):
+            return True
+
+    return False
+
+
+# ── Soundtrack detection ──
+
+_SOUNDTRACK_KEYWORDS = (
+    'soundtrack', 'original motion picture', 'music from the',
+    'tv series', 'from the motion picture',
+)
+
+
+def _is_soundtrack_album(album_data: Optional[dict], album_title: str) -> bool:
+    """Check if an album is a soundtrack (never replaced — keep as-is)."""
+    title = album_title.lower()
+    for kw in _SOUNDTRACK_KEYWORDS:
+        if kw in title:
+            return True
+    # Also check raw album_data title if available (e.g. via hifi upstream)
+    if album_data and isinstance(album_data, dict):
+        raw_title = str(album_data.get('title') or '').lower()
+        for kw in _SOUNDTRACK_KEYWORDS:
+            if kw in raw_title:
+                return True
     return False
 
 
@@ -315,6 +380,11 @@ def _fetch_album_for_track(track_data: dict) -> Optional[dict]:
 
 # ── Main entry point ──
 
+def _track_label(hifi_id: Any, track_info: dict) -> str:
+    """Format a human-friendly track label for log messages."""
+    return f"track {hifi_id} ({track_info.get('title', '')})"
+
+
 def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
     """Check a track for problems and find a replacement if needed.
 
@@ -343,10 +413,31 @@ def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
     # Fetch album detail for single/EP and compilation detection
     album_data = _fetch_album_for_track(track_info)
 
-    # Detect problems (respect settings toggles)
+    label = _track_label(hifi_id, track_info)
+
+    # Get album title for logging / soundtrack detection
+    album_title = ""
+    if album_data and isinstance(album_data, dict):
+        album_title = str(album_data.get('title') or '')
+    else:
+        album_title = str((track_info.get('album') or {}).get('title') or '')
+
+    # Detect problems
     all_problems = detect_problems(track_info, album_data)
-    active_problems = []
+
+    # Separate soundtracks from other compilation reasons.
+    # Soundtracks are logged but never replaced — the track is kept as-is.
+    soundtrack = False
+    other_problems = []
     for p in all_problems:
+        if p == 'compilation' and _is_soundtrack_album(album_data, album_title):
+            soundtrack = True
+        else:
+            other_problems.append(p)
+
+    # Filter remaining problems by settings toggles
+    active_problems = []
+    for p in other_problems:
         setting_key = {
             'karaoke/instrumental': 'penalty_karaoke',
             'live': 'penalty_live',
@@ -356,13 +447,38 @@ def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
         if setting_key is None or settings.get(setting_key, True):
             active_problems.append(p)
 
-    reason = '; '.join(active_problems) if active_problems else 'none'
+    # ── Log human-readable decisions ──
+    if soundtrack:
+        logger.info("%s is from a Soundtrack, keeping track", label)
+
+    if active_problems:
+        for p in active_problems:
+            if p == 'karaoke/instrumental':
+                logger.info("%s is Karaoke/Instrumental, will search for a replacement", label)
+            elif p == 'live':
+                logger.info("%s is Live, will search for a replacement", label)
+            elif p == 'single/ep':
+                logger.info("%s is from a Single/EP, will search for a replacement", label)
+            elif p == 'compilation':
+                logger.info("%s is from a Compilation, will search for a replacement", label)
+    elif not soundtrack:
+        logger.info("%s is from a Studio Album, keeping track", label)
+
+    reason_parts = ([p for p in active_problems] +
+                    (['soundtrack'] if soundtrack else []))
+    reason = '; '.join(reason_parts) if reason_parts else 'none'
 
     if not active_problems:
-        return {'original_id': hifi_id, 'reason': 'none', 'replacement': None}
+        return {'original_id': hifi_id, 'reason': reason, 'replacement': None}
 
     # Find replacement
     replacement = find_replacement(track_info)
+
+    if replacement:
+        logger.info("%s → replaced by %s from \"%s\"",
+                    label, replacement.get('id'), replacement.get('_resolved_from_album', '?'))
+    else:
+        logger.info("no replacement found for %s, keeping track", label)
 
     return {
         'original_id': hifi_id,
