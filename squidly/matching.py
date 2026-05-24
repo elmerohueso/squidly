@@ -412,7 +412,7 @@ def _get_track_row_by_path(cur, path):
         SELECT track_id, album_id, artist_id, title, library_id, confidence, hifi_id, path,
                format, bitrate, disc_number, track_number, last_seen_at, isrc, duration
         FROM tracks
-        WHERE path = %s
+        WHERE LOWER(path) = LOWER(%s)
         """,
         (path,)
     )

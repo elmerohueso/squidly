@@ -850,7 +850,27 @@ def process_plex_sync_job(job_id, payload):
             (now_dt,)
         )
 
+        # Clean up download-only orphan tracks that now have a Plex duplicate
+        # (same path, different casing, but one has library_id after this sync)
+        cur.execute(
+            """
+            DELETE FROM tracks
+            WHERE library_id IS NULL
+              AND EXISTS (
+                    SELECT 1
+                    FROM tracks t2
+                    WHERE t2.track_id != tracks.track_id
+                      AND t2.library_id IS NOT NULL
+                      AND LOWER(t2.path) = LOWER(tracks.path)
+                )
+            """
+        )
+        merged = cur.rowcount or 0
+
     conn.commit()
+
+    if merged:
+        logger.info("[PLEX_SYNC] Job %s: Merged %s orphan download tracks into Plex entries", job_id, merged)
 
     # Add "Explicit" label to albums that contain [Explicit] in their name
     # (explicit_album_keys was populated during the track processing loop above)
