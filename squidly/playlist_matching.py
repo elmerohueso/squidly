@@ -38,7 +38,7 @@ def compute_playlist_match_penalty(item, settings):
                 break
 
     if settings.get('penalty_live'):
-        for text in (item_title, item_version):
+        for text in (item_title, item_version, item_album_title):
             if re.search(r'\blive\b', text):
                 penalty += 0.15
                 break
