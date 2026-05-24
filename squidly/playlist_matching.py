@@ -5,45 +5,7 @@ YouTube Music, Last.fm) to the local library. They are separate from
 library entity matching (squidly.matching).
 """
 
-import re
-
 from squidly.utils import _safe_int, normalize_match_text
-
-
-COMPILATION_KEYWORDS = (
-    'greatest hits', 'best of', 'mixtape', 'essence', 'classics',
-    'hits of', 'throwback', 'anthology', 'collection', 'singles collection',
-    'number ones', 'greatest', 'ultimate', 'essential', 'definitive',
-    'now that', 'presents', 'the best', 'complete', 'vol. ',
-)
-
-
-def compute_playlist_match_penalty(item, settings):
-    """Apply score penalties to deprioritize compilation, live, and karaoke matches."""
-    penalty = 0.0
-    item_title = str(item.get('title') or '').lower()
-    item_version = str(item.get('version') or '').lower()
-    item_album_title = str((item.get('album') or {}).get('title') or '').lower()
-
-    if settings.get('penalty_compilation'):
-        for kw in COMPILATION_KEYWORDS:
-            if kw in item_album_title:
-                penalty += 0.15
-                break
-
-    if settings.get('penalty_karaoke'):
-        for text in (item_title, item_version, item_album_title):
-            if 'karaoke' in text or 'instrumental' in text:
-                penalty += 0.20
-                break
-
-    if settings.get('penalty_live'):
-        for text in (item_title, item_version, item_album_title):
-            if re.search(r'\blive\b', text):
-                penalty += 0.15
-                break
-
-    return penalty
 
 
 def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):

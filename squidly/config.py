@@ -66,6 +66,7 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'tag_explicit': True,
     'tag_explicit_suffix': True,
     'penalty_compilation': True,
+    'penalty_single': True,
     'penalty_karaoke': True,
     'penalty_live': True,
     'download_source': 'tidal',

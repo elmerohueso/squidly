@@ -108,7 +108,6 @@ from squidly.matching import (
 )
 
 from squidly.playlist_matching import (
-    compute_playlist_match_penalty,
     _lookup_track_metadata,
 )
 
@@ -3079,7 +3078,7 @@ def download_settings():
         'tag_copyright', 'tag_cover_art', 'tag_explicit', 'tag_explicit_suffix',
     ]
     penalty_keys = [
-        'penalty_compilation', 'penalty_karaoke', 'penalty_live',
+        'penalty_compilation', 'penalty_single', 'penalty_karaoke', 'penalty_live',
     ]
 
     updated = {
@@ -3620,9 +3619,9 @@ def match_listenbrainz_track():
             elif norm_album in item_album or item_album in norm_album:
                 score += 0.10
 
-        score -= compute_playlist_match_penalty(item, settings)
         return score
 
+    from squidly.track_resolver import resolve_best_match
     isrcs = []
     mbid_match = re.search(r'recording/([a-f0-9-]+)', identifier, re.IGNORECASE)
 
@@ -3692,8 +3691,10 @@ def match_listenbrainz_track():
                 method = 'text'
 
         if best_match and best_score >= 0.50:
+            # Run through track resolver for detection+replacement
+            resolved = resolve_best_match(best_match, settings, 'LB_MATCH')
             return jsonify({
-                'match': best_match,
+                'match': resolved,
                 'method': method,
                 'confidence': min(best_score, 1.0)
             })
@@ -3896,7 +3897,6 @@ def match_ytm_track():
             elif norm_album in item_album or item_album in norm_album:
                 score += 0.10
 
-        score -= compute_playlist_match_penalty(item, settings)
         return score
 
     def search_hifi(search_type, search_query, limit=25):
@@ -3928,8 +3928,9 @@ def match_ytm_track():
                 best_match = item
 
         if best_match and best_score >= 0.50:
+            resolved = resolve_best_match(best_match, settings, 'YTM_MATCH')
             return jsonify({
-                'match': best_match,
+                'match': resolved,
                 'confidence': min(best_score, 1.0)
             })
 
@@ -5499,6 +5500,25 @@ def process_recommendation_job(job_id, payload):
             quality_filtered.append(rec)
     progress['tracks_after_quality_filter'] = len(quality_filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
+
+    # Step 1.5: Resolve tracks — detect karaoke/live/single/compilation
+    #            and replace with a better version from a proper album.
+    from squidly.track_resolver import resolve_track, merge_replacement_into_rec
+    resolved_count = 0
+    for rec in quality_filtered:
+        tid = rec.get('hifi_id')
+        if not tid:
+            continue
+        try:
+            result = resolve_track(tid, settings)
+            if result.get('reason') != 'none' and result.get('replacement'):
+                logger.info("[RECOMMENDATION] Resolved track %s (%s) → %s",
+                            tid, result['reason'], result['replacement'].get('id'))
+                merge_replacement_into_rec(rec, result['replacement'])
+                resolved_count += 1
+        except Exception as e:
+            logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
+    jobs.update_job_progress(job_id, {'progress': {**progress, 'tracks_resolved': resolved_count}})
 
     # Step 2: Deduplicate by ISRC, aggregate frequency score.
     #         Fallback: use normalized artist+title when ISRC is missing.
