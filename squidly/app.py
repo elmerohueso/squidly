@@ -3377,6 +3377,82 @@ def save_fresh_finds_retention():
     return jsonify({'success': True, 'count': max(1, min(100, int(count)))})
 
 
+@app.route('/api/fresh-finds/new-track-pct', methods=['GET'])
+def get_fresh_finds_new_track_pct_route():
+    """Get the Fresh Finds new-track percentage for a specific user."""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import get_fresh_finds_new_track_pct
+    from squidly.storage import get_all_plex_account_mappings
+    mappings = get_all_plex_account_mappings()
+    plex_account_id = None
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            plex_account_id = m.get('plex_account_id')
+            break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    pct = get_fresh_finds_new_track_pct(plex_account_id)
+    return jsonify({'pct': pct})
+
+
+@app.route('/api/fresh-finds/new-track-pct', methods=['POST'])
+def save_fresh_finds_new_track_pct_route():
+    """Set the Fresh Finds new-track percentage for a specific user. Clamps to [0, 100]."""
+    payload = request.get_json(silent=True) or {}
+    user_id = payload.get('user_id')
+    pct = payload.get('pct', 50)
+
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import set_fresh_finds_new_track_pct
+    set_fresh_finds_new_track_pct(user_id, pct)
+    return jsonify({'success': True, 'pct': max(0, min(100, int(pct)))})
+
+
+@app.route('/api/fresh-finds/track-count', methods=['GET'])
+def get_fresh_finds_track_count_route():
+    """Get the Fresh Finds track count for a specific user."""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import get_fresh_finds_track_count
+    from squidly.storage import get_all_plex_account_mappings
+    mappings = get_all_plex_account_mappings()
+    plex_account_id = None
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            plex_account_id = m.get('plex_account_id')
+            break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    count = get_fresh_finds_track_count(plex_account_id)
+    return jsonify({'count': count})
+
+
+@app.route('/api/fresh-finds/track-count', methods=['POST'])
+def save_fresh_finds_track_count_route():
+    """Set the Fresh Finds track count for a specific user. Clamps to [5, 100]."""
+    payload = request.get_json(silent=True) or {}
+    user_id = payload.get('user_id')
+    count = payload.get('count', 25)
+
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    from squidly.storage import set_fresh_finds_track_count
+    set_fresh_finds_track_count(user_id, count)
+    return jsonify({'success': True, 'count': max(5, min(100, int(count)))})
+
+
 @app.route('/api/listenbrainz/playlists', methods=['GET'])
 def get_listenbrainz_playlists():
     """Fetch recommended playlists created for user from ListenBrainz"""
@@ -5387,12 +5463,12 @@ def process_recommendation_job(job_id, payload):
     stages['fetching_recommendations'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 4: Process tracks - quality filter, dedupe, filter, rank
+    # Stage 4: Process tracks - quality filter, dedupe by ISRC, classify, split
     stages['processing_tracks'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
 
-    # Filter by minimum quality from download settings
+    # Step 1: Filter by minimum quality from download settings (same as before)
     settings = get_download_settings()
     min_quality = settings.get('quality', 'LOSSLESS')
     min_rank = _get_hifi_audio_quality_rank(min_quality)
@@ -5404,37 +5480,101 @@ def process_recommendation_job(job_id, payload):
     progress['tracks_after_quality_filter'] = len(quality_filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Deduplicate by hifi_id, aggregate frequency score
+    # Step 2: Deduplicate by ISRC, aggregate frequency score.
+    #         Fallback: use normalized artist+title when ISRC is missing.
+    from squidly.storage import get_existing_isrcs, get_existing_artist_titles
+    from squidly.utils import normalize_match_text
+
     deduped = {}
     for rec in quality_filtered:
-        hid = rec['hifi_id']
-        if hid not in deduped:
-            deduped[hid] = rec
-            deduped[hid]['score'] = 1
+        key = str(rec.get('isrc') or '').strip().upper()
+        if not key:
+            key = normalize_match_text(rec.get('artist', '')) + '||' + normalize_match_text(rec.get('title', ''))
+        if key not in deduped:
+            deduped[key] = {**rec, 'score': 1}
         else:
-            deduped[hid]['score'] += 1
+            deduped[key]['score'] += 1
 
-    # Filter out tracks already in library by isrc or normalized artist-title
+    # Step 3: Classify each deduped track into NEW or LIBRARY candidate pools
     existing_isrcs = get_existing_isrcs()
     existing_artist_titles = get_existing_artist_titles()
-    filtered = []
+    library_candidates = []
+    new_candidates = []
+
     for rec in deduped.values():
         rec_isrc = str(rec.get('isrc') or '').strip().upper()
+        is_library_track = False
+
         if rec_isrc and rec_isrc in existing_isrcs:
-            continue
-        artist_title = (
-            normalize_match_text(rec.get('artist', '')),
-            normalize_match_text(rec.get('title', ''), strip_trailing_parenthetical=True)
-        )
-        if artist_title in existing_artist_titles:
-            continue
-        filtered.append(rec)
-    progress['tracks_after_filter'] = len(filtered)
+            is_library_track = True
+        elif not rec_isrc:
+            # Fallback: check normalized artist+title against library
+            at = (
+                normalize_match_text(rec.get('artist', '')),
+                normalize_match_text(rec.get('title', ''), strip_trailing_parenthetical=True)
+            )
+            if at in existing_artist_titles:
+                is_library_track = True
+
+        if is_library_track:
+            library_candidates.append(rec)
+        else:
+            new_candidates.append(rec)
+
+    # Step 4: Exclude library tracks recently played by this user (30 days)
+    from squidly.storage import get_recently_played_isrcs
+    recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
+    library_candidates = [
+        rec for rec in library_candidates
+        if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
+    ]
+
+    # Step 5: Sort both pools by frequency score descending
+    new_candidates.sort(key=lambda x: x['score'], reverse=True)
+    library_candidates.sort(key=lambda x: x['score'], reverse=True)
+
+    # Step 6: Calculate distribution based on user settings
+    from squidly.storage import get_fresh_finds_new_track_pct, get_fresh_finds_track_count
+    new_track_pct = get_fresh_finds_new_track_pct(plex_account_id)
+    track_count = get_fresh_finds_track_count(plex_account_id)
+    n_new = round(track_count * new_track_pct / 100)
+    n_library = track_count - n_new
+
+    selected_new = new_candidates[:n_new]
+    selected_library = library_candidates[:n_library]
+
+    # Handle overflow: if one pool is too short, fill from the other
+    if len(selected_new) < n_new and len(library_candidates) > n_library:
+        extra = n_new - len(selected_new)
+        selected_library = library_candidates[:n_library + extra]
+    elif len(selected_library) < n_library and len(new_candidates) > n_new:
+        extra = n_library - len(selected_library)
+        selected_new = new_candidates[:n_new + extra]
+
+    progress['tracks_new_candidates'] = len(new_candidates)
+    progress['tracks_library_candidates'] = len(library_candidates)
+    progress['tracks_selected_new'] = len(selected_new)
+    progress['tracks_selected_library'] = len(selected_library)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Sort by frequency score descending, take top 25
-    filtered.sort(key=lambda x: x['score'], reverse=True)
-    top_tracks = filtered[:25]
+    # Step 7: Resolve library picks to local library instance
+    from squidly.storage import get_local_track_by_isrc
+
+    for rec in selected_library:
+        rec_isrc = str(rec.get('isrc') or '').strip().upper()
+        if rec_isrc:
+            local = get_local_track_by_isrc(rec_isrc)
+            if local:
+                rec['library_id'] = local['library_id']
+                rec['hifi_id'] = local['hifi_id']  # Use the local track's hifi_id
+
+    # Step 8: Combine — new tracks first, then library tracks
+    top_tracks = selected_new + selected_library
+    top_tracks = top_tracks[:track_count]
+
+    progress['tracks_after_filter'] = len(top_tracks)
+    progress['tracks_saved'] = len(top_tracks)
+    jobs.update_job_progress(job_id, {'progress': progress})
 
     stages['processing_tracks'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})

@@ -5,9 +5,10 @@ state in the database (e.g., Plex config, download settings, library update
 status).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 import json
 import logging
+import re
 
 from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.db import get_db_connection
@@ -767,10 +768,135 @@ def set_fresh_finds_retention_count(plex_client_id, count):
     conn.close()
 
 
+def get_fresh_finds_new_track_pct(plex_account_id):
+    """Get the Fresh Finds new-track percentage for a user. Default 50."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_new_track_pct FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_new_track_pct') if row else None
+    return val if val is not None else 50
+
+
+def set_fresh_finds_new_track_pct(plex_client_id, pct):
+    """Set the Fresh Finds new-track percentage for a user. Clamps to [0, 100]."""
+    pct = max(0, min(100, int(pct)))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_new_track_pct = %s WHERE plex_client_id = %s",
+        (pct, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_fresh_finds_track_count(plex_account_id):
+    """Get the Fresh Finds track count for a user. Default 25."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_track_count FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_track_count') if row else None
+    return val if val is not None else 25
+
+
+def set_fresh_finds_track_count(plex_client_id, count):
+    """Set the Fresh Finds track count for a user. Clamps to [5, 100], rounds to nearest 5."""
+    count = max(5, min(100, int(count)))
+    # Round to nearest 5
+    count = round(count / 5) * 5
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_track_count = %s WHERE plex_client_id = %s",
+        (count, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recently_played_isrcs(plex_account_id, days=30):
+    """Return set of ISRCs played by this user in the last N days."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT t.isrc
+        FROM listen_history lh
+        JOIN tracks t ON t.hifi_id = lh.hifi_id
+        WHERE lh.plex_account_id = %s
+          AND lh.played_at >= NOW() - INTERVAL '%s days'
+          AND t.isrc IS NOT NULL AND t.isrc != ''
+        """,
+        (plex_account_id, days)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {str(row['isrc']).strip().upper() for row in rows}
+
+
+def get_local_track_by_isrc(isrc):
+    """Resolve an ISRC to the local library track instance.
+    
+    Returns dict with track_id, hifi_id, library_id, album_id, artist_id, title
+    or None if not found. Prefers tracks with library_id set.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT track_id, hifi_id, library_id, album_id, artist_id, title
+        FROM tracks
+        WHERE UPPER(TRIM(isrc)) = %s
+          AND library_id IS NOT NULL AND library_id <> ''
+        ORDER BY last_seen_at DESC
+        LIMIT 1
+        """,
+        (str(isrc).strip().upper(),)
+    )
+    row = cur.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+
+def _parse_fresh_finds_date(name):
+    """Parse the effective date from a Fresh Finds playlist name.
+    
+    Name format is 'Fresh Finds (M-D)'. Since names don't include a year,
+    uses the current year and shifts back one year if the result is in the
+    future (handles Dec/Jan year boundary).
+    Returns a date object, or None if the name can't be parsed.
+    """
+    m = re.match(r'^Fresh Finds\s*\((\d{1,2})-(\d{1,2})\)$', name)
+    if not m:
+        return None
+    month, day = int(m.group(1)), int(m.group(2))
+    today = date.today()
+    try:
+        parsed = date(today.year, month, day)
+    except ValueError:
+        return None
+    if parsed > today:
+        parsed = parsed.replace(year=today.year - 1)
+    return parsed
+
+
 def cleanup_old_fresh_finds(plex_account_id):
     """Delete Fresh Finds playlists beyond the user's retention count from DB and Plex.
     
-    Keeps the N most recent playlists (by playlist_date) where N is the retention count.
+    Keeps the N most recent playlists (by date parsed from the playlist name)
+    where N is the retention count.
     Returns dict with 'deleted_count' and 'plex_deleted' counts.
     """
     retention_count = get_fresh_finds_retention_count(plex_account_id)
@@ -778,18 +904,27 @@ def cleanup_old_fresh_finds(plex_account_id):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # Fetch all fresh-finds playlists ordered by date descending
+    # Fetch all fresh-finds playlists
     cur.execute(
         """
         SELECT id, name, plex_playlist_key, playlist_date
         FROM recommendation_playlists
         WHERE plex_account_id = %s
           AND slug = 'fresh-finds'
-        ORDER BY playlist_date DESC
         """,
         (plex_account_id,)
     )
     all_playlists = cur.fetchall() or []
+
+    # Sort by date parsed from the name (most recent first).
+    # Entries with unparseable names sort to the end (oldest).
+    def sort_key(p):
+        d = _parse_fresh_finds_date(p['name'])
+        if d is None:
+            return date.min
+        return d
+
+    all_playlists.sort(key=sort_key, reverse=True)
 
     if len(all_playlists) <= retention_count:
         conn.close()
@@ -1070,8 +1205,8 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
             cur.execute(
                 """
                 INSERT INTO recommendation_playlist_tracks
-                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, library_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     playlist_id,
@@ -1087,6 +1222,7 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
                     track.get('quality', ''),
                     track.get('artist_id'),
                     track.get('album_id'),
+                    track.get('library_id'),
                 )
             )
 

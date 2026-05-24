@@ -763,13 +763,11 @@ def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
     """Delete Plex playlists by their ratingKey, falling back to name matching.
     
     First tries to delete each playlist by its ratingKey. If a key doesn't match,
-    falls back to matching against fallback_names and the Fresh Finds naming pattern.
+    falls back to matching against fallback_names by exact title.
     Best-effort: logs failures but doesn't raise.
     
     Returns count of successfully deleted playlists.
     """
-    import re
-
     config = get_plex_config()
     server_url = (config.get('server_url') or '').strip()
     api_token = (config.get('api_token') or '').strip()
@@ -779,7 +777,6 @@ def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
         return 0
 
     deleted = 0
-    fresh_finds_pattern = re.compile(r'^Fresh Finds\s*\(\d+-\d+\)$')
 
     try:
         plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
@@ -814,7 +811,7 @@ def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
         # Fallback name matching for keys that weren't resolved and provided fallback names
         names_to_delete = set(str(n) for n in fallback_names if n)
         for title, pl in playlists_by_title.items():
-            if title in names_to_delete or fresh_finds_pattern.match(title):
+            if title in names_to_delete:
                 # Skip if already deleted by key
                 pl_key = str(getattr(pl, 'ratingKey', '') or '')
                 if pl_key in plex_playlist_keys:
@@ -852,43 +849,62 @@ def create_fresh_finds_plex_playlist(plex_account_id, playlist_name, tracks):
         logger.info("[PLEX] Cannot create Fresh Finds playlist: failed to connect for user %s: %s", plex_account_id, str(e))
         return False, f'Failed to connect to Plex: {str(e)}'
 
-    # Look up track hifi_ids in the local tracks table to get Plex library_ids
-    hifi_ids = [str(t.get('hifi_id')) for t in tracks if t.get('hifi_id')]
-    if not hifi_ids:
-        return False, 'No tracks with hifi_ids provided'
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT library_id, hifi_id
-        FROM tracks
-        WHERE hifi_id = ANY(%s)
-          AND library_id IS NOT NULL
-          AND library_id <> ''
-        """,
-        (hifi_ids,)
-    )
-    library_rows = cur.fetchall() or []
-    conn.close()
-
-    if not library_rows:
-        logger.info("[PLEX] No matching tracks found in library for %d hifi_ids", len(hifi_ids))
-        return False, 'No tracks found in Plex library matching these recommendations'
-
-    # Fetch actual Plex items
+    # Resolve tracks to Plex library items
+    # Library tracks (resolved in Stage 4) have library_id set directly.
+    # New tracks skip the DB lookup and won't be added to Plex yet.
     plex_items = []
-    for row in library_rows:
-        library_id = str(row['library_id']).strip()
-        if not library_id:
-            continue
-        metadata_key = library_id if library_id.startswith('/library/metadata/') else f'/library/metadata/{library_id}'
-        try:
-            item = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
-            if item is not None:
-                plex_items.append(item)
-        except Exception as e:
-            logger.info("[PLEX] Failed to fetch Plex item for library_id=%s: %s", library_id, str(e))
+    unresolved_hifi_ids = []
+
+    for track in tracks:
+        if track.get('library_id'):
+            # Library track — use pre-resolved Plex library_id
+            library_id = str(track['library_id']).strip()
+            if library_id:
+                metadata_key = library_id if library_id.startswith('/library/metadata/') else f'/library/metadata/{library_id}'
+                try:
+                    item = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
+                    if item is not None:
+                        plex_items.append(item)
+                    else:
+                        # Couldn't fetch, try hifi_id fallback
+                        if track.get('hifi_id'):
+                            unresolved_hifi_ids.append(str(track['hifi_id']))
+                except Exception as e:
+                    logger.info("[PLEX] Failed to fetch Plex item for library_id=%s: %s", library_id, str(e))
+                    if track.get('hifi_id'):
+                        unresolved_hifi_ids.append(str(track['hifi_id']))
+        elif track.get('hifi_id'):
+            # New track — will be handled by auto-download after DL, skip for now
+            pass
+
+    # Fallback: resolve any unresolved tracks by hifi_id
+    if unresolved_hifi_ids:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT library_id, hifi_id
+            FROM tracks
+            WHERE hifi_id = ANY(%s)
+              AND library_id IS NOT NULL
+              AND library_id <> ''
+            """,
+            (unresolved_hifi_ids,)
+        )
+        fallback_rows = cur.fetchall() or []
+        conn.close()
+
+        for row in fallback_rows:
+            library_id = str(row['library_id']).strip()
+            if not library_id:
+                continue
+            metadata_key = library_id if library_id.startswith('/library/metadata/') else f'/library/metadata/{library_id}'
+            try:
+                item = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
+                if item is not None:
+                    plex_items.append(item)
+            except Exception as e:
+                logger.info("[PLEX] Failed to fetch Plex item for library_id=%s: %s", library_id, str(e))
 
     if not plex_items:
         return False, 'Could not resolve any tracks to Plex items'

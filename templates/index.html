@@ -542,6 +542,66 @@
                                 </script>
                                 <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
                                 <p class="settings-note" id="freshFindsRetentionStatus"></p>
+                                <div class="fresh-finds-slider-setting" style="margin: 1.25rem 0 0.75rem;">
+                                    <label class="settings-label" style="display: block; margin-bottom: 0.5rem;">
+                                        Mix of tracks
+                                    </label>
+                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                        <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Already Owned</span>
+                                        <input type="range" id="freshFindsNewPct" min="0" max="100" step="5" value="50" style="flex: 1; max-width: 200px;">
+                                        <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Fresh</span>
+                                    </div>
+                                    <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-primary);">
+                                        <span id="freshFindsNewPctValue">50%</span> new tracks
+                                    </div>
+                                </div>
+                                <p class="settings-note" id="freshFindsNewPctStatus"></p>
+                                <div class="track-count-setting" style="margin: 1rem 0 0.75rem;">
+                                    <label class="settings-label" for="freshFindsTrackCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
+                                        Tracks per playlist
+                                    </label>
+                                    <div class="retention-spinner">
+                                        <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                        <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="5" max="100" value="25" readonly>
+                                        <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <script>
+                                (function() {
+                                    var trackInput = document.getElementById('freshFindsTrackCount');
+                                    var trackDec = document.getElementById('trackCountDec');
+                                    var trackInc = document.getElementById('trackCountInc');
+                                    var pctSlider = document.getElementById('freshFindsNewPct');
+                                    var pctValue = document.getElementById('freshFindsNewPctValue');
+                                    function updateTrackButtons() {
+                                        var v = parseInt(trackInput.value, 10);
+                                        trackDec.disabled = v <= 5;
+                                        trackInc.disabled = v >= 100;
+                                    }
+                                    trackDec.addEventListener('click', function() {
+                                        var v = parseInt(trackInput.value, 10);
+                                        if (v > 5) { trackInput.value = String(Math.max(5, v - 5)); trackInput.dispatchEvent(new Event('change')); }
+                                        updateTrackButtons();
+                                    });
+                                    trackInc.addEventListener('click', function() {
+                                        var v = parseInt(trackInput.value, 10);
+                                        if (v < 100) { trackInput.value = String(Math.min(100, v + 5)); trackInput.dispatchEvent(new Event('change')); }
+                                        updateTrackButtons();
+                                    });
+                                    trackInput.addEventListener('change', updateTrackButtons);
+                                    updateTrackButtons();
+                                    if (pctSlider && pctValue) {
+                                        pctSlider.addEventListener('input', function() {
+                                            pctValue.textContent = this.value + '%';
+                                        });
+                                    }
+                                })();
+                                </script>
+                                <p class="settings-note" id="freshFindsTrackCountStatus"></p>
                             </div>
                         </div>
                         <div class="settings-section" id="uiPreferencesSettings">

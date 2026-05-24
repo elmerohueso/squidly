@@ -2833,6 +2833,49 @@ body {
     margin: 0;
 }
 
+/* === Fresh Finds Mix Slider === */
+.fresh-finds-slider-setting input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: var(--border-color);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.fresh-finds-slider-setting input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    border: 2px solid var(--bg-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: transform var(--transition-fast);
+}
+
+.fresh-finds-slider-setting input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+.fresh-finds-slider-setting input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    border: 2px solid var(--bg-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+}
+
+.fresh-finds-slider-setting input[type="range"]:focus-visible {
+    box-shadow: 0 0 0 2px var(--color-accent-bg);
+}
+
 .settings-danger-zone {
     border-color: var(--color-danger-zone-border);
     background: var(--color-danger-zone-bg);

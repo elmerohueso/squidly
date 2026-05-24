@@ -624,6 +624,39 @@ def init_db():
     if not cur.fetchone():
         cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_retention_count INTEGER NOT NULL DEFAULT 10")
 
+    # Migration: add fresh_finds_new_track_pct to user_settings
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_new_track_pct'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_new_track_pct INTEGER NOT NULL DEFAULT 50")
+
+    # Migration: add fresh_finds_track_count to user_settings
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_track_count'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_track_count INTEGER NOT NULL DEFAULT 25")
+
+    # Migration: add library_id to recommendation_playlist_tracks
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'library_id'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN library_id TEXT")
+
     # Migration: add plex_playlist_key to recommendation_playlists
     cur.execute(
         """

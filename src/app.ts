@@ -629,6 +629,11 @@ class App {
     private freshFindsAutoDownloadStatusEl: HTMLElement;
     private freshFindsRetentionInput: HTMLInputElement;
     private freshFindsRetentionStatusEl: HTMLElement;
+    private freshFindsNewPctSlider: HTMLInputElement;
+    private freshFindsNewPctValueEl: HTMLElement;
+    private freshFindsNewPctStatusEl: HTMLElement;
+    private freshFindsTrackCountInput: HTMLInputElement;
+    private freshFindsTrackCountStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -949,6 +954,11 @@ class App {
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
         this.freshFindsRetentionStatusEl = document.getElementById('freshFindsRetentionStatus') as HTMLElement;
+        this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
+        this.freshFindsNewPctValueEl = document.getElementById('freshFindsNewPctValue') as HTMLElement;
+        this.freshFindsNewPctStatusEl = document.getElementById('freshFindsNewPctStatus') as HTMLElement;
+        this.freshFindsTrackCountInput = document.getElementById('freshFindsTrackCount') as HTMLInputElement;
+        this.freshFindsTrackCountStatusEl = document.getElementById('freshFindsTrackCountStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -1024,6 +1034,8 @@ class App {
         void this.loadYtmConfig();
         void this.loadFreshFindsAutoDownload();
         void this.loadFreshFindsRetention();
+        void this.loadFreshFindsNewPct();
+        void this.loadFreshFindsTrackCount();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1342,6 +1354,12 @@ class App {
         }
         if (this.freshFindsRetentionInput) {
             this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsRetention());
+        }
+        if (this.freshFindsNewPctSlider) {
+            this.freshFindsNewPctSlider.addEventListener('change', () => this.saveFreshFindsNewPct());
+        }
+        if (this.freshFindsTrackCountInput) {
+            this.freshFindsTrackCountInput.addEventListener('change', () => this.saveFreshFindsTrackCount());
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2664,6 +2682,8 @@ class App {
 
         void this.loadFreshFindsAutoDownload();
         void this.loadFreshFindsRetention();
+        void this.loadFreshFindsNewPct();
+        void this.loadFreshFindsTrackCount();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -6179,6 +6199,156 @@ class App {
         }
     }
 
+    private async loadFreshFindsNewPct(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsNewPctSlider) {
+                    this.freshFindsNewPctSlider.value = '50';
+                }
+                if (this.freshFindsNewPctValueEl) {
+                    this.freshFindsNewPctValueEl.textContent = '50%';
+                }
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/new-track-pct?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (this.freshFindsNewPctSlider && data.pct !== undefined) {
+                    this.freshFindsNewPctSlider.value = String(data.pct);
+                }
+                if (this.freshFindsNewPctValueEl && data.pct !== undefined) {
+                    this.freshFindsNewPctValueEl.textContent = data.pct + '%';
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds mix setting.', error);
+        }
+    }
+
+    private async saveFreshFindsNewPct(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsNewPctStatusEl) {
+                    this.freshFindsNewPctStatusEl.textContent = '⚠ Select a Plex user first';
+                    this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
+                }
+                return;
+            }
+
+            const pct = parseInt(this.freshFindsNewPctSlider.value, 10);
+            const response = await fetch('/api/fresh-finds/new-track-pct', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    pct: pct
+                })
+            });
+
+            if (response.ok) {
+                if (this.freshFindsNewPctStatusEl) {
+                    this.freshFindsNewPctStatusEl.textContent = `✓ Mix set to ${pct}% new tracks`;
+                    this.freshFindsNewPctStatusEl.style.color = 'var(--accent-primary)';
+                    setTimeout(() => {
+                        if (this.freshFindsNewPctStatusEl) this.freshFindsNewPctStatusEl.textContent = '';
+                    }, 3000);
+                }
+            } else {
+                if (this.freshFindsNewPctStatusEl) {
+                    this.freshFindsNewPctStatusEl.textContent = '✗ Failed to save setting';
+                    this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds mix setting:', error);
+            if (this.freshFindsNewPctStatusEl) {
+                this.freshFindsNewPctStatusEl.textContent = '✗ Error saving setting';
+                this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    private async loadFreshFindsTrackCount(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsTrackCountInput) {
+                    this.freshFindsTrackCountInput.value = '25';
+                }
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/track-count?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (this.freshFindsTrackCountInput && data.count) {
+                    this.freshFindsTrackCountInput.value = String(data.count);
+                    this.freshFindsTrackCountInput.dispatchEvent(new Event('change'));
+                }
+            } else {
+                if (this.freshFindsTrackCountStatusEl) {
+                    this.freshFindsTrackCountStatusEl.textContent = '✗ Failed to load track count setting';
+                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds track count setting.', error);
+            if (this.freshFindsTrackCountStatusEl) {
+                this.freshFindsTrackCountStatusEl.textContent = '✗ Error loading track count setting';
+                this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    private async saveFreshFindsTrackCount(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsTrackCountStatusEl) {
+                    this.freshFindsTrackCountStatusEl.textContent = '⚠ Select a Plex user first';
+                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
+                }
+                return;
+            }
+
+            const count = parseInt(this.freshFindsTrackCountInput.value, 10);
+            const response = await fetch('/api/fresh-finds/track-count', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    count: count
+                })
+            });
+
+            if (response.ok) {
+                if (this.freshFindsTrackCountStatusEl) {
+                    this.freshFindsTrackCountStatusEl.textContent = `✓ Track count set to ${count}`;
+                    this.freshFindsTrackCountStatusEl.style.color = 'var(--accent-primary)';
+                    setTimeout(() => {
+                        if (this.freshFindsTrackCountStatusEl) this.freshFindsTrackCountStatusEl.textContent = '';
+                    }, 3000);
+                }
+            } else {
+                if (this.freshFindsTrackCountStatusEl) {
+                    this.freshFindsTrackCountStatusEl.textContent = '✗ Failed to save setting';
+                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds track count setting:', error);
+            if (this.freshFindsTrackCountStatusEl) {
+                this.freshFindsTrackCountStatusEl.textContent = '✗ Error saving setting';
+                this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
     private async loadYtmConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
@@ -6763,6 +6933,8 @@ class App {
                     await this.updatePlexLoginOnlyState();
                     void this.loadFreshFindsAutoDownload();
                     void this.loadFreshFindsRetention();
+                    void this.loadFreshFindsNewPct();
+                    void this.loadFreshFindsTrackCount();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });
@@ -11575,14 +11747,14 @@ class App {
                 this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
                 return;
             }
-            await this.showPlaylistSelectorForAll(playlists);
+            await this.showPlaylistSelectorForAll(playlists, this.freshFindsPlaylistName);
         } catch (error) {
             console.error('[PLAYLIST_ALL] Error handling add all to playlist:', error);
             this.displayMessage('Error fetching playlists. Please try again.');
         }
     }
 
-    private async showPlaylistSelectorForAll(playlists: string[]): Promise<void> {
+    private async showPlaylistSelectorForAll(playlists: string[], defaultPlaylistName: string | null = null): Promise<void> {
         return new Promise((resolve) => {
             const overlay = document.createElement('div');
             overlay.className = 'playlist-modal-overlay';
@@ -11627,6 +11799,9 @@ class App {
             input.type = 'text';
             input.className = 'playlist-create-inline-input';
             input.placeholder = 'New playlist name...';
+            if (defaultPlaylistName) {
+                input.value = defaultPlaylistName;
+            }
             const okBtn = document.createElement('button');
             okBtn.className = 'playlist-create-inline-btn';
             okBtn.textContent = 'OK';
