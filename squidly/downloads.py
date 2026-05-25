@@ -17,7 +17,7 @@ from mutagen.mp4 import MP4, MP4Cover
 import requests
 from squidly.db import get_db_connection
 from squidly.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
-from squidly import qobuz
+from squidly.services import qobuz
 
 import logging
 

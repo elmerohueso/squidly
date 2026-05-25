@@ -144,7 +144,7 @@ def process_recommendation_job(job_id, payload):
 
     # Step 1.5: Resolve tracks — detect karaoke/live/single/compilation
     #            and replace with a better version from a proper album.
-    from squidly.track_resolver import resolve_track, merge_replacement_into_rec
+    from squidly.services.track_resolver import resolve_track, merge_replacement_into_rec
     resolved_count = 0
     for rec in quality_filtered:
         tid = rec.get('hifi_id')

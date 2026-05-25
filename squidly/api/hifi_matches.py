@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from squidly.utils import _safe_float, _safe_int, _now_utc
 from squidly.storage import get_plex_config
-from squidly.matching import (
+from squidly.services.matching import (
     MATCH_REVIEW_ARTWORK_SIZE,
     _fetch_match_review_row,
     _build_artist_match_candidates,

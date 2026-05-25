@@ -9,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 from squidly import downloads
 from squidly import jobs
-from squidly import qobuz
+from squidly.services import qobuz
 from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.config import DOWNLOADS_ROOT
 from squidly.db import get_db_connection
 from squidly.jobs.orchestration import queue_pending_playlist_addition
 from squidly.jobs.workers import _raise_if_job_cancelled
-from squidly.matching import upsert_download_match_hint
-from squidly.playlist_matching import _lookup_track_metadata, _matches_requested_format
+from squidly.services.matching import upsert_download_match_hint
+from squidly.services.playlist_matching import _lookup_track_metadata, _matches_requested_format
 from squidly.plex import plex_healthcheck, get_plex_config
 from squidly.services.hifi import get_hifi_track_object
 from squidly.storage import get_download_settings, set_last_download_activity_at

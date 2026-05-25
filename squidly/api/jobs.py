@@ -56,7 +56,7 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
 
 def _lookup_track_metadata(cur, title, artist, album):
     """Look up track metadata from database."""
-    from squidly.playlist_matching import _lookup_track_metadata as lookup
+    from squidly.services.playlist_matching import _lookup_track_metadata as lookup
     return lookup(cur, title, artist, album)
 
 

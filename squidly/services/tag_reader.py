@@ -13,7 +13,7 @@ from mutagen.mp4 import MP4
 from squidly.config import DOWNLOADS_ROOT
 from squidly.db import get_db_connection
 from squidly.utils import _safe_int, _safe_float, _now_utc
-from squidly.matching import (
+from squidly.services.matching import (
     _get_track_row_by_path,
     _get_album_row,
     _get_artist_row,

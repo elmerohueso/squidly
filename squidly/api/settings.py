@@ -638,7 +638,7 @@ def match_listenbrainz_track():
 
         return score
 
-    from squidly.track_resolver import resolve_best_match
+    from squidly.services.track_resolver import resolve_best_match
     from squidly.services.hifi import _fetch_hifi_search_results
     from urllib.parse import urlencode
     
@@ -941,7 +941,7 @@ def match_ytm_track():
 
         return score
 
-    from squidly.track_resolver import resolve_best_match
+    from squidly.services.track_resolver import resolve_best_match
     from squidly.services.hifi import _fetch_hifi_search_results
     from urllib.parse import urlencode
 

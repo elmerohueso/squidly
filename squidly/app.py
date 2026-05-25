@@ -18,6 +18,8 @@ import concurrent.futures
 import psycopg2
 import psycopg2.extras
 from squidly.config import DOWNLOADS_ROOT
+from squidly.db import init_db
+from squidly.job_queue import recover_stale_in_progress_jobs
 
 from squidly.utils import (
     _now_utc,
@@ -69,53 +71,6 @@ from squidly.plex import (
     wait_for_plex_library_scan_completion,
 )
 
-from squidly.matching import (
-    MATCH_REVIEW_ARTWORK_SIZE,
-    MATCH_REVIEW_HIFI_ARTWORK_SIZE,
-    MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
-    _extract_hifi_item_artists,
-    _extract_primary_hifi_artist,
-    _merge_match_state,
-    _is_hifi_explicit,
-    _format_hifi_track_title,
-    _extract_hifi_album_track_titles,
-    _has_explicit_marker,
-    _score_explicit_alignment,
-    _score_album_track_title_alignment,
-    _score_artist_candidate_name,
-    _extract_album_candidate_artist_names,
-    _score_album_candidate_artist_alignment,
-    _score_album_candidate_title,
-    _score_track_candidate_payload,
-    _serialize_match_variants,
-    _evaluate_album_candidate,
-    _get_artist_row,
-    _get_album_row,
-    _get_track_row_by_path,
-    _upsert_artist_row,
-    _upsert_album_row,
-    _upsert_track_row,
-    upsert_download_match_hint,
-    _fetch_source_album_track_titles_map,
-    _find_hifi_track_search_candidate,
-    _cascade_track_confirm_ids,
-    _refresh_album_completeness,
-    _build_stored_track_match_lookup,
-    _build_stored_album_match_lookup,
-    _build_stored_artist_match_lookup,
-    _fetch_match_review_row,
-    _build_artist_match_candidates,
-    _build_album_match_candidates,
-    _build_track_match_candidates,
-)
-
-from squidly.playlist_matching import (
-    _lookup_track_metadata,
-)
-
-from squidly.tag_reader import scan_library_for_tags, _resolve_library_file_path
-from squidly.hifi_matcher import find_missing_hifi_ids
-
 from squidly.services.hifi import (
     _fetch_hifi_search_results,
     _fetch_hifi_artist_payload,
@@ -136,7 +91,7 @@ from squidly.jobs.workers import (
 from ytmusicapi import YTMusic
 
 from squidly import downloads
-from squidly import qobuz
+from squidly.services import qobuz
 from squidly import jobs
 
 from squidly.jobs.orchestration import (
@@ -237,7 +192,7 @@ else:
 # Startup sequence
 if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
-    recover_stale_in_progress_jobs(stale_after_minutes=15)
+    recover_stale_in_progress_jobs()
     downloads.seed_mirrors_from_json()
     downloads.refresh_squid_urls()
     logger.info("Squidly starting up...")

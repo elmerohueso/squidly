@@ -5,7 +5,7 @@ or from soundtracks. Only karaoke, live, single/ep, and compilation trigger
 replacement — soundtracks and studio albums are always kept.
 
 Usage:
-    from squidly.track_resolver import resolve_track
+    from squidly.services.track_resolver import resolve_track
     result = resolve_track(hifi_id, settings)
 """
 

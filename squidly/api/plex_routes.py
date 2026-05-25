@@ -27,7 +27,7 @@ from squidly.storage import (
     save_plex_user_setting,
 )
 from squidly.jobs.orchestration import start_plex_library_update_job
-from squidly.playlist_matching import _lookup_track_metadata
+from squidly.services.playlist_matching import _lookup_track_metadata
 from squidly.db import get_db_connection
 
 logger = logging.getLogger(__name__)

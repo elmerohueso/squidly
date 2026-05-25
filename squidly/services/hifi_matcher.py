@@ -17,7 +17,7 @@ from squidly.services.hifi import (
     _fetch_hifi_track_info_payload,
     _extract_hifi_album_track_items,
 )
-from squidly.matching import (
+from squidly.services.matching import (
     _get_artist_row,
     _get_album_row,
     _upsert_artist_row,

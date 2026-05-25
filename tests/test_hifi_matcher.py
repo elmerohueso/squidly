@@ -1,6 +1,6 @@
 """Tests for HiFi matcher gap-filling functions."""
 
-from squidly.hifi_matcher import (
+from squidly.services.hifi_matcher import (
     _score_album_candidate,
 )
 

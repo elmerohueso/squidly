@@ -124,7 +124,7 @@ def test_import_utils():
 
 
 def test_import_matching():
-    from squidly.matching import (
+    from squidly.services.matching import (
         MATCH_REVIEW_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
@@ -252,7 +252,7 @@ def test_db_does_not_import_app():
 
 def test_matching_does_not_import_app():
     """matching.py must not import from app at top level to avoid circular deps (lazy imports inside functions are allowed)."""
-    import squidly.matching as matching_module
+    import squidly.services.matching as matching_module
     import inspect
 
     source = inspect.getsource(matching_module)
