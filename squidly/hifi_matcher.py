@@ -10,7 +10,7 @@ import logging
 
 from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
 from squidly.db import get_db_connection
-from squidly.hifi import (
+from squidly.services.hifi import (
     _fetch_hifi_search_results,
     _fetch_hifi_album_payload,
     _fetch_hifi_artist_payload,

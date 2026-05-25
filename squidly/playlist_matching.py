@@ -8,6 +8,27 @@ library entity matching (squidly.matching).
 from squidly.utils import _safe_int, normalize_match_text
 
 
+def _requested_download_format(file_format):
+    """Normalize requested download format."""
+    normalized = str(file_format or '').strip().lower()
+    if normalized in ('m4a', 'aac', 'mp4'):
+        return 'm4a'
+    if normalized == 'flac':
+        return 'flac'
+    return 'm4a'
+
+
+def _matches_requested_format(file_format, candidate_format):
+    """Check if candidate format matches requested format."""
+    normalized_request = _requested_download_format(file_format)
+    normalized_candidate = str(candidate_format or '').strip().lower()
+
+    if normalized_request == 'flac':
+        return normalized_candidate == 'flac'
+
+    return normalized_candidate in ('m4a', 'aac', 'mp4')
+
+
 def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):
     """Query local tracks table for rows matching title+artist+album, falling back to title+artist.
     If fuzzy=True, falls back further to normalized text matching when exact matches fail."""

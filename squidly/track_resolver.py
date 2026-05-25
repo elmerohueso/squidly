@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from squidly.hifi import (
+from squidly.services.hifi import (
     _fetch_hifi_album_payload,
     _fetch_hifi_search_results,
     _fetch_hifi_track_info_payload,

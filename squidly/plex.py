@@ -389,8 +389,8 @@ def bulk_add_tracks_to_playlists(job_id, payload):
 
     Returns a result dict with progress fields for the job card.
     """
-    from squidly.jobs import update_job_progress
-    from squidly.orchestration import (
+    from squidly.job_queue import update_job_progress
+    from squidly.jobs.orchestration import (
         get_pending_playlist_adds,
         delete_pending_playlist_adds,
     )

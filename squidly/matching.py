@@ -2,10 +2,10 @@
 
 import re
 
-from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
+from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text, _normalize_library_track_path
 from squidly.db import get_db_connection
-from squidly.jobs import update_job_progress
-from squidly.hifi import (
+from squidly.job_queue import update_job_progress
+from squidly.services.hifi import (
     _extract_hifi_album_track_items,
     _get_hifi_audio_quality_rank,
     _format_hifi_image_value,
@@ -651,8 +651,6 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
 
 
 def upsert_download_match_hint(track_title, track_artist_name, album_title, album_artist_name, full_path, audio_format, hifi_track_id=None, hifi_album_id=None, track_hifi_artist_id=None, album_hifi_artist_id=None, isrc=None, duration=None, track_number=None, disc_number=None):
-    from squidly.app import _normalize_library_track_path
-
     relative_path = _normalize_library_track_path(full_path)
     if not relative_path:
         return

@@ -17,8 +17,6 @@ import requests
 import concurrent.futures
 import psycopg2
 import psycopg2.extras
-from squidly.config import DOWNLOADS_ROOT
-
 from squidly.utils import (
     _now_utc,
     _safe_float,
@@ -226,27 +224,104 @@ app.register_blueprint(hifi_matches_bp)
 
 # ...existing code...
 
-# Verify downloads directory
-if not os.path.exists(DOWNLOADS_ROOT):
-    logger.error("Error: Downloads directory does not exist: %s", DOWNLOADS_ROOT)
-elif not os.access(DOWNLOADS_ROOT, os.W_OK):
-    logger.error("Error: Downloads directory is not writable: %s", DOWNLOADS_ROOT)
-else:
-    logger.info("Downloads directory ready: %s", DOWNLOADS_ROOT)
-
 # Startup sequence
-if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
-    init_db()
-    recover_stale_in_progress_jobs(stale_after_minutes=15)
-    downloads.seed_mirrors_from_json()
-    downloads.refresh_squid_urls()
-    logger.info("Squidly starting up...")
-    downloads.validate_all_endpoints()
-    plex_healthcheck()
-    start_workers()
+def process_download_job(job_id, payload):
+    track_id = payload.get('trackId')
+    quality_choice = str(payload.get('downloadQuality', payload.get('quality'))).strip().upper()
+    if quality_choice not in ('LOSSLESS', 'HIGH', 'LOW'):
+        quality_choice = 'LOSSLESS'
 
+    stages = {
+        'downloaded': 'pending',
+        'tagged': 'pending',
+        'converted': 'pending',
+        'written': 'pending',
+        'playlist_added': 'pending'
+    }
+
+    if not track_id:
+        raise ValueError('trackId is required')
+
+    logger.info("[DOWNLOAD] Fetching track metadata from normalized HiFi object for quality=%s", quality_choice)
     try:
-        os.makedirs("/app/temp", exist_ok=True)
-        logger.info("Temp folder ready (/app/temp)")
+        track_object = get_hifi_track_object(
+            track_id,
+            include_streams=False,
+            include_album=True,
+            audio_quality=quality_choice,
+            mirror_type='tidal',
+        )
     except Exception as e:
-        logger.info("Failed to create temp folder: %s", e)
+        raise downloads.TransientDownloadError(f"Failed to fetch download track object: {str(e)}") from e
+
+    if not isinstance(track_object, dict):
+        raise downloads.TransientDownloadError("Failed to build normalized track object")
+
+    file_naming = payload.get('fileNaming')
+    if not file_naming:
+        file_naming = payload.get('fileNamingAlbum') or DEFAULT_DOWNLOAD_SETTINGS['file_naming_album']
+
+    tag_settings = get_download_settings()
+
+    download_source = tag_settings.get('download_source', 'tidal').lower()
+
+    downloads_folder = DOWNLOADS_ROOT
+
+    if not os.path.exists(downloads_folder):
+        logger.info("[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: %s", downloads_folder)
+        os.makedirs(downloads_folder, exist_ok=True)
+
+    track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
+    album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+
+    output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
+    logger.info("[DOWNLOAD] Selected output format=%s for quality='%s'", output_format, quality_choice)
+
+    track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
+    album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
+
+    # --- Extract metadata before downloading (needed for match check and file naming) ---
+
+    track_artist_name = 'Unknown Artist'
+    track_artist_id = None
+    album_artist_name = None
+    album_artist_id = None
+    album_name = 'Unknown Album'
+    track_title = 'Unknown Track'
+    track_version = ''
+    track_num = '01'
+    disc_num = ''
+    release_year = ''
+    copyright_text = ''
+    cover_url = ''
+    album_id = ''
+    album_disc_count = 1
+    album_has_multiple_discs = False
+    track_artists = []
+
+    if isinstance(track_data, dict):
+        if isinstance(track_data.get('artists'), list) and track_data['artists']:
+            artist_names = [str(a.get('name', '')).strip() for a in track_data['artists'] if isinstance(a, dict) and a.get('name')]
+            track_artist_name = '; '.join(artist_names) if artist_names else 'Unknown Artist'
+            track_artists = artist_names
+            first_artist = track_data['artists'][0] if isinstance(track_data['artists'][0], dict) else None
+            if first_artist and first_artist.get('id') is not None:
+                track_artist_id = str(first_artist.get('id')).strip() or None
+        elif isinstance(track_data.get('artists'), dict):
+            artist = track_data['artists']
+            track_artist_name = str(artist.get('name', 'Unknown Artist'))
+            if artist.get('name'):
+                track_artists = [track_artist_name]
+            if artist.get('id') is not None:
+                track_artist_id = str(artist.get('id')).strip() or None
+
+        track_title = str(track_data.get('title') or track_title)
+        track_version = str(track_data.get('version') or '').strip()
+        if track_data.get('explicit') and tag_settings.get('tag_explicit_suffix', True) and '[Explicit]' not in track_title:
+            track_title += ' [Explicit]'
+        if track_version:
+            track_title = f"{track_title} ({track_version})"
+
+        track_number = track_data.get('trackNumber')
+        if track_number is not None:
+            track_num = str(track_number).zfill(2)

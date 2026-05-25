@@ -89,3 +89,96 @@ def extract_year_from_text(text: str) -> str:
         return ''
     match = re.search(r"\b(19|20)\d{2}\b", text)
     return match.group(0) if match else ''
+
+
+def _normalize_library_track_path(file_path: str) -> str:
+    """Normalize a library track file path to a relative path.
+
+    Strips the DOWNLOADS_ROOT prefix if present, normalizes slashes,
+    and returns the relative path. Returns empty string if path is invalid.
+    """
+    if not file_path or not isinstance(file_path, str):
+        return ''
+
+    from squidly.config import DOWNLOADS_ROOT
+
+    normalized = file_path.replace('\\', '/')
+
+    if DOWNLOADS_ROOT and normalized.startswith(DOWNLOADS_ROOT.replace('\\', '/')):
+        normalized = normalized[len(DOWNLOADS_ROOT):].lstrip('/')
+
+    return normalized
+
+
+def _extract_plex_library_id(value) -> str | None:
+    """Extract a Plex library ID from a ratingKey or key attribute.
+
+    Handles both integer ratingKey and string key paths like '/library/metadata/123'.
+    Returns the ID as a string, or None if not extractable.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        if value.startswith('/library/metadata/'):
+            return value.split('/')[-1] or None
+        if value.isdigit():
+            return value
+
+    return None
+
+
+def _read_embedded_hifi_ids(file_path: str) -> dict:
+    """Read embedded Tidal HiFi IDs from audio file tags.
+
+    Returns a dict with 'track_id', 'album_id', and 'isrc' keys.
+    Returns empty dict if file cannot be read or tags not found.
+    """
+    import os
+    from mutagen.flac import FLAC
+    from mutagen.mp4 import MP4
+
+    if not file_path or not os.path.exists(file_path):
+        return {}
+
+    try:
+        lower_path = file_path.lower()
+        if lower_path.endswith('.flac'):
+            audio = FLAC(file_path)
+            def first_tag(key):
+                values = audio.get(key)
+                if not values:
+                    return ''
+                return str(values[0]) if values else ''
+            return {
+                'track_id': first_tag('TIDAL_TRACK_ID').strip() or None,
+                'album_id': first_tag('TIDAL_ALBUM_ID').strip() or None,
+                'isrc': first_tag('ISRC').strip() or None,
+            }
+        elif lower_path.endswith('.m4a'):
+            audio = MP4(file_path)
+
+            def first_text(key):
+                values = audio.get(key) or []
+                if not values:
+                    return None
+                val = values[0]
+                if isinstance(val, bytes):
+                    val = val.decode('utf-8', errors='ignore')
+                return str(val).strip() or None
+
+            return {
+                'track_id': first_text('----:com.apple.iTunes:tidal_track_id'),
+                'album_id': first_text('----:com.apple.iTunes:tidal_album_id'),
+                'isrc': first_text('----:com.apple.iTunes:isrc'),
+            }
+    except Exception:
+        pass
+
+    return {}

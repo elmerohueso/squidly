@@ -74,7 +74,7 @@ def test_import_jobs():
 
 
 def test_import_orchestration():
-    from squidly.orchestration import (
+    from squidly.jobs.orchestration import (
         JOB_TYPES,
         any_plex_library_update_jobs_running_or_queued,
         count_pending_playlist_adds,
@@ -165,7 +165,7 @@ def test_import_matching():
 
 
 def test_import_workers():
-    from squidly.workers import (
+    from squidly.jobs.workers import (
         JobCancelledError,
         _raise_if_job_cancelled,
         start_workers,
@@ -184,7 +184,7 @@ def test_import_workers():
 
 
 def test_import_hifi():
-    from squidly.hifi import (
+    from squidly.services.hifi import (
         _fetch_hifi_search_results,
         _fetch_hifi_artist_payload,
         _fetch_hifi_album_payload,
@@ -263,7 +263,7 @@ def test_matching_does_not_import_app():
 
 def test_workers_does_not_import_app_directly():
     """workers.py should not have top-level imports from app (lazy imports only)."""
-    import squidly.workers as workers_module
+    import squidly.jobs.workers as workers_module
     import inspect
 
     source = inspect.getsource(workers_module)
@@ -274,7 +274,7 @@ def test_workers_does_not_import_app_directly():
 
 def test_hifi_does_not_import_app():
     """hifi.py must not import from app to avoid circular deps."""
-    import squidly.hifi as hifi_module
+    import squidly.services.hifi as hifi_module
     import inspect
 
     source = inspect.getsource(hifi_module)

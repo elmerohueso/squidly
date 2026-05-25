@@ -25,12 +25,33 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# SQUID_URLS shared accessor
+# ---------------------------------------------------------------------------
+# Cache for enabled mirror URLs, populated at app startup.
+# Use refresh_squid_urls() to update the cache.
+# Use get_squid_urls() to read the current cache.
+
+_SQUID_URLS_CACHE = []
+
+
+def get_squid_urls():
+    """Return the current cache of enabled mirror URLs."""
+    return _SQUID_URLS_CACHE
+
+
+def refresh_squid_urls():
+    """Refresh the SQUID_URLS cache from the database."""
+    global _SQUID_URLS_CACHE
+    _SQUID_URLS_CACHE = load_enabled_mirror_urls()
+
+
+# ---------------------------------------------------------------------------
 # Download-specific error classes
 # ---------------------------------------------------------------------------
 # These inherit from the generic RetryableError/PermanentError in jobs.py
 # so the generic worker_loop() catches them correctly.
 
-from squidly.jobs import RetryableError, PermanentError
+from squidly.job_queue import RetryableError, PermanentError
 
 
 class ManifestDownloadError(RetryableError):

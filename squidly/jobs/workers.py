@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from squidly.config import app_timezone
-from squidly.jobs import (
+from squidly.job_queue import (
     RetryableError,
     PermanentError,
     claim_next_job,
@@ -21,7 +21,7 @@ from squidly.jobs import (
     requeue_claimed_job,
     serialize_job_payload,
 )
-from squidly.orchestration import (
+from squidly.jobs.orchestration import (
     JOB_TYPES,
     any_plex_library_update_jobs_running_or_queued,
     handle_on_success,
@@ -135,7 +135,7 @@ def worker_loop(job_type, idle_sleep=None):
 def download_track_worker():
     """Worker for download_track jobs with custom stage validation."""
     from squidly.downloads import download_track_all_stages_done
-    from squidly.app import process_download_job
+    from squidly.jobs.processors.download import process_download_job
 
     log_prefix = "[DOWNLOAD_WORKER]"
     logger.info("%s Background worker started", log_prefix)
@@ -195,7 +195,7 @@ def download_track_worker():
 
 def plex_sync_worker():
     """Worker for plex_library_sync jobs with pre-claim deferral logic."""
-    from squidly.app import process_plex_sync_job
+    from squidly.jobs.processors.plex_sync import process_plex_sync_job
 
     log_prefix = "[PLEX_SYNC_WORKER]"
     logger.info("%s Background worker started", log_prefix)
@@ -315,7 +315,7 @@ def plex_sync_scheduler_worker():
     The update chains to plex_library_sync → automatic_matching → bulk_playlist_add
     via on_success rules.
     """
-    from squidly.orchestration import queue_plex_library_update
+    from squidly.jobs.orchestration import queue_plex_library_update
 
     logger.info("[PLEX_SYNC_SCHEDULER] Background scheduler started")
 
@@ -364,7 +364,7 @@ def plex_sync_scheduler_worker():
 def recommendation_scheduler_worker():
     """Queue Fresh Finds recommendation generation daily at midnight."""
     from squidly.storage import get_all_plex_account_mappings, has_listen_history
-    from squidly.orchestration import is_job_type_running_or_queued
+    from squidly.jobs.orchestration import is_job_type_running_or_queued
 
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
 
@@ -380,7 +380,7 @@ def recommendation_scheduler_worker():
             if last_run_date == today:
                 # Same day — check if we need to queue auto-download yet
                 if auto_download_pending and not is_job_type_running_or_queued('generate_recommendations'):
-                    from squidly.orchestration import queue_fresh_finds_auto_download
+                    from squidly.jobs.orchestration import queue_fresh_finds_auto_download
                     try:
                         auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
                         if auto_job_id:
