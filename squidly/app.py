@@ -1306,13 +1306,14 @@ def process_download_job(job_id, payload):
         download_sources = ['tidal']
 
     last_download_error = None
+    any_source_had_mirrors = False  # Track if any source had eligible mirrors to try
     audio_format = None
     expected_duration = track_data.get('duration')
 
     for current_source in download_sources:
         if current_source == 'qobuz' and not track_data.get('isrc'):
             logger.info("[DOWNLOAD] Skipping Qobuz: track has no ISRC")
-            last_download_error = "Qobuz requires ISRC"
+            last_download_error = "Qobuz requires ISRC (permanent)"
             continue
 
         # Create a fresh temp path for each attempt
@@ -1402,14 +1403,31 @@ def process_download_job(job_id, payload):
             break
 
         except (ValueError, downloads.TransientDownloadError, RuntimeError, requests.exceptions.RequestException) as e:
-            last_download_error = str(e)
+            error_str = str(e)
+            last_download_error = error_str
+            # If this source had eligible mirrors to try (even if they failed),
+            # the failure might be transient — keep the door open for retry.
+            # "No mirror" errors are permanent per-source, but other sources
+            # may still work via fallback.
+            _is_permanent_no_mirror = (
+                'no configured mirror' in error_str.lower()
+                or 'no qobuz mirrors configured' in error_str.lower()
+            )
+            if not _is_permanent_no_mirror:
+                any_source_had_mirrors = True
             logger.info("[DOWNLOAD] Source '%s' failed, %s", current_source,
                         "trying next source..." if len(download_sources) > 1 else "no more sources")
             downloads.cleanup_file(temp_source_path)
             continue
 
     if download_mirror is None:
-        raise downloads.TransientDownloadError(
+        if any_source_had_mirrors:
+            # At least one source had eligible mirrors and could work on retry
+            raise downloads.TransientDownloadError(
+                f"All download sources failed: {last_download_error or 'unknown error'}"
+            )
+        # No source had eligible mirrors — permanent configuration issue, don't retry
+        raise downloads.PermanentDownloadError(
             f"All download sources failed: {last_download_error or 'unknown error'}"
         )
 
