@@ -100,7 +100,7 @@ def _normalize_library_track_path(file_path: str) -> str:
     if not file_path or not isinstance(file_path, str):
         return ''
 
-    from squidly.config import DOWNLOADS_ROOT
+    from squidly.infrastructure.config import DOWNLOADS_ROOT
 
     normalized = file_path.replace('\\', '/')
 

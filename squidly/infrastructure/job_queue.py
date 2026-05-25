@@ -4,9 +4,9 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from squidly.config import WORKER_ID
-from squidly.db import get_db_connection
-from squidly.storage import (
+from squidly.infrastructure.config import WORKER_ID
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.storage import (
     normalize_db_timestamp,
     set_library_update_needed,
     set_last_job_finished_at,

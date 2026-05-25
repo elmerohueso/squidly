@@ -1,5 +1,5 @@
 """Job system exports — re-export from squidly.job_queue."""
-from squidly.job_queue import (
+from squidly.infrastructure.job_queue import (
     RetryableError,
     PermanentError,
     enqueue_job,
@@ -16,7 +16,7 @@ from squidly.job_queue import (
     recover_stale_in_progress_jobs,
     requeue_claimed_job,
 )
-from squidly.downloads import download_track_all_stages_done
+from squidly.infrastructure.downloads import download_track_all_stages_done
 
 __all__ = [
     'RetryableError',

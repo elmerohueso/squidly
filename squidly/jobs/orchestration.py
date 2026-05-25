@@ -4,9 +4,9 @@ import logging
 import time
 from datetime import datetime
 
-from squidly.db import get_db_connection
-from squidly.job_queue import enqueue_job, is_job_cancelled, serialize_job_payload
-from squidly.storage import get_plex_config
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.job_queue import enqueue_job, is_job_cancelled, serialize_job_payload
+from squidly.infrastructure.storage import get_plex_config
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from plexapi.server import PlexServer
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 
-from squidly.plex import (
+from squidly.infrastructure.plex import (
     _get_plex_server_for_user,
     get_all_plex_users,
     get_plex_health_status,
@@ -18,7 +18,7 @@ from squidly.plex import (
     set_plex_health_status,
     test_plex_connection,
 )
-from squidly.storage import (
+from squidly.infrastructure.storage import (
     clear_plex_config,
     clear_plex_user_settings,
     get_plex_config,
@@ -28,7 +28,7 @@ from squidly.storage import (
 )
 from squidly.jobs.orchestration import start_plex_library_update_job
 from squidly.services.playlist_matching import _lookup_track_metadata
-from squidly.db import get_db_connection
+from squidly.infrastructure.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 

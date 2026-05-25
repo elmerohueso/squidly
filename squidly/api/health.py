@@ -2,7 +2,7 @@
 
 from flask import Blueprint, render_template, jsonify
 
-from squidly.plex import plex_healthcheck
+from squidly.infrastructure.plex import plex_healthcheck
 
 health_bp = Blueprint('health', __name__)
 

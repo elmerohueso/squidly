@@ -10,9 +10,9 @@ from http.cookies import SimpleCookie
 import requests
 from flask import Blueprint, jsonify, request
 
-from squidly import downloads
-from squidly.db import get_db_connection
-from squidly.storage import (
+from squidly.infrastructure import downloads
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.storage import (
     get_download_settings,
     save_download_settings,
     get_listenbrainz_config,
@@ -28,7 +28,7 @@ from squidly.storage import (
     get_fresh_finds_track_count,
     set_fresh_finds_track_count,
 )
-from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
+from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
 from urllib.parse import urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)

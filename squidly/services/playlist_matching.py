@@ -5,7 +5,7 @@ YouTube Music, Last.fm) to the local library. They are separate from
 library entity matching (squidly.matching).
 """
 
-from squidly.utils import _safe_int, normalize_match_text
+from squidly.infrastructure.utils import _safe_int, normalize_match_text
 
 
 def _requested_download_format(file_format):

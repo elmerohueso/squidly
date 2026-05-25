@@ -4,20 +4,20 @@ import logging
 from datetime import datetime
 logger = logging.getLogger(__name__)
 
-from squidly import downloads
+from squidly.infrastructure import downloads
 from squidly import jobs
-from squidly.config import DEFAULT_DOWNLOAD_SETTINGS, app_timezone
-from squidly.db import get_db_connection
-from squidly.job_queue import enqueue_job
+from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS, app_timezone
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.job_queue import enqueue_job
 from squidly.jobs.orchestration import is_job_type_running_or_queued
 from squidly.jobs.orchestration import queue_plex_listen_history_sync
 from squidly.jobs.orchestration import queue_recommendation_generation
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.hifi import _get_hifi_audio_quality_rank
-from squidly.storage import get_download_settings
-from squidly.storage import get_fresh_finds_auto_download_users
-from squidly.storage import get_recommendation_playlist, get_todays_recommendation_playlist, get_recent_listen_history_seeds
-from squidly.storage import save_recommendation_playlist
+from squidly.infrastructure.storage import get_download_settings
+from squidly.infrastructure.storage import get_fresh_finds_auto_download_users
+from squidly.infrastructure.storage import get_recommendation_playlist, get_todays_recommendation_playlist, get_recent_listen_history_seeds
+from squidly.infrastructure.storage import save_recommendation_playlist
 from zoneinfo import ZoneInfo
 
 def process_recommendation_job(job_id, payload):
@@ -163,8 +163,8 @@ def process_recommendation_job(job_id, payload):
 
     # Step 2: Deduplicate by ISRC, aggregate frequency score.
     #         Fallback: use normalized artist+title when ISRC is missing.
-    from squidly.storage import get_existing_isrcs, get_existing_artist_titles
-    from squidly.utils import normalize_match_text
+    from squidly.infrastructure.storage import get_existing_isrcs, get_existing_artist_titles
+    from squidly.infrastructure.utils import normalize_match_text
 
     deduped = {}
     for rec in quality_filtered:
@@ -203,7 +203,7 @@ def process_recommendation_job(job_id, payload):
             new_candidates.append(rec)
 
     # Step 4: Exclude library tracks recently played by this user (30 days)
-    from squidly.storage import get_recently_played_isrcs
+    from squidly.infrastructure.storage import get_recently_played_isrcs
     recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
     library_candidates = [
         rec for rec in library_candidates
@@ -215,7 +215,7 @@ def process_recommendation_job(job_id, payload):
     library_candidates.sort(key=lambda x: x['score'], reverse=True)
 
     # Step 6: Calculate distribution based on user settings
-    from squidly.storage import get_fresh_finds_new_track_pct, get_fresh_finds_track_count
+    from squidly.infrastructure.storage import get_fresh_finds_new_track_pct, get_fresh_finds_track_count
     new_track_pct = get_fresh_finds_new_track_pct(plex_account_id)
     track_count = get_fresh_finds_track_count(plex_account_id)
     n_new = round(track_count * new_track_pct / 100)
@@ -239,7 +239,7 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'progress': progress})
 
     # Step 7: Resolve library picks to local library instance
-    from squidly.storage import get_local_track_by_isrc
+    from squidly.infrastructure.storage import get_local_track_by_isrc
 
     for rec in selected_library:
         rec_isrc = str(rec.get('isrc') or '').strip().upper()
@@ -265,7 +265,7 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
 
-    from squidly.config import app_timezone
+    from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     now_tz = datetime.now(ZoneInfo(app_timezone))
     playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
@@ -281,7 +281,7 @@ def process_recommendation_job(job_id, payload):
     )
 
     # Stage 6: Create Plex playlist and store key
-    from squidly.plex import create_fresh_finds_plex_playlist
+    from squidly.infrastructure.plex import create_fresh_finds_plex_playlist
     plex_playlist_key = None
     try:
         success, result = create_fresh_finds_plex_playlist(
@@ -312,7 +312,7 @@ def process_recommendation_job(job_id, payload):
             logger.info("[RECOMMENDATION] Job %s failed to save playlist key (non-fatal): %s", job_id, str(e))
 
     # Stage 7: Cleanup old Fresh Finds playlists
-    from squidly.storage import cleanup_old_fresh_finds
+    from squidly.infrastructure.storage import cleanup_old_fresh_finds
     try:
         cleanup_result = cleanup_old_fresh_finds(plex_account_id)
         logger.info(
@@ -336,9 +336,9 @@ def process_recommendation_job(job_id, payload):
 
 def process_fresh_finds_auto_download_job(job_id, payload):
     """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
-    from squidly.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
+    from squidly.infrastructure.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
     from squidly.jobs.orchestration import is_job_type_running_or_queued
-    from squidly.job_queue import enqueue_job, RetryableError
+    from squidly.infrastructure.job_queue import enqueue_job, RetryableError
 
     slug = payload.get('slug', 'fresh-finds')
 

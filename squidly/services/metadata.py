@@ -93,7 +93,7 @@ class TidalMetadataProvider(MetadataProvider):
     
     def get_playlist(self, playlist_id: str) -> Dict[str, Any]:
         """Get playlist by ID."""
-        from squidly.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
+        from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
         response, _ = make_request_with_retry_rotating_mirrors(
             f"/playlists/{playlist_id}",
             get_squid_urls(),
@@ -105,7 +105,7 @@ class TidalMetadataProvider(MetadataProvider):
     
     def get_similar_tracks(self, track_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar tracks."""
-        from squidly.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
+        from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
         response, _ = make_request_with_retry_rotating_mirrors(
             f"/tracks/{track_id}/similar",
             get_squid_urls(),
@@ -118,7 +118,7 @@ class TidalMetadataProvider(MetadataProvider):
     
     def get_similar_albums(self, album_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar albums."""
-        from squidly.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
+        from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
         response, _ = make_request_with_retry_rotating_mirrors(
             f"/albums/{album_id}/similar",
             get_squid_urls(),
@@ -131,7 +131,7 @@ class TidalMetadataProvider(MetadataProvider):
     
     def get_similar_artists(self, artist_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar artists."""
-        from squidly.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
+        from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, get_squid_urls
         response, _ = make_request_with_retry_rotating_mirrors(
             f"/artists/{artist_id}/similar",
             get_squid_urls(),

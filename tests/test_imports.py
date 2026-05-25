@@ -2,14 +2,14 @@
 
 
 def test_import_db():
-    from squidly.db import get_db_connection, init_db
+    from squidly.infrastructure.db import get_db_connection, init_db
 
     assert callable(get_db_connection)
     assert callable(init_db)
 
 
 def test_import_storage():
-    from squidly.storage import (
+    from squidly.infrastructure.storage import (
         any_download_jobs_running,
         can_start_plex_library_update,
         clear_plex_config,
@@ -36,7 +36,7 @@ def test_import_storage():
 
 
 def test_import_plex():
-    from squidly.plex import (
+    from squidly.infrastructure.plex import (
         _get_plex_server_for_user,
         _is_plex_library_scan_active,
         add_tracks_to_plex_playlist,
@@ -94,7 +94,7 @@ def test_import_orchestration():
 
 
 def test_import_downloads():
-    from squidly.downloads import (
+    from squidly.infrastructure.downloads import (
         ManifestDownloadError,
         PermanentDownloadError,
         TransientDownloadError,
@@ -113,7 +113,7 @@ def test_import_downloads():
 
 
 def test_import_utils():
-    from squidly.utils import (
+    from squidly.infrastructure.utils import (
         _now_utc,
         _safe_float,
         _safe_int,
@@ -212,7 +212,7 @@ def test_import_app_no_circular():
 
 def test_storage_does_not_import_app():
     """storage.py must not import from app to avoid circular deps."""
-    import squidly.storage as storage_module
+    import squidly.infrastructure.storage as storage_module
     import inspect
 
     source = inspect.getsource(storage_module)
@@ -222,7 +222,7 @@ def test_storage_does_not_import_app():
 
 def test_plex_does_not_import_app():
     """plex.py must not import from app to avoid circular deps."""
-    import squidly.plex as plex_module
+    import squidly.infrastructure.plex as plex_module
     import inspect
 
     source = inspect.getsource(plex_module)
@@ -239,15 +239,6 @@ def test_jobs_does_not_import_app():
     assert "from squidly.app" not in source
     assert "import squidly.app" not in source
 
-
-def test_db_does_not_import_app():
-    """db.py must not import from app to avoid circular deps."""
-    import squidly.db as db_module
-    import inspect
-
-    source = inspect.getsource(db_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
 
 
 def test_matching_does_not_import_app():
@@ -284,7 +275,7 @@ def test_hifi_does_not_import_app():
 
 def test_plex_does_not_import_app():
     """plex.py must not import from app to avoid circular deps."""
-    import squidly.plex as plex_module
+    import squidly.infrastructure.plex as plex_module
     import inspect
 
     source = inspect.getsource(plex_module)
@@ -304,7 +295,7 @@ def test_jobs_does_not_import_app():
 
 def test_db_does_not_import_app():
     """db.py must not import from app to avoid circular deps."""
-    import squidly.db as db_module
+    import squidly.infrastructure.db as db_module
     import inspect
 
     source = inspect.getsource(db_module)

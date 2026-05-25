@@ -11,8 +11,8 @@ import requests
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
 from squidly import jobs
-from squidly.db import get_db_connection
-from squidly.storage import (
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.storage import (
     can_start_plex_library_update,
     get_plex_config,
     save_plex_config,
@@ -389,7 +389,7 @@ def bulk_add_tracks_to_playlists(job_id, payload):
 
     Returns a result dict with progress fields for the job card.
     """
-    from squidly.job_queue import update_job_progress
+    from squidly.infrastructure.job_queue import update_job_progress
     from squidly.jobs.orchestration import (
         get_pending_playlist_adds,
         delete_pending_playlist_adds,

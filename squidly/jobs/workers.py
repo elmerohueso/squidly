@@ -8,8 +8,8 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from squidly.config import app_timezone
-from squidly.job_queue import (
+from squidly.infrastructure.config import app_timezone
+from squidly.infrastructure.job_queue import (
     RetryableError,
     PermanentError,
     claim_next_job,
@@ -27,8 +27,8 @@ from squidly.jobs.orchestration import (
     handle_on_success,
     queue_recommendation_generation,
 )
-from squidly.plex import get_last_successful_plex_sync_finished_at
-from squidly.storage import get_plex_config
+from squidly.infrastructure.plex import get_last_successful_plex_sync_finished_at
+from squidly.infrastructure.storage import get_plex_config
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def worker_loop(job_type, idle_sleep=None):
 
 def download_track_worker():
     """Worker for download_track jobs with custom stage validation."""
-    from squidly.downloads import download_track_all_stages_done
+    from squidly.infrastructure.downloads import download_track_all_stages_done
     from squidly.jobs.processors.download import process_download_job
 
     log_prefix = "[DOWNLOAD_WORKER]"
@@ -244,8 +244,8 @@ def plex_sync_worker():
 
 def plex_library_update_worker():
     """Worker for plex_library_update jobs with download gate logic."""
-    from squidly.plex import process_plex_library_update_job
-    from squidly.storage import can_start_plex_library_update
+    from squidly.infrastructure.plex import process_plex_library_update_job
+    from squidly.infrastructure.storage import can_start_plex_library_update
     from squidly import jobs as jobs_module
 
     log_prefix = "[LIBRARY_UPDATE_WORKER]"
@@ -363,7 +363,7 @@ def plex_sync_scheduler_worker():
 
 def recommendation_scheduler_worker():
     """Queue Fresh Finds recommendation generation daily at midnight."""
-    from squidly.storage import get_all_plex_account_mappings, has_listen_history
+    from squidly.infrastructure.storage import get_all_plex_account_mappings, has_listen_history
     from squidly.jobs.orchestration import is_job_type_running_or_queued
 
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")

@@ -6,13 +6,13 @@ logger = logging.getLogger(__name__)
 
 from plexapi.server import PlexServer
 from squidly import jobs
-from squidly.db import get_db_connection
+from squidly.infrastructure.db import get_db_connection
 from squidly.jobs.orchestration import queue_plex_listen_history_sync
 from squidly.jobs.workers import _raise_if_job_cancelled
-from squidly.plex import plex_healthcheck, get_plex_config
-from squidly.storage import get_all_plex_account_mappings, get_listen_history, get_recent_listen_history_seeds
-from squidly.storage import get_listen_history_sync_status, save_plex_account_id, set_listen_history_sync_status
-from squidly.storage import upsert_listen_history_entries
+from squidly.infrastructure.plex import plex_healthcheck, get_plex_config
+from squidly.infrastructure.storage import get_all_plex_account_mappings, get_listen_history, get_recent_listen_history_seeds
+from squidly.infrastructure.storage import get_listen_history_sync_status, save_plex_account_id, set_listen_history_sync_status
+from squidly.infrastructure.storage import upsert_listen_history_entries
 
 def process_plex_listen_history_sync(job_id, payload):
     config = get_plex_config()

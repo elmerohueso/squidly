@@ -1,6 +1,6 @@
 
 import logging
-from squidly.logging_setup import setup_logging
+from squidly.infrastructure.logging_setup import setup_logging
 setup_logging()
 
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
@@ -17,11 +17,11 @@ import requests
 import concurrent.futures
 import psycopg2
 import psycopg2.extras
-from squidly.config import DOWNLOADS_ROOT
-from squidly.db import init_db
-from squidly.job_queue import recover_stale_in_progress_jobs
+from squidly.infrastructure.config import DOWNLOADS_ROOT
+from squidly.infrastructure.db import init_db
+from squidly.infrastructure.job_queue import recover_stale_in_progress_jobs
 
-from squidly.utils import (
+from squidly.infrastructure.utils import (
     _now_utc,
     _safe_float,
     _safe_int,
@@ -56,7 +56,7 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
 from io import BytesIO
 
-from squidly.plex import (
+from squidly.infrastructure.plex import (
     _get_plex_server_for_user,
     _is_plex_library_scan_active,
     _plex_call_with_timeout,
@@ -90,7 +90,7 @@ from squidly.jobs.workers import (
 
 from ytmusicapi import YTMusic
 
-from squidly import downloads
+from squidly.infrastructure import downloads
 from squidly.services import qobuz
 from squidly import jobs
 
@@ -103,7 +103,7 @@ from squidly.jobs.orchestration import (
     wait_for_job_type,
 )
 
-from squidly.storage import (
+from squidly.infrastructure.storage import (
     any_download_jobs_running,
     can_start_plex_library_update,
     clear_plex_config,

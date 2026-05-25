@@ -4,7 +4,7 @@ recommendations_bp = Blueprint("recommendations", __name__)
 
 @recommendations_bp.route('/api/recommendations/playlists', methods=['GET'])
 def list_recommendation_playlists_route():
-    from squidly.storage import list_recommendation_playlists, has_listen_history, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import list_recommendation_playlists, has_listen_history, get_all_plex_account_mappings
     from datetime import datetime
     user_id = request.args.get('user_id', '').strip() or None
     plex_account_id = None
@@ -31,7 +31,7 @@ def list_recommendation_playlists_route():
 @recommendations_bp.route('/api/recommendations/generate', methods=['POST'])
 def generate_recommendation_playlist():
     from squidly.jobs.orchestration import queue_recommendation_generation
-    from squidly.storage import get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_all_plex_account_mappings
     data = request.json if request.is_json else {}
     slug = data.get('slug', 'fresh-finds')
     user_id = data.get('user_id', '').strip()
@@ -54,7 +54,7 @@ def generate_recommendation_playlist():
 
 @recommendations_bp.route('/api/recommendations/<slug>', methods=['GET'])
 def get_recommendation_playlist_route(slug):
-    from squidly.storage import get_recommendation_playlist, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_recommendation_playlist, get_all_plex_account_mappings
     from datetime import datetime
     user_id = request.args.get('user_id', '').strip() or None
     plex_account_id = None

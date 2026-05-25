@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 import requests
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from squidly import downloads
+from squidly.infrastructure import downloads
 from squidly.services.hifi import (
     get_hifi_track_object,
     get_hifi_album_object,
@@ -19,7 +19,7 @@ from squidly.services.hifi import (
     _fetch_hifi_track_manifests_payload,
     _normalize_hifi_playlist_items,
 )
-from squidly.downloads import get_squid_urls
+from squidly.infrastructure.downloads import get_squid_urls
 
 search_bp = Blueprint('search', __name__)
 

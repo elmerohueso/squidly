@@ -6,8 +6,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from squidly import jobs
-from squidly.db import get_db_connection
-from squidly.storage import get_download_settings
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.storage import get_download_settings
 
 jobs_bp = Blueprint('jobs', __name__)
 

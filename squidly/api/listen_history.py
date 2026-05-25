@@ -4,7 +4,7 @@ listen_history_bp = Blueprint("listen_history", __name__)
 
 @listen_history_bp.route('/api/listen-history', methods=['GET'])
 def get_listen_history_route():
-    from squidly.storage import get_listen_history, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_listen_history, get_all_plex_account_mappings
     user_id = request.args.get('user_id', '').strip()
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
@@ -21,7 +21,7 @@ def get_listen_history_route():
 
 @listen_history_bp.route('/api/listen-history/users', methods=['GET'])
 def get_listen_history_users():
-    from squidly.storage import get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_all_plex_account_mappings
     mappings = get_all_plex_account_mappings()
     users = [{'plex_client_id': m.get('plex_client_id'), 'username': m.get('username')} for m in mappings]
     return jsonify({'users': users})
@@ -29,7 +29,7 @@ def get_listen_history_users():
 @listen_history_bp.route('/api/listen-history/sync', methods=['POST'])
 def sync_listen_history():
     from squidly.jobs.orchestration import queue_plex_listen_history_sync
-    from squidly.storage import get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_all_plex_account_mappings
     data = request.json if request.is_json else {}
     user_id = data.get('user_id', '').strip()
     if not user_id:
@@ -49,7 +49,7 @@ def sync_listen_history():
 
 @listen_history_bp.route('/api/listen-history/sync-status', methods=['GET'])
 def get_listen_history_sync_status_route():
-    from squidly.storage import get_listen_history_sync_status, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_listen_history_sync_status, get_all_plex_account_mappings
     user_id = request.args.get('user_id', '').strip()
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400

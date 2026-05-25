@@ -3,7 +3,7 @@
 import psycopg2
 import psycopg2.extras
 
-from squidly.config import DATABASE_URL
+from squidly.infrastructure.config import DATABASE_URL
 
 
 def get_db_connection():

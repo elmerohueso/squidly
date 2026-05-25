@@ -2,9 +2,9 @@
 
 import re
 
-from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text, _normalize_library_track_path
-from squidly.db import get_db_connection
-from squidly.job_queue import update_job_progress
+from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc, normalize_match_text, _normalize_library_track_path
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.job_queue import update_job_progress
 from squidly.services.hifi import (
     _extract_hifi_album_track_items,
     _get_hifi_audio_quality_rank,

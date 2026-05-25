@@ -10,7 +10,7 @@ import re
 from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, List, Optional
 
-from squidly.downloads import make_request_with_retry_rotating_mirrors, load_enabled_mirror_urls
+from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, load_enabled_mirror_urls
 
 
 _SQUID_URLS_CACHE = None

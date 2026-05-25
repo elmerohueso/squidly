@@ -7,17 +7,17 @@ from squidly.jobs import (
     compute_job_backoff_seconds,
     serialize_job_payload,
 )
-from squidly.downloads import (
+from squidly.infrastructure.downloads import (
     download_track_all_stages_done,
     detect_audio_format,
     format_tidal_image_url,
 )
-from squidly.utils import (
+from squidly.infrastructure.utils import (
     clean_path_components,
     extract_year_from_text,
     sanitize_filename_component,
 )
-from squidly.storage import normalize_db_timestamp
+from squidly.infrastructure.storage import normalize_db_timestamp
 
 
 class TestSerializeJobPayload:

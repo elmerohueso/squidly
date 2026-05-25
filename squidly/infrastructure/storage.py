@@ -10,8 +10,8 @@ import json
 import logging
 import re
 
-from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
-from squidly.db import get_db_connection
+from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
+from squidly.infrastructure.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -952,7 +952,7 @@ def cleanup_old_fresh_finds(plex_account_id):
     # Best-effort Plex cleanup using keys first, fallback to names
     plex_deleted = 0
     try:
-        from squidly.plex import delete_plex_playlists_by_keys_or_names
+        from squidly.infrastructure.plex import delete_plex_playlists_by_keys_or_names
         plex_deleted = delete_plex_playlists_by_keys_or_names(
             plex_playlist_keys=playlist_keys,
             fallback_names=playlist_names
@@ -1133,7 +1133,7 @@ def get_existing_isrcs():
 
 
 def get_existing_artist_titles():
-    from squidly.utils import normalize_match_text
+    from squidly.infrastructure.utils import normalize_match_text
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1154,7 +1154,7 @@ def get_existing_artist_titles():
 
 
 def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks, plex_playlist_key=None):
-    from squidly.config import app_timezone
+    from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     from datetime import datetime
 
@@ -1308,7 +1308,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
 
 def get_todays_recommendation_playlist(plex_account_id, slug):
     """Get today's recommendation playlist for a user/slug using app_timezone for the date."""
-    from squidly.config import app_timezone
+    from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     from datetime import datetime
 

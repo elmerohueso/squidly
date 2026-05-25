@@ -6,10 +6,10 @@ downloads_bp = Blueprint("downloads", __name__)
 def download_track():
     """Enqueue a download job."""
     from flask import request, jsonify
-    from squidly.storage import get_download_settings, set_last_download_activity_at
-    from squidly.job_queue import enqueue_job
+    from squidly.infrastructure.storage import get_download_settings, set_last_download_activity_at
+    from squidly.infrastructure.job_queue import enqueue_job
     from squidly.services.hifi import get_hifi_track_object
-    from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
+    from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
     from datetime import datetime
     import logging
     logger = logging.getLogger(__name__)

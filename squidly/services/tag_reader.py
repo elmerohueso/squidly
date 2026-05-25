@@ -10,9 +10,9 @@ import os
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
 
-from squidly.config import DOWNLOADS_ROOT
-from squidly.db import get_db_connection
-from squidly.utils import _safe_int, _safe_float, _now_utc
+from squidly.infrastructure.config import DOWNLOADS_ROOT
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc
 from squidly.services.matching import (
     _get_track_row_by_path,
     _get_album_row,

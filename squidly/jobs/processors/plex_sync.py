@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from plexapi.server import PlexServer
 from squidly import jobs
-from squidly.db import get_db_connection
+from squidly.infrastructure.db import get_db_connection
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.matching import (
     _get_artist_row,
@@ -18,9 +18,9 @@ from squidly.services.matching import (
     _upsert_album_row,
     _upsert_track_row,
 )
-from squidly.plex import _plex_call_with_timeout, plex_healthcheck, get_plex_config
+from squidly.infrastructure.plex import _plex_call_with_timeout, plex_healthcheck, get_plex_config
 from squidly.services.tag_reader import _resolve_library_file_path
-from squidly.utils import _safe_int, _safe_float, _now_utc, _normalize_library_track_path, _extract_plex_library_id, _read_embedded_hifi_ids
+from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc, _normalize_library_track_path, _extract_plex_library_id, _read_embedded_hifi_ids
 
 def process_plex_sync_job(job_id, payload):
     config = get_plex_config()

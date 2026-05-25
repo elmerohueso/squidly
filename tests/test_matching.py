@@ -1,6 +1,6 @@
 """Tests for pure matching/scoring functions that require no database access."""
 
-from squidly.utils import normalize_match_text
+from squidly.infrastructure.utils import normalize_match_text
 from squidly.services.matching import (
     _extract_hifi_item_artists,
     _extract_primary_hifi_artist,

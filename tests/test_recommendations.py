@@ -76,9 +76,9 @@ class TestQueueRecommendationGeneration:
 
 
 class TestStorageFunctions:
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_true(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'has_history': True}
@@ -94,9 +94,9 @@ class TestStorageFunctions:
         assert 'listen_history' in call_args[0]
         assert call_args[1] == (123,)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_false(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'has_history': False}
@@ -108,9 +108,9 @@ class TestStorageFunctions:
 
         assert result is False
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_no_row(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
@@ -122,9 +122,9 @@ class TestStorageFunctions:
 
         assert result is False
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recent_listen_history_seeds(self, mock_conn):
-        from squidly.storage import get_recent_listen_history_seeds
+        from squidly.infrastructure.storage import get_recent_listen_history_seeds
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -147,9 +147,9 @@ class TestStorageFunctions:
         assert 'DISTINCT ON' in call_args[0]
         assert call_args[1] == (123, 20)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_existing_isrcs(self, mock_conn):
-        from squidly.storage import get_existing_isrcs
+        from squidly.infrastructure.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
@@ -165,9 +165,9 @@ class TestStorageFunctions:
 
         assert result == {'USRC17607839', 'GBUM71505078', 'USRC17607840'}
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_existing_isrcs_empty(self, mock_conn):
-        from squidly.storage import get_existing_isrcs
+        from squidly.infrastructure.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -179,9 +179,9 @@ class TestStorageFunctions:
 
         assert result == set()
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_list_recommendation_playlists(self, mock_conn):
-        from squidly.storage import list_recommendation_playlists
+        from squidly.infrastructure.storage import list_recommendation_playlists
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -200,9 +200,9 @@ class TestStorageFunctions:
         call_args = mock_cursor.execute.call_args[0]
         assert call_args[1] == (123,)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_list_recommendation_playlists_empty(self, mock_conn):
-        from squidly.storage import list_recommendation_playlists
+        from squidly.infrastructure.storage import list_recommendation_playlists
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -214,9 +214,9 @@ class TestStorageFunctions:
 
         assert result == []
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recommendation_playlist(self, mock_conn):
-        from squidly.storage import get_recommendation_playlist
+        from squidly.infrastructure.storage import get_recommendation_playlist
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -237,9 +237,9 @@ class TestStorageFunctions:
         assert result['tracks'][0]['hifi_id'] == 100
         assert result['tracks'][0]['score'] == 3.0
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recommendation_playlist_not_found(self, mock_conn):
-        from squidly.storage import get_recommendation_playlist
+        from squidly.infrastructure.storage import get_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
@@ -253,9 +253,9 @@ class TestStorageFunctions:
 
 
 class TestSaveRecommendationPlaylist:
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_save_new_playlist(self, mock_conn):
-        from squidly.storage import save_recommendation_playlist
+        from squidly.infrastructure.storage import save_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'id': 1}
@@ -281,9 +281,9 @@ class TestSaveRecommendationPlaylist:
         assert mock_cursor.execute.call_count == 5  # SELECT check, UPDATE playlist, DELETE old tracks, INSERT 2 tracks
         mock_connection.commit.assert_called_once()
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_save_playlist_rolls_back_on_error(self, mock_conn):
-        from squidly.storage import save_recommendation_playlist
+        from squidly.infrastructure.storage import save_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'id': 1}

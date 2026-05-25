@@ -4,8 +4,8 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from squidly.utils import _safe_float, _safe_int, _now_utc
-from squidly.storage import get_plex_config
+from squidly.infrastructure.utils import _safe_float, _safe_int, _now_utc
+from squidly.infrastructure.storage import get_plex_config
 from squidly.services.matching import (
     MATCH_REVIEW_ARTWORK_SIZE,
     _fetch_match_review_row,
@@ -25,7 +25,7 @@ from squidly.jobs.orchestration import (
     start_plex_library_update_job,
 )
 from squidly.api.plex_routes import _resolve_plex_library_context
-from squidly.db import get_db_connection
+from squidly.infrastructure.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 

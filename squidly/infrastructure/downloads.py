@@ -15,8 +15,8 @@ from urllib.parse import urljoin, urlencode, urlparse
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4, MP4Cover
 import requests
-from squidly.db import get_db_connection
-from squidly.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.utils import clean_path_components, extract_year_from_text, sanitize_filename_component
 from squidly.services import qobuz
 
 import logging
@@ -51,7 +51,7 @@ def refresh_squid_urls():
 # These inherit from the generic RetryableError/PermanentError in jobs.py
 # so the generic worker_loop() catches them correctly.
 
-from squidly.job_queue import RetryableError, PermanentError
+from squidly.infrastructure.job_queue import RetryableError, PermanentError
 
 
 class ManifestDownloadError(RetryableError):

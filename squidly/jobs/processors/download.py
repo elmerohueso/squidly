@@ -7,20 +7,20 @@ from datetime import datetime
 import requests
 logger = logging.getLogger(__name__)
 
-from squidly import downloads
+from squidly.infrastructure import downloads
 from squidly import jobs
 from squidly.services import qobuz
-from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
-from squidly.config import DOWNLOADS_ROOT
-from squidly.db import get_db_connection
+from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
+from squidly.infrastructure.config import DOWNLOADS_ROOT
+from squidly.infrastructure.db import get_db_connection
 from squidly.jobs.orchestration import queue_pending_playlist_addition
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.matching import upsert_download_match_hint
 from squidly.services.playlist_matching import _lookup_track_metadata, _matches_requested_format
-from squidly.plex import plex_healthcheck, get_plex_config
+from squidly.infrastructure.plex import plex_healthcheck, get_plex_config
 from squidly.services.hifi import get_hifi_track_object
-from squidly.storage import get_download_settings, set_last_download_activity_at
-from squidly.utils import (
+from squidly.infrastructure.storage import get_download_settings, set_last_download_activity_at
+from squidly.infrastructure.utils import (
     _safe_int,
     clean_path_components,
     extract_year_from_text,
