@@ -364,11 +364,13 @@ def plex_sync_scheduler_worker():
 def recommendation_scheduler_worker():
     """Queue Fresh Finds recommendation generation daily at midnight."""
     from squidly.storage import get_all_plex_account_mappings, has_listen_history
+    from squidly.orchestration import is_job_type_running_or_queued
 
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
 
     last_run_date = None
     tz = ZoneInfo(app_timezone)
+    auto_download_pending = False
 
     while True:
         try:
@@ -376,6 +378,16 @@ def recommendation_scheduler_worker():
             today = now.date()
 
             if last_run_date == today:
+                # Same day — check if we need to queue auto-download yet
+                if auto_download_pending and not is_job_type_running_or_queued('generate_recommendations'):
+                    from squidly.orchestration import queue_fresh_finds_auto_download
+                    try:
+                        auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
+                        if auto_job_id:
+                            logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds auto-download (job %s)", auto_job_id)
+                        auto_download_pending = False
+                    except Exception as e:
+                        logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue auto-download: %s", e)
                 time.sleep(60)
                 continue
 
@@ -384,6 +396,7 @@ def recommendation_scheduler_worker():
                 continue
 
             last_run_date = today
+            auto_download_pending = False
             logger.info("[RECOMMENDATION_SCHEDULER] Running daily recommendation generation")
 
             mappings = get_all_plex_account_mappings()
@@ -408,15 +421,9 @@ def recommendation_scheduler_worker():
                 except Exception as e:
                     logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue for %s: %s", plex_username, e)
 
-            # Queue a single auto-download job after all recommendation jobs.
-            # The auto-download job will wait for recommendations to finish before processing.
-            try:
-                from squidly.orchestration import queue_fresh_finds_auto_download
-                auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
-                if auto_job_id:
-                    logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds auto-download (job %s)", auto_job_id)
-            except Exception as e:
-                logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue auto-download: %s", e)
+            # Mark auto-download as pending — will be queued on a later pass
+            # once all generate_recommendations jobs have finished.
+            auto_download_pending = True
 
         except Exception as e:
             logger.info("[RECOMMENDATION_SCHEDULER] Error: %s", str(e))
