@@ -5665,7 +5665,7 @@ class App {
 
     private async fetchAppConfig(): Promise<void> {
         try {
-            const response = await fetch('/api/app/config');
+            const response = await fetch('/api/settings');
             if (!response.ok) {
                 return;
             }

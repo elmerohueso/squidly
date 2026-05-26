@@ -29,7 +29,7 @@ from squidly.infrastructure.storage import (
     get_fresh_finds_track_count,
     set_fresh_finds_track_count,
 )
-from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
+from squidly.infrastructure.config import app_timezone, DEFAULT_DOWNLOAD_SETTINGS
 
 from squidly.services.playlist_matching import _score_track_candidate
 from urllib.parse import urlparse, parse_qs
@@ -94,7 +94,9 @@ def _get_ytmusic(user_id):
 def download_settings():
     """Get or update download settings stored in SQLite."""
     if request.method == 'GET':
-        return jsonify(get_download_settings())
+        settings = get_download_settings()
+        settings['timezone'] = app_timezone
+        return jsonify(settings)
 
     payload = request.get_json(silent=True) or {}
     current = get_download_settings()
