@@ -786,7 +786,7 @@ def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
 
 
 def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence=1.0, track_artist_hifi_id=None, album_artist_hifi_id=None, album_payload_cache=None):
-    from squidly.app import _fetch_hifi_track_info_payload as _app_fetch_track_info
+    from squidly.services.hifi import _fetch_hifi_track_info_payload
 
     if not isinstance(track_row, dict):
         return track_row.get('album_id') if isinstance(track_row, dict) else None
@@ -805,7 +805,7 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence
     track_data = {}
     track_artist_info = None
     if needs_track_api:
-        track_payload = _app_fetch_track_info(track_hifi_id)
+        track_payload = _fetch_hifi_track_info_payload(track_hifi_id)
         track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
         if not isinstance(track_data, dict):
             track_data = {}

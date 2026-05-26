@@ -10,17 +10,7 @@ import re
 from urllib.parse import urlencode, urlparse
 from typing import Any, Dict, List, Optional
 
-from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, load_enabled_mirror_urls
-
-
-_SQUID_URLS_CACHE = None
-
-
-def _get_squid_urls():
-    global _SQUID_URLS_CACHE
-    if _SQUID_URLS_CACHE is None:
-        _SQUID_URLS_CACHE = load_enabled_mirror_urls()
-    return _SQUID_URLS_CACHE
+from squidly.infrastructure.downloads import make_request_with_retry_rotating_mirrors, load_enabled_mirror_urls, format_tidal_image_url, get_squid_urls
 
 
 def _extract_hifi_image_string(value: Any) -> str:
@@ -34,15 +24,6 @@ def _extract_hifi_image_string(value: Any) -> str:
     if isinstance(value, dict):
         return str(value.get('id') or value.get('url') or '')
     return ''
-
-
-def _format_tidal_image_url(image_id_or_path: str, size: int) -> str:
-    """Format a Tidal CDN image URL from a UUID/path and requested square size."""
-    if not image_id_or_path:
-        return ''
-
-    image_path = image_id_or_path.replace('-', '/')
-    return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
 
 
 def _normalize_tidal_image_url(normalized_value: str, size: int) -> Optional[str]:
@@ -91,7 +72,7 @@ def _format_hifi_image_value(image_id_or_url: Any, size: int = 640) -> Optional[
         normalized_value = normalized_value.strip('/')
 
     try:
-        return _format_tidal_image_url(normalized_value, size)
+        return format_tidal_image_url(normalized_value, size)
     except Exception:
         return None
 
@@ -1145,7 +1126,7 @@ def fetch_hifi_track_manifest(track_id: Any, audio_quality: Any = None) -> Dict[
 def _fetch_hifi_search_results(search_type, query, limit=10):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/search/?{urlencode({search_type: query, 'limit': str(limit)})}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3
@@ -1171,7 +1152,7 @@ def _fetch_hifi_artist_payload(artist_id, skip_tracks=False, mirror_type=None):
 
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/artist/?{urlencode(params)}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
@@ -1185,7 +1166,7 @@ def _fetch_hifi_artist_payload(artist_id, skip_tracks=False, mirror_type=None):
 def _fetch_hifi_album_payload(album_id, mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/album/?{urlencode({'id': str(album_id)})}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
@@ -1199,7 +1180,7 @@ def _fetch_hifi_album_payload(album_id, mirror_type=None):
 def _fetch_hifi_track_payload(track_id, quality='LOW', mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/track/?{urlencode({'id': str(track_id), 'quality': str(quality)})}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
@@ -1223,7 +1204,7 @@ def _fetch_hifi_track_manifests_payload(track_id, formats=None, mirror_type=None
 
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/trackManifests/?{urlencode(params)}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,
@@ -1237,7 +1218,7 @@ def _fetch_hifi_track_manifests_payload(track_id, formats=None, mirror_type=None
 def _fetch_hifi_track_info_payload(track_id, mirror_type=None):
     response, _target = make_request_with_retry_rotating_mirrors(
         f"/info/?{urlencode({'id': str(track_id)})}",
-        _get_squid_urls(),
+        get_squid_urls(),
         method='GET',
         timeout=10,
         max_retries=3,

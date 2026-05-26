@@ -19,46 +19,46 @@ JOB_TYPES = {
     'download_track': {
         'max_attempts': 20,
         'idle_sleep': 2,
-        'process_fn': 'squidly.app.process_download_job',
+        'process_fn': 'squidly.jobs.processors.download.process_download_job',
         'on_success': ['plex_library_update'],
     },
     'plex_library_update': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.plex.process_plex_library_update_job',
+        'process_fn': 'squidly.infrastructure.plex.process_plex_library_update_job',
         'on_success': ['plex_library_sync'],
     },
     'plex_library_sync': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_plex_sync_job',
+        'process_fn': 'squidly.jobs.processors.plex_sync.process_plex_sync_job',
         'on_success': ['automatic_matching'],
     },
     'automatic_matching': {
         'max_attempts': 1,
         'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_automatic_matching_job',
+        'process_fn': 'squidly.jobs.processors.matching.process_automatic_matching_job',
         'on_success': ['bulk_playlist_add'],
     },
     'bulk_playlist_add': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.plex.bulk_add_tracks_to_playlists',
+        'process_fn': 'squidly.infrastructure.plex.bulk_add_tracks_to_playlists',
     },
     'plex_listen_history_sync': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_plex_listen_history_sync',
+        'process_fn': 'squidly.jobs.processors.listen_history.process_plex_listen_history_sync',
     },
     'generate_recommendations': {
         'max_attempts': 3,
         'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_recommendation_job',
+        'process_fn': 'squidly.jobs.processors.recommendations.process_recommendation_job',
     },
     'fresh_finds_auto_download': {
         'max_attempts': 10,
         'idle_sleep': 5,
-        'process_fn': 'squidly.app.process_fresh_finds_auto_download_job',
+        'process_fn': 'squidly.jobs.processors.recommendations.process_fresh_finds_auto_download_job',
     },
 }
 
@@ -101,7 +101,7 @@ def wait_for_job_type(job_type, timeout=300, poll_interval=5, check_cancelled_jo
     deadline = time.time() + timeout
     while is_job_type_running_or_queued(job_type):
         if check_cancelled_job_id and is_job_cancelled(check_cancelled_job_id):
-            from squidly.workers import JobCancelledError
+            from squidly.jobs.workers import JobCancelledError
             raise JobCancelledError(f'Job {check_cancelled_job_id} was cancelled while waiting for {job_type}')
         if time.time() > deadline:
             raise TimeoutError(f'Timed out waiting for {job_type} jobs to complete after {timeout}s')
@@ -228,14 +228,6 @@ def queue_fresh_finds_auto_download(trigger='scheduled'):
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
     return enqueue_job('fresh_finds_auto_download', payload, max_attempts=3)
-
-
-# ---------------------------------------------------------------------------
-# Convenience aliases (matching old function names for backward compat)
-# ---------------------------------------------------------------------------
-
-# Convenience alias for readability at call sites that check specific job types.
-any_plex_library_update_jobs_running_or_queued = lambda: is_job_type_running_or_queued('plex_library_update')
 
 
 # ---------------------------------------------------------------------------

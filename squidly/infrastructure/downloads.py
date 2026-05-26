@@ -418,39 +418,6 @@ def make_request_with_retry(url, method='GET', timeout=10, max_retries=3, backof
     return None
 
 
-def get_online_mirror_names(mirror_type=None):
-    """Return set of mirror names that are currently marked online and enabled.
-
-    Args:
-        mirror_type: Optional filter for mirror type ('tidal' or 'qobuz').
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    if mirror_type:
-        cur.execute(
-            """
-            SELECT name
-            FROM mirror_endpoints
-            WHERE online = 1 AND enabled = 1 AND mirror_type = %s
-            """,
-            (mirror_type,)
-        )
-    else:
-        cur.execute(
-            """
-            SELECT name
-            FROM mirror_endpoints
-            WHERE online = 1 AND enabled = 1
-            """
-        )
-    rows = cur.fetchall()
-    conn.close()
-    return {row['name'] for row in rows}
-
-
-def select_next_mirror(url_iterator):
-    return next(url_iterator)
-
 
 # Rate-limit tuning state (in-memory).
 RATE_LIMIT_HISTORY_SECONDS = 300
@@ -676,7 +643,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
         enforce_mirror_rate_limit()
 
         try:
-            target = select_next_mirror(url_iterator)
+            target = next(url_iterator)
             target_url = target['url'].rstrip('/')
             full_url = f"{target_url}{url_base}"
             last_target = target
@@ -980,11 +947,6 @@ def validate_all_endpoints_from_db():
     }
 
 
-def validate_all_endpoints():
-    """Validate all squid mirror endpoints and update database state."""
-    return validate_all_endpoints_from_db()
-
-
 def validate_endpoint(url, name, timeout=5):
     """Validate a mirror endpoint and return status info."""
     timestamp = datetime.utcnow().isoformat() + 'Z'
@@ -1237,54 +1199,6 @@ def download_cover_image(cover_url):
     except Exception as e:
         logger.info("[COVER] Error downloading cover image: %s", str(e))
         return None
-
-
-def convert_to_mp3(source_path: str, mp3_path: str, source_format: str = 'audio') -> bool:
-    """
-    Convert an audio file (e.g., FLAC or M4A/AAC) to highest VBR quality MP3 using ffmpeg.
-
-    Args:
-        source_path: Path to the source audio file
-        mp3_path: Path where the MP3 should be saved
-        source_format: Source format label for logging
-
-    Returns:
-        True on success, False on failure
-    """
-    try:
-        logger.info("[FFMPEG] Converting %s to MP3 (highest VBR quality): %s -> %s", source_format.upper(), source_path, mp3_path)
-
-        mp3_dir = os.path.dirname(mp3_path)
-        if mp3_dir:
-            os.makedirs(mp3_dir, exist_ok=True)
-
-        cmd = [
-            'ffmpeg',
-            '-i', source_path,
-            '-c:a', 'libmp3lame',
-            '-q:a', '0',
-            '-y',
-            mp3_path
-        ]
-
-        logger.info("[FFMPEG] Command: %s", ' '.join(cmd))
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-        if result.returncode == 0:
-            logger.info("[FFMPEG] SUCCESS: Converted to %s", mp3_path)
-            return True
-
-        logger.info("[FFMPEG] ERROR: Conversion failed with code %d", result.returncode)
-        logger.info("[FFMPEG] stderr: %s", result.stderr)
-        return False
-
-    except subprocess.TimeoutExpired:
-        logger.info("[FFMPEG] ERROR: Conversion timeout")
-        return False
-    except Exception as e:
-        logger.info("[FFMPEG] ERROR: %s", str(e))
-        return False
 
 
 _DURATION_RE = re.compile(r'time=(\d+):(\d+):(\d+)\.(\d+)')

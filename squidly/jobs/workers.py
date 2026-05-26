@@ -23,8 +23,8 @@ from squidly.infrastructure.job_queue import (
 )
 from squidly.jobs.orchestration import (
     JOB_TYPES,
-    any_plex_library_update_jobs_running_or_queued,
     handle_on_success,
+    is_job_type_running_or_queued,
     queue_recommendation_generation,
 )
 from squidly.infrastructure.plex import get_last_successful_plex_sync_finished_at
@@ -214,7 +214,7 @@ def plex_sync_worker():
             except (TypeError, ValueError):
                 payload = {}
 
-            if any_plex_library_update_jobs_running_or_queued():
+            if is_job_type_running_or_queued('plex_library_update'):
                 requeue_claimed_job(
                     job['id'],
                     delay_seconds=20,
@@ -256,7 +256,7 @@ def plex_library_update_worker():
         try:
             gate = can_start_plex_library_update(required_idle_seconds=180)
             if not gate.get('can_start'):
-                if any_plex_library_update_jobs_running_or_queued():
+                if is_job_type_running_or_queued('plex_library_update'):
                     gate_state = gate.get('gate_state') or {}
                     blocking_count = gate_state.get('blocking_count') or 0
                     idle_seconds = gate.get('idle_seconds')
@@ -338,7 +338,7 @@ def plex_sync_scheduler_worker():
             if interval_hours < 1:
                 interval_hours = 1
 
-            if any_plex_library_update_jobs_running_or_queued():
+            if is_job_type_running_or_queued('plex_library_update'):
                 time.sleep(60)
                 continue
 

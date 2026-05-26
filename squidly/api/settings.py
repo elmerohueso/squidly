@@ -34,6 +34,45 @@ from urllib.parse import urlparse, parse_qs
 settings_bp = Blueprint('settings', __name__)
 
 
+def _normalize_match_text(s):
+    """Normalize text for matching by removing non-alphanumeric characters."""
+    return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
+
+
+def _score_track_candidate(title, artist, album, item):
+    """Score a track candidate against the requested title/artist/album.
+    
+    Returns a score between 0.0 and 1.0 based on title/artist/album alignment.
+    """
+    score = 0.0
+    item_title = _normalize_match_text(item.get('title') or '')
+    item_artist = _normalize_match_text((item.get('artist') or {}).get('name') or '')
+    item_album = _normalize_match_text((item.get('album') or {}).get('title') or '')
+    norm_title = _normalize_match_text(title)
+    norm_artist = _normalize_match_text(artist)
+    norm_album = _normalize_match_text(album)
+
+    if item_title and norm_title:
+        if item_title == norm_title:
+            score += 0.50
+        elif norm_title in item_title or item_title in norm_title:
+            score += 0.30
+
+    if item_artist and norm_artist:
+        if item_artist == norm_artist:
+            score += 0.30
+        elif norm_artist in item_artist or item_artist in norm_artist:
+            score += 0.15
+
+    if norm_album and item_album:
+        if item_album == norm_album:
+            score += 0.20
+        elif norm_album in item_album or item_album in norm_album:
+            score += 0.10
+
+    return score
+
+
 def _run_async(fn):
     """Run a callable in a background daemon thread."""
     def _wrapper():
@@ -606,38 +645,6 @@ def match_listenbrainz_track():
 
     settings = get_download_settings()
 
-    def normalize(s):
-        return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
-
-    def score_candidate(item):
-        score = 0.0
-        item_title = normalize(item.get('title') or '')
-        item_artist = normalize((item.get('artist') or {}).get('name') or '')
-        item_album = normalize((item.get('album') or {}).get('title') or '')
-        norm_title = normalize(title)
-        norm_artist = normalize(artist)
-        norm_album = normalize(album)
-
-        if item_title and norm_title:
-            if item_title == norm_title:
-                score += 0.50
-            elif norm_title in item_title or item_title in norm_title:
-                score += 0.30
-
-        if item_artist and norm_artist:
-            if item_artist == norm_artist:
-                score += 0.30
-            elif norm_artist in item_artist or item_artist in norm_artist:
-                score += 0.15
-
-        if norm_album and item_album:
-            if item_album == norm_album:
-                score += 0.20
-            elif norm_album in item_album or item_album in norm_album:
-                score += 0.10
-
-        return score
-
     from squidly.services.track_resolver import resolve_best_match
     from squidly.services.hifi import _fetch_hifi_search_results
     from urllib.parse import urlencode
@@ -681,7 +688,7 @@ def match_listenbrainz_track():
         for isrc in isrcs:
             results = search_hifi('s', f'isrc:{isrc}', limit=5)
             for item in results:
-                score = score_candidate(item)
+                score = _score_track_candidate(title, artist, album, item)
                 if score > best_score:
                     best_score = score
                     best_match = item
@@ -691,7 +698,7 @@ def match_listenbrainz_track():
         query = f'{title} {artist}'
         results = search_hifi('s', query, limit=50)
         for item in results:
-            score = score_candidate(item)
+            score = _score_track_candidate(title, artist, album, item)
             if score > best_score:
                 best_score = score
                 best_match = item
@@ -909,42 +916,6 @@ def match_ytm_track():
 
     settings = get_download_settings()
 
-    def normalize(s):
-        return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
-
-    def score_candidate(item):
-        score = 0.0
-        item_title = normalize(item.get('title') or '')
-        item_artist = normalize((item.get('artist') or {}).get('name') or '')
-        item_album = normalize((item.get('album') or {}).get('title') or '')
-        norm_title = normalize(title)
-        norm_artist = normalize(artist)
-        norm_album = normalize(album)
-
-        if item_title and norm_title:
-            if item_title == norm_title:
-                score += 0.50
-            elif norm_title in item_title or item_title in norm_title:
-                score += 0.30
-
-        if item_artist and norm_artist:
-            if item_artist == norm_artist:
-                score += 0.30
-            elif norm_artist in item_artist or item_artist in norm_artist:
-                score += 0.15
-
-        if norm_album and item_album:
-            if item_album == norm_album:
-                score += 0.20
-            elif norm_album in item_album or item_album in norm_album:
-                score += 0.10
-
-        return score
-
-    from squidly.services.track_resolver import resolve_best_match
-    from squidly.services.hifi import _fetch_hifi_search_results
-    from urllib.parse import urlencode
-
     query = f'{title} {artist}'
     response, _ = downloads.make_request_with_retry_rotating_mirrors(
         f"/search/?{urlencode({'s': query, 'limit': '50'})}",
@@ -964,7 +935,7 @@ def match_ytm_track():
     best_score = 0.0
 
     for item in tracks:
-        score = score_candidate(item)
+        score = _score_track_candidate(title, artist, album, item)
         if score > best_score:
             best_score = score
             best_match = item

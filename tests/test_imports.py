@@ -76,7 +76,6 @@ def test_import_jobs():
 def test_import_orchestration():
     from squidly.jobs.orchestration import (
         JOB_TYPES,
-        any_plex_library_update_jobs_running_or_queued,
         count_pending_playlist_adds,
         delete_pending_playlist_adds,
         get_pending_playlist_adds,
@@ -99,7 +98,6 @@ def test_import_downloads():
         PermanentDownloadError,
         TransientDownloadError,
         cleanup_file,
-        convert_to_mp3,
         detect_audio_format,
         download_cover_image,
         download_track_all_stages_done,
@@ -107,7 +105,6 @@ def test_import_downloads():
         make_request_with_retry,
         make_request_with_retry_rotating_mirrors,
         seed_mirrors_from_json,
-        validate_all_endpoints,
         validate_endpoint,
     )
 
