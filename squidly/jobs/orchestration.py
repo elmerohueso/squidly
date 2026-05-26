@@ -25,7 +25,7 @@ JOB_TYPES = {
     'plex_library_update': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.infrastructure.plex.process_plex_library_update_job',
+        'process_fn': 'squidly.jobs.processors.plex_library_update.process_plex_library_update_job',
         'on_success': ['plex_library_sync'],
     },
     'plex_library_sync': {
@@ -43,7 +43,7 @@ JOB_TYPES = {
     'bulk_playlist_add': {
         'max_attempts': 5,
         'idle_sleep': 5,
-        'process_fn': 'squidly.infrastructure.plex.bulk_add_tracks_to_playlists',
+        'process_fn': 'squidly.jobs.processors.bulk_playlist_add.bulk_add_tracks_to_playlists',
     },
     'plex_listen_history_sync': {
         'max_attempts': 5,

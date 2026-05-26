@@ -1,6 +1,7 @@
 """Settings, endpoints, ListenBrainz, and YouTube Music routes."""
 
 import json
+import logging
 import re
 import threading
 import time
@@ -29,48 +30,12 @@ from squidly.infrastructure.storage import (
     set_fresh_finds_track_count,
 )
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
+
+from squidly.services.playlist_matching import _score_track_candidate
 from urllib.parse import urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)
-
-
-def _normalize_match_text(s):
-    """Normalize text for matching by removing non-alphanumeric characters."""
-    return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
-
-
-def _score_track_candidate(title, artist, album, item):
-    """Score a track candidate against the requested title/artist/album.
-    
-    Returns a score between 0.0 and 1.0 based on title/artist/album alignment.
-    """
-    score = 0.0
-    item_title = _normalize_match_text(item.get('title') or '')
-    item_artist = _normalize_match_text((item.get('artist') or {}).get('name') or '')
-    item_album = _normalize_match_text((item.get('album') or {}).get('title') or '')
-    norm_title = _normalize_match_text(title)
-    norm_artist = _normalize_match_text(artist)
-    norm_album = _normalize_match_text(album)
-
-    if item_title and norm_title:
-        if item_title == norm_title:
-            score += 0.50
-        elif norm_title in item_title or item_title in norm_title:
-            score += 0.30
-
-    if item_artist and norm_artist:
-        if item_artist == norm_artist:
-            score += 0.30
-        elif norm_artist in item_artist or item_artist in norm_artist:
-            score += 0.15
-
-    if norm_album and item_album:
-        if item_album == norm_album:
-            score += 0.20
-        elif norm_album in item_album or item_album in norm_album:
-            score += 0.10
-
-    return score
+logger = logging.getLogger(__name__)
 
 
 def _run_async(fn):
@@ -79,7 +44,6 @@ def _run_async(fn):
         try:
             fn()
         except Exception as e:
-            from squidly.app import logger
             logger.info("[ENDPOINTS] Async operation failed: %s", e)
     threading.Thread(target=_wrapper, daemon=True).start()
 
@@ -249,11 +213,10 @@ def endpoints_status():
             'downloadsEnabled': bool(row.get('downloads_enabled', True)),
         })
 
-    mirror_rate_limit_status = {}
+        mirror_rate_limit_status = {}
     try:
         mirror_rate_limit_status = downloads.get_mirror_rate_limit_status() or {}
     except Exception as e:
-        from squidly.app import logger
         logger.info("[ENDPOINTS] Failed to get mirror rate limit status: %s", e)
 
     return jsonify({
@@ -285,7 +248,6 @@ def add_endpoint():
     try:
         downloads.add_mirror(url, mirror_type=mirror_type)
     except Exception as e:
-        from squidly.app import logger
         logger.info("[ENDPOINTS] Failed to add mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
@@ -300,7 +262,6 @@ def delete_endpoint(name):
     try:
         downloads.remove_mirror(name)
     except Exception as e:
-        from squidly.app import logger
         logger.info("[ENDPOINTS] Failed to remove mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
@@ -317,7 +278,6 @@ def toggle_endpoint(name):
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     except Exception as e:
-        from squidly.app import logger
         logger.info("[ENDPOINTS] Failed to toggle mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
@@ -335,7 +295,6 @@ def toggle_endpoint_downloads(name):
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     except Exception as e:
-        from squidly.app import logger
         logger.info("[ENDPOINTS] Failed to toggle mirror downloads: %s", e)
         return jsonify({'error': str(e)}), 500
     return jsonify({'name': name, 'downloadsEnabled': bool(new_state)}), 200
@@ -646,7 +605,6 @@ def match_listenbrainz_track():
     settings = get_download_settings()
 
     from squidly.services.track_resolver import resolve_best_match
-    from squidly.services.hifi import _fetch_hifi_search_results
     from urllib.parse import urlencode
     
     isrcs = []
@@ -784,7 +742,6 @@ def youtube_music_playlist():
         })
 
     except Exception as e:
-        from squidly.app import logger
         logger.info("YouTube Music playlist parsing error: %s", e)
         return jsonify({
             'error': 'Failed to process YouTube Music playlist',
@@ -860,7 +817,6 @@ def get_ytm_playlists():
         return jsonify({'playlists': result})
 
     except Exception as e:
-        from squidly.app import logger
         logger.info("YouTube Music playlists error: %s", e)
         return jsonify({'error': f'Failed to fetch playlists: {str(e)}'}), 500
 
@@ -895,7 +851,6 @@ def get_ytm_playlist(playlist_id):
         })
 
     except Exception as e:
-        from squidly.app import logger
         logger.info("YouTube Music playlist error: %s", e)
         return jsonify({'error': f'Failed to fetch playlist: {str(e)}'}), 500
 

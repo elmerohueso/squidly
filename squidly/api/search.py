@@ -1,5 +1,6 @@
 """HiFi search and metadata routes."""
 
+import logging
 import re
 from urllib.parse import urlencode
 
@@ -15,57 +16,13 @@ from squidly.services.hifi import (
     _get_hifi_album_dedupe_key,
     _get_hifi_track_dedupe_key,
     _get_hifi_audio_quality_rank,
-    _fetch_hifi_search_results,
     _fetch_hifi_track_manifests_payload,
     _normalize_hifi_playlist_items,
 )
 from squidly.infrastructure.downloads import get_squid_urls
 
 search_bp = Blueprint('search', __name__)
-
-
-def _get_album_quality_rank(album):
-    """Extract audio quality rank from an album object."""
-    quality_order = {
-        'HI_RES_LOSSLESS': 5,
-        'HIRES_LOSSLESS': 5,
-        'DOLBY_ATMOS': 5,
-        'LOSSLESS': 4,
-        'HIGH': 2,
-        'LOW': 1
-    }
-    rank = 0
-    media_metadata = album.get('mediaMetadata')
-    if isinstance(media_metadata, dict):
-        tags = media_metadata.get('tags')
-        if isinstance(tags, list):
-            for tag in tags:
-                if tag in quality_order:
-                    rank = max(rank, quality_order[tag])
-    audio_quality = album.get('audioQuality')
-    if isinstance(audio_quality, str) and audio_quality in quality_order:
-        rank = max(rank, quality_order[audio_quality])
-    return rank
-
-
-def _derive_audio_quality_from_tags(album):
-    """Derive maxAudioQuality from mediaTags or mediaMetadata.tags."""
-    quality_priority = ['DOLBY_ATMOS', 'HIRES_LOSSLESS', 'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
-    media_metadata = album.get('mediaMetadata')
-    if isinstance(media_metadata, dict):
-        tags = media_metadata.get('tags')
-        if isinstance(tags, list):
-            tags_upper = [t.upper() for t in tags if t]
-            for q in quality_priority:
-                if q in tags_upper:
-                    return q
-    media_tags = album.get('mediaTags')
-    if isinstance(media_tags, list):
-        tags_upper = [t.upper() for t in media_tags if t]
-        for q in quality_priority:
-            if q in tags_upper:
-                return q
-    return None
+logger = logging.getLogger(__name__)
 
 
 @search_bp.route('/api/hifi/search', methods=['GET'])
@@ -670,7 +627,6 @@ def lastfm_playlist():
         })
 
     except Exception as e:
-        from squidly.app import logger
         logger.info("Last.fm scraping error: %s", e)
         return jsonify({
             'error': 'Failed to process Last.fm playlist',

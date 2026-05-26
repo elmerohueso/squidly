@@ -4,6 +4,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 from squidly import jobs
+from squidly.services.tag_reader import scan_library_for_tags
+from squidly.services.hifi_matcher import find_missing_hifi_ids
 
 def process_automatic_matching_job(job_id, payload):
     """Run the full automatic matching pipeline:

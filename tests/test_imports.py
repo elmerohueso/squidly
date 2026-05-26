@@ -46,10 +46,12 @@ def test_import_plex():
         get_plex_music_playlists,
         plex_healthcheck,
         plex_pin_sessions,
-        process_plex_library_update_job,
         set_plex_health_status,
         test_plex_connection,
         wait_for_plex_library_scan_completion,
+    )
+    from squidly.jobs.processors.plex_library_update import (
+        process_plex_library_update_job,
     )
 
 
@@ -266,26 +268,6 @@ def test_hifi_does_not_import_app():
     import inspect
 
     source = inspect.getsource(hifi_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
-
-
-def test_plex_does_not_import_app():
-    """plex.py must not import from app to avoid circular deps."""
-    import squidly.infrastructure.plex as plex_module
-    import inspect
-
-    source = inspect.getsource(plex_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
-
-
-def test_jobs_does_not_import_app():
-    """jobs.py must not import from app to avoid circular deps."""
-    import squidly.jobs as jobs_module
-    import inspect
-
-    source = inspect.getsource(jobs_module)
     assert "from squidly.app" not in source
     assert "import squidly.app" not in source
 

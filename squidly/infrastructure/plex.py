@@ -7,16 +7,14 @@ import re
 import threading
 import time
 from datetime import datetime
+from urllib.parse import quote_plus
 import requests
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from plexapi.server import PlexServer
-from squidly import jobs
 from squidly.infrastructure.db import get_db_connection
 from squidly.infrastructure.storage import (
-    can_start_plex_library_update,
     get_plex_config,
     save_plex_config,
-    set_last_library_update_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -384,191 +382,6 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
         return False, f'Unexpected error: {str(e)}'
 
 
-def bulk_add_tracks_to_playlists(job_id, payload):
-    """Process all rows in pending_playlist_adds, grouped by (user_id, playlist_name).
-
-    Returns a result dict with progress fields for the job card.
-    """
-    from squidly.infrastructure.job_queue import update_job_progress
-    from squidly.jobs.orchestration import (
-        get_pending_playlist_adds,
-        delete_pending_playlist_adds,
-    )
-
-    config = get_plex_config()
-    server_url = (config.get('server_url') or '').strip()
-    api_token = (config.get('api_token') or '').strip()
-
-    if not (server_url and api_token):
-        raise ValueError('Plex is not fully configured')
-
-    stages = {
-        'resolving_tracks': 'pending',
-        'adding_to_playlists': 'pending',
-    }
-    progress = {
-        'total_tracks': 0,
-        'tracks_processed': 0,
-        'tracks_added': 0,
-        'tracks_skipped': 0,
-        'tracks_failed': 0,
-    }
-    update_job_progress(job_id, {'stages': stages, 'progress': progress})
-
-    pending = get_pending_playlist_adds()
-    total = len(pending)
-    progress['total_tracks'] = total
-    update_job_progress(job_id, {'progress': progress})
-
-    logger.info("[BULK_PLAYLIST] Job %s: found %d pending playlist adds", job_id, total)
-    for item in pending:
-        logger.info("[BULK_PLAYLIST] Job %s: pending add parent_job_id=%s file_path=%s playlist=%s", job_id, item.get('parent_job_id'), item.get('file_path'), item.get('playlist_name'))
-
-    if total == 0:
-        stages['resolving_tracks'] = 'skipped'
-        stages['adding_to_playlists'] = 'skipped'
-        update_job_progress(job_id, {'stages': stages, 'progress': progress})
-        return {
-            'total_tracks': 0,
-            'tracks_added': 0,
-            'tracks_skipped': 0,
-            'tracks_failed': 0,
-            'summary': 'No pending tracks',
-        }
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT library_id, path
-        FROM tracks
-        WHERE library_id IS NOT NULL AND library_id <> ''
-        """
-    )
-    rows = cur.fetchall() or []
-    conn.close()
-
-    path_index = {}
-    for row in rows:
-        raw_path = str(row.get('path') or '').strip()
-        library_id = str(row.get('library_id') or '').strip()
-        if not raw_path or not library_id:
-            continue
-        path_parts = [p for p in re.split(r'[\\/]+', raw_path) if p]
-        tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
-        path_tail = '\\'.join(tail_parts).lower()
-        path_index.setdefault(path_tail, []).append(library_id)
-    conn.close()
-
-    stages['resolving_tracks'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
-
-    groups = {}
-    for item in pending:
-        file_path = str(item.get('file_path') or '').strip()
-        playlist_name = str(item.get('playlist_name') or '').strip()
-        plex_user_id = item.get('plex_user_id')
-
-        path_parts = [p for p in re.split(r'[\\/]+', file_path) if p]
-        tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
-        path_tail = '\\'.join(tail_parts).lower()
-
-        library_ids = path_index.get(path_tail, [])
-        key = (plex_user_id, playlist_name)
-        groups.setdefault(key, {'tracks': [], 'ids': []})
-        groups[key]['tracks'].append(item)
-        groups[key]['ids'].extend(library_ids)
-
-    stages['adding_to_playlists'] = 'in_progress'
-    update_job_progress(job_id, {'stages': stages})
-
-    successful_ids = []
-    plex_cache = {}
-
-    for (plex_user_id, playlist_name), group_data in groups.items():
-        user_display = plex_user_id or 'Owner'
-        logger.info("[BULK_PLAYLIST] Processing %d tracks for playlist '%s' (user: %s)", len(group_data['tracks']), playlist_name, user_display)
-
-        if plex_user_id not in plex_cache:
-            try:
-                plex_cache[plex_user_id] = _get_plex_server_for_user(server_url, api_token, plex_user_id)
-            except Exception as e:
-                logger.info("[BULK_PLAYLIST] Failed to get Plex server for user %s: %s", user_display, str(e))
-                for item in group_data['tracks']:
-                    progress['tracks_processed'] += 1
-                    progress['tracks_failed'] += 1
-                    update_job_progress(job_id, {'progress': progress})
-                continue
-
-        plex = plex_cache[plex_user_id]
-
-        unique_library_ids = list(dict.fromkeys(group_data['ids']))
-        tracks_to_add = []
-
-        for rating_key in unique_library_ids:
-            metadata_key = rating_key if rating_key.startswith('/library/metadata/') else f'/library/metadata/{rating_key}'
-            try:
-                candidate = _plex_call_with_timeout(plex.fetchItem, metadata_key, timeout=15, label="fetchItem")
-                if candidate is not None:
-                    tracks_to_add.append(candidate)
-            except Exception as e:
-                logger.info("[BULK_PLAYLIST] Failed to fetch ratingKey=%s: %s", rating_key, str(e))
-
-        if not tracks_to_add:
-            for item in group_data['tracks']:
-                progress['tracks_processed'] += 1
-                progress['tracks_failed'] += 1
-                update_job_progress(job_id, {'progress': progress})
-            continue
-
-        with _playlist_operation_lock:
-            playlist, created = _get_or_create_playlist(plex, playlist_name, items=tracks_to_add)
-            if created:
-                for item in group_data['tracks']:
-                    progress['tracks_processed'] += 1
-                    progress['tracks_added'] += 1
-                    successful_ids.append(item['id'])
-                    update_job_progress(job_id, {'progress': progress})
-                continue
-
-            added, skipped, failed = _add_items_to_playlist(playlist, tracks_to_add)
-            for item in group_data['tracks']:
-                progress['tracks_processed'] += 1
-                if added > 0:
-                    progress['tracks_added'] += 1
-                    successful_ids.append(item['id'])
-                elif skipped > 0:
-                    progress['tracks_skipped'] += 1
-                    successful_ids.append(item['id'])
-                else:
-                    progress['tracks_failed'] += 1
-                update_job_progress(job_id, {'progress': progress})
-
-    stages['adding_to_playlists'] = 'done'
-    update_job_progress(job_id, {'stages': stages})
-
-    if successful_ids:
-        delete_pending_playlist_adds(successful_ids)
-
-    summary = (
-        f"{progress['tracks_processed']}/{total} tracks processed • "
-        f"{progress['tracks_added']} added • "
-        f"{progress['tracks_skipped']} skipped • "
-        f"{progress['tracks_failed']} failed"
-    )
-
-    return {
-        'stages': stages,
-        'progress': progress,
-        'total_tracks': total,
-        'tracks_processed': progress['tracks_processed'],
-        'tracks_added': progress['tracks_added'],
-        'tracks_skipped': progress['tracks_skipped'],
-        'tracks_failed': progress['tracks_failed'],
-        'summary': summary,
-    }
-
-
 def _is_plex_library_scan_active(plex, library):
     """Best-effort check for whether the target Plex library is actively scanning."""
     try:
@@ -642,91 +455,138 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
         time.sleep(max(1, poll_interval_seconds))
 
 
+def _resolve_plex_user_context(plex, user_id):
+    """Best-effort managed user switch for Plex context."""
+    requested_user_id = str(user_id or '').strip()
+    if not requested_user_id:
+        return plex, None
 
-def process_plex_library_update_job(job_id, payload, gate_snapshot=None):
-    config = get_plex_config()
-    server_url = (config.get('server_url') or '').strip()
-    api_token = (config.get('api_token') or '').strip()
-    library_name = (config.get('library_name') or '').strip()
+    selected_user = None
+    success, users, _ = get_all_plex_users()
+    if success:
+        for user in users:
+            candidate_ids = {
+                str(user.get('client_id') or '').strip(),
+                str(user.get('id') or '').strip(),
+                str(user.get('username') or '').strip(),
+                str(user.get('title') or '').strip(),
+            }
+            candidate_ids = {value for value in candidate_ids if value}
+            if requested_user_id in candidate_ids:
+                selected_user = user
+                break
 
-    if not server_url or not api_token or not library_name:
-        raise ValueError('Plex server_url, api_token, and library_name must be configured before updating library')
+    if selected_user and not bool(selected_user.get('is_owner')):
+        switch_target = (
+            str(selected_user.get('username') or '').strip()
+            or str(selected_user.get('title') or '').strip()
+            or str(selected_user.get('id') or '').strip()
+            or requested_user_id
+        )
+        try:
+            switched = plex.switchUser(switch_target)
+            logger.info("[PLEX_LIBRARY] Switched to user %s (requested %s)", switch_target, requested_user_id)
+            return switched, switch_target
+        except Exception as e:
+            logger.info("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
+            return plex, None
 
-    stages = {
-        'scanning_plex_library': 'pending'
-    }
-    progress = {
-        'download_gate_status': 'pending',
-        'download_gate_checks': 0,
-        'download_gate_blocking_count': 0,
-        'download_gate_idle_seconds': 0,
-        'download_gate_required_idle_seconds': 180,
-        'download_gate_last_activity_at': None,
-        'scan_detected': False,
-        'scan_completed': False,
-        'sync_job_id': None,
-        'sync_queue_status': 'pending'
-    }
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    if selected_user and bool(selected_user.get('is_owner')):
+        logger.info("[PLEX_LIBRARY] Requested owner user %s; using owner context", requested_user_id)
+    else:
+        logger.info("[PLEX_LIBRARY] User %s not found in current account; using owner context", requested_user_id)
 
-    gate = gate_snapshot or can_start_plex_library_update(required_idle_seconds=180)
-    gate_state = gate.get('gate_state') or {}
-    progress['download_gate_checks'] = 1
-    progress['download_gate_blocking_count'] = gate_state.get('blocking_count') or 0
-    progress['download_gate_idle_seconds'] = gate.get('idle_seconds') or 0
-    progress['download_gate_required_idle_seconds'] = gate.get('required_idle_seconds') or 180
-    progress['download_gate_last_activity_at'] = gate.get('last_activity_at')
-    progress['download_gate_status'] = 'ready'
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    return plex, None
 
-    stages['scanning_plex_library'] = 'in_progress'
-    jobs.update_job_progress(job_id, {'stages': stages})
 
-    logger.info("[LIBRARY_UPDATE_JOB] Job %s connecting to Plex at %s", job_id, server_url)
-    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=20)
+def _resolve_plex_library_context(server_url, api_token, library_name, user_id=None):
+    plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+    plex, effective_user = _resolve_plex_user_context(plex, user_id)
 
     library = None
-    sections = _plex_call_with_timeout(plex.library.sections, timeout=30, label="library.sections")
-    for section in sections:
+    for section in plex.library.sections():
         if section.title == library_name and section.type == 'artist':
             library = section
             break
 
-    if not library:
-        raise ValueError(f'Plex music library "{library_name}" not found')
+    return plex, library, effective_user
 
-    logger.info("[LIBRARY_UPDATE_JOB] Job %s triggering scan on library '%s'", job_id, library_name)
-    _plex_call_with_timeout(library.update, timeout=30, label="library.update")
 
-    completed, saw_active = wait_for_plex_library_scan_completion(
-        plex,
-        library,
-        timeout_seconds=600,
-        poll_interval_seconds=5,
-        startup_grace_seconds=30
-    )
+def _build_plex_image_url(server_url, api_token, image_path, image_size=None):
+    raw_path = str(image_path or '').strip()
+    if not raw_path:
+        return None
 
-    progress['scan_detected'] = bool(saw_active)
-    progress['scan_completed'] = bool(completed)
-    stages['scanning_plex_library'] = 'done'
-    jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+    base = server_url.rstrip('/')
+    if raw_path.startswith('http://') or raw_path.startswith('https://'):
+        return raw_path
 
-    set_last_library_update_time(datetime.utcnow())
+    sized_path = raw_path
+    if image_size:
+        joiner = '&' if '?' in sized_path else '?'
+        sized_path = f'{sized_path}{joiner}width={int(image_size)}&height={int(image_size)}&minSize=1&upscale=1'
 
-    trigger = payload.get('trigger') if isinstance(payload, dict) else None
-    scan_outcome = 'completed' if completed else ('started_but_timeout' if saw_active else 'not_observed')
-    logger.info(
-        "[LIBRARY_UPDATE_JOB] Job %s finished. scan_outcome=%s",
-        job_id,
-        scan_outcome,
-    )
+    token = quote_plus(str(api_token or '').strip())
+    if not token:
+        return f'{base}{sized_path}'
 
-    return {
-        'trigger': trigger or 'unknown',
-        'stages': stages,
-        'progress': progress,
-        'scan_outcome': scan_outcome,
-    }
+    joiner = '&' if '?' in sized_path else '?'
+    return f'{base}{sized_path}{joiner}X-Plex-Token={token}'
+
+
+def _get_match_review_plex_context():
+    """Get Plex context (server_url, api_token, library) for match review artwork.
+    
+    Returns (server_url, api_token, library) tuple, or (None, None, None) if
+    Plex is not configured or library cannot be resolved.
+    """
+    from squidly.infrastructure.storage import get_plex_config
+    
+    try:
+        config = get_plex_config()
+        server_url = str(config.get('server_url') or '').strip()
+        api_token = str(config.get('api_token') or '').strip()
+        library_name = str(config.get('library_name') or '').strip()
+        if not server_url or not api_token or not library_name:
+            return None, None, None
+
+        _, library, _ = _resolve_plex_library_context(server_url, api_token, library_name)
+        if not library:
+            return None, None, None
+
+        return server_url, api_token, library
+    except Exception as e:
+        logger.info("[MATCH_REVIEW] Unable to resolve Plex context for artwork: %s", str(e))
+        return None, None, None
+
+
+def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, image_size=None):
+    """Fetch Plex artwork URLs for a list of library IDs.
+    
+    Returns a dict mapping library_id (string) to image URL or None.
+    """
+    if not library or not server_url or not api_token:
+        return {}
+
+    image_map = {}
+    for library_id in library_ids or []:
+        normalized_id = str(library_id or '').strip()
+        if not normalized_id or normalized_id in image_map:
+            continue
+        try:
+            item = library.fetchItem(f'/library/metadata/{normalized_id}')
+            image_map[normalized_id] = _build_plex_image_url(
+                server_url,
+                api_token,
+                getattr(item, 'thumb', None),
+                image_size=image_size,
+            ) if item else None
+        except Exception as e:
+            logger.info("[MATCH_REVIEW] Failed to fetch Plex artwork for %s: %s", normalized_id, str(e))
+            image_map[normalized_id] = None
+
+    return image_map
+
 
 
 def get_last_successful_plex_sync_finished_at():

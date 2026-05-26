@@ -8,29 +8,9 @@ from flask import Blueprint, jsonify, request
 from squidly import jobs
 from squidly.infrastructure.db import get_db_connection
 from squidly.infrastructure.storage import get_download_settings
+from squidly.services.playlist_matching import _requested_download_format, _matches_requested_format
 
 jobs_bp = Blueprint('jobs', __name__)
-
-
-def _requested_download_format(file_format):
-    """Normalize requested download format."""
-    normalized = str(file_format or '').strip().lower()
-    if normalized in ('m4a', 'aac', 'mp4'):
-        return 'm4a'
-    if normalized == 'flac':
-        return 'flac'
-    return 'm4a'
-
-
-def _matches_requested_format(file_format, candidate_format):
-    """Check if candidate format matches requested format."""
-    normalized_request = _requested_download_format(file_format)
-    normalized_candidate = str(candidate_format or '').strip().lower()
-
-    if normalized_request == 'flac':
-        return normalized_candidate == 'flac'
-
-    return normalized_candidate in ('m4a', 'aac', 'mp4')
 
 
 def _download_job_exists_in_plex(cur, result_payload, job_payload):

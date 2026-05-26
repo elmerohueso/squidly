@@ -50,7 +50,7 @@ _process_fn_cache = {}
 
 
 def _import_process_fn(dotted_path):
-    """Import and cache a process function by dotted path (e.g. 'squidly.app.process_download_job')."""
+    """Import and cache a process function by dotted path (e.g. 'squidly.jobs.processors.download.process_download_job')."""
     if dotted_path in _process_fn_cache:
         return _process_fn_cache[dotted_path]
 
@@ -244,7 +244,7 @@ def plex_sync_worker():
 
 def plex_library_update_worker():
     """Worker for plex_library_update jobs with download gate logic."""
-    from squidly.infrastructure.plex import process_plex_library_update_job
+    from squidly.jobs.processors.plex_library_update import process_plex_library_update_job
     from squidly.infrastructure.storage import can_start_plex_library_update
     from squidly import jobs as jobs_module
 

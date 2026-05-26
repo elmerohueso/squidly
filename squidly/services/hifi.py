@@ -697,6 +697,50 @@ def _get_hifi_audio_quality_rank(quality: Any) -> int:
     return quality_rank.get(str(quality).strip().upper(), 0)
 
 
+def _get_album_quality_rank(album: Any) -> int:
+    """Extract audio quality rank from an album object."""
+    quality_order = {
+        'HI_RES_LOSSLESS': 5,
+        'HIRES_LOSSLESS': 5,
+        'DOLBY_ATMOS': 5,
+        'LOSSLESS': 4,
+        'HIGH': 2,
+        'LOW': 1
+    }
+    rank = 0
+    media_metadata = album.get('mediaMetadata')
+    if isinstance(media_metadata, dict):
+        tags = media_metadata.get('tags')
+        if isinstance(tags, list):
+            for tag in tags:
+                if tag in quality_order:
+                    rank = max(rank, quality_order[tag])
+    audio_quality = album.get('audioQuality')
+    if isinstance(audio_quality, str) and audio_quality in quality_order:
+        rank = max(rank, quality_order[audio_quality])
+    return rank
+
+
+def _derive_audio_quality_from_tags(album: Any) -> Any:
+    """Derive maxAudioQuality from mediaTags or mediaMetadata.tags."""
+    quality_priority = ['DOLBY_ATMOS', 'HIRES_LOSSLESS', 'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW']
+    media_metadata = album.get('mediaMetadata')
+    if isinstance(media_metadata, dict):
+        tags = media_metadata.get('tags')
+        if isinstance(tags, list):
+            tags_upper = [t.upper() for t in tags if t]
+            for q in quality_priority:
+                if q in tags_upper:
+                    return q
+    media_tags = album.get('mediaTags')
+    if isinstance(media_tags, list):
+        tags_upper = [t.upper() for t in media_tags if t]
+        for q in quality_priority:
+            if q in tags_upper:
+                return q
+    return None
+
+
 def _normalize_hifi_artist_track_payload(track_payload: Any) -> Dict[str, Any]:
     if not isinstance(track_payload, dict):
         return {}

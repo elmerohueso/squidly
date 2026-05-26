@@ -24,57 +24,12 @@ from squidly.jobs.orchestration import (
     is_job_type_running_or_queued,
     start_plex_library_update_job,
 )
-from squidly.api.plex_routes import _resolve_plex_library_context
+from squidly.infrastructure.plex import _resolve_plex_library_context, _build_plex_image_url, _get_match_review_plex_context, _fetch_plex_item_image_map
 from squidly.infrastructure.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 
 hifi_matches_bp = Blueprint("hifi_matches", __name__)
-
-
-def _get_match_review_plex_context():
-    try:
-        config = get_plex_config()
-        server_url = str(config.get('server_url') or '').strip()
-        api_token = str(config.get('api_token') or '').strip()
-        library_name = str(config.get('library_name') or '').strip()
-        if not server_url or not api_token or not library_name:
-            return None, None, None
-
-        _, library, _ = _resolve_plex_library_context(server_url, api_token, library_name)
-        if not library:
-            return None, None, None
-
-        return server_url, api_token, library
-    except Exception as e:
-        logger.info("[MATCH_REVIEW] Unable to resolve Plex context for artwork: %s", str(e))
-        return None, None, None
-
-
-def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, image_size=None):
-    from squidly.api.plex_routes import _build_plex_image_url
-    
-    if not library or not server_url or not api_token:
-        return {}
-
-    image_map = {}
-    for library_id in library_ids or []:
-        normalized_id = str(library_id or '').strip()
-        if not normalized_id or normalized_id in image_map:
-            continue
-        try:
-            item = library.fetchItem(f'/library/metadata/{normalized_id}')
-            image_map[normalized_id] = _build_plex_image_url(
-                server_url,
-                api_token,
-                getattr(item, 'thumb', None),
-                image_size=image_size,
-            ) if item else None
-        except Exception as e:
-            logger.info("[MATCH_REVIEW] Failed to fetch Plex artwork for %s: %s", normalized_id, str(e))
-            image_map[normalized_id] = None
-
-    return image_map
 
 
 @hifi_matches_bp.route('/api/hifi/matches', methods=['POST'])
