@@ -9727,10 +9727,11 @@ class App {
     ): Promise<Response> {
         let lastError: Error | null = null;
 
-        // Ensure abort signal is included if not already provided
+        // Use pendingRequestController only for GET requests (cancelled on page navigation)
+        // POST/PUT/DELETE/PATCH requests must complete even if user navigates away
         const finalOptions = {
             ...options,
-            signal: options?.signal || this.pendingRequestController?.signal
+            signal: options?.signal || ((!options?.method || options.method === 'GET') ? this.pendingRequestController?.signal : undefined)
         };
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
