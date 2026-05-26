@@ -266,10 +266,15 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
     conn.close()
 
 
-def mark_job_retrying(job_id, attempt_count, error_message):
+def mark_job_retrying(job_id, attempt_count, max_attempts, error_message):
+    new_attempt_count = (int(attempt_count or 0) + 1)
+
+    if new_attempt_count >= int(max_attempts or 0):
+        mark_job_failed(job_id, attempt_count, max_attempts, error_message)
+        return
+
     now = datetime.utcnow()
     now_iso = now.isoformat() + 'Z'
-    new_attempt_count = (int(attempt_count or 0) + 1)
     run_after = (now + timedelta(seconds=compute_job_backoff_seconds(new_attempt_count))).isoformat() + 'Z'
 
     conn = get_db_connection()

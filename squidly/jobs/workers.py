@@ -110,7 +110,7 @@ def worker_loop(job_type, idle_sleep=None):
 
             except RetryableError as e:
                 logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
-                mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
@@ -175,7 +175,7 @@ def download_track_worker():
 
             except RetryableError as e:
                 logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
-                mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
