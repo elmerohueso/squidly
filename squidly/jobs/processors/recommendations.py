@@ -161,26 +161,9 @@ def process_recommendation_job(job_id, payload):
     logger.info("[RECOMMENDATION] Job %s: removed %d tracks already in existing FF playlists",
                 job_id, before_ff_dedup - len(deduped))
 
-    # Step 3: Track resolution — detect karaoke/live/single/compilation
-    from squidly.services.track_resolver import resolve_track, merge_replacement_into_rec
     settings = get_download_settings()
-    resolved_count = 0
-    for rec in list(deduped.values()):
-        tid = rec.get('hifi_id')
-        if not tid:
-            continue
-        try:
-            result = resolve_track(tid, settings)
-            if result.get('reason') != 'none' and result.get('replacement'):
-                logger.info("[RECOMMENDATION] Resolved track %s (%s) → %s",
-                            tid, result['reason'], result['replacement'].get('id'))
-                merge_replacement_into_rec(rec, result['replacement'])
-                resolved_count += 1
-        except Exception as e:
-            logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
-    jobs.update_job_progress(job_id, {'progress': {**progress, 'tracks_resolved': resolved_count}})
 
-    # Step 4: Quality filter
+    # Step 3: Quality filter
     min_quality = settings.get('quality', 'LOSSLESS')
     min_rank = _get_hifi_audio_quality_rank(min_quality)
     quality_filtered = []
@@ -191,7 +174,7 @@ def process_recommendation_job(job_id, payload):
     progress['tracks_after_quality_filter'] = len(quality_filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Step 5: Exclude tracks recently played by this user (30 days, hardcoded)
+    # Step 4: Exclude tracks recently played by this user (30 days, hardcoded)
     from squidly.infrastructure.storage import get_recently_played_isrcs
     recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
     quality_filtered = [
@@ -199,7 +182,7 @@ def process_recommendation_job(job_id, payload):
         if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
     ]
 
-    # Step 6: Classify into NEW or LIBRARY candidate pools
+    # Step 5: Classify into NEW or LIBRARY candidate pools
     from squidly.infrastructure.storage import get_existing_isrcs, get_existing_artist_titles
     existing_isrcs = get_existing_isrcs()
     existing_artist_titles = get_existing_artist_titles()
@@ -225,11 +208,10 @@ def process_recommendation_job(job_id, payload):
         else:
             new_candidates.append(rec)
 
-    # Step 7: Sort both pools by frequency score descending
+    # Step 6: Sort both pools and calculate distribution
     new_candidates.sort(key=lambda x: x['score'], reverse=True)
     library_candidates.sort(key=lambda x: x['score'], reverse=True)
 
-    # Step 8: Calculate distribution based on user settings
     from squidly.infrastructure.storage import get_fresh_finds_new_track_pct
     new_track_pct = get_fresh_finds_new_track_pct(plex_account_id)
     n_new = round(track_count * new_track_pct / 100)
@@ -252,7 +234,7 @@ def process_recommendation_job(job_id, payload):
     progress['tracks_selected_library'] = len(selected_library)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Step 9: Resolve library picks to local library instance
+    # Step 7: Resolve library picks to local library instance
     from squidly.infrastructure.storage import get_local_track_by_isrc
 
     for rec in selected_library:
@@ -263,13 +245,32 @@ def process_recommendation_job(job_id, payload):
                 rec['library_id'] = local['library_id']
                 rec['hifi_id'] = local['hifi_id']
 
-    # Step 10: Combine — new tracks first, then library tracks
+    # Step 8: Combine — new tracks first, then library tracks
     top_tracks = selected_new + selected_library
     top_tracks = top_tracks[:track_count]
 
     progress['tracks_after_filter'] = len(top_tracks)
     progress['tracks_saved'] = len(top_tracks)
     jobs.update_job_progress(job_id, {'progress': progress})
+
+    # Step 9: Track resolution — only on final selected tracks
+    from squidly.services.track_resolver import resolve_track, merge_replacement_into_rec
+    resolved_count = 0
+    for rec in top_tracks:
+        tid = rec.get('hifi_id')
+        if not tid:
+            continue
+        try:
+            result = resolve_track(tid, settings)
+            if result.get('reason') != 'none' and result.get('replacement'):
+                logger.info("[RECOMMENDATION] Resolved track %s (%s) → %s",
+                            tid, result['reason'], result['replacement'].get('id'))
+                merge_replacement_into_rec(rec, result['replacement'])
+                resolved_count += 1
+        except Exception as e:
+            logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
+    progress['tracks_resolved'] = resolved_count
+    jobs.update_job_progress(job_id, {'progress': {**progress, 'tracks_resolved': resolved_count}})
 
     stages['processing_tracks'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
