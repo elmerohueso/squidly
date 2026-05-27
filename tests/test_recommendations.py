@@ -252,6 +252,31 @@ class TestStorageFunctions:
         assert result is None
 
 
+class TestGetRandomListenHistorySeeds:
+    @patch('squidly.infrastructure.storage.get_db_connection')
+    def test_get_random_listen_history_seeds(self, mock_conn):
+        from squidly.infrastructure.storage import get_random_listen_history_seeds
+        from datetime import datetime
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            {'hifi_id': '100', 'title': 'Track 1', 'artist': 'Artist 1', 'album': 'Album 1', 'played_at': datetime(2024, 1, 15)},
+            {'hifi_id': '200', 'title': 'Track 2', 'artist': 'Artist 2', 'album': 'Album 2', 'played_at': datetime(2024, 1, 14)},
+            {'hifi_id': '300', 'title': 'Track 3', 'artist': 'Artist 3', 'album': 'Album 3', 'played_at': datetime(2024, 1, 13)},
+        ]
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_conn.return_value = mock_connection
+
+        result = get_random_listen_history_seeds(123, limit=2, days=30)
+
+        assert len(result) == 2
+        assert result[0]['hifi_id'] == 100 or result[0]['hifi_id'] == 200 or result[0]['hifi_id'] == 300
+        assert isinstance(result[0]['hifi_id'], int)
+        mock_cursor.execute.assert_called_once()
+        call_args = mock_cursor.execute.call_args[0]
+        assert call_args[1] == (123, 30)
+
+
 class TestSaveRecommendationPlaylist:
     @patch('squidly.infrastructure.storage.get_db_connection')
     def test_save_new_playlist(self, mock_conn):

@@ -28,6 +28,8 @@ from squidly.infrastructure.storage import (
     set_fresh_finds_new_track_pct,
     get_fresh_finds_track_count,
     set_fresh_finds_track_count,
+    get_fresh_finds_history_days,
+    set_fresh_finds_history_days,
 )
 from squidly.infrastructure.config import app_timezone, DEFAULT_DOWNLOAD_SETTINGS
 
@@ -475,7 +477,7 @@ def get_fresh_finds_track_count_route():
 
 @settings_bp.route('/api/fresh-finds/track-count', methods=['POST'])
 def save_fresh_finds_track_count_route():
-    """Set the Fresh Finds track count for a specific user. Clamps to [5, 100]."""
+    """Set the Fresh Finds track count for a specific user. Clamps to [10, 50]."""
     payload = request.get_json(silent=True) or {}
     user_id = payload.get('user_id')
     count = payload.get('count', 25)
@@ -484,7 +486,42 @@ def save_fresh_finds_track_count_route():
         return jsonify({'error': 'user_id is required'}), 400
 
     set_fresh_finds_track_count(user_id, count)
-    return jsonify({'success': True, 'count': max(5, min(100, int(count)))})
+    return jsonify({'success': True, 'count': max(10, min(50, int(count)))})
+
+
+@settings_bp.route('/api/fresh-finds/history-days', methods=['GET'])
+def get_fresh_finds_history_days_route():
+    """Get the Fresh Finds history window (days) for a specific user."""
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    mappings = get_all_plex_account_mappings()
+    plex_account_id = None
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            plex_account_id = m.get('plex_account_id')
+            break
+
+    if plex_account_id is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    days = get_fresh_finds_history_days(plex_account_id)
+    return jsonify({'days': days})
+
+
+@settings_bp.route('/api/fresh-finds/history-days', methods=['POST'])
+def save_fresh_finds_history_days_route():
+    """Set the Fresh Finds history window (days) for a specific user. Clamps to [10, 60]."""
+    payload = request.get_json(silent=True) or {}
+    user_id = payload.get('user_id')
+    days = payload.get('days', 30)
+
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+
+    set_fresh_finds_history_days(user_id, days)
+    return jsonify({'success': True, 'days': max(10, min(60, int(days)))})
 
 
 @settings_bp.route('/api/listenbrainz/playlists', methods=['GET'])

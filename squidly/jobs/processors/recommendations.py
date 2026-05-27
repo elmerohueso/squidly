@@ -16,7 +16,12 @@ from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.hifi import _get_hifi_audio_quality_rank
 from squidly.infrastructure.storage import get_download_settings
 from squidly.infrastructure.storage import get_fresh_finds_auto_download_users
-from squidly.infrastructure.storage import get_recommendation_playlist, get_todays_recommendation_playlist, get_recent_listen_history_seeds
+from squidly.infrastructure.storage import (
+    get_recommendation_playlist, get_todays_recommendation_playlist,
+    get_random_listen_history_seeds,
+    get_fresh_finds_track_count, get_fresh_finds_history_days,
+    get_existing_fresh_finds_isrcs,
+)
 from squidly.infrastructure.storage import save_recommendation_playlist
 from zoneinfo import ZoneInfo
 
@@ -59,17 +64,20 @@ def process_recommendation_job(job_id, payload):
     stages['syncing_listen_history'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 2: Gather seeds
+    # Stage 2: Gather seeds — random from configurable time window
     stages['gathering_seeds'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s gathering seeds for %s", job_id, plex_username)
 
-    seeds = get_recent_listen_history_seeds(plex_account_id, limit=20)
+    track_count = get_fresh_finds_track_count(plex_account_id)
+    history_days = get_fresh_finds_history_days(plex_account_id)
+
+    seeds = get_random_listen_history_seeds(plex_account_id, limit=track_count, days=history_days)
     progress['seeds_found'] = len(seeds)
     jobs.update_job_progress(job_id, {'progress': progress})
 
     if not seeds:
-        raise ValueError(f'No listen history seeds found for user {plex_username}')
+        raise ValueError(f'No listen history seeds found for user {plex_username} (last {history_days} days)')
 
     stages['gathering_seeds'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
@@ -125,28 +133,39 @@ def process_recommendation_job(job_id, payload):
     stages['fetching_recommendations'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 4: Process tracks - quality filter, dedupe by ISRC, classify, split
+    # Stage 4: Process tracks
     stages['processing_tracks'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
 
-    # Step 1: Filter by minimum quality from download settings (same as before)
-    settings = get_download_settings()
-    min_quality = settings.get('quality', 'LOSSLESS')
-    min_rank = _get_hifi_audio_quality_rank(min_quality)
-    quality_filtered = []
-    for rec in raw_recommendations:
-        rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
-        if rec_rank >= min_rank:
-            quality_filtered.append(rec)
-    progress['tracks_after_quality_filter'] = len(quality_filtered)
-    jobs.update_job_progress(job_id, {'progress': progress})
+    # Step 1: Deduplicate by ISRC, aggregate frequency score
+    from squidly.infrastructure.utils import normalize_match_text
 
-    # Step 1.5: Resolve tracks — detect karaoke/live/single/compilation
-    #            and replace with a better version from a proper album.
+    deduped = {}
+    for rec in raw_recommendations:
+        key = str(rec.get('isrc') or '').strip().upper()
+        if not key:
+            key = normalize_match_text(rec.get('artist', '')) + '||' + normalize_match_text(rec.get('title', ''))
+        if key not in deduped:
+            deduped[key] = {**rec, 'score': 1}
+        else:
+            deduped[key]['score'] += 1
+
+    # Step 2: Dedupe against existing Fresh Finds playlists (by ISRC)
+    existing_ff_isrcs = get_existing_fresh_finds_isrcs(plex_account_id)
+    before_ff_dedup = len(deduped)
+    deduped = {
+        key: rec for key, rec in deduped.items()
+        if str(rec.get('isrc') or '').strip().upper() not in existing_ff_isrcs
+    }
+    logger.info("[RECOMMENDATION] Job %s: removed %d tracks already in existing FF playlists",
+                job_id, before_ff_dedup - len(deduped))
+
+    # Step 3: Track resolution — detect karaoke/live/single/compilation
     from squidly.services.track_resolver import resolve_track, merge_replacement_into_rec
+    settings = get_download_settings()
     resolved_count = 0
-    for rec in quality_filtered:
+    for rec in list(deduped.values()):
         tid = rec.get('hifi_id')
         if not tid:
             continue
@@ -161,35 +180,39 @@ def process_recommendation_job(job_id, payload):
             logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
     jobs.update_job_progress(job_id, {'progress': {**progress, 'tracks_resolved': resolved_count}})
 
-    # Step 2: Deduplicate by ISRC, aggregate frequency score.
-    #         Fallback: use normalized artist+title when ISRC is missing.
+    # Step 4: Quality filter
+    min_quality = settings.get('quality', 'LOSSLESS')
+    min_rank = _get_hifi_audio_quality_rank(min_quality)
+    quality_filtered = []
+    for rec in deduped.values():
+        rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
+        if rec_rank >= min_rank:
+            quality_filtered.append(rec)
+    progress['tracks_after_quality_filter'] = len(quality_filtered)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    # Step 5: Exclude tracks recently played by this user (30 days, hardcoded)
+    from squidly.infrastructure.storage import get_recently_played_isrcs
+    recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
+    quality_filtered = [
+        rec for rec in quality_filtered
+        if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
+    ]
+
+    # Step 6: Classify into NEW or LIBRARY candidate pools
     from squidly.infrastructure.storage import get_existing_isrcs, get_existing_artist_titles
-    from squidly.infrastructure.utils import normalize_match_text
-
-    deduped = {}
-    for rec in quality_filtered:
-        key = str(rec.get('isrc') or '').strip().upper()
-        if not key:
-            key = normalize_match_text(rec.get('artist', '')) + '||' + normalize_match_text(rec.get('title', ''))
-        if key not in deduped:
-            deduped[key] = {**rec, 'score': 1}
-        else:
-            deduped[key]['score'] += 1
-
-    # Step 3: Classify each deduped track into NEW or LIBRARY candidate pools
     existing_isrcs = get_existing_isrcs()
     existing_artist_titles = get_existing_artist_titles()
     library_candidates = []
     new_candidates = []
 
-    for rec in deduped.values():
+    for rec in quality_filtered:
         rec_isrc = str(rec.get('isrc') or '').strip().upper()
         is_library_track = False
 
         if rec_isrc and rec_isrc in existing_isrcs:
             is_library_track = True
         elif not rec_isrc:
-            # Fallback: check normalized artist+title against library
             at = (
                 normalize_match_text(rec.get('artist', '')),
                 normalize_match_text(rec.get('title', ''), strip_trailing_parenthetical=True)
@@ -202,22 +225,13 @@ def process_recommendation_job(job_id, payload):
         else:
             new_candidates.append(rec)
 
-    # Step 4: Exclude library tracks recently played by this user (30 days)
-    from squidly.infrastructure.storage import get_recently_played_isrcs
-    recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
-    library_candidates = [
-        rec for rec in library_candidates
-        if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
-    ]
-
-    # Step 5: Sort both pools by frequency score descending
+    # Step 7: Sort both pools by frequency score descending
     new_candidates.sort(key=lambda x: x['score'], reverse=True)
     library_candidates.sort(key=lambda x: x['score'], reverse=True)
 
-    # Step 6: Calculate distribution based on user settings
-    from squidly.infrastructure.storage import get_fresh_finds_new_track_pct, get_fresh_finds_track_count
+    # Step 8: Calculate distribution based on user settings
+    from squidly.infrastructure.storage import get_fresh_finds_new_track_pct
     new_track_pct = get_fresh_finds_new_track_pct(plex_account_id)
-    track_count = get_fresh_finds_track_count(plex_account_id)
     n_new = round(track_count * new_track_pct / 100)
     n_library = track_count - n_new
 
@@ -238,7 +252,7 @@ def process_recommendation_job(job_id, payload):
     progress['tracks_selected_library'] = len(selected_library)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Step 7: Resolve library picks to local library instance
+    # Step 9: Resolve library picks to local library instance
     from squidly.infrastructure.storage import get_local_track_by_isrc
 
     for rec in selected_library:
@@ -247,9 +261,9 @@ def process_recommendation_job(job_id, payload):
             local = get_local_track_by_isrc(rec_isrc)
             if local:
                 rec['library_id'] = local['library_id']
-                rec['hifi_id'] = local['hifi_id']  # Use the local track's hifi_id
+                rec['hifi_id'] = local['hifi_id']
 
-    # Step 8: Combine — new tracks first, then library tracks
+    # Step 10: Combine — new tracks first, then library tracks
     top_tracks = selected_new + selected_library
     top_tracks = top_tracks[:track_count]
 
@@ -270,7 +284,6 @@ def process_recommendation_job(job_id, payload):
     now_tz = datetime.now(ZoneInfo(app_timezone))
     playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
 
-    # Save playlist to DB first, then create in Plex
     playlist_id = save_recommendation_playlist(
         plex_account_id=plex_account_id,
         slug=slug,
@@ -297,7 +310,6 @@ def process_recommendation_job(job_id, payload):
     except Exception as e:
         logger.info("[RECOMMENDATION] Job %s Plex playlist creation error (non-fatal): %s", job_id, str(e))
 
-    # Update the playlist record with the Plex key
     if plex_playlist_key and playlist_id:
         try:
             conn_inner = get_db_connection()

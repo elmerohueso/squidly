@@ -564,7 +564,7 @@
                                         <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
-                                        <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="5" max="100" value="25" readonly>
+                                        <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly>
                                         <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
@@ -579,17 +579,17 @@
                                     var pctValue = document.getElementById('freshFindsNewPctValue');
                                     function updateTrackButtons() {
                                         var v = parseInt(trackInput.value, 10);
-                                        trackDec.disabled = v <= 5;
-                                        trackInc.disabled = v >= 100;
+                                        trackDec.disabled = v <= 10;
+                                        trackInc.disabled = v >= 50;
                                     }
                                     trackDec.addEventListener('click', function() {
                                         var v = parseInt(trackInput.value, 10);
-                                        if (v > 5) { trackInput.value = String(Math.max(5, v - 5)); trackInput.dispatchEvent(new Event('change')); }
+                                        if (v > 10) { trackInput.value = String(Math.max(10, v - 5)); trackInput.dispatchEvent(new Event('change')); }
                                         updateTrackButtons();
                                     });
                                     trackInc.addEventListener('click', function() {
                                         var v = parseInt(trackInput.value, 10);
-                                        if (v < 100) { trackInput.value = String(Math.min(100, v + 5)); trackInput.dispatchEvent(new Event('change')); }
+                                        if (v < 50) { trackInput.value = String(Math.min(50, v + 5)); trackInput.dispatchEvent(new Event('change')); }
                                         updateTrackButtons();
                                     });
                                     trackInput.addEventListener('change', updateTrackButtons);
@@ -602,6 +602,46 @@
                                 })();
                                 </script>
                                 <p class="settings-note" id="freshFindsTrackCountStatus"></p>
+                                <div class="history-days-setting" style="margin: 1rem 0 0.75rem;">
+                                    <label class="settings-label" for="freshFindsHistoryDays" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
+                                        History window
+                                    </label>
+                                    <div class="retention-spinner">
+                                        <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                        <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly>
+                                        <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        </button>
+                                    </div>
+                                    <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">days</span>
+                                </div>
+                                <script>
+                                (function() {
+                                    var historyInput = document.getElementById('freshFindsHistoryDays');
+                                    var historyDec = document.getElementById('historyDaysDec');
+                                    var historyInc = document.getElementById('historyDaysInc');
+                                    function updateHistoryButtons() {
+                                        var v = parseInt(historyInput.value, 10);
+                                        historyDec.disabled = v <= 10;
+                                        historyInc.disabled = v >= 60;
+                                    }
+                                    historyDec.addEventListener('click', function() {
+                                        var v = parseInt(historyInput.value, 10);
+                                        if (v > 10) { historyInput.value = String(Math.max(10, v - 5)); historyInput.dispatchEvent(new Event('change')); }
+                                        updateHistoryButtons();
+                                    });
+                                    historyInc.addEventListener('click', function() {
+                                        var v = parseInt(historyInput.value, 10);
+                                        if (v < 60) { historyInput.value = String(Math.min(60, v + 5)); historyInput.dispatchEvent(new Event('change')); }
+                                        updateHistoryButtons();
+                                    });
+                                    historyInput.addEventListener('change', updateHistoryButtons);
+                                    updateHistoryButtons();
+                                })();
+                                </script>
+                                <p class="settings-note" id="freshFindsHistoryDaysStatus"></p>
                             </div>
                         </div>
                         <div class="settings-section" id="uiPreferencesSettings">

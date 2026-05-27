@@ -8,6 +8,7 @@ status).
 from datetime import date, datetime
 import json
 import logging
+import random
 import re
 
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
@@ -799,7 +800,7 @@ def set_fresh_finds_new_track_pct(plex_client_id, pct):
 
 
 def get_fresh_finds_track_count(plex_account_id):
-    """Get the Fresh Finds track count for a user. Default 25."""
+    """Get the Fresh Finds track count for a user. Default 25. Clamps to [10, 50]."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -809,12 +810,14 @@ def get_fresh_finds_track_count(plex_account_id):
     row = cur.fetchone()
     conn.close()
     val = row.get('fresh_finds_track_count') if row else None
-    return val if val is not None else 25
+    if val is None:
+        return 25
+    return max(10, min(50, int(val)))
 
 
 def set_fresh_finds_track_count(plex_client_id, count):
-    """Set the Fresh Finds track count for a user. Clamps to [5, 100], rounds to nearest 5."""
-    count = max(5, min(100, int(count)))
+    """Set the Fresh Finds track count for a user. Clamps to [10, 50], rounds to nearest 5."""
+    count = max(10, min(50, int(count)))
     # Round to nearest 5
     count = round(count / 5) * 5
     conn = get_db_connection()
@@ -825,6 +828,90 @@ def set_fresh_finds_track_count(plex_client_id, count):
     )
     conn.commit()
     conn.close()
+
+
+def get_fresh_finds_history_days(plex_account_id):
+    """Get the Fresh Finds history window in days for a user. Default 30. Clamps to [10, 60]."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_history_days FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_history_days') if row else None
+    if val is None:
+        return 30
+    return max(10, min(60, int(val)))
+
+
+def set_fresh_finds_history_days(plex_client_id, days):
+    """Set the Fresh Finds history window in days. Clamps to [10, 60], rounds to nearest 5."""
+    days = max(10, min(60, int(days)))
+    days = round(days / 5) * 5
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_history_days = %s WHERE plex_client_id = %s",
+        (days, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_random_listen_history_seeds(plex_account_id, limit=25, days=30):
+    """Return N random unique tracks from listen history within the last M days."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT ON (hifi_id)
+            hifi_id, title, artist, album, played_at
+        FROM listen_history
+        WHERE plex_account_id = %s
+          AND hifi_id IS NOT NULL
+          AND played_at >= NOW() - INTERVAL '%s days'
+        ORDER BY hifi_id, played_at DESC
+        """,
+        (plex_account_id, days)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    # Shuffle and take limit
+    random.shuffle(rows)
+    rows = rows[:limit]
+    return [
+        {
+            'hifi_id': int(row['hifi_id']),
+            'title': row['title'],
+            'artist': row['artist'],
+            'album': row['album'],
+            'played_at': row['played_at'],
+        }
+        for row in rows
+    ]
+
+
+def get_existing_fresh_finds_isrcs(plex_account_id):
+    """Return set of ISRCs from tracks in all existing Fresh Finds playlists for this user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT UPPER(TRIM(t.isrc)) AS isrc
+        FROM recommendation_playlist_tracks rpt
+        JOIN recommendation_playlists rp ON rp.id = rpt.playlist_id
+        JOIN tracks t ON CAST(t.hifi_id AS TEXT) = CAST(rpt.hifi_id AS TEXT)
+        WHERE rp.plex_account_id = %s
+          AND rp.slug = 'fresh-finds'
+          AND t.isrc IS NOT NULL AND t.isrc != ''
+        """,
+        (plex_account_id,)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {str(row['isrc']).strip().upper() for row in rows}
 
 
 def get_recently_played_isrcs(plex_account_id, days=30):

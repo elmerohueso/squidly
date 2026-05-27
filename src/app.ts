@@ -634,6 +634,8 @@ class App {
     private freshFindsNewPctStatusEl: HTMLElement;
     private freshFindsTrackCountInput: HTMLInputElement;
     private freshFindsTrackCountStatusEl: HTMLElement;
+    private freshFindsHistoryDaysInput: HTMLInputElement;
+    private freshFindsHistoryDaysStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
@@ -959,6 +961,8 @@ class App {
         this.freshFindsNewPctStatusEl = document.getElementById('freshFindsNewPctStatus') as HTMLElement;
         this.freshFindsTrackCountInput = document.getElementById('freshFindsTrackCount') as HTMLInputElement;
         this.freshFindsTrackCountStatusEl = document.getElementById('freshFindsTrackCountStatus') as HTMLElement;
+        this.freshFindsHistoryDaysInput = document.getElementById('freshFindsHistoryDays') as HTMLInputElement;
+        this.freshFindsHistoryDaysStatusEl = document.getElementById('freshFindsHistoryDaysStatus') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -1036,6 +1040,7 @@ class App {
         void this.loadFreshFindsRetention();
         void this.loadFreshFindsNewPct();
         void this.loadFreshFindsTrackCount();
+        void this.loadFreshFindsHistoryDays();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1361,6 +1366,9 @@ class App {
         if (this.freshFindsTrackCountInput) {
             this.freshFindsTrackCountInput.addEventListener('change', () => this.saveFreshFindsTrackCount());
         }
+        if (this.freshFindsHistoryDaysInput) {
+            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.saveFreshFindsHistoryDays());
+        }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
                 void this.savePlexConfig();
@@ -1560,6 +1568,11 @@ class App {
                 if (plexChip) {
                     e.preventDefault();
                     e.stopPropagation();
+
+                    // Artist hero chips are informational only — no action on click
+                    if (plexChip.closest('.artist-actions')) {
+                        return;
+                    }
 
                     const chipEl = plexChip as HTMLElement;
 
@@ -2704,6 +2717,7 @@ class App {
         void this.loadFreshFindsRetention();
         void this.loadFreshFindsNewPct();
         void this.loadFreshFindsTrackCount();
+        void this.loadFreshFindsHistoryDays();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -6369,6 +6383,78 @@ class App {
         }
     }
 
+    private async loadFreshFindsHistoryDays(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsHistoryDaysInput) {
+                    this.freshFindsHistoryDaysInput.value = '30';
+                }
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/history-days?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (this.freshFindsHistoryDaysInput && data.days) {
+                    this.freshFindsHistoryDaysInput.value = String(data.days);
+                    this.freshFindsHistoryDaysInput.dispatchEvent(new Event('change'));
+                }
+            } else {
+                if (this.freshFindsHistoryDaysStatusEl) {
+                    this.freshFindsHistoryDaysStatusEl.textContent = 'Failed to load history window setting';
+                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds history window setting.', error);
+            if (this.freshFindsHistoryDaysStatusEl) {
+                this.freshFindsHistoryDaysStatusEl.textContent = 'Error loading history window setting';
+                this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
+    private async saveFreshFindsHistoryDays(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                if (this.freshFindsHistoryDaysStatusEl) {
+                    this.freshFindsHistoryDaysStatusEl.textContent = 'Select a Plex user first';
+                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+                }
+                return;
+            }
+
+            const days = parseInt(this.freshFindsHistoryDaysInput.value, 10);
+            const response = await fetch('/api/fresh-finds/history-days', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, days: days })
+            });
+
+            if (response.ok) {
+                if (this.freshFindsHistoryDaysStatusEl) {
+                    this.freshFindsHistoryDaysStatusEl.textContent = `History window set to ${days} days`;
+                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--accent-primary)';
+                    setTimeout(() => {
+                        if (this.freshFindsHistoryDaysStatusEl) this.freshFindsHistoryDaysStatusEl.textContent = '';
+                    }, 3000);
+                }
+            } else {
+                if (this.freshFindsHistoryDaysStatusEl) {
+                    this.freshFindsHistoryDaysStatusEl.textContent = 'Failed to save setting';
+                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+                }
+            }
+        } catch (error) {
+            console.error('Error saving Fresh Finds history window setting:', error);
+            if (this.freshFindsHistoryDaysStatusEl) {
+                this.freshFindsHistoryDaysStatusEl.textContent = 'Error saving setting';
+                this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+            }
+        }
+    }
+
     private async loadYtmConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
@@ -6955,6 +7041,7 @@ class App {
                     void this.loadFreshFindsRetention();
                     void this.loadFreshFindsNewPct();
                     void this.loadFreshFindsTrackCount();
+                    void this.loadFreshFindsHistoryDays();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });
