@@ -19,12 +19,15 @@ from squidly.services.hifi import (
     _fetch_hifi_track_info_payload,
     extract_hifi_track_info,
 )
+from squidly.services.playlist_matching import _normalize_match_text_for_scoring
 
 logger = logging.getLogger(__name__)
 
 _album_cache: dict = {}
 _STRIP_VERSION_RE = re.compile(r'\s*[\(\[].*[\)\]]\s*$')
 
+
+# Use shared normalization from playlist_matching
 
 # ── Detections ──
 
@@ -270,7 +273,7 @@ _REASON_LOG = {
 }
 
 
-def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
+def resolve_track(hifi_id: Any, settings: Optional[dict] = None, expected_album: Optional[str] = None) -> dict:
     if settings is None:
         settings = {}
 
@@ -285,6 +288,17 @@ def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
     album_data = _fetch_album(album_id) if album_id else None
 
     all_problems = detect_problems(track_info, album_data)
+    label = f"track {hifi_id} ({track_info.get('title', '')})"
+
+    # Check if the track's album matches the expected album (from LB playlist)
+    # If so, skip single/ep replacement — the user explicitly chose this release
+    album_matches_expected = False
+    if expected_album and 'single/ep' in all_problems:
+        track_album_title = str((album_data or track_info.get('album', {})).get('title') or '')
+        if _normalize_match_text_for_scoring(track_album_title) == _normalize_match_text_for_scoring(expected_album):
+            album_matches_expected = True
+            logger.info("%s album '%s' matches expected '%s' — keeping single/ep",
+                        label, track_album_title, expected_album)
 
     # Soundtracks are never replaced
     active = [p for p in all_problems if p != 'soundtrack' or settings.get('penalty_soundtrack', False)]
@@ -299,12 +313,13 @@ def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
     for p in all_problems:
         if p == 'soundtrack':
             continue  # never replace soundtracks
+        # Skip single/ep if the album matches the expected album
+        if p == 'single/ep' and album_matches_expected:
+            continue
         key = {'karaoke/instrumental': 'penalty_karaoke', 'live': 'penalty_live',
                'single/ep': 'penalty_single', 'compilation': 'penalty_compilation'}.get(p)
         if key is None or settings.get(key, True):
             active_problems.append(p)
-
-    label = f"track {hifi_id} ({track_info.get('title', '')})"
 
     # Log
     for p in all_problems + (['none'] if not all_problems else []):
@@ -328,10 +343,10 @@ def resolve_track(hifi_id: Any, settings: Optional[dict] = None) -> dict:
 
 # ── Shared helpers for callers ──
 
-def resolve_best_match(best_item: Optional[dict], settings: dict, log_label: str = "") -> Optional[dict]:
+def resolve_best_match(best_item: Optional[dict], settings: dict, log_label: str = "", expected_album: Optional[str] = None) -> Optional[dict]:
     if not best_item:
         return best_item
-    result = resolve_track(best_item.get('id'), settings)
+    result = resolve_track(best_item.get('id'), settings, expected_album=expected_album)
     if result.get('replacement'):
         logger.info("[%s] Resolved %s (%s) → track %s",
                     log_label or 'RESOLVE', best_item.get('id'), result['reason'],

@@ -32,7 +32,7 @@ from squidly.infrastructure.storage import (
 from squidly.infrastructure.config import app_timezone, DEFAULT_DOWNLOAD_SETTINGS
 
 from squidly.services.playlist_matching import _score_track_candidate
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlencode, urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)
 logger = logging.getLogger(__name__)
@@ -606,76 +606,20 @@ def match_listenbrainz_track():
 
     settings = get_download_settings()
 
-    from squidly.services.track_resolver import resolve_best_match
-    from urllib.parse import urlencode
-    
-    isrcs = []
-    mbid_match = re.search(r'recording/([a-f0-9-]+)', identifier, re.IGNORECASE)
+    from squidly.services.listenbrainz_matching import match_listenbrainz_tracks
+    results = match_listenbrainz_tracks([{
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'identifier': identifier,
+    }], settings)
 
-    if mbid_match:
-        mbid = mbid_match.group(1)
-        try:
-            mb_url = f'https://musicbrainz.org/ws/2/recording/{mbid}?inc=isrcs&fmt=json'
-            mb_resp = requests.get(
-                mb_url,
-                timeout=10,
-                headers={'User-Agent': 'Squidly/1.0 (https://github.com/brendan/squidly)'}
-            )
-            if mb_resp.ok:
-                mb_data = mb_resp.json()
-                isrcs = mb_data.get('isrcs') or []
-        except requests.exceptions.RequestException:
-            pass
-
-    def search_hifi(search_type, search_query, limit=25):
-        response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/search/?{urlencode({search_type: search_query, 'limit': str(limit)})}",
-            downloads.get_squid_urls(),
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-        if not response.ok:
-            return []
-        result = response.json()
-        return result.get(search_type, []) if isinstance(result, dict) else []
-
-    best_match = None
-    best_score = 0.0
-    method = None
-
-    if isrcs:
-        for isrc in isrcs:
-            results = search_hifi('s', f'isrc:{isrc}', limit=5)
-            for item in results:
-                score = _score_track_candidate(title, artist, album, item)
-                if score > best_score:
-                    best_score = score
-                    best_match = item
-                    method = 'isrc'
-
-    if not best_match or best_score < 0.80:
-        query = f'{title} {artist}'
-        results = search_hifi('s', query, limit=50)
-        for item in results:
-            score = _score_track_candidate(title, artist, album, item)
-            if score > best_score:
-                best_score = score
-                best_match = item
-                method = 'text'
-
-    if best_match:
-        resolved = resolve_best_match(best_match, settings)
-        if resolved:
-            best_match = resolved
-
-        return jsonify({
-            'match': best_match,
-            'method': method,
-            'confidence': min(best_score, 1.0)
-        })
-
-    return jsonify({'match': None, 'method': None, 'confidence': 0.0})
+    r = results[0] if results else {'match': None, 'method': None, 'confidence': 0.0, 'error': None}
+    return jsonify({
+        'match': r.get('match'),
+        'method': r.get('method'),
+        'confidence': min(r.get('confidence', 0.0), 1.0),
+    })
 
 
 @settings_bp.route('/api/youtube_music/playlist', methods=['POST'])

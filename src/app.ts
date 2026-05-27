@@ -7863,6 +7863,32 @@ class App {
         `;
     }
 
+    private async processWithConcurrency<T, R>(
+        items: T[],
+        concurrency: number,
+        processor: (item: T) => Promise<R>,
+        onResult: (result: R, index: number) => void
+    ): Promise<R[]> {
+        const results: R[] = new Array(items.length);
+        let currentIndex = 0;
+
+        const processNext = async (): Promise<void> => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const result = await processor(items[index]);
+                onResult(result, index);
+                results[index] = result;
+            }
+        };
+
+        const workers = Array(Math.min(concurrency, items.length))
+            .fill(null)
+            .map(() => processNext());
+
+        await Promise.all(workers);
+        return results;
+    }
+
     private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true, usernameOverride?: string): Promise<void> {
         this.downloadAllScope = 'loose';
         const username = (usernameOverride || this.listenbrainzCurrentUsername || '').trim();
@@ -7947,64 +7973,65 @@ class App {
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
 
-            // Search for each track progressively
-            for (let i = 0; i < tracks.length; i++) {
-                const lbTrack = tracks[i];
-                const artists = lbTrack.creator || 'Unknown';
+            const trackPayloads: Array<{ title: string; artist: string; album: string; identifier: string }> = tracks.map((lbTrack: any) => ({
+                title: lbTrack.title || '',
+                artist: lbTrack.creator || 'Unknown',
+                album: lbTrack.album || '',
+                identifier: Array.isArray(lbTrack.identifier) ? lbTrack.identifier[0] : lbTrack.identifier || '',
+            }));
 
-                if (progressEl) {
-                    progressEl.textContent = `Processing track ${i + 1} of ${tracks.length}`;
-                }
+            const CONCURRENCY = 5;
+            let processedCount = 0;
 
-                try {
-                    const matchResponse = await fetch('/api/listenbrainz/match', {
+            if (progressEl) {
+                progressEl.textContent = `Matching ${tracks.length} tracks... (0/${tracks.length})`;
+            }
+
+            await this.processWithConcurrency(
+                trackPayloads,
+                CONCURRENCY,
+                async (payload) => {
+                    const response = await fetch('/api/listenbrainz/match', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            title: lbTrack.title,
-                            artist: artists,
-                            album: lbTrack.album || '',
-                            identifier: lbTrack.identifier || ''
-                        }),
-                        signal: this.pendingRequestController?.signal
+                        body: JSON.stringify(payload),
+                        signal: this.pendingRequestController?.signal,
                     });
+                    if (!response.ok) {
+                        return { match: null, title: payload.title, artist: payload.artist };
+                    }
+                    const data = await response.json();
+                    // Preserve original track info for the "not found" fallback
+                    data.title = payload.title;
+                    data.artist = payload.artist;
+                    return data;
+                },
+                (result: any) => {
+                    processedCount++;
+                    if (progressEl) {
+                        progressEl.textContent = `Matching ${tracks.length} tracks... (${processedCount}/${tracks.length})`;
+                    }
 
-                    if (matchResponse.ok) {
-                        const matchData = await matchResponse.json();
-
-                        if (matchData.match) {
-                            const trackRow = this.formatTrackGridRow(this.normalizeTrack(matchData.match as Track), {
-                                viewMode: 'multi-album',
-                                showTrackNumber: false,
-                                showAlbumColumn: true,
-                                showArtwork: true,
-                            });
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackRow);
-                            }
-                            matchedTracks.push(matchData.match as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: artists,
-                                name: lbTrack.title || 'Unknown'
-                            });
+                    if (result.match) {
+                        const trackRow = this.formatTrackGridRow(this.normalizeTrack(result.match as Track), {
+                            viewMode: 'multi-album',
+                            showTrackNumber: false,
+                            showAlbumColumn: true,
+                            showArtwork: true,
+                        });
+                        if (resultsList) {
+                            resultsList.insertAdjacentHTML('beforeend', trackRow);
                         }
+                        matchedTracks.push(result.match as Track);
+                        foundCount++;
                     } else {
                         notFoundTracks.push({
-                            artist: artists,
-                            name: lbTrack.title || 'Unknown'
+                            artist: result.artist || 'Unknown',
+                            name: result.title || 'Unknown',
                         });
                     }
-                } catch (error) {
-                    console.error(`Failed to match ${lbTrack.title} by ${artists}:`, error);
-                    notFoundTracks.push({
-                        artist: artists,
-                        name: lbTrack.title || 'Unknown'
-                    });
                 }
-
-            }
+            );
 
             if (progressEl) {
                 progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
