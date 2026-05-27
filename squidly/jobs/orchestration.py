@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 JOB_TYPES = {
     'download_track': {
-        'max_attempts': 20,
+        'max_attempts': 5,
         'idle_sleep': 2,
         'process_fn': 'squidly.jobs.processors.download.process_download_job',
         'on_success': ['plex_library_update'],
@@ -56,7 +56,7 @@ JOB_TYPES = {
         'process_fn': 'squidly.jobs.processors.recommendations.process_recommendation_job',
     },
     'fresh_finds_auto_download': {
-        'max_attempts': 10,
+        'max_attempts': 3,
         'idle_sleep': 5,
         'process_fn': 'squidly.jobs.processors.recommendations.process_fresh_finds_auto_download_job',
     },
@@ -333,7 +333,7 @@ def handle_on_success(job_type, result):
                 logger.info("[ON_SUCCESS] %s → queued plex_library_sync job %s", job_type, job_id)
 
         elif followup_type == 'automatic_matching':
-            job_id = queue_if_not_running('automatic_matching', {'trigger': f'post_{job_type}'}, max_attempts=1)
+            job_id = queue_if_not_running('automatic_matching', {'trigger': f'post_{job_type}'}, max_attempts=3)
             if job_id:
                 logger.info("[ON_SUCCESS] %s → queued automatic_matching job %s", job_type, job_id)
 
