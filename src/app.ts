@@ -1561,11 +1561,25 @@ class App {
                     e.preventDefault();
                     e.stopPropagation();
 
+                    const chipEl = plexChip as HTMLElement;
+
+                    // Try dataset-based IDs first (set by createPlexMatchChip)
+                    if (chipEl.dataset.trackId) {
+                        void this.handleRedownloadTrack(parseInt(chipEl.dataset.trackId, 10), chipEl, chipEl);
+                        return;
+                    }
+
+                    if (chipEl.dataset.albumId) {
+                        void this.handleRedownloadAlbum(parseInt(chipEl.dataset.albumId, 10), chipEl, chipEl);
+                        return;
+                    }
+
+                    // Fall back to parent traversal for chips without dataset IDs
                     const trackRow = plexChip.closest('.tracks-grid-row') as HTMLElement;
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.handleRedownloadTrack(parseInt(trackId, 10), trackRow, plexChip as HTMLElement);
+                            void this.handleRedownloadTrack(parseInt(trackId, 10), trackRow, chipEl);
                         }
                         return;
                     }
@@ -1574,8 +1588,14 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.handleRedownloadAlbum(parseInt(albumId, 10), albumRow, plexChip as HTMLElement);
+                            void this.handleRedownloadAlbum(parseInt(albumId, 10), albumRow, chipEl);
                         }
+                        return;
+                    }
+
+                    // Bulk chip without specific ID — re-download all visible tracks
+                    if (chipEl.classList.contains('plex-existing-chip--bulk')) {
+                        void this.handleRedownloadAll(chipEl);
                         return;
                     }
                 }
@@ -8298,7 +8318,7 @@ class App {
             );
     }
 
-    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean }): HTMLSpanElement {
+    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean; trackId?: number; albumId?: number }): HTMLSpanElement {
         const chip = document.createElement('span');
         const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
         const incomplete = options?.incomplete === true;
@@ -8327,6 +8347,10 @@ class App {
         }
         chip.textContent = label;
         chip.title = this.buildStoredMatchTooltip(match.variants || [], incomplete);
+
+        if (options?.trackId && Number.isFinite(options.trackId)) chip.dataset.trackId = String(options.trackId);
+        if (options?.albumId && Number.isFinite(options.albumId)) chip.dataset.albumId = String(options.albumId);
+
         return chip;
     }
 
@@ -8349,7 +8373,7 @@ class App {
         return `${heading}\n${details.join('\n')}`;
     }
 
-    private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {
+    private async annotateTrackCardsWithPlexStatus(tracks: Track[], albumId?: number): Promise<void> {
         if (!Array.isArray(tracks) || tracks.length === 0) {
             return;
         }
@@ -8367,7 +8391,7 @@ class App {
 
             const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
             if (gridRows.length > 0) {
-                await this.annotateGridRowsWithPlexStatus(gridRows, matchById);
+                await this.annotateGridRowsWithPlexStatus(gridRows, matchById, albumId);
                 return;
             }
 
@@ -8391,7 +8415,7 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
-                metadataEl.appendChild(this.createPlexMatchChip(match));
+                metadataEl.appendChild(this.createPlexMatchChip(match, { trackId: parseInt(trackId, 10) }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -8401,7 +8425,7 @@ class App {
         }
     }
 
-    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>): Promise<void> {
+    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>, albumId?: number): Promise<void> {
         const resolvedMatches: HifiTrackLookupMatch[] = [];
 
         for (const row of gridRows) {
@@ -8420,12 +8444,12 @@ class App {
                 continue;
             }
 
-            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true }));
+            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, trackId: parseInt(trackId, 10) }));
         }
 
         const allRowsInPlex = gridRows.length > 0 && resolvedMatches.length === gridRows.length;
         if (allRowsInPlex) {
-            this.replaceAddAllLibraryWithPlexBadge(resolvedMatches);
+            this.replaceAddAllLibraryWithPlexBadge(resolvedMatches, albumId);
         }
     }
 
@@ -8461,7 +8485,7 @@ class App {
                     continue;
                 }
 
-                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false }));
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false, albumId: parseInt(albumId, 10) }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -8471,7 +8495,7 @@ class App {
         }
     }
 
-    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean }): void {
+    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean; trackId?: number; albumId?: number }): void {
         if (!container || !match || !match.exists) {
             return;
         }
@@ -8483,7 +8507,9 @@ class App {
             inActions: options?.inActions,
             bulk: options?.bulk,
             incomplete: match.complete === false,
-            hero: options?.hero
+            hero: options?.hero,
+            trackId: options?.trackId,
+            albumId: options?.albumId
         });
 
         if (options?.hero) {
@@ -8554,7 +8580,7 @@ class App {
             }
 
             const container = document.querySelector('.album-actions') as HTMLElement | null;
-            this.insertHeroPlexChip(container, albumMatch, { inActions: true, bulk: true });
+            this.insertHeroPlexChip(container, albumMatch, { inActions: true, bulk: true, albumId });
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
                 return;
@@ -8586,7 +8612,7 @@ class App {
         }
     }
 
-    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[]): void {
+    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[], albumId?: number): void {
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
         if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
             return;
@@ -8606,11 +8632,11 @@ class App {
 
         if (albumActions) {
             addAllLibraryBtn.remove();
-            albumActions.appendChild(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
+            albumActions.appendChild(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true, albumId }));
             return;
         }
 
-        addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true }));
+        addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true, albumId }));
     }
 
     private formatSearchPlaylistCard(playlist: PlaylistSearchItem): string {
@@ -10106,7 +10132,7 @@ class App {
 
             this.movePlexPlaylistContainerBeneathDownloadAll();
 
-            void this.annotateTrackCardsWithPlexStatus(tracks);
+            void this.annotateTrackCardsWithPlexStatus(tracks, albumId);
             void this.annotateAlbumHeroWithPlexStatus(albumId);
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
@@ -10678,6 +10704,45 @@ class App {
             });
         } catch {
             this.displayMessage('Error re-downloading album. Please try again.');
+        }
+    }
+
+    private async handleRedownloadAll(chip: HTMLElement): Promise<void> {
+        console.log('[RE-DOWNLOAD] Re-downloading all visible tracks');
+
+        try {
+            await this.withRedownloadContext(chip, 'All tracks are already in your Plex library. Re-download them?', async () => {
+            const trackRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
+            const totalTracks = trackRows.length;
+
+            if (totalTracks === 0) {
+                this.displayMessage('No visible tracks to re-download');
+                throw new Error('No tracks found');
+            }
+
+            const jobIds: number[] = [];
+            for (const trackRow of trackRows) {
+                const trackId = trackRow.getAttribute('data-track-id');
+                if (trackId) {
+                    try {
+                        const jobId = await this.downloadTrackToLibrary(parseInt(trackId, 10), this.downloadAllScope);
+                        jobIds.push(jobId);
+                    } catch (error) {
+                        console.error(`[RE-DOWNLOAD] Failed to queue track ${trackId}:`, error);
+                    }
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[RE-DOWNLOAD] Queued ${jobIds.length} tracks`);
+            chip.textContent = 'In Plex';
+            chip.title = `Re-downloading ${jobIds.length} tracks...`;
+        });
+        } catch {
+            this.displayMessage('Error re-downloading tracks. Please try again.');
         }
     }
 
