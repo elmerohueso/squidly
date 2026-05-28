@@ -63,6 +63,9 @@ def process_plex_sync_job(job_id, payload):
     if not library:
         raise ValueError(f'Plex music library "{library_name}" not found')
 
+    library_roots = library.locations or []
+    logger.info("[PLEX_SYNC] Job %s: library root paths: %s", job_id, library_roots)
+
     logger.info("[PLEX_SYNC] Job %s fetching tracks from library '%s'", job_id, library_name)
     tracks = []
     try:
@@ -117,7 +120,7 @@ def process_plex_sync_job(job_id, payload):
                 seen_paths.add(file_path)
                 upserted += 1
 
-                relative_path = _normalize_library_track_path(file_path)
+                relative_path = _normalize_library_track_path(file_path, library_roots)
                 existing_track_row = _get_track_row_by_path(cur, relative_path) if relative_path else None
 
                 album_artist_row = None

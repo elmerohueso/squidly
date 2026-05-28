@@ -2,6 +2,7 @@
 
 import re
 
+from squidly.infrastructure.config import DOWNLOADS_ROOT
 from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc, normalize_match_text, _normalize_library_track_path
 from squidly.infrastructure.db import get_db_connection
 from squidly.infrastructure.job_queue import update_job_progress
@@ -651,7 +652,7 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
 
 
 def upsert_download_match_hint(track_title, track_artist_name, album_title, album_artist_name, full_path, audio_format, hifi_track_id=None, hifi_album_id=None, track_hifi_artist_id=None, album_hifi_artist_id=None, isrc=None, duration=None, track_number=None, disc_number=None):
-    relative_path = _normalize_library_track_path(full_path)
+    relative_path = _normalize_library_track_path(full_path, DOWNLOADS_ROOT)
     if not relative_path:
         return
 

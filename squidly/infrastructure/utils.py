@@ -91,21 +91,29 @@ def extract_year_from_text(text: str) -> str:
     return match.group(0) if match else ''
 
 
-def _normalize_library_track_path(file_path: str) -> str:
+def _normalize_library_track_path(file_path: str, root: str | list[str]) -> str:
     """Normalize a library track file path to a relative path.
 
-    Strips the DOWNLOADS_ROOT prefix if present, normalizes slashes,
-    and returns the relative path. Returns empty string if path is invalid.
+    Strips the given root prefix (or longest matching root from a list),
+    normalizes slashes, and returns the relative path.
+    Returns empty string if path is invalid.
     """
     if not file_path or not isinstance(file_path, str):
         return ''
 
-    from squidly.infrastructure.config import DOWNLOADS_ROOT
+    normalized = file_path.replace('\\', '/').lstrip('/')
 
-    normalized = file_path.replace('\\', '/')
-
-    if DOWNLOADS_ROOT and normalized.startswith(DOWNLOADS_ROOT.replace('\\', '/')):
-        normalized = normalized[len(DOWNLOADS_ROOT):].lstrip('/')
+    if root:
+        roots = root if isinstance(root, list) else [root]
+        roots = sorted(
+            [r.replace('\\', '/').lstrip('/').rstrip('/') for r in roots if r],
+            key=len,
+            reverse=True,
+        )
+        for r in roots:
+            if normalized.startswith(r + '/'):
+                normalized = normalized[len(r) + 1:]
+                break
 
     return normalized
 
