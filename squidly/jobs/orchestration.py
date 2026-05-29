@@ -109,7 +109,7 @@ def wait_for_job_type(job_type, timeout=300, poll_interval=5, check_cancelled_jo
     return True
 
 
-def queue_if_not_running(job_type, payload, max_attempts=None, priority=0, run_after=None):
+def queue_if_not_running(job_type, payload, priority=0, run_after=None):
     """Enqueue a job only if no job of this type is already queued or in progress.
 
     Returns the job ID if enqueued, or None if a job of this type is already active.
@@ -117,10 +117,7 @@ def queue_if_not_running(job_type, payload, max_attempts=None, priority=0, run_a
     if is_job_type_running_or_queued(job_type):
         return None
 
-    if max_attempts is None:
-        max_attempts = JOB_TYPES.get(job_type, {}).get('max_attempts', 5)
-
-    return enqueue_job(job_type, payload, max_attempts=max_attempts, priority=priority, run_after=run_after)
+    return enqueue_job(job_type, payload, priority=priority, run_after=run_after)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +129,6 @@ def queue_plex_library_sync(trigger='manual'):
     job_id = queue_if_not_running(
         'plex_library_sync',
         {'trigger': trigger, 'requested_at': datetime.utcnow().isoformat() + 'Z'},
-        max_attempts=5,
     )
     if job_id:
         logger.info("[PLEX_QUEUE] Queued plex_library_sync job %s (trigger=%s)", job_id, trigger)
@@ -144,7 +140,6 @@ def queue_plex_library_update(trigger='scheduled'):
     job_id = queue_if_not_running(
         'plex_library_update',
         {'trigger': trigger, 'requested_at': datetime.utcnow().isoformat() + 'Z'},
-        max_attempts=5,
     )
     if job_id:
         logger.info("[LIBRARY_UPDATE_QUEUE] Queued plex_library_update job %s (trigger=%s)", job_id, trigger)
@@ -172,7 +167,6 @@ def queue_plex_listen_history_sync(trigger='scheduled'):
     job_id = queue_if_not_running(
         'plex_listen_history_sync',
         {'trigger': trigger, 'requested_at': datetime.utcnow().isoformat() + 'Z'},
-        max_attempts=5,
     )
     if job_id:
         logger.info("[LISTEN_HISTORY_QUEUE] Queued plex_listen_history_sync job %s (trigger=%s)", job_id, trigger)
@@ -196,7 +190,7 @@ def queue_bulk_playlist_add_job(trigger='post_library_sync'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    job_id = enqueue_job('bulk_playlist_add', payload, max_attempts=5)
+    job_id = enqueue_job('bulk_playlist_add', payload)
     logger.info("[BULK_PLAYLIST_QUEUE] Queued bulk playlist add job %s (%d pending tracks, trigger=%s)", job_id, pending_count, trigger)
     return job_id
 
@@ -210,7 +204,7 @@ def queue_recommendation_generation(slug, plex_account_id, plex_username, trigge
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('generate_recommendations', payload, max_attempts=3)
+    return enqueue_job('generate_recommendations', payload)
 
 
 def queue_fresh_finds_auto_download(trigger='scheduled'):
@@ -227,7 +221,7 @@ def queue_fresh_finds_auto_download(trigger='scheduled'):
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('fresh_finds_auto_download', payload, max_attempts=3)
+    return enqueue_job('fresh_finds_auto_download', payload)
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +327,7 @@ def handle_on_success(job_type, result):
                 logger.info("[ON_SUCCESS] %s → queued plex_library_sync job %s", job_type, job_id)
 
         elif followup_type == 'automatic_matching':
-            job_id = queue_if_not_running('automatic_matching', {'trigger': f'post_{job_type}'}, max_attempts=3)
+            job_id = queue_if_not_running('automatic_matching', {'trigger': f'post_{job_type}'})
             if job_id:
                 logger.info("[ON_SUCCESS] %s → queued automatic_matching job %s", job_type, job_id)
 

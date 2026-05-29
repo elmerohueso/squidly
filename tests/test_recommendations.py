@@ -37,7 +37,6 @@ class TestQueueRecommendationGeneration:
         assert payload['plex_username'] == 'brendan'
         assert payload['trigger'] == 'scheduled'
         assert 'requested_at' in payload
-        assert args[1]['max_attempts'] == 3
 
     @patch('squidly.jobs.orchestration.enqueue_job')
     @patch('squidly.jobs.orchestration.datetime')

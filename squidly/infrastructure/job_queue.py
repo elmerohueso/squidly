@@ -36,7 +36,10 @@ def serialize_job_payload(payload):
         return json.dumps(payload, default=str, separators=(',', ':'), sort_keys=True)
 
 
-def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
+def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None):
+    from squidly.jobs.orchestration import JOB_TYPES
+    max_attempts = JOB_TYPES.get(job_type, {}).get('max_attempts', 5)
+
     now = datetime.utcnow().isoformat() + 'Z'
     payload_json = serialize_job_payload(payload)
     scheduled_at = run_after or now
