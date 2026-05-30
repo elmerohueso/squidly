@@ -169,11 +169,6 @@
                             <option value="s">Tracks</option>
                             <option value="a">Artists</option>
                             <option value="al">Albums</option>
-                            <!-- <option value="p">Playlists</option> -->
-                            <!-- <option value="trackid">Track ID</option> -->
-                            <!-- <option value="lastfm">Last.fm Playlist</option> -->
-                            <!-- <option value="youtube_music">YouTube Music Playlist</option> -->
-                            <!-- <option value="listenbrainz">ListenBrainz Playlists</option> -->
                         </select>
                         <input type="text" id="searchInput" class="search-bar-compact" placeholder="Search..."
                             name="search" autocomplete="search" />
@@ -275,168 +270,26 @@
 
                             <div class="playlist-matching-group" style="margin-top: 1.25rem;">
                                 <div class="playlist-matching-title">Playlist Matching Penalties</div>
-                                <p class="settings-hint" style="margin-top: 0; margin-bottom: 0.75rem;">Apply score penalties to deprioritize these matches when better options exist</p>
-                                <div class="tag-group" style="margin-bottom: 0;">
-                                    <div class="tag-toggle-row">
-                                        <span class="tag-toggle-label">Compilations (Various Artists)</span>
-                                        <label class="tag-switch">
-                                            <input type="checkbox" id="penaltyCompilation">
-                                            <span class="tag-switch-slider"></span>
-                                        </label>
-                                    </div>
-                                    <div class="tag-toggle-row">
-                                        <span class="tag-toggle-label">Karaoke / Instrumental tracks</span>
-                                        <label class="tag-switch">
-                                            <input type="checkbox" id="penaltyKaraoke">
-                                            <span class="tag-switch-slider"></span>
-                                        </label>
-                                    </div>
-                                    <div class="tag-toggle-row">
-                                        <span class="tag-toggle-label">Live tracks</span>
-                                        <label class="tag-switch">
-                                            <input type="checkbox" id="penaltyLive">
-                                            <span class="tag-switch-slider"></span>
-                                        </label>
-                                    </div>
-                                </div>
+                                <div class="tag-group" id="penaltyTagGroup" style="margin-bottom: 0;"></div>
                             </div>
                         </div>
                         <div class="settings-section" id="taggingSettings">
                             <h3>Metadata Tagging</h3>
 
-                            <div class="tag-group">
+                            <div class="tag-group" id="coreMetadataGroup">
                                 <div class="tag-group-title">Core Metadata</div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Title</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagTitle">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Artist</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagArtist">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Album Artist</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagAlbumArtist">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Album</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagAlbum">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Year</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagYear">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
                             </div>
 
-                            <div class="tag-group">
+                            <div class="tag-group" id="trackInfoGroup">
                                 <div class="tag-group-title">Track Information</div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Track Number</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagTrackNumber">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Track Total</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagTrackTotal">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Disc Number</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagDiscNumber">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Disc Total</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagDiscTotal">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Version</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagVersion">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
                             </div>
 
-                            <div class="tag-group">
+                            <div class="tag-group" id="identifiersGroup">
                                 <div class="tag-group-title">Identifiers</div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Tidal Track ID</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagTidalTrackId">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Tidal Album ID</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagTidalAlbumId">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">ISRC</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagIsrc">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
                             </div>
 
-                            <div class="tag-group">
+                            <div class="tag-group" id="additionalTagGroup">
                                 <div class="tag-group-title">Additional</div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Copyright</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagCopyright">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Cover Art</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagCoverArt">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Explicit Tag</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagExplicit">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
-                                <div class="tag-toggle-row">
-                                    <span class="tag-toggle-label">Append [Explicit] suffix to titles</span>
-                                    <label class="tag-switch">
-                                        <input type="checkbox" id="tagExplicitSuffix">
-                                        <span class="tag-switch-slider"></span>
-                                    </label>
-                                </div>
                             </div>
                         </div>
                         <div class="settings-section" id="integrationsSettings">
@@ -506,40 +359,17 @@
                                         Keep up to
                                     </label>
                                     <div class="retention-spinner">
-                                        <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention">
+                                        <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention" data-spinner-dec="freshFindsRetentionCount">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
-                                        <input type="number" id="freshFindsRetentionCount" class="retention-spinner-input" min="1" max="7" value="7" readonly>
-                                        <button type="button" class="retention-spinner-btn" id="retentionInc" aria-label="Increase retention">
+                                        <input type="number" id="freshFindsRetentionCount" class="retention-spinner-input" min="1" max="7" value="7" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="7" data-spinner-step="1">
+                                        <button type="button" class="retention-spinner-btn" id="retentionInc" aria-label="Increase retention" data-spinner-inc="freshFindsRetentionCount">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
                                     </div>
                                     <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">Fresh Finds playlists</span>
                                 </div>
-                                <script>
-                                (function() {
-                                    var input = document.getElementById('freshFindsRetentionCount');
-                                    var dec = document.getElementById('retentionDec');
-                                    var inc = document.getElementById('retentionInc');
-                                    function updateButtons() {
-                                        var v = parseInt(input.value, 10);
-                                        dec.disabled = v <= 1;
-                                        inc.disabled = v >= 7;
-                                    }
-                                    dec.addEventListener('click', function() {
-                                        var v = parseInt(input.value, 10);
-                                        if (v > 1) { input.value = String(v - 1); input.dispatchEvent(new Event('change')); }
-                                        updateButtons();
-                                    });
-                                    inc.addEventListener('click', function() {
-                                        var v = parseInt(input.value, 10);
-                                        if (v < 7) { input.value = String(v + 1); input.dispatchEvent(new Event('change')); }
-                                        updateButtons();
-                                    });
-                                    input.addEventListener('change', updateButtons);
-                                    updateButtons();
-                                })();
-                                </script>
+
                                 <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
                                 <p class="settings-note" id="freshFindsRetentionStatus"></p>
                                 <div class="fresh-finds-slider-setting" style="margin: 1.25rem 0 0.75rem;">
@@ -561,86 +391,33 @@
                                         Tracks per playlist
                                     </label>
                                     <div class="retention-spinner">
-                                        <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count">
+                                        <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
-                                        <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly>
-                                        <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count">
+                                        <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="50" data-spinner-step="5">
+                                        <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count" data-spinner-inc="freshFindsTrackCount">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
                                     </div>
                                 </div>
-                                <script>
-                                (function() {
-                                    var trackInput = document.getElementById('freshFindsTrackCount');
-                                    var trackDec = document.getElementById('trackCountDec');
-                                    var trackInc = document.getElementById('trackCountInc');
-                                    var pctSlider = document.getElementById('freshFindsNewPct');
-                                    var pctValue = document.getElementById('freshFindsNewPctValue');
-                                    function updateTrackButtons() {
-                                        var v = parseInt(trackInput.value, 10);
-                                        trackDec.disabled = v <= 10;
-                                        trackInc.disabled = v >= 50;
-                                    }
-                                    trackDec.addEventListener('click', function() {
-                                        var v = parseInt(trackInput.value, 10);
-                                        if (v > 10) { trackInput.value = String(Math.max(10, v - 5)); trackInput.dispatchEvent(new Event('change')); }
-                                        updateTrackButtons();
-                                    });
-                                    trackInc.addEventListener('click', function() {
-                                        var v = parseInt(trackInput.value, 10);
-                                        if (v < 50) { trackInput.value = String(Math.min(50, v + 5)); trackInput.dispatchEvent(new Event('change')); }
-                                        updateTrackButtons();
-                                    });
-                                    trackInput.addEventListener('change', updateTrackButtons);
-                                    updateTrackButtons();
-                                    if (pctSlider && pctValue) {
-                                        pctSlider.addEventListener('input', function() {
-                                            pctValue.textContent = this.value + '%';
-                                        });
-                                    }
-                                })();
-                                </script>
+
                                 <p class="settings-note" id="freshFindsTrackCountStatus"></p>
                                 <div class="history-days-setting" style="margin: 1rem 0 0.75rem;">
                                     <label class="settings-label" for="freshFindsHistoryDays" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
                                         History window
                                     </label>
                                     <div class="retention-spinner">
-                                        <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days">
+                                        <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days" data-spinner-dec="freshFindsHistoryDays">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
-                                        <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly>
-                                        <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days">
+                                        <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="60" data-spinner-step="5">
+                                        <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days" data-spinner-inc="freshFindsHistoryDays">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                         </button>
                                     </div>
                                     <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">days</span>
                                 </div>
-                                <script>
-                                (function() {
-                                    var historyInput = document.getElementById('freshFindsHistoryDays');
-                                    var historyDec = document.getElementById('historyDaysDec');
-                                    var historyInc = document.getElementById('historyDaysInc');
-                                    function updateHistoryButtons() {
-                                        var v = parseInt(historyInput.value, 10);
-                                        historyDec.disabled = v <= 10;
-                                        historyInc.disabled = v >= 60;
-                                    }
-                                    historyDec.addEventListener('click', function() {
-                                        var v = parseInt(historyInput.value, 10);
-                                        if (v > 10) { historyInput.value = String(Math.max(10, v - 5)); historyInput.dispatchEvent(new Event('change')); }
-                                        updateHistoryButtons();
-                                    });
-                                    historyInc.addEventListener('click', function() {
-                                        var v = parseInt(historyInput.value, 10);
-                                        if (v < 60) { historyInput.value = String(Math.min(60, v + 5)); historyInput.dispatchEvent(new Event('change')); }
-                                        updateHistoryButtons();
-                                    });
-                                    historyInput.addEventListener('change', updateHistoryButtons);
-                                    updateHistoryButtons();
-                                })();
-                                </script>
+
                                 <p class="settings-note" id="freshFindsHistoryDaysStatus"></p>
                             </div>
                         </div>
