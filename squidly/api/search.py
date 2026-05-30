@@ -16,7 +16,6 @@ from squidly.services.hifi import (
     _get_hifi_album_dedupe_key,
     _get_hifi_track_dedupe_key,
     _get_hifi_audio_quality_rank,
-    _fetch_hifi_track_manifests_payload,
     _normalize_hifi_playlist_items,
 )
 from squidly.infrastructure.downloads import get_squid_urls
@@ -259,33 +258,6 @@ def track_info(track_id=None):
         }), 502
 
 
-@search_bp.route('/api/hifi/tracks/<track_id>/object', methods=['GET'])
-def track_object(track_id=None):
-    """Get a normalized HiFi track object."""
-    track_id = str(track_id or request.args.get('id') or '').strip()
-
-    if not track_id:
-        return jsonify({'error': 'Track ID parameter is required'}), 400
-
-    if not track_id.isdigit():
-        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
-
-    include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
-    include_album = str(request.args.get('include_album', 'false')).strip().lower() in ('1', 'true', 'yes')
-    audio_quality = str(request.args.get('audio_quality', '')).strip() or None
-
-    try:
-        result = get_hifi_track_object(
-            track_id,
-            include_streams=include_streams,
-            include_album=include_album,
-            audio_quality=audio_quality
-        )
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': 'Failed to build track object', 'details': str(e)}), 500
-
-
 @search_bp.route('/api/hifi/tracks/<track_id>/stream', methods=['GET'])
 def track_stream(track_id=None):
     """Proxy a HiFi track stream through the application."""
@@ -448,26 +420,6 @@ def playlist_object(playlist_id=None):
             'error': 'Proxy error',
             'details': str(e)
         }), 502
-
-
-@search_bp.route('/api/hifi/tracks/<track_id>/manifest', methods=['GET'])
-def track_manifest(track_id=None):
-    """Get the manifest (streaming URLs) for a track."""
-    track_id = str(track_id or request.args.get('id') or '').strip()
-
-    if not track_id:
-        return jsonify({'error': 'Track ID parameter is required'}), 400
-
-    if not track_id.isdigit():
-        return jsonify({'error': 'Track ID must be numeric'}), 400
-
-    audio_quality = str(request.args.get('audio_quality', 'LOSSLESS')).strip().upper()
-
-    try:
-        result = _fetch_hifi_track_manifests_payload(track_id, audio_quality=audio_quality)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': 'Failed to fetch track manifest', 'details': str(e)}), 500
 
 
 @search_bp.route('/api/hifi/tracks/<track_id>/similar', methods=['GET'])
