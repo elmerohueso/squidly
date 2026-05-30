@@ -83,3 +83,7 @@ copilot-instructions.md
 test_scripts/
 # Generated TypeScript output
 src/app.js
+
+# Pre-compressed static assets
+static/dist/*.gz
+static/dist/*.br

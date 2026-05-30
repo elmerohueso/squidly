@@ -3,7 +3,7 @@ import logging
 from squidly.infrastructure.logging_setup import setup_logging
 setup_logging()
 
-from flask import Flask
+from flask import Flask, request, send_file
 from flask_cors import CORS
 import os
 
@@ -23,6 +23,41 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'templates')
 )
 CORS(app)
+
+
+@app.before_request
+def serve_compressed_static():
+    """Serve pre-compressed .gz or .br versions of static assets when supported."""
+    if not request.path.startswith('/static/dist/'):
+        return None
+
+    accept_encoding = request.headers.get('Accept-Encoding', '')
+    if not app.static_folder:
+        return None
+    filepath = os.path.join(app.static_folder, request.path.lstrip('/'))
+
+    if not os.path.isfile(filepath):
+        return None
+
+    # Prefer brotli, then gzip
+    if 'br' in accept_encoding:
+        br_path = filepath + '.br'
+        if os.path.isfile(br_path):
+            response = send_file(br_path, mimetype='application/javascript')
+            response.headers['Content-Encoding'] = 'br'
+            response.headers['Vary'] = 'Accept-Encoding'
+            return response
+
+    if 'gzip' in accept_encoding:
+        gz_path = filepath + '.gz'
+        if os.path.isfile(gz_path):
+            response = send_file(gz_path, mimetype='application/javascript')
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Vary'] = 'Accept-Encoding'
+            return response
+
+    return None
+
 
 from squidly.api.health import health_bp
 app.register_blueprint(health_bp)
