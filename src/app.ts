@@ -4901,7 +4901,7 @@ class App {
         let queuedJobIsActive = false;
 
         try {
-            const response = await fetch('/api/plex/library-updates', { method: 'POST' });
+            const response = await fetch('/api/plex/sync', { method: 'POST' });
             const data = await response.json().catch(() => ({} as { error?: string; job_id?: number | string; status?: string }));
             if (!response.ok) {
                 throw new Error(data.error || 'Failed to queue library update');
@@ -6879,7 +6879,7 @@ class App {
         this.startPlexSyncButton.disabled = true;
 
         try {
-            const libUpdateResponse = await fetch('/api/plex/library-updates', {
+            const libUpdateResponse = await fetch('/api/plex/sync', {
                 method: 'POST'
             });
 

@@ -20,10 +20,7 @@ from squidly.services.matching import (
     _build_stored_album_match_lookup,
     _build_stored_artist_match_lookup,
 )
-from squidly.jobs.orchestration import (
-    is_job_type_running_or_queued,
-    start_plex_library_update_job,
-)
+from squidly.jobs.orchestration import is_job_type_running_or_queued
 from squidly.infrastructure.plex import _resolve_plex_library_context, _build_plex_image_url, _get_match_review_plex_context, _fetch_plex_item_image_map
 from squidly.infrastructure.db import get_db_connection
 
@@ -31,16 +28,6 @@ logger = logging.getLogger(__name__)
 
 hifi_matches_bp = Blueprint("hifi_matches", __name__)
 
-
-@hifi_matches_bp.route('/api/hifi/matches', methods=['POST'])
-def start_hifi_match_endpoint():
-    """Queue a Plex library update, which chains to sync → automatic matching."""
-    result = start_plex_library_update_job(trigger='manual')
-    if not result.get('ok'):
-        status_code = result.get('status_code', 500)
-        return jsonify({'error': result.get('error')}), int(status_code)
-
-    return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
 
 
 @hifi_matches_bp.route('/api/hifi/matches/lookup', methods=['POST'])

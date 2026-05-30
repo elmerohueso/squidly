@@ -250,20 +250,9 @@ def save_plex_config_endpoint():
     return jsonify({'success': True})
 
 
-@plex_bp.route('/api/plex/syncs', methods=['POST'])
+@plex_bp.route('/api/plex/sync', methods=['POST'])
 def start_plex_sync_endpoint():
-    """Queue a manual Plex library update and sync job."""
-    result = start_plex_library_update_job(trigger='manual')
-    if not result.get('ok'):
-        status_code = result.get('status_code', 500)
-        return jsonify({'error': result.get('error')}), int(status_code)
-
-    return jsonify({'success': True, 'job_id': result.get('job_id'), 'status': result.get('status')}), 202
-
-
-@plex_bp.route('/api/plex/library-updates', methods=['POST'])
-def start_plex_library_update_endpoint():
-    """Queue a manual Plex library update and sync job."""
+    """Queue a manual Plex library sync (scan → match → playlist pipeline)."""
     result = start_plex_library_update_job(trigger='manual')
     if not result.get('ok'):
         status_code = result.get('status_code', 500)
