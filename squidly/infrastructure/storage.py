@@ -756,6 +756,19 @@ def set_fresh_finds_auto_download(plex_client_id, enabled):
     conn.close()
 
 
+def get_fresh_finds_auto_download(plex_client_id: str) -> bool:
+    """Get the auto_download_fresh_finds flag for a specific user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT auto_download_fresh_finds FROM user_settings WHERE plex_client_id = %s",
+        (plex_client_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return bool(row.get('auto_download_fresh_finds')) if row else False
+
+
 def get_fresh_finds_retention_count(plex_account_id):
     """Get the Fresh Finds retention count for a user. Default 7 if not set."""
     conn = get_db_connection()

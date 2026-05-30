@@ -1036,11 +1036,7 @@ class App {
         void this.fetchDownloadSettingsFromServer();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
-        void this.loadFreshFindsAutoDownload();
-        void this.loadFreshFindsRetention();
-        void this.loadFreshFindsNewPct();
-        void this.loadFreshFindsTrackCount();
-        void this.loadFreshFindsHistoryDays();
+        void this.loadFreshFindsConfig();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
 
@@ -1355,19 +1351,19 @@ class App {
             this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
         }
         if (this.autoDownloadFreshFindsCheckbox) {
-            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsAutoDownload());
+            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsConfig('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
         }
         if (this.freshFindsRetentionInput) {
-            this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsRetention());
+            this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsConfig('retention', parseInt(this.freshFindsRetentionInput.value, 10)));
         }
         if (this.freshFindsNewPctSlider) {
-            this.freshFindsNewPctSlider.addEventListener('change', () => this.saveFreshFindsNewPct());
+            this.freshFindsNewPctSlider.addEventListener('change', () => this.saveFreshFindsConfig('new_track_pct', parseInt(this.freshFindsNewPctSlider.value, 10)));
         }
         if (this.freshFindsTrackCountInput) {
-            this.freshFindsTrackCountInput.addEventListener('change', () => this.saveFreshFindsTrackCount());
+            this.freshFindsTrackCountInput.addEventListener('change', () => this.saveFreshFindsConfig('track_count', parseInt(this.freshFindsTrackCountInput.value, 10)));
         }
         if (this.freshFindsHistoryDaysInput) {
-            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.saveFreshFindsHistoryDays());
+            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.saveFreshFindsConfig('history_days', parseInt(this.freshFindsHistoryDaysInput.value, 10)));
         }
         if (this.savePlexConfigButton) {
             this.savePlexConfigButton.addEventListener('click', () => {
@@ -2713,11 +2709,7 @@ class App {
             void this.loadListenHistory();
         }
 
-        void this.loadFreshFindsAutoDownload();
-        void this.loadFreshFindsRetention();
-        void this.loadFreshFindsNewPct();
-        void this.loadFreshFindsTrackCount();
-        void this.loadFreshFindsHistoryDays();
+        void this.loadFreshFindsConfig();
     }
 
     private async updateSidebarPlaylists(): Promise<void> {
@@ -6104,354 +6096,108 @@ class App {
         }
     }
 
-    private async loadFreshFindsAutoDownload(): Promise<void> {
+    private async loadFreshFindsConfig(): Promise<void> {
         try {
             const userId = this.getSelectedPlexUserId();
             if (!userId) {
                 this.autoDownloadFreshFindsCheckbox.checked = false;
+                if (this.freshFindsRetentionInput) this.freshFindsRetentionInput.value = '7';
+                if (this.freshFindsNewPctSlider) this.freshFindsNewPctSlider.value = '50';
+                if (this.freshFindsNewPctValueEl) this.freshFindsNewPctValueEl.textContent = '50%';
+                if (this.freshFindsTrackCountInput) this.freshFindsTrackCountInput.value = '25';
+                if (this.freshFindsHistoryDaysInput) this.freshFindsHistoryDaysInput.value = '30';
                 return;
             }
-            const response = await fetch(`/api/fresh-finds/auto-download?user_id=${encodeURIComponent(userId)}`);
+            const response = await fetch(`/api/fresh-finds/config?user_id=${encodeURIComponent(userId)}`);
             if (response.ok) {
                 const data = await response.json();
-                this.autoDownloadFreshFindsCheckbox.checked = data.enabled;
-            }
-        } catch (error) {
-            console.warn('Failed to load Fresh Finds auto-download setting.', error);
-        }
-    }
-
-    private async saveFreshFindsAutoDownload(): Promise<void> {
-        const enabled = this.autoDownloadFreshFindsCheckbox.checked;
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                this.freshFindsAutoDownloadStatusEl.textContent = '⚠ Select a Plex user first';
-                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
-                return;
-            }
-
-            const response = await fetch('/api/fresh-finds/auto-download', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_id: userId,
-                    enabled: enabled
-                })
-            });
-
-            if (response.ok) {
-                this.freshFindsAutoDownloadStatusEl.textContent = enabled ? '✓ Auto-download enabled' : '✓ Auto-download disabled';
-                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--accent-primary)';
-                setTimeout(() => {
-                    this.freshFindsAutoDownloadStatusEl.textContent = '';
-                }, 3000);
-            } else {
-                this.freshFindsAutoDownloadStatusEl.textContent = '✗ Failed to save setting';
-                this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
-                // Revert checkbox on failure
-                this.autoDownloadFreshFindsCheckbox.checked = !enabled;
-            }
-        } catch (error) {
-            console.error('Error saving Fresh Finds auto-download setting:', error);
-            this.freshFindsAutoDownloadStatusEl.textContent = '✗ Error saving setting';
-            this.freshFindsAutoDownloadStatusEl.style.color = 'var(--text-secondary)';
-            this.autoDownloadFreshFindsCheckbox.checked = !enabled;
-        }
-    }
-
-    private async loadFreshFindsRetention(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsRetentionInput) {
-                    this.freshFindsRetentionInput.value = '7';
-                }
-                return;
-            }
-            const response = await fetch(`/api/fresh-finds/retention?user_id=${encodeURIComponent(userId)}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (this.freshFindsRetentionInput && data.count) {
-                    this.freshFindsRetentionInput.value = String(data.count);
+                this.autoDownloadFreshFindsCheckbox.checked = data.auto_download ?? false;
+                if (this.freshFindsRetentionInput && data.retention) {
+                    this.freshFindsRetentionInput.value = String(data.retention);
                     this.freshFindsRetentionInput.dispatchEvent(new Event('change'));
                 }
-            } else {
-                if (this.freshFindsRetentionStatusEl) {
-                    this.freshFindsRetentionStatusEl.textContent = '✗ Failed to load retention setting';
-                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                if (this.freshFindsNewPctSlider && data.new_track_pct !== undefined) {
+                    this.freshFindsNewPctSlider.value = String(data.new_track_pct);
                 }
-            }
-        } catch (error) {
-            console.warn('Failed to load Fresh Finds retention setting.', error);
-            if (this.freshFindsRetentionStatusEl) {
-                this.freshFindsRetentionStatusEl.textContent = '✗ Error loading retention setting';
-                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
-            }
-        }
-    }
-
-    private async saveFreshFindsRetention(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsRetentionStatusEl) {
-                    this.freshFindsRetentionStatusEl.textContent = '⚠ Select a Plex user first';
-                    this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
+                if (this.freshFindsNewPctValueEl && data.new_track_pct !== undefined) {
+                    this.freshFindsNewPctValueEl.textContent = data.new_track_pct + '%';
                 }
-                return;
-            }
-
-            const count = parseInt(this.freshFindsRetentionInput.value, 10);
-            const response = await fetch('/api/fresh-finds/retention', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_id: userId,
-                    count: count
-                })
-            });
-
-            if (response.ok) {
-                this.freshFindsRetentionStatusEl.textContent = `✓ Retention set to ${count} playlists`;
-                this.freshFindsRetentionStatusEl.style.color = 'var(--accent-primary)';
-                setTimeout(() => {
-                    this.freshFindsRetentionStatusEl.textContent = '';
-                }, 3000);
-            } else {
-                this.freshFindsRetentionStatusEl.textContent = '✗ Failed to save setting';
-                this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
-            }
-        } catch (error) {
-            console.error('Error saving Fresh Finds retention setting:', error);
-            this.freshFindsRetentionStatusEl.textContent = '✗ Error saving setting';
-            this.freshFindsRetentionStatusEl.style.color = 'var(--text-secondary)';
-        }
-    }
-
-    private async loadFreshFindsNewPct(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsNewPctSlider) {
-                    this.freshFindsNewPctSlider.value = '50';
-                }
-                if (this.freshFindsNewPctValueEl) {
-                    this.freshFindsNewPctValueEl.textContent = '50%';
-                }
-                return;
-            }
-            const response = await fetch(`/api/fresh-finds/new-track-pct?user_id=${encodeURIComponent(userId)}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (this.freshFindsNewPctSlider && data.pct !== undefined) {
-                    this.freshFindsNewPctSlider.value = String(data.pct);
-                }
-                if (this.freshFindsNewPctValueEl && data.pct !== undefined) {
-                    this.freshFindsNewPctValueEl.textContent = data.pct + '%';
-                }
-            }
-        } catch (error) {
-            console.warn('Failed to load Fresh Finds mix setting.', error);
-        }
-    }
-
-    private async saveFreshFindsNewPct(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsNewPctStatusEl) {
-                    this.freshFindsNewPctStatusEl.textContent = '⚠ Select a Plex user first';
-                    this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
-                }
-                return;
-            }
-
-            const pct = parseInt(this.freshFindsNewPctSlider.value, 10);
-            const response = await fetch('/api/fresh-finds/new-track-pct', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_id: userId,
-                    pct: pct
-                })
-            });
-
-            if (response.ok) {
-                if (this.freshFindsNewPctStatusEl) {
-                    this.freshFindsNewPctStatusEl.textContent = `✓ Mix set to ${pct}% new tracks`;
-                    this.freshFindsNewPctStatusEl.style.color = 'var(--accent-primary)';
-                    setTimeout(() => {
-                        if (this.freshFindsNewPctStatusEl) this.freshFindsNewPctStatusEl.textContent = '';
-                    }, 3000);
-                }
-            } else {
-                if (this.freshFindsNewPctStatusEl) {
-                    this.freshFindsNewPctStatusEl.textContent = '✗ Failed to save setting';
-                    this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
-                }
-            }
-        } catch (error) {
-            console.error('Error saving Fresh Finds mix setting:', error);
-            if (this.freshFindsNewPctStatusEl) {
-                this.freshFindsNewPctStatusEl.textContent = '✗ Error saving setting';
-                this.freshFindsNewPctStatusEl.style.color = 'var(--text-secondary)';
-            }
-        }
-    }
-
-    private async loadFreshFindsTrackCount(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsTrackCountInput) {
-                    this.freshFindsTrackCountInput.value = '25';
-                }
-                return;
-            }
-            const response = await fetch(`/api/fresh-finds/track-count?user_id=${encodeURIComponent(userId)}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (this.freshFindsTrackCountInput && data.count) {
-                    this.freshFindsTrackCountInput.value = String(data.count);
+                if (this.freshFindsTrackCountInput && data.track_count) {
+                    this.freshFindsTrackCountInput.value = String(data.track_count);
                     this.freshFindsTrackCountInput.dispatchEvent(new Event('change'));
                 }
-            } else {
-                if (this.freshFindsTrackCountStatusEl) {
-                    this.freshFindsTrackCountStatusEl.textContent = '✗ Failed to load track count setting';
-                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
-                }
-            }
-        } catch (error) {
-            console.warn('Failed to load Fresh Finds track count setting.', error);
-            if (this.freshFindsTrackCountStatusEl) {
-                this.freshFindsTrackCountStatusEl.textContent = '✗ Error loading track count setting';
-                this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
-            }
-        }
-    }
-
-    private async saveFreshFindsTrackCount(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsTrackCountStatusEl) {
-                    this.freshFindsTrackCountStatusEl.textContent = '⚠ Select a Plex user first';
-                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
-                }
-                return;
-            }
-
-            const count = parseInt(this.freshFindsTrackCountInput.value, 10);
-            const response = await fetch('/api/fresh-finds/track-count', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    user_id: userId,
-                    count: count
-                })
-            });
-
-            if (response.ok) {
-                if (this.freshFindsTrackCountStatusEl) {
-                    this.freshFindsTrackCountStatusEl.textContent = `✓ Track count set to ${count}`;
-                    this.freshFindsTrackCountStatusEl.style.color = 'var(--accent-primary)';
-                    setTimeout(() => {
-                        if (this.freshFindsTrackCountStatusEl) this.freshFindsTrackCountStatusEl.textContent = '';
-                    }, 3000);
-                }
-            } else {
-                if (this.freshFindsTrackCountStatusEl) {
-                    this.freshFindsTrackCountStatusEl.textContent = '✗ Failed to save setting';
-                    this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
-                }
-            }
-        } catch (error) {
-            console.error('Error saving Fresh Finds track count setting:', error);
-            if (this.freshFindsTrackCountStatusEl) {
-                this.freshFindsTrackCountStatusEl.textContent = '✗ Error saving setting';
-                this.freshFindsTrackCountStatusEl.style.color = 'var(--text-secondary)';
-            }
-        }
-    }
-
-    private async loadFreshFindsHistoryDays(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsHistoryDaysInput) {
-                    this.freshFindsHistoryDaysInput.value = '30';
-                }
-                return;
-            }
-            const response = await fetch(`/api/fresh-finds/history-days?user_id=${encodeURIComponent(userId)}`);
-            if (response.ok) {
-                const data = await response.json();
-                if (this.freshFindsHistoryDaysInput && data.days) {
-                    this.freshFindsHistoryDaysInput.value = String(data.days);
+                if (this.freshFindsHistoryDaysInput && data.history_days) {
+                    this.freshFindsHistoryDaysInput.value = String(data.history_days);
                     this.freshFindsHistoryDaysInput.dispatchEvent(new Event('change'));
                 }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds config.', error);
+        }
+    }
+
+    private async saveFreshFindsConfig(field: string, value: any): Promise<void> {
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            const statusEl = this.getFreshFindsStatusEl(field);
+            if (statusEl) {
+                statusEl.textContent = '⚠ Select a Plex user first';
+                statusEl.style.color = 'var(--text-secondary)';
+            }
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/fresh-finds/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, [field]: value })
+            });
+
+            if (response.ok) {
+                const statusEl = this.getFreshFindsStatusEl(field);
+                const label = this.getFreshFindsStatusLabel(field, value);
+                if (statusEl) {
+                    statusEl.textContent = `✓ ${label}`;
+                    statusEl.style.color = 'var(--accent-primary)';
+                    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+                }
             } else {
-                if (this.freshFindsHistoryDaysStatusEl) {
-                    this.freshFindsHistoryDaysStatusEl.textContent = 'Failed to load history window setting';
-                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+                const statusEl = this.getFreshFindsStatusEl(field);
+                if (statusEl) {
+                    statusEl.textContent = '✗ Failed to save setting';
+                    statusEl.style.color = 'var(--text-secondary)';
                 }
             }
         } catch (error) {
-            console.warn('Failed to load Fresh Finds history window setting.', error);
-            if (this.freshFindsHistoryDaysStatusEl) {
-                this.freshFindsHistoryDaysStatusEl.textContent = 'Error loading history window setting';
-                this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
+            console.error(`Error saving Fresh Finds ${field}:`, error);
+            const statusEl = this.getFreshFindsStatusEl(field);
+            if (statusEl) {
+                statusEl.textContent = '✗ Error saving setting';
+                statusEl.style.color = 'var(--text-secondary)';
             }
         }
     }
 
-    private async saveFreshFindsHistoryDays(): Promise<void> {
-        try {
-            const userId = this.getSelectedPlexUserId();
-            if (!userId) {
-                if (this.freshFindsHistoryDaysStatusEl) {
-                    this.freshFindsHistoryDaysStatusEl.textContent = 'Select a Plex user first';
-                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
-                }
-                return;
-            }
+    private getFreshFindsStatusEl(field: string): HTMLElement | null {
+        const map: Record<string, HTMLElement | null> = {
+            auto_download: this.freshFindsAutoDownloadStatusEl,
+            retention: this.freshFindsRetentionStatusEl,
+            new_track_pct: this.freshFindsNewPctStatusEl,
+            track_count: this.freshFindsTrackCountStatusEl,
+            history_days: this.freshFindsHistoryDaysStatusEl,
+        };
+        return map[field] ?? null;
+    }
 
-            const days = parseInt(this.freshFindsHistoryDaysInput.value, 10);
-            const response = await fetch('/api/fresh-finds/history-days', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId, days: days })
-            });
-
-            if (response.ok) {
-                if (this.freshFindsHistoryDaysStatusEl) {
-                    this.freshFindsHistoryDaysStatusEl.textContent = `History window set to ${days} days`;
-                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--accent-primary)';
-                    setTimeout(() => {
-                        if (this.freshFindsHistoryDaysStatusEl) this.freshFindsHistoryDaysStatusEl.textContent = '';
-                    }, 3000);
-                }
-            } else {
-                if (this.freshFindsHistoryDaysStatusEl) {
-                    this.freshFindsHistoryDaysStatusEl.textContent = 'Failed to save setting';
-                    this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
-                }
-            }
-        } catch (error) {
-            console.error('Error saving Fresh Finds history window setting:', error);
-            if (this.freshFindsHistoryDaysStatusEl) {
-                this.freshFindsHistoryDaysStatusEl.textContent = 'Error saving setting';
-                this.freshFindsHistoryDaysStatusEl.style.color = 'var(--text-secondary)';
-            }
+    private getFreshFindsStatusLabel(field: string, value: any): string {
+        switch (field) {
+            case 'auto_download': return value ? 'Auto-download enabled' : 'Auto-download disabled';
+            case 'retention': return `Retention set to ${value} playlists`;
+            case 'new_track_pct': return `Mix set to ${value}% new tracks`;
+            case 'track_count': return `Track count set to ${value}`;
+            case 'history_days': return `History window set to ${value} days`;
+            default: return 'Setting saved';
         }
     }
 
@@ -7037,11 +6783,7 @@ class App {
                     await this.loadPlexPlaylists();
                     this.updateUserTypeAccess();
                     await this.updatePlexLoginOnlyState();
-                    void this.loadFreshFindsAutoDownload();
-                    void this.loadFreshFindsRetention();
-                    void this.loadFreshFindsNewPct();
-                    void this.loadFreshFindsTrackCount();
-                    void this.loadFreshFindsHistoryDays();
+                    void this.loadFreshFindsConfig();
                 });
                 this.plexLoginOnlyUserList.appendChild(button);
             });

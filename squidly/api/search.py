@@ -435,7 +435,7 @@ def track_similar(track_id=None):
 
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/tracks/{track_id}/similar",
+            f"/recommendations/?id={track_id}",
             get_squid_urls(),
             method='GET',
             timeout=10,
@@ -469,7 +469,7 @@ def artist_similar(artist_id=None):
 
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/artists/{artist_id}/similar",
+            f"/artist/similar/?id={artist_id}",
             get_squid_urls(),
             method='GET',
             timeout=10,
@@ -503,7 +503,7 @@ def album_similar(album_id=None):
 
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/albums/{album_id}/similar",
+            f"/album/similar/?id={album_id}",
             get_squid_urls(),
             method='GET',
             timeout=10,

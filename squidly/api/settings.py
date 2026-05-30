@@ -22,6 +22,7 @@ from squidly.infrastructure.storage import (
     save_ytm_config,
     get_all_plex_account_mappings,
     resolve_plex_account_id,
+    get_fresh_finds_auto_download,
     set_fresh_finds_auto_download,
     get_fresh_finds_retention_count,
     set_fresh_finds_retention_count,
@@ -341,54 +342,9 @@ def save_listenbrainz_config_endpoint():
     })
 
 
-@settings_bp.route('/api/fresh-finds/auto-download', methods=['GET'])
-def get_fresh_finds_auto_download_config():
-    """Get the Fresh Finds auto-download setting for a specific user."""
-    user_id = request.args.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    mappings = get_all_plex_account_mappings()
-    user_row = None
-    for m in mappings:
-        if str(m.get('plex_client_id') or '') == user_id:
-            user_row = m
-            break
-
-    if not user_row:
-        return jsonify({'error': 'User not found'}), 404
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT auto_download_fresh_finds FROM user_settings WHERE plex_client_id = %s",
-        (user_id,)
-    )
-    row = cur.fetchone()
-    conn.close()
-
-    enabled = bool(row.get('auto_download_fresh_finds')) if row else False
-    return jsonify({'enabled': enabled})
-
-
-@settings_bp.route('/api/fresh-finds/auto-download', methods=['POST'])
-def save_fresh_finds_auto_download_config():
-    """Set the Fresh Finds auto-download toggle for a specific user."""
-    payload = request.get_json(silent=True) or {}
-
-    user_id = payload.get('user_id')
-    enabled = payload.get('enabled', False)
-
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    set_fresh_finds_auto_download(user_id, enabled)
-    return jsonify({'success': True, 'enabled': bool(enabled)})
-
-
-@settings_bp.route('/api/fresh-finds/retention', methods=['GET'])
-def get_fresh_finds_retention():
-    """Get the Fresh Finds retention count setting for a specific user."""
+@settings_bp.route('/api/fresh-finds/config', methods=['GET'])
+def get_fresh_finds_config():
+    """Get all Fresh Finds settings for a specific user."""
     user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
@@ -397,109 +353,35 @@ def get_fresh_finds_retention():
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
-    count = get_fresh_finds_retention_count(plex_account_id)
-    return jsonify({'count': count})
+    return jsonify({
+        'auto_download': get_fresh_finds_auto_download(user_id),
+        'retention': get_fresh_finds_retention_count(plex_account_id),
+        'new_track_pct': get_fresh_finds_new_track_pct(plex_account_id),
+        'track_count': get_fresh_finds_track_count(plex_account_id),
+        'history_days': get_fresh_finds_history_days(plex_account_id),
+    })
 
 
-@settings_bp.route('/api/fresh-finds/retention', methods=['POST'])
-def save_fresh_finds_retention():
-    """Set the Fresh Finds retention count for a specific user. Clamps to [1, 100]."""
+@settings_bp.route('/api/fresh-finds/config', methods=['POST'])
+def save_fresh_finds_config():
+    """Save Fresh Finds settings for a specific user."""
     payload = request.get_json(silent=True) or {}
     user_id = payload.get('user_id')
-    count = payload.get('count', 10)
-
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    set_fresh_finds_retention_count(user_id, count)
-    return jsonify({'success': True, 'count': max(1, min(100, int(count)))})
+    if 'auto_download' in payload:
+        set_fresh_finds_auto_download(user_id, bool(payload['auto_download']))
+    if 'retention' in payload:
+        set_fresh_finds_retention_count(user_id, max(1, min(100, int(payload['retention']))))
+    if 'new_track_pct' in payload:
+        set_fresh_finds_new_track_pct(user_id, max(0, min(100, int(payload['new_track_pct']))))
+    if 'track_count' in payload:
+        set_fresh_finds_track_count(user_id, max(10, min(50, int(payload['track_count']))))
+    if 'history_days' in payload:
+        set_fresh_finds_history_days(user_id, max(10, min(60, int(payload['history_days']))))
 
-
-@settings_bp.route('/api/fresh-finds/new-track-pct', methods=['GET'])
-def get_fresh_finds_new_track_pct_route():
-    """Get the Fresh Finds new-track percentage for a specific user."""
-    user_id = request.args.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    plex_account_id = resolve_plex_account_id(user_id)
-    if plex_account_id is None:
-        return jsonify({'error': 'User not found'}), 404
-
-    pct = get_fresh_finds_new_track_pct(plex_account_id)
-    return jsonify({'pct': pct})
-
-
-@settings_bp.route('/api/fresh-finds/new-track-pct', methods=['POST'])
-def save_fresh_finds_new_track_pct_route():
-    """Set the Fresh Finds new-track percentage for a specific user. Clamps to [0, 100]."""
-    payload = request.get_json(silent=True) or {}
-    user_id = payload.get('user_id')
-    pct = payload.get('pct', 50)
-
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    set_fresh_finds_new_track_pct(user_id, pct)
-    return jsonify({'success': True, 'pct': max(0, min(100, int(pct)))})
-
-
-@settings_bp.route('/api/fresh-finds/track-count', methods=['GET'])
-def get_fresh_finds_track_count_route():
-    """Get the Fresh Finds track count for a specific user."""
-    user_id = request.args.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    plex_account_id = resolve_plex_account_id(user_id)
-    if plex_account_id is None:
-        return jsonify({'error': 'User not found'}), 404
-
-    count = get_fresh_finds_track_count(plex_account_id)
-    return jsonify({'count': count})
-
-
-@settings_bp.route('/api/fresh-finds/track-count', methods=['POST'])
-def save_fresh_finds_track_count_route():
-    """Set the Fresh Finds track count for a specific user. Clamps to [10, 50]."""
-    payload = request.get_json(silent=True) or {}
-    user_id = payload.get('user_id')
-    count = payload.get('count', 25)
-
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    set_fresh_finds_track_count(user_id, count)
-    return jsonify({'success': True, 'count': max(10, min(50, int(count)))})
-
-
-@settings_bp.route('/api/fresh-finds/history-days', methods=['GET'])
-def get_fresh_finds_history_days_route():
-    """Get the Fresh Finds history window (days) for a specific user."""
-    user_id = request.args.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    plex_account_id = resolve_plex_account_id(user_id)
-    if plex_account_id is None:
-        return jsonify({'error': 'User not found'}), 404
-
-    days = get_fresh_finds_history_days(plex_account_id)
-    return jsonify({'days': days})
-
-
-@settings_bp.route('/api/fresh-finds/history-days', methods=['POST'])
-def save_fresh_finds_history_days_route():
-    """Set the Fresh Finds history window (days) for a specific user. Clamps to [10, 60]."""
-    payload = request.get_json(silent=True) or {}
-    user_id = payload.get('user_id')
-    days = payload.get('days', 30)
-
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-
-    set_fresh_finds_history_days(user_id, days)
-    return jsonify({'success': True, 'days': max(10, min(60, int(days)))})
+    return jsonify({'success': True})
 
 
 @settings_bp.route('/api/listenbrainz/playlists', methods=['GET'])
