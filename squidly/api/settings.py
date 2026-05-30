@@ -21,6 +21,7 @@ from squidly.infrastructure.storage import (
     get_ytm_config,
     save_ytm_config,
     get_all_plex_account_mappings,
+    resolve_plex_account_id,
     set_fresh_finds_auto_download,
     get_fresh_finds_retention_count,
     set_fresh_finds_retention_count,
@@ -392,13 +393,7 @@ def get_fresh_finds_retention():
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    mappings = get_all_plex_account_mappings()
-    plex_account_id = None
-    for m in mappings:
-        if str(m.get('plex_client_id') or '') == user_id:
-            plex_account_id = m.get('plex_account_id')
-            break
-
+    plex_account_id = resolve_plex_account_id(user_id)
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
@@ -427,13 +422,7 @@ def get_fresh_finds_new_track_pct_route():
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    mappings = get_all_plex_account_mappings()
-    plex_account_id = None
-    for m in mappings:
-        if str(m.get('plex_client_id') or '') == user_id:
-            plex_account_id = m.get('plex_account_id')
-            break
-
+    plex_account_id = resolve_plex_account_id(user_id)
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
@@ -462,13 +451,7 @@ def get_fresh_finds_track_count_route():
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    mappings = get_all_plex_account_mappings()
-    plex_account_id = None
-    for m in mappings:
-        if str(m.get('plex_client_id') or '') == user_id:
-            plex_account_id = m.get('plex_account_id')
-            break
-
+    plex_account_id = resolve_plex_account_id(user_id)
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 
@@ -497,13 +480,7 @@ def get_fresh_finds_history_days_route():
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
 
-    mappings = get_all_plex_account_mappings()
-    plex_account_id = None
-    for m in mappings:
-        if str(m.get('plex_client_id') or '') == user_id:
-            plex_account_id = m.get('plex_account_id')
-            break
-
+    plex_account_id = resolve_plex_account_id(user_id)
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
 

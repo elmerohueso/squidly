@@ -695,6 +695,17 @@ def save_plex_account_id(plex_client_id, plex_account_id):
     conn.close()
 
 
+def resolve_plex_account_id(user_id: str) -> int | None:
+    """Resolve a plex_client_id to a plex_account_id. Returns None if not found."""
+    if not user_id:
+        return None
+    mappings = get_all_plex_account_mappings()
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            return m.get('plex_account_id')
+    return None
+
+
 def get_all_plex_account_mappings():
     conn = get_db_connection()
     cur = conn.cursor()

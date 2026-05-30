@@ -4,16 +4,10 @@ recommendations_bp = Blueprint("recommendations", __name__)
 
 @recommendations_bp.route('/api/recommendations/playlists', methods=['GET'])
 def list_recommendation_playlists_route():
-    from squidly.infrastructure.storage import list_recommendation_playlists, has_listen_history, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import list_recommendation_playlists, has_listen_history, resolve_plex_account_id
     from datetime import datetime
     user_id = request.args.get('user_id', '').strip() or None
-    plex_account_id = None
-    if user_id:
-        mappings = get_all_plex_account_mappings()
-        for m in mappings:
-            if str(m.get('plex_client_id') or '') == user_id:
-                plex_account_id = m.get('plex_account_id')
-                break
+    plex_account_id = resolve_plex_account_id(user_id) if user_id else None
     if plex_account_id is None:
         return jsonify({'playlists': [], 'has_history': False})
     has_history = has_listen_history(plex_account_id)
@@ -54,16 +48,10 @@ def generate_recommendation_playlist():
 
 @recommendations_bp.route('/api/recommendations/<slug>', methods=['GET'])
 def get_recommendation_playlist_route(slug):
-    from squidly.infrastructure.storage import get_recommendation_playlist, get_all_plex_account_mappings
+    from squidly.infrastructure.storage import get_recommendation_playlist, resolve_plex_account_id
     from datetime import datetime
     user_id = request.args.get('user_id', '').strip() or None
-    plex_account_id = None
-    if user_id:
-        mappings = get_all_plex_account_mappings()
-        for m in mappings:
-            if str(m.get('plex_client_id') or '') == user_id:
-                plex_account_id = m.get('plex_account_id')
-                break
+    plex_account_id = resolve_plex_account_id(user_id) if user_id else None
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
     playlist_id_param = request.args.get('playlist_id', '').strip()
