@@ -34,6 +34,7 @@ from squidly.infrastructure.storage import (
 from squidly.infrastructure.config import app_timezone, DEFAULT_DOWNLOAD_SETTINGS
 
 from squidly.services.playlist_matching import _score_track_candidate
+from squidly.services.track_resolver import resolve_best_match
 from urllib.parse import urlencode, urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)
