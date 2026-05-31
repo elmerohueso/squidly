@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 from squidly.infrastructure import downloads
 from squidly import jobs
+from squidly.services import deezer
 from squidly.services import qobuz
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.infrastructure.config import DOWNLOADS_ROOT
@@ -324,7 +325,7 @@ def process_download_job(job_id, payload):
 
     # --- Download track with source fallback ---
     # Build priority order from comma-separated download_source (e.g. "tidal,qobuz")
-    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz')]
+    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz', 'deezer')]
     if not download_sources:
         download_sources = ['tidal']
 
@@ -337,6 +338,11 @@ def process_download_job(job_id, payload):
         if current_source == 'qobuz' and not track_data.get('isrc'):
             logger.info("[DOWNLOAD] Skipping Qobuz: track has no ISRC")
             last_download_error = "Qobuz requires ISRC (permanent)"
+            continue
+
+        if current_source == 'deezer' and not tag_settings.get('deezer_arl'):
+            logger.info("[DOWNLOAD] Skipping Deezer: no ARL configured")
+            last_download_error = "Deezer ARL not configured (permanent)"
             continue
 
         # Create a fresh temp path for each attempt
@@ -393,6 +399,37 @@ def process_download_job(job_id, payload):
                 # Validate duration
                 downloads.validate_audio_duration(temp_source_path, expected_duration)
 
+            elif current_source == 'deezer':
+                # --- Deezer download path ---
+                isrc = track_data.get('isrc')
+                if not isrc:
+                    raise ValueError("Deezer requires ISRC")
+
+                arl = tag_settings.get('deezer_arl', '')
+                if not arl:
+                    raise ValueError("Deezer ARL not configured")
+
+                deezer_result = deezer.download_deezer_track(
+                    isrc=isrc,
+                    output_path=temp_source_path,
+                    arl=arl,
+                )
+
+                if deezer_result is None:
+                    raise ValueError(f"Failed to download from Deezer (ISRC: {isrc})")
+
+                logger.info("[DEEZER] Successfully downloaded track via Deezer (ISRC: %s)", isrc)
+
+                # Detect format
+                with open(temp_source_path, 'rb') as tmp_file:
+                    audio_format = downloads.detect_audio_format(tmp_file.read(32))
+                if audio_format == 'unknown':
+                    audio_format = 'flac'
+                logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+
+                # Validate duration
+                downloads.validate_audio_duration(temp_source_path, expected_duration)
+
             else:
                 # --- Tidal download path ---
                 logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
@@ -435,6 +472,8 @@ def process_download_job(job_id, payload):
             _is_permanent_no_mirror = (
                 'no configured mirror' in error_str.lower()
                 or 'no qobuz mirrors configured' in error_str.lower()
+                or 'no arl configured' in error_str.lower()
+                or 'deezer requires isrc' in error_str.lower()
             )
             if not _is_permanent_no_mirror:
                 any_source_had_mirrors = True
