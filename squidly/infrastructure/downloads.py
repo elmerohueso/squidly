@@ -1042,9 +1042,9 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
         file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
-        logger.info("[ID3_DEBUG] Writing tags for '%s' type='%s'", file_path, file_type)
+        logger.info("[TAGGING_DEBUG] Writing tags for '%s' type='%s'", file_path, file_type)
         logger.info(
-            "[ID3_DEBUG] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
+            "[TAGGING_DEBUG] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
             artist, metadata.get('track_artists'), metadata.get('album_artist'), metadata.get('album_artists'), title, album, year, track_num, disc_num, metadata.get('version'), metadata.get('isrc'), metadata.get('audio_quality')
         )
 

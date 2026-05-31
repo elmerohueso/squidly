@@ -28,6 +28,13 @@ from squidly.infrastructure.utils import (
     sanitize_filename_component,
 )
 
+_PERMANENT_ERROR_KEYWORDS = (
+    'no configured mirror',
+    'no qobuz mirrors configured',
+    'no arl configured',
+    'deezer requires isrc',
+)
+
 def process_download_job(job_id, payload):
     track_id = payload.get('trackId')
     quality_choice = str(payload.get('downloadQuality', payload.get('quality'))).strip().upper()
@@ -470,12 +477,7 @@ def process_download_job(job_id, payload):
             # the failure might be transient — keep the door open for retry.
             # "No mirror" errors are permanent per-source, but other sources
             # may still work via fallback.
-            _is_permanent_no_mirror = (
-                'no configured mirror' in error_str.lower()
-                or 'no qobuz mirrors configured' in error_str.lower()
-                or 'no arl configured' in error_str.lower()
-                or 'deezer requires isrc' in error_str.lower()
-            )
+            _is_permanent_no_mirror = any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
             if not _is_permanent_no_mirror:
                 any_source_had_mirrors = True
             logger.info("[DOWNLOAD] Source '%s' failed, %s", current_source,

@@ -132,7 +132,7 @@ def download_settings():
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
         'download_source': payload.get('downloadSource', payload.get('download_source', current.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']))),
-        'deezer_arl': payload.get('deezerArl', payload.get('deezer_arl', current.get('deezer_arl', ''))),
+        'deezer_arl': payload.get('deezerArl') or payload.get('deezer_arl') or current.get('deezer_arl', ''),
     }
 
     for key in tag_keys:
@@ -234,6 +234,14 @@ def validate_deezer_arl():
         return jsonify({'valid': False, 'error': str(e)}), 200
     except (ValueError, KeyError) as e:
         return jsonify({'valid': False, 'error': f'Invalid response: {e}'}), 200
+
+
+@settings_bp.route('/api/deezer/status', methods=['GET'])
+def deezer_status():
+    """Check if a Deezer ARL is configured in the database."""
+    settings = get_download_settings()
+    arl = settings.get('deezer_arl', '')
+    return jsonify({'has_arl': bool(arl)})
 
 
 @settings_bp.route('/api/endpoints/status', methods=['GET'])
