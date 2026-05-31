@@ -419,6 +419,7 @@ def process_download_job(job_id, payload):
                     raise ValueError(f"Failed to download from Deezer (ISRC: {isrc})")
 
                 logger.info("[DEEZER] Successfully downloaded track via Deezer (ISRC: %s)", isrc)
+                download_mirror = 'deezer'
 
                 # Detect format
                 with open(temp_source_path, 'rb') as tmp_file:
