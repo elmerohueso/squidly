@@ -255,6 +255,7 @@ def process_recommendation_job(job_id, payload):
 
     # Step 9: Track resolution — only on final selected tracks
     from squidly.services.track_resolver import resolve_track
+    from squidly.services.hifi import _fetch_hifi_track_info_payload, extract_hifi_track_info
     resolved_count = 0
     for rec in top_tracks:
         tid = rec.get('hifi_id')
@@ -272,6 +273,24 @@ def process_recommendation_job(job_id, payload):
             new_id = result.get('hifi_id')
             if new_id and str(new_id) != str(tid):
                 rec['hifi_id'] = int(new_id)
+                # Refresh metadata to match the resolved track
+                raw = _fetch_hifi_track_info_payload(str(new_id))
+                if raw:
+                    info = extract_hifi_track_info(raw)
+                    if info.get('title'):
+                        rec['title'] = info['title']
+                    if info.get('track_artists'):
+                        rec['artist'] = info['track_artists'][0].get('name', '') if info['track_artists'] else rec.get('artist', '')
+                    if info.get('album'):
+                        rec['album'] = info['album']
+                    if info.get('album_id'):
+                        rec['album_id'] = info['album_id']
+                    if info.get('duration'):
+                        rec['duration'] = info['duration']
+                    if info.get('cover'):
+                        rec['cover'] = info['cover']
+                    if info.get('isrc'):
+                        rec['isrc'] = info['isrc']
                 resolved_count += 1
                 logger.info("[RECOMMENDATION] Resolved track %s (%s, source=%s) -> %s",
                             tid, result['reason'], result['source'], new_id)
