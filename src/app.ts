@@ -685,6 +685,9 @@ class App {
     private ytmCookieInput: HTMLInputElement;
     private saveYtmConfigButton: HTMLButtonElement;
     private ytmConfigStatusEl: HTMLElement;
+    private deezerArlInput: HTMLInputElement;
+    private saveDeezerConfigButton: HTMLButtonElement;
+    private deezerConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsAutoDownloadStatusEl: HTMLElement;
     private freshFindsRetentionInput: HTMLInputElement;
@@ -980,6 +983,9 @@ class App {
         this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
         this.saveYtmConfigButton = document.getElementById('saveYtmConfig') as HTMLButtonElement;
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
+        this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
+        this.saveDeezerConfigButton = document.getElementById('saveDeezerConfig') as HTMLButtonElement;
+        this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
@@ -1315,9 +1321,8 @@ class App {
         if (this.saveYtmConfigButton) {
             this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
         }
-        const saveDeezerConfigButton = document.getElementById('saveDeezerConfig') as HTMLButtonElement | null;
-        if (saveDeezerConfigButton) {
-            saveDeezerConfigButton.addEventListener('click', () => this.saveDeezerConfig());
+        if (this.saveDeezerConfigButton) {
+            this.saveDeezerConfigButton.addEventListener('click', () => this.saveDeezerConfig());
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsConfig('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
@@ -5671,7 +5676,36 @@ class App {
             const data = await response.json();
             this.downloadSettings = this.normalizeSettings(data);
             this.applySettingsToForm(this.downloadSettings);
-            this.syncDeezerSourceAvailability(!!this.downloadSettings.deezerArl);
+            if (this.downloadSettings.deezerArl) {
+                // Validate to get current offer name
+                try {
+                    const resp = await fetch('/api/deezer/validate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ arl: this.downloadSettings.deezerArl })
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data.valid && data.lossless) {
+                            this.deezerConfigStatusEl.textContent = `✓ Connected — ${data.offer_name || 'Premium'} (FLAC)`;
+                            this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                            this.syncDeezerSourceAvailability(true, data.offer_name);
+                        } else if (data.valid) {
+                            this.deezerConfigStatusEl.textContent = `⚠ ARL valid but not Premium (${data.offer_name || 'Unknown'})`;
+                            this.deezerConfigStatusEl.style.color = 'var(--warning-color, #f59e0b)';
+                            this.syncDeezerSourceAvailability(false);
+                        } else {
+                            this.deezerConfigStatusEl.textContent = '✗ ARL invalid or expired';
+                            this.deezerConfigStatusEl.style.color = '';
+                            this.syncDeezerSourceAvailability(false);
+                        }
+                    }
+                } catch {
+                    // Fallback if validation fails
+                    this.deezerConfigStatusEl.textContent = '✓ ARL configured';
+                    this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                }
+            }
         } catch (error) {
             console.warn('Failed to load download settings.', error);
         }
@@ -5690,10 +5724,6 @@ class App {
             if (this.tagCheckboxes[id] && s[id] !== undefined) {
                 this.tagCheckboxes[id].checked = s[id];
             }
-        }
-        const deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement | null;
-        if (deezerArlInput) {
-            deezerArlInput.value = settings.deezerArl;
         }
         this.syncQualityToggleStyles();
     }
@@ -5722,7 +5752,6 @@ class App {
                 }
                 return result;
             })(),
-            deezerArl: (document.getElementById('deezerArl') as HTMLInputElement)?.value.trim() || '',
         } as DownloadSettings;
     }
 
@@ -6226,17 +6255,15 @@ class App {
     }
 
     private async saveDeezerConfig(): Promise<void> {
-        const deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement | null;
-        const deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement | null;
-        const value = deezerArlInput?.value.trim() || '';
+        const value = this.deezerArlInput.value.trim();
 
         if (!value) {
-            this.showStatusMessage(deezerConfigStatusEl, '⚠ ARL cookie is required', true, 0);
+            this.showStatusMessage(this.deezerConfigStatusEl, '⚠ ARL cookie is required', true, 0);
             return;
         }
 
         // Step 1: Validate ARL
-        this.showStatusMessage(deezerConfigStatusEl, 'Validating ARL...');
+        this.showStatusMessage(this.deezerConfigStatusEl, 'Validating ARL...');
         try {
             const validateResp = await fetch('/api/deezer/validate', {
                 method: 'POST',
@@ -6246,18 +6273,18 @@ class App {
 
             if (!validateResp.ok) {
                 const errData = await validateResp.json().catch(() => ({}));
-                this.showStatusMessage(deezerConfigStatusEl, `✗ ${errData.error || 'Validation failed'}`, true, 0);
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errData.error || 'Validation failed'}`, true, 0);
                 return;
             }
 
             const validateData = await validateResp.json();
             if (!validateData.valid) {
-                this.showStatusMessage(deezerConfigStatusEl, `✗ Invalid ARL: ${validateData.error || 'Could not authenticate'}`, true, 0);
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ Invalid ARL: ${validateData.error || 'Could not authenticate'}`, true, 0);
                 return;
             }
 
             if (!validateData.lossless) {
-                this.showStatusMessage(deezerConfigStatusEl, `✗ ARL valid but not Premium (no FLAC). Detected: ${validateData.offer_name || 'Unknown'}`, true, 0);
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ARL valid but not Premium (no FLAC). Detected: ${validateData.offer_name || 'Unknown'}`, true, 0);
                 return;
             }
 
@@ -6269,16 +6296,18 @@ class App {
             });
 
             if (saveResp.ok) {
-                this.showStatusMessage(deezerConfigStatusEl, `✓ Connected — ${validateData.offer_name || 'Premium'} (FLAC)`);
+                this.showStatusMessage(this.deezerConfigStatusEl, `✓ Connected — ${validateData.offer_name || 'Premium'} (FLAC)`);
+                this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                this.deezerArlInput.value = '';
                 this.syncDeezerSourceAvailability(true, validateData.offer_name);
                 void this.fetchDownloadSettingsFromServer();
             } else {
                 const errorData = await saveResp.json().catch(() => ({}));
-                this.showStatusMessage(deezerConfigStatusEl, `✗ ${errorData.error || 'Failed to save'}`, true, 0);
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errorData.error || 'Failed to save'}`, true, 0);
             }
         } catch (error) {
             console.error('Error saving Deezer config:', error);
-            this.showStatusMessage(deezerConfigStatusEl, '✗ Error validating configuration', true, 0);
+            this.showStatusMessage(this.deezerConfigStatusEl, '✗ Error validating configuration', true, 0);
         }
     }
 
