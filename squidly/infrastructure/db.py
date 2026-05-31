@@ -98,6 +98,8 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN penalty_live BOOLEAN NOT NULL DEFAULT TRUE")
     if 'download_source' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN download_source TEXT NOT NULL DEFAULT 'tidal'")
+    if 'deezer_arl' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN deezer_arl TEXT NOT NULL DEFAULT ''")
 
     cur.execute(
         """
