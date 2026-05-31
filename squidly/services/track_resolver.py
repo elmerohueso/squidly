@@ -488,6 +488,11 @@ def resolve_track(
                     (best.get('album') or {}).get('title', 'unknown')
                 )
                 return {'hifi_id': best_id, 'reason': 'isrc_match', 'source': 'isrc'}
+            else:
+                logger.info("[RESOLVE] ISRC %s: no alternative found for '%s' by '%s'", isrc, title, track_artist)
+                if original_hifi_id:
+                    return {'hifi_id': original_hifi_id, 'reason': 'no_alternative', 'source': 'original'}
+                return {'hifi_id': None, 'reason': 'no_alternative', 'source': 'original'}
 
     # No ISRC available — log and return original (or None)
     if not isrc:
