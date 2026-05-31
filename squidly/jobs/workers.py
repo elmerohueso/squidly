@@ -8,8 +8,8 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from squidly.config import app_timezone
-from squidly.jobs import (
+from squidly.infrastructure.config import app_timezone
+from squidly.infrastructure.job_queue import (
     RetryableError,
     PermanentError,
     claim_next_job,
@@ -21,14 +21,14 @@ from squidly.jobs import (
     requeue_claimed_job,
     serialize_job_payload,
 )
-from squidly.orchestration import (
+from squidly.jobs.orchestration import (
     JOB_TYPES,
-    any_plex_library_update_jobs_running_or_queued,
     handle_on_success,
+    is_job_type_running_or_queued,
     queue_recommendation_generation,
 )
-from squidly.plex import get_last_successful_plex_sync_finished_at
-from squidly.storage import get_plex_config
+from squidly.infrastructure.plex import get_last_successful_plex_sync_finished_at
+from squidly.infrastructure.storage import get_plex_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ _process_fn_cache = {}
 
 
 def _import_process_fn(dotted_path):
-    """Import and cache a process function by dotted path (e.g. 'squidly.app.process_download_job')."""
+    """Import and cache a process function by dotted path (e.g. 'squidly.jobs.processors.download.process_download_job')."""
     if dotted_path in _process_fn_cache:
         return _process_fn_cache[dotted_path]
 
@@ -110,7 +110,7 @@ def worker_loop(job_type, idle_sleep=None):
 
             except RetryableError as e:
                 logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
-                mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
@@ -134,8 +134,8 @@ def worker_loop(job_type, idle_sleep=None):
 
 def download_track_worker():
     """Worker for download_track jobs with custom stage validation."""
-    from squidly.downloads import download_track_all_stages_done
-    from squidly.app import process_download_job
+    from squidly.infrastructure.downloads import download_track_all_stages_done
+    from squidly.jobs.processors.download import process_download_job
 
     log_prefix = "[DOWNLOAD_WORKER]"
     logger.info("%s Background worker started", log_prefix)
@@ -175,7 +175,7 @@ def download_track_worker():
 
             except RetryableError as e:
                 logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
-                mark_job_retrying(job['id'], job['attempt_count'], str(e))
+                mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
@@ -195,7 +195,7 @@ def download_track_worker():
 
 def plex_sync_worker():
     """Worker for plex_library_sync jobs with pre-claim deferral logic."""
-    from squidly.app import process_plex_sync_job
+    from squidly.jobs.processors.plex_sync import process_plex_sync_job
 
     log_prefix = "[PLEX_SYNC_WORKER]"
     logger.info("%s Background worker started", log_prefix)
@@ -214,7 +214,7 @@ def plex_sync_worker():
             except (TypeError, ValueError):
                 payload = {}
 
-            if any_plex_library_update_jobs_running_or_queued():
+            if is_job_type_running_or_queued('plex_library_update'):
                 requeue_claimed_job(
                     job['id'],
                     delay_seconds=20,
@@ -244,8 +244,8 @@ def plex_sync_worker():
 
 def plex_library_update_worker():
     """Worker for plex_library_update jobs with download gate logic."""
-    from squidly.plex import process_plex_library_update_job
-    from squidly.storage import can_start_plex_library_update
+    from squidly.jobs.processors.plex_library_update import process_plex_library_update_job
+    from squidly.infrastructure.storage import can_start_plex_library_update
     from squidly import jobs as jobs_module
 
     log_prefix = "[LIBRARY_UPDATE_WORKER]"
@@ -256,7 +256,7 @@ def plex_library_update_worker():
         try:
             gate = can_start_plex_library_update(required_idle_seconds=180)
             if not gate.get('can_start'):
-                if any_plex_library_update_jobs_running_or_queued():
+                if is_job_type_running_or_queued('plex_library_update'):
                     gate_state = gate.get('gate_state') or {}
                     blocking_count = gate_state.get('blocking_count') or 0
                     idle_seconds = gate.get('idle_seconds')
@@ -315,7 +315,7 @@ def plex_sync_scheduler_worker():
     The update chains to plex_library_sync → automatic_matching → bulk_playlist_add
     via on_success rules.
     """
-    from squidly.orchestration import queue_plex_library_update
+    from squidly.jobs.orchestration import queue_plex_library_update
 
     logger.info("[PLEX_SYNC_SCHEDULER] Background scheduler started")
 
@@ -338,7 +338,7 @@ def plex_sync_scheduler_worker():
             if interval_hours < 1:
                 interval_hours = 1
 
-            if any_plex_library_update_jobs_running_or_queued():
+            if is_job_type_running_or_queued('plex_library_update'):
                 time.sleep(60)
                 continue
 
@@ -363,8 +363,8 @@ def plex_sync_scheduler_worker():
 
 def recommendation_scheduler_worker():
     """Queue Fresh Finds recommendation generation daily at midnight."""
-    from squidly.storage import get_all_plex_account_mappings, has_listen_history
-    from squidly.orchestration import is_job_type_running_or_queued
+    from squidly.infrastructure.storage import get_all_plex_account_mappings, has_listen_history
+    from squidly.jobs.orchestration import is_job_type_running_or_queued
 
     logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
 
@@ -380,7 +380,7 @@ def recommendation_scheduler_worker():
             if last_run_date == today:
                 # Same day — check if we need to queue auto-download yet
                 if auto_download_pending and not is_job_type_running_or_queued('generate_recommendations'):
-                    from squidly.orchestration import queue_fresh_finds_auto_download
+                    from squidly.jobs.orchestration import queue_fresh_finds_auto_download
                     try:
                         auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
                         if auto_job_id:

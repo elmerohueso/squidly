@@ -4,9 +4,9 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-from squidly.config import WORKER_ID
-from squidly.db import get_db_connection
-from squidly.storage import (
+from squidly.infrastructure.config import WORKER_ID
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.storage import (
     normalize_db_timestamp,
     set_library_update_needed,
     set_last_job_finished_at,
@@ -36,7 +36,10 @@ def serialize_job_payload(payload):
         return json.dumps(payload, default=str, separators=(',', ':'), sort_keys=True)
 
 
-def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None, max_attempts=20):
+def enqueue_job(job_type, payload, status='queued', priority=0, run_after=None):
+    from squidly.jobs.orchestration import JOB_TYPES
+    max_attempts = JOB_TYPES.get(job_type, {}).get('max_attempts', 5)
+
     now = datetime.utcnow().isoformat() + 'Z'
     payload_json = serialize_job_payload(payload)
     scheduled_at = run_after or now
@@ -266,10 +269,15 @@ def mark_job_failed(job_id, attempt_count, max_attempts, error_message):
     conn.close()
 
 
-def mark_job_retrying(job_id, attempt_count, error_message):
+def mark_job_retrying(job_id, attempt_count, max_attempts, error_message):
+    new_attempt_count = (int(attempt_count or 0) + 1)
+
+    if new_attempt_count >= int(max_attempts or 0):
+        mark_job_failed(job_id, attempt_count, max_attempts, error_message)
+        return
+
     now = datetime.utcnow()
     now_iso = now.isoformat() + 'Z'
-    new_attempt_count = (int(attempt_count or 0) + 1)
     run_after = (now + timedelta(seconds=compute_job_backoff_seconds(new_attempt_count))).isoformat() + 'Z'
 
     conn = get_db_connection()

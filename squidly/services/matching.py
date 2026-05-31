@@ -2,10 +2,11 @@
 
 import re
 
-from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
-from squidly.db import get_db_connection
-from squidly.jobs import update_job_progress
-from squidly.hifi import (
+from squidly.infrastructure.config import DOWNLOADS_ROOT
+from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc, normalize_match_text, _normalize_library_track_path
+from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.job_queue import update_job_progress
+from squidly.services.hifi import (
     _extract_hifi_album_track_items,
     _get_hifi_audio_quality_rank,
     _format_hifi_image_value,
@@ -651,9 +652,7 @@ def _upsert_track_row(cur, album_id, artist_id, title, path, library_id=None, hi
 
 
 def upsert_download_match_hint(track_title, track_artist_name, album_title, album_artist_name, full_path, audio_format, hifi_track_id=None, hifi_album_id=None, track_hifi_artist_id=None, album_hifi_artist_id=None, isrc=None, duration=None, track_number=None, disc_number=None):
-    from squidly.app import _normalize_library_track_path
-
-    relative_path = _normalize_library_track_path(full_path)
+    relative_path = _normalize_library_track_path(full_path, DOWNLOADS_ROOT)
     if not relative_path:
         return
 
@@ -788,7 +787,7 @@ def _find_hifi_track_search_candidate(cur, track_row, track_hifi_id):
 
 
 def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence=1.0, track_artist_hifi_id=None, album_artist_hifi_id=None, album_payload_cache=None):
-    from squidly.app import _fetch_hifi_track_info_payload as _app_fetch_track_info
+    from squidly.services.hifi import _fetch_hifi_track_info_payload
 
     if not isinstance(track_row, dict):
         return track_row.get('album_id') if isinstance(track_row, dict) else None
@@ -807,7 +806,7 @@ def _cascade_track_confirm_ids(cur, track_row, track_hifi_id, now_dt, confidence
     track_data = {}
     track_artist_info = None
     if needs_track_api:
-        track_payload = _app_fetch_track_info(track_hifi_id)
+        track_payload = _fetch_hifi_track_info_payload(track_hifi_id)
         track_data = track_payload.get('data') if isinstance(track_payload, dict) else {}
         if not isinstance(track_data, dict):
             track_data = {}

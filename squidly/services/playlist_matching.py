@@ -5,7 +5,75 @@ YouTube Music, Last.fm) to the local library. They are separate from
 library entity matching (squidly.matching).
 """
 
-from squidly.utils import _safe_int, normalize_match_text
+import re
+
+from squidly.infrastructure.utils import _safe_int, normalize_match_text
+
+
+def _requested_download_format(file_format):
+    """Normalize requested download format."""
+    normalized = str(file_format or '').strip().lower()
+    if normalized in ('m4a', 'aac', 'mp4'):
+        return 'm4a'
+    if normalized == 'flac':
+        return 'flac'
+    return 'm4a'
+
+
+def _matches_requested_format(file_format, candidate_format):
+    """Check if candidate format matches requested format."""
+    normalized_request = _requested_download_format(file_format)
+    normalized_candidate = str(candidate_format or '').strip().lower()
+
+    if normalized_request == 'flac':
+        return normalized_candidate == 'flac'
+
+    return normalized_candidate in ('m4a', 'aac', 'mp4')
+
+
+def _normalize_match_text_for_scoring(s):
+    """Normalize text for scoring by removing non-alphanumeric characters."""
+    return re.sub(r'[^a-z0-9]+', '', s.lower().strip())
+
+
+def _score_track_candidate(title, artist, album, item):
+    """Score a track candidate against the requested title/artist/album.
+    
+    Returns a score between 0.0 and 1.0 based on title/artist/album alignment.
+    """
+    score = 0.0
+    item_title = _normalize_match_text_for_scoring(item.get('title') or '')
+    # Handle both 'artist' (dict) and 'artists' (array) formats
+    item_artist_raw = ''
+    if item.get('artists') and isinstance(item['artists'], list) and item['artists']:
+        item_artist_raw = str(item['artists'][0].get('name') or '')
+    elif item.get('artist') and isinstance(item['artist'], dict):
+        item_artist_raw = str(item['artist'].get('name') or '')
+    item_artist = _normalize_match_text_for_scoring(item_artist_raw)
+    item_album = _normalize_match_text_for_scoring((item.get('album') or {}).get('title') or '')
+    norm_title = _normalize_match_text_for_scoring(title)
+    norm_artist = _normalize_match_text_for_scoring(artist)
+    norm_album = _normalize_match_text_for_scoring(album)
+
+    if item_title and norm_title:
+        if item_title == norm_title:
+            score += 0.50
+        elif norm_title in item_title or item_title in norm_title:
+            score += 0.30
+
+    if item_artist and norm_artist:
+        if item_artist == norm_artist:
+            score += 0.30
+        elif norm_artist in item_artist or item_artist in norm_artist:
+            score += 0.15
+
+    if norm_album and item_album:
+        if item_album == norm_album:
+            score += 0.20
+        elif norm_album in item_album or item_album in norm_album:
+            score += 0.10
+
+    return score
 
 
 def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):

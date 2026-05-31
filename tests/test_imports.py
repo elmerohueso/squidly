@@ -2,14 +2,14 @@
 
 
 def test_import_db():
-    from squidly.db import get_db_connection, init_db
+    from squidly.infrastructure.db import get_db_connection, init_db
 
     assert callable(get_db_connection)
     assert callable(init_db)
 
 
 def test_import_storage():
-    from squidly.storage import (
+    from squidly.infrastructure.storage import (
         any_download_jobs_running,
         can_start_plex_library_update,
         clear_plex_config,
@@ -36,7 +36,7 @@ def test_import_storage():
 
 
 def test_import_plex():
-    from squidly.plex import (
+    from squidly.infrastructure.plex import (
         _get_plex_server_for_user,
         _is_plex_library_scan_active,
         add_tracks_to_plex_playlist,
@@ -46,10 +46,12 @@ def test_import_plex():
         get_plex_music_playlists,
         plex_healthcheck,
         plex_pin_sessions,
-        process_plex_library_update_job,
         set_plex_health_status,
         test_plex_connection,
         wait_for_plex_library_scan_completion,
+    )
+    from squidly.jobs.processors.plex_library_update import (
+        process_plex_library_update_job,
     )
 
 
@@ -74,9 +76,8 @@ def test_import_jobs():
 
 
 def test_import_orchestration():
-    from squidly.orchestration import (
+    from squidly.jobs.orchestration import (
         JOB_TYPES,
-        any_plex_library_update_jobs_running_or_queued,
         count_pending_playlist_adds,
         delete_pending_playlist_adds,
         get_pending_playlist_adds,
@@ -94,12 +95,11 @@ def test_import_orchestration():
 
 
 def test_import_downloads():
-    from squidly.downloads import (
+    from squidly.infrastructure.downloads import (
         ManifestDownloadError,
         PermanentDownloadError,
         TransientDownloadError,
         cleanup_file,
-        convert_to_mp3,
         detect_audio_format,
         download_cover_image,
         download_track_all_stages_done,
@@ -107,13 +107,12 @@ def test_import_downloads():
         make_request_with_retry,
         make_request_with_retry_rotating_mirrors,
         seed_mirrors_from_json,
-        validate_all_endpoints,
         validate_endpoint,
     )
 
 
 def test_import_utils():
-    from squidly.utils import (
+    from squidly.infrastructure.utils import (
         _now_utc,
         _safe_float,
         _safe_int,
@@ -124,7 +123,7 @@ def test_import_utils():
 
 
 def test_import_matching():
-    from squidly.matching import (
+    from squidly.services.matching import (
         MATCH_REVIEW_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTWORK_SIZE,
         MATCH_REVIEW_HIFI_ARTIST_ARTWORK_SIZE,
@@ -165,7 +164,7 @@ def test_import_matching():
 
 
 def test_import_workers():
-    from squidly.workers import (
+    from squidly.jobs.workers import (
         JobCancelledError,
         _raise_if_job_cancelled,
         start_workers,
@@ -184,7 +183,7 @@ def test_import_workers():
 
 
 def test_import_hifi():
-    from squidly.hifi import (
+    from squidly.services.hifi import (
         _fetch_hifi_search_results,
         _fetch_hifi_artist_payload,
         _fetch_hifi_album_payload,
@@ -212,7 +211,7 @@ def test_import_app_no_circular():
 
 def test_storage_does_not_import_app():
     """storage.py must not import from app to avoid circular deps."""
-    import squidly.storage as storage_module
+    import squidly.infrastructure.storage as storage_module
     import inspect
 
     source = inspect.getsource(storage_module)
@@ -222,7 +221,7 @@ def test_storage_does_not_import_app():
 
 def test_plex_does_not_import_app():
     """plex.py must not import from app to avoid circular deps."""
-    import squidly.plex as plex_module
+    import squidly.infrastructure.plex as plex_module
     import inspect
 
     source = inspect.getsource(plex_module)
@@ -240,19 +239,10 @@ def test_jobs_does_not_import_app():
     assert "import squidly.app" not in source
 
 
-def test_db_does_not_import_app():
-    """db.py must not import from app to avoid circular deps."""
-    import squidly.db as db_module
-    import inspect
-
-    source = inspect.getsource(db_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
-
 
 def test_matching_does_not_import_app():
     """matching.py must not import from app at top level to avoid circular deps (lazy imports inside functions are allowed)."""
-    import squidly.matching as matching_module
+    import squidly.services.matching as matching_module
     import inspect
 
     source = inspect.getsource(matching_module)
@@ -263,7 +253,7 @@ def test_matching_does_not_import_app():
 
 def test_workers_does_not_import_app_directly():
     """workers.py should not have top-level imports from app (lazy imports only)."""
-    import squidly.workers as workers_module
+    import squidly.jobs.workers as workers_module
     import inspect
 
     source = inspect.getsource(workers_module)
@@ -274,7 +264,7 @@ def test_workers_does_not_import_app_directly():
 
 def test_hifi_does_not_import_app():
     """hifi.py must not import from app to avoid circular deps."""
-    import squidly.hifi as hifi_module
+    import squidly.services.hifi as hifi_module
     import inspect
 
     source = inspect.getsource(hifi_module)
@@ -282,29 +272,9 @@ def test_hifi_does_not_import_app():
     assert "import squidly.app" not in source
 
 
-def test_plex_does_not_import_app():
-    """plex.py must not import from app to avoid circular deps."""
-    import squidly.plex as plex_module
-    import inspect
-
-    source = inspect.getsource(plex_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
-
-
-def test_jobs_does_not_import_app():
-    """jobs.py must not import from app to avoid circular deps."""
-    import squidly.jobs as jobs_module
-    import inspect
-
-    source = inspect.getsource(jobs_module)
-    assert "from squidly.app" not in source
-    assert "import squidly.app" not in source
-
-
 def test_db_does_not_import_app():
     """db.py must not import from app to avoid circular deps."""
-    import squidly.db as db_module
+    import squidly.infrastructure.db as db_module
     import inspect
 
     source = inspect.getsource(db_module)

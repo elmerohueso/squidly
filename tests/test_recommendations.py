@@ -12,13 +12,13 @@ import pytest
 
 
 class TestQueueRecommendationGeneration:
-    @patch('squidly.orchestration.enqueue_job')
-    @patch('squidly.orchestration.datetime')
+    @patch('squidly.jobs.orchestration.enqueue_job')
+    @patch('squidly.jobs.orchestration.datetime')
     def test_queues_with_correct_payload(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 42
 
-        from squidly.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_recommendation_generation
 
         job_id = queue_recommendation_generation(
             slug='fresh-finds',
@@ -37,15 +37,14 @@ class TestQueueRecommendationGeneration:
         assert payload['plex_username'] == 'brendan'
         assert payload['trigger'] == 'scheduled'
         assert 'requested_at' in payload
-        assert args[1]['max_attempts'] == 3
 
-    @patch('squidly.orchestration.enqueue_job')
-    @patch('squidly.orchestration.datetime')
+    @patch('squidly.jobs.orchestration.enqueue_job')
+    @patch('squidly.jobs.orchestration.datetime')
     def test_default_trigger_is_scheduled(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 1
 
-        from squidly.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_recommendation_generation
 
         queue_recommendation_generation(
             slug='fresh-finds',
@@ -56,13 +55,13 @@ class TestQueueRecommendationGeneration:
         payload = mock_enqueue.call_args[0][1]
         assert payload['trigger'] == 'scheduled'
 
-    @patch('squidly.orchestration.enqueue_job')
-    @patch('squidly.orchestration.datetime')
+    @patch('squidly.jobs.orchestration.enqueue_job')
+    @patch('squidly.jobs.orchestration.datetime')
     def test_manual_trigger(self, mock_dt, mock_enqueue):
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 2
 
-        from squidly.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_recommendation_generation
 
         queue_recommendation_generation(
             slug='fresh-finds',
@@ -76,9 +75,9 @@ class TestQueueRecommendationGeneration:
 
 
 class TestStorageFunctions:
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_true(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'has_history': True}
@@ -94,9 +93,9 @@ class TestStorageFunctions:
         assert 'listen_history' in call_args[0]
         assert call_args[1] == (123,)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_false(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'has_history': False}
@@ -108,9 +107,9 @@ class TestStorageFunctions:
 
         assert result is False
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_has_listen_history_no_row(self, mock_conn):
-        from squidly.storage import has_listen_history
+        from squidly.infrastructure.storage import has_listen_history
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
@@ -122,9 +121,9 @@ class TestStorageFunctions:
 
         assert result is False
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recent_listen_history_seeds(self, mock_conn):
-        from squidly.storage import get_recent_listen_history_seeds
+        from squidly.infrastructure.storage import get_recent_listen_history_seeds
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -147,9 +146,9 @@ class TestStorageFunctions:
         assert 'DISTINCT ON' in call_args[0]
         assert call_args[1] == (123, 20)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_existing_isrcs(self, mock_conn):
-        from squidly.storage import get_existing_isrcs
+        from squidly.infrastructure.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [
@@ -165,9 +164,9 @@ class TestStorageFunctions:
 
         assert result == {'USRC17607839', 'GBUM71505078', 'USRC17607840'}
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_existing_isrcs_empty(self, mock_conn):
-        from squidly.storage import get_existing_isrcs
+        from squidly.infrastructure.storage import get_existing_isrcs
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -179,9 +178,9 @@ class TestStorageFunctions:
 
         assert result == set()
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_list_recommendation_playlists(self, mock_conn):
-        from squidly.storage import list_recommendation_playlists
+        from squidly.infrastructure.storage import list_recommendation_playlists
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -200,9 +199,9 @@ class TestStorageFunctions:
         call_args = mock_cursor.execute.call_args[0]
         assert call_args[1] == (123,)
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_list_recommendation_playlists_empty(self, mock_conn):
-        from squidly.storage import list_recommendation_playlists
+        from squidly.infrastructure.storage import list_recommendation_playlists
 
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = []
@@ -214,9 +213,9 @@ class TestStorageFunctions:
 
         assert result == []
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recommendation_playlist(self, mock_conn):
-        from squidly.storage import get_recommendation_playlist
+        from squidly.infrastructure.storage import get_recommendation_playlist
 
         from datetime import datetime
         mock_cursor = MagicMock()
@@ -237,9 +236,9 @@ class TestStorageFunctions:
         assert result['tracks'][0]['hifi_id'] == 100
         assert result['tracks'][0]['score'] == 3.0
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_get_recommendation_playlist_not_found(self, mock_conn):
-        from squidly.storage import get_recommendation_playlist
+        from squidly.infrastructure.storage import get_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = None
@@ -252,10 +251,35 @@ class TestStorageFunctions:
         assert result is None
 
 
+class TestGetRandomListenHistorySeeds:
+    @patch('squidly.infrastructure.storage.get_db_connection')
+    def test_get_random_listen_history_seeds(self, mock_conn):
+        from squidly.infrastructure.storage import get_random_listen_history_seeds
+        from datetime import datetime
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.return_value = [
+            {'hifi_id': '100', 'title': 'Track 1', 'artist': 'Artist 1', 'album': 'Album 1', 'played_at': datetime(2024, 1, 15)},
+            {'hifi_id': '200', 'title': 'Track 2', 'artist': 'Artist 2', 'album': 'Album 2', 'played_at': datetime(2024, 1, 14)},
+            {'hifi_id': '300', 'title': 'Track 3', 'artist': 'Artist 3', 'album': 'Album 3', 'played_at': datetime(2024, 1, 13)},
+        ]
+        mock_connection = MagicMock()
+        mock_connection.cursor.return_value = mock_cursor
+        mock_conn.return_value = mock_connection
+
+        result = get_random_listen_history_seeds(123, limit=2, days=30)
+
+        assert len(result) == 2
+        assert result[0]['hifi_id'] == 100 or result[0]['hifi_id'] == 200 or result[0]['hifi_id'] == 300
+        assert isinstance(result[0]['hifi_id'], int)
+        mock_cursor.execute.assert_called_once()
+        call_args = mock_cursor.execute.call_args[0]
+        assert call_args[1] == (123, 30)
+
+
 class TestSaveRecommendationPlaylist:
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_save_new_playlist(self, mock_conn):
-        from squidly.storage import save_recommendation_playlist
+        from squidly.infrastructure.storage import save_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'id': 1}
@@ -281,9 +305,9 @@ class TestSaveRecommendationPlaylist:
         assert mock_cursor.execute.call_count == 5  # SELECT check, UPDATE playlist, DELETE old tracks, INSERT 2 tracks
         mock_connection.commit.assert_called_once()
 
-    @patch('squidly.storage.get_db_connection')
+    @patch('squidly.infrastructure.storage.get_db_connection')
     def test_save_playlist_rolls_back_on_error(self, mock_conn):
-        from squidly.storage import save_recommendation_playlist
+        from squidly.infrastructure.storage import save_recommendation_playlist
 
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'id': 1}

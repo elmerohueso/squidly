@@ -5,6 +5,7 @@
   "main": "src/app.ts",
   "scripts": {
     "build": "webpack --mode production",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path'),zlib=require('zlib');const d=path.resolve(__dirname,'static/dist');fs.readdirSync(d).filter(f=>f.endsWith('.js')&&!f.endsWith('.gz')&&!f.endsWith('.br')).sort().forEach(f=>{const p=path.join(d,f),data=fs.readFileSync(p);const gz=zlib.gzipSync(data,{level:9});fs.writeFileSync(p+'.gz',gz);console.log(f+'  '+f+'.gz: '+data.length+' -> '+gz.length+' bytes');const br=zlib.brotliCompressSync(data,{params:{[zlib.constants.BROTLI_PARAM_QUALITY]:11}});fs.writeFileSync(p+'.br',br);console.log(f+'  '+f+'.br: '+data.length+' -> '+br.length+' bytes')})\"",
     "dev": "webpack --mode development --watch",
     "type-check": "tsc --noEmit"
   },

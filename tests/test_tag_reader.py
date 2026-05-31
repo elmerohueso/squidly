@@ -4,7 +4,7 @@ import os
 import tempfile
 import struct
 
-from squidly.tag_reader import (
+from squidly.services.tag_reader import (
     _resolve_library_file_path,
     _read_flac_tags,
     _read_m4a_tags,

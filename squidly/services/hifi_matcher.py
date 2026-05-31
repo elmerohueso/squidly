@@ -8,16 +8,16 @@ falls back to title+artist search.
 
 import logging
 
-from squidly.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
-from squidly.db import get_db_connection
-from squidly.hifi import (
+from squidly.infrastructure.utils import _safe_int, _safe_float, _now_utc, normalize_match_text
+from squidly.infrastructure.db import get_db_connection
+from squidly.services.hifi import (
     _fetch_hifi_search_results,
     _fetch_hifi_album_payload,
     _fetch_hifi_artist_payload,
     _fetch_hifi_track_info_payload,
     _extract_hifi_album_track_items,
 )
-from squidly.matching import (
+from squidly.services.matching import (
     _get_artist_row,
     _get_album_row,
     _upsert_artist_row,

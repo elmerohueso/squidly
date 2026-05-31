@@ -3,7 +3,7 @@
 import psycopg2
 import psycopg2.extras
 
-from squidly.config import DATABASE_URL
+from squidly.infrastructure.config import DATABASE_URL
 
 
 def get_db_connection():
@@ -645,6 +645,17 @@ def init_db():
     )
     if not cur.fetchone():
         cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_track_count INTEGER NOT NULL DEFAULT 25")
+
+    # Migration: add fresh_finds_history_days to user_settings
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_history_days'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_history_days INTEGER NOT NULL DEFAULT 30")
 
     # Migration: add library_id to recommendation_playlist_tracks
     cur.execute(

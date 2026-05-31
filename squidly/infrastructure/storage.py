@@ -8,10 +8,11 @@ status).
 from datetime import date, datetime
 import json
 import logging
+import random
 import re
 
-from squidly.config import DEFAULT_DOWNLOAD_SETTINGS
-from squidly.db import get_db_connection
+from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
+from squidly.infrastructure.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -694,6 +695,17 @@ def save_plex_account_id(plex_client_id, plex_account_id):
     conn.close()
 
 
+def resolve_plex_account_id(user_id: str) -> int | None:
+    """Resolve a plex_client_id to a plex_account_id. Returns None if not found."""
+    if not user_id:
+        return None
+    mappings = get_all_plex_account_mappings()
+    for m in mappings:
+        if str(m.get('plex_client_id') or '') == user_id:
+            return m.get('plex_account_id')
+    return None
+
+
 def get_all_plex_account_mappings():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -742,6 +754,19 @@ def set_fresh_finds_auto_download(plex_client_id, enabled):
     )
     conn.commit()
     conn.close()
+
+
+def get_fresh_finds_auto_download(plex_client_id: str) -> bool:
+    """Get the auto_download_fresh_finds flag for a specific user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT auto_download_fresh_finds FROM user_settings WHERE plex_client_id = %s",
+        (plex_client_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    return bool(row.get('auto_download_fresh_finds')) if row else False
 
 
 def get_fresh_finds_retention_count(plex_account_id):
@@ -799,7 +824,7 @@ def set_fresh_finds_new_track_pct(plex_client_id, pct):
 
 
 def get_fresh_finds_track_count(plex_account_id):
-    """Get the Fresh Finds track count for a user. Default 25."""
+    """Get the Fresh Finds track count for a user. Default 25. Clamps to [10, 50]."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -809,12 +834,14 @@ def get_fresh_finds_track_count(plex_account_id):
     row = cur.fetchone()
     conn.close()
     val = row.get('fresh_finds_track_count') if row else None
-    return val if val is not None else 25
+    if val is None:
+        return 25
+    return max(10, min(50, int(val)))
 
 
 def set_fresh_finds_track_count(plex_client_id, count):
-    """Set the Fresh Finds track count for a user. Clamps to [5, 100], rounds to nearest 5."""
-    count = max(5, min(100, int(count)))
+    """Set the Fresh Finds track count for a user. Clamps to [10, 50], rounds to nearest 5."""
+    count = max(10, min(50, int(count)))
     # Round to nearest 5
     count = round(count / 5) * 5
     conn = get_db_connection()
@@ -825,6 +852,90 @@ def set_fresh_finds_track_count(plex_client_id, count):
     )
     conn.commit()
     conn.close()
+
+
+def get_fresh_finds_history_days(plex_account_id):
+    """Get the Fresh Finds history window in days for a user. Default 30. Clamps to [10, 60]."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT fresh_finds_history_days FROM user_settings WHERE plex_account_id = %s",
+        (plex_account_id,)
+    )
+    row = cur.fetchone()
+    conn.close()
+    val = row.get('fresh_finds_history_days') if row else None
+    if val is None:
+        return 30
+    return max(10, min(60, int(val)))
+
+
+def set_fresh_finds_history_days(plex_client_id, days):
+    """Set the Fresh Finds history window in days. Clamps to [10, 60], rounds to nearest 5."""
+    days = max(10, min(60, int(days)))
+    days = round(days / 5) * 5
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE user_settings SET fresh_finds_history_days = %s WHERE plex_client_id = %s",
+        (days, plex_client_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_random_listen_history_seeds(plex_account_id, limit=25, days=30):
+    """Return N random unique tracks from listen history within the last M days."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT ON (hifi_id)
+            hifi_id, title, artist, album, played_at
+        FROM listen_history
+        WHERE plex_account_id = %s
+          AND hifi_id IS NOT NULL
+          AND played_at >= NOW() - INTERVAL '%s days'
+        ORDER BY hifi_id, played_at DESC
+        """,
+        (plex_account_id, days)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    # Shuffle and take limit
+    random.shuffle(rows)
+    rows = rows[:limit]
+    return [
+        {
+            'hifi_id': int(row['hifi_id']),
+            'title': row['title'],
+            'artist': row['artist'],
+            'album': row['album'],
+            'played_at': row['played_at'],
+        }
+        for row in rows
+    ]
+
+
+def get_existing_fresh_finds_isrcs(plex_account_id):
+    """Return set of ISRCs from tracks in all existing Fresh Finds playlists for this user."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT UPPER(TRIM(t.isrc)) AS isrc
+        FROM recommendation_playlist_tracks rpt
+        JOIN recommendation_playlists rp ON rp.id = rpt.playlist_id
+        JOIN tracks t ON CAST(t.hifi_id AS TEXT) = CAST(rpt.hifi_id AS TEXT)
+        WHERE rp.plex_account_id = %s
+          AND rp.slug = 'fresh-finds'
+          AND t.isrc IS NOT NULL AND t.isrc != ''
+        """,
+        (plex_account_id,)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {str(row['isrc']).strip().upper() for row in rows}
 
 
 def get_recently_played_isrcs(plex_account_id, days=30):
@@ -952,7 +1063,7 @@ def cleanup_old_fresh_finds(plex_account_id):
     # Best-effort Plex cleanup using keys first, fallback to names
     plex_deleted = 0
     try:
-        from squidly.plex import delete_plex_playlists_by_keys_or_names
+        from squidly.infrastructure.plex import delete_plex_playlists_by_keys_or_names
         plex_deleted = delete_plex_playlists_by_keys_or_names(
             plex_playlist_keys=playlist_keys,
             fallback_names=playlist_names
@@ -1133,7 +1244,7 @@ def get_existing_isrcs():
 
 
 def get_existing_artist_titles():
-    from squidly.utils import normalize_match_text
+    from squidly.infrastructure.utils import normalize_match_text
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1154,7 +1265,7 @@ def get_existing_artist_titles():
 
 
 def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks, plex_playlist_key=None):
-    from squidly.config import app_timezone
+    from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     from datetime import datetime
 
@@ -1308,7 +1419,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
 
 def get_todays_recommendation_playlist(plex_account_id, slug):
     """Get today's recommendation playlist for a user/slug using app_timezone for the date."""
-    from squidly.config import app_timezone
+    from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     from datetime import datetime
 
