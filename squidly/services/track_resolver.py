@@ -1,17 +1,22 @@
-"""Track detection and replacement for better-quality versions.
+"""Track resolution to best available hifi ID via ISRC-first pipeline.
 
-Detects tracks that are karaoke, live, singles/EPs, on compilation albums,
-or from soundtracks. Only karaoke, live, single/ep, and compilation trigger
-replacement — soundtracks and studio albums are always kept.
+Pipeline:
+1. If hifi_id provided, fetch track metadata to get ISRC, album info
+2. If no ISRC, try MusicBrainz text search
+3. If ISRC available, search hifi by ISRC and rank results
+4. Return best hifi_id (or original if no ISRC available)
 
 Usage:
     from squidly.services.track_resolver import resolve_track
-    result = resolve_track(hifi_id, settings)
+    result = resolve_track(title, artist, album, year=2024, isrc='US...', hifi_id='123', settings={})
 """
 
 import logging
 import re
+import time
 from typing import Any, Optional
+
+import requests
 
 from squidly.services.hifi import (
     _fetch_hifi_album_payload,
@@ -24,17 +29,10 @@ from squidly.services.playlist_matching import _normalize_match_text_for_scoring
 logger = logging.getLogger(__name__)
 
 _album_cache: dict = {}
-_STRIP_VERSION_RE = re.compile(r'\s*[\(\[].*[\)\]]\s*$')
 
+_MUSICBRAINZ_USER_AGENT = 'Squidly/1.0 (https://github.com/elmerohueso/squidly)'
 
-# Use shared normalization from playlist_matching
-
-# ── Detections ──
-
-def _has_any(texts, keywords):
-    t = ' '.join(texts).lower()
-    return any(kw in t for kw in keywords)
-
+# ── Detection helpers ──
 
 COMPILATION_KEYWORDS = (
     'greatest hits', 'best of', 'mixtape', 'essence', 'classics',
@@ -52,13 +50,9 @@ SOUNDTRACK_KEYWORDS = (
 )
 
 
-def _is_karaoke(title, version, album_title):
-    return _has_any([title, version, album_title], ['karaoke', 'instrumental'])
-
-
-def _is_live(title, version, album_title):
-    return _has_any([title, version, album_title], ['live']) and bool(
-        re.search(r'\blive\b', ' '.join([title, version, album_title]).lower()))
+def _has_any(texts, keywords):
+    t = ' '.join(texts).lower()
+    return any(kw in t for kw in keywords)
 
 
 def _is_single(track_data, album_data):
@@ -127,61 +121,6 @@ def _is_compilation(track_data, album_data):
     return False
 
 
-def detect_problems(track_data, album_data=None):
-    """Return list of problem types: karaoke/instrumental, live, single/ep, soundtrack, compilation."""
-    title = str(track_data.get('title') or '')
-    version = str(track_data.get('version') or '')
-    album_title = str((album_data or track_data.get('album', {})).get('title') or '')
-
-    problems = []
-    if _is_karaoke(title, version, album_title):
-        problems.append('karaoke/instrumental')
-    if _is_live(title, version, album_title):
-        problems.append('live')
-    if _is_single(track_data, album_data):
-        problems.append('single/ep')
-    if _is_soundtrack(track_data, album_data):
-        problems.append('soundtrack')
-    elif _is_compilation(track_data, album_data):
-        problems.append('compilation')
-    return problems
-
-
-# ── Replacement search ──
-
-def _strip_title(title):
-    return _STRIP_VERSION_RE.sub('', title).strip()
-
-
-def _first_artist(track_data):
-    for a in (track_data.get('artists') or []):
-        if isinstance(a, dict):
-            name = str(a.get('name') or '').strip()
-            if name:
-                for sep in (';', ','):
-                    if sep in name:
-                        return name.split(sep)[0].strip()
-                return name
-    if isinstance(track_data.get('artist'), dict):
-        return str(track_data['artist'].get('name') or '').strip()
-    return ''
-
-
-def _artist_overlap(track_data, item):
-    def names(d):
-        s = set()
-        for a in (d.get('artists') or []):
-            if isinstance(a, dict):
-                n = str(a.get('name') or '').strip().lower()
-                if n: s.add(n)
-        if not s and isinstance(d.get('artist'), dict):
-            n = str(d['artist'].get('name') or '').strip().lower()
-            if n: s.add(n)
-        return s
-    o, c = names(track_data), names(item)
-    return not o or not c or bool(o & c)
-
-
 def _fetch_album(album_id):
     if album_id not in _album_cache:
         raw = _fetch_hifi_album_payload(album_id)
@@ -189,188 +128,236 @@ def _fetch_album(album_id):
     return _album_cache[album_id]
 
 
-def _find_track_in_album(album_data, stripped_title):
-    """Return list of (track_id, is_clean) for matching tracks in the album."""
-    matches = []
-    album_title = str(album_data.get('title') or '')
-    for entry in (album_data.get('items') or []):
-        t = entry.get('item') or entry
-        if t.get('id') is None:
-            continue
-        tt = str(t.get('title') or '').strip()
-        if not tt:
-            continue
-        if _strip_title(tt).lower() != stripped_title.lower():
-            continue
-        tv = str(t.get('version') or '').strip()
-        is_clean = not (_is_karaoke(tt, tv, album_title) or _is_live(tt, tv, album_title))
-        matches.append((t['id'], is_clean))
-    return matches
+# ── New helpers ──
+
+def _extract_primary_artist_name(track_info: dict) -> str:
+    """Extract primary artist name from extract_hifi_track_info output."""
+    artists = track_info.get('track_artists') or []
+    for a in artists:
+        if isinstance(a, dict):
+            name = str(a.get('name') or '').strip()
+            if name:
+                return name
+    return ''
 
 
-def find_replacement(track_data):
-    stripped = _strip_title(track_data.get('title', ''))
-    query = f"{_first_artist(track_data)} {stripped}".strip()
-    if not query:
-        return None
+def _isrc_from_musicbrainz(title: str, artist: str, album: str = "", year: Optional[int] = None) -> Optional[str]:
+    """Search MusicBrainz for an ISRC by text. Returns first ISRC or None."""
+    query_parts = [f'recording:"{title}"', f'artist:"{artist}"']
+    if album:
+        query_parts.append(f'release:"{album}"')
+    if year:
+        query_parts.append(f'firstreleasedate:{year}')
+    query = ' AND '.join(query_parts)
 
-    results = _fetch_hifi_search_results('s', query, limit=10)
-    if not results:
-        return None
+    try:
+        resp = requests.get(
+            'https://musicbrainz.org/ws/2/recording/',
+            params={'query': query, 'fmt': 'json', 'limit': 5},
+            headers={'User-Agent': _MUSICBRAINZ_USER_AGENT},
+            timeout=10,
+        )
+        if resp.status_code == 429:
+            logger.warning("[RESOLVE] MusicBrainz rate limited (429), skipping ISRC lookup for '%s' by '%s'", title, artist)
+            return None
+        if resp.status_code == 503:
+            time.sleep(1)
+            resp = requests.get(
+                'https://musicbrainz.org/ws/2/recording/',
+                params={'query': query, 'fmt': 'json', 'limit': 5},
+                headers={'User-Agent': _MUSICBRAINZ_USER_AGENT},
+                timeout=10,
+            )
+        if not resp.ok:
+            logger.warning("[RESOLVE] MusicBrainz returned %d for '%s' by '%s'", resp.status_code, title, artist)
+            return None
 
-    results.sort(key=lambda r: (
-        0 if _strip_title(str(r.get('title') or '')).lower() == stripped.lower() else 1,
-        0 if not r.get('version') else 1,
-        0 if not _has_any([str((r.get('album') or {}).get('title') or '')], COMPILATION_KEYWORDS) else 1,
-    ))
-
-    seen = set()
-    fallback = None
-    for item in results:
-        if item.get('id') == track_data.get('id') or not _artist_overlap(track_data, item):
-            continue
-        aid = (item.get('album') or {}).get('id')
-        if not aid or aid in seen:
-            continue
-        seen.add(aid)
-
-        album_data = _fetch_album(aid)
-        if not album_data:
-            continue
-
-        matches = _find_track_in_album(album_data, stripped)
-        if not matches:
-            continue
-
-        clean = [m for m in matches if m[1]]
-        if clean:
-            raw = _fetch_hifi_track_info_payload(clean[0][0])
-            if raw:
-                info = extract_hifi_track_info(raw)
-                if info:
-                    return info
-        if fallback is None:
-            fallback = (matches[0][0], str(album_data.get('title') or ''))
-
-    if fallback:
-        raw = _fetch_hifi_track_info_payload(fallback[0])
-        if raw:
-            info = extract_hifi_track_info(raw)
-            if info:
-                return info
+        recordings = resp.json().get('recordings', [])
+        for rec in recordings:
+            isrcs = rec.get('isrcs') or []
+            if isrcs:
+                return isrcs[0]
+    except requests.exceptions.RequestException as e:
+        logger.warning("[RESOLVE] MusicBrainz request failed: %s", e)
     return None
+
+
+def _artists_overlap(track_artist: str, item_artists: list) -> bool:
+    """Check if the provided track artist overlaps with hifi item artists (normalized)."""
+    norm_track = _normalize_match_text_for_scoring(track_artist)
+    if not norm_track:
+        return True  # no artist provided, don't filter
+
+    for a in (item_artists or []):
+        if isinstance(a, dict):
+            name = str(a.get('name') or '').strip()
+            norm_item = _normalize_match_text_for_scoring(name)
+            if norm_item and (norm_track in norm_item or norm_item in norm_track):
+                return True
+    return False
+
+
+def _get_hifi_quality_rank(quality: Optional[str]) -> int:
+    """Return numeric rank for audio quality (higher = better)."""
+    ranks = {
+        'HI_RES_LOSSLESS': 5,
+        'LOSSLESS': 4,
+        'HIGH': 3,
+        'LOW': 1,
+    }
+    return ranks.get(quality, 2)
+
+
+# ── Filtering and ranking ──
+
+def _filter_and_rank_isrc_results(
+    items: list, title: str, track_artist: str, album: str,
+    original_is_soundtrack: bool, original_hifi_id: Optional[str]
+) -> Optional[dict]:
+    """Filter ISRC results: require title+artist match, rank by penalties and quality."""
+    norm_title = _normalize_match_text_for_scoring(title)
+    norm_album = _normalize_match_text_for_scoring(album)
+
+    candidates = []
+
+    for item in items:
+        item_id = str(item.get('id'))
+        item_title = str(item.get('title') or '')
+        item_artists = item.get('artists') or []
+        item_album = item.get('album') or {}
+        item_album_title = str(item_album.get('title') or '')
+
+        # Hard filter: title must match (normalized)
+        norm_item_title = _normalize_match_text_for_scoring(item_title)
+        if not norm_item_title or not norm_title:
+            continue
+        if norm_item_title != norm_title and norm_title not in norm_item_title and norm_item_title not in norm_title:
+            continue
+
+        # Hard filter: artist must overlap
+        if not _artists_overlap(track_artist, item_artists):
+            continue
+
+        # Skip the original track
+        if item_id == original_hifi_id:
+            continue
+
+        # Score: start at 1.0, apply bonuses/penalties
+        score = 1.0
+
+        # Soundtrack bonus: if original was from a soundtrack and this is too, prefer it
+        if original_is_soundtrack and _has_any([item_album_title], SOUNDTRACK_KEYWORDS):
+            score += 0.5
+
+        # Compilation penalty
+        if _has_any([item_album_title], COMPILATION_KEYWORDS):
+            score -= 0.3
+
+        # Single/EP penalty (from album track count if available)
+        num_tracks = item_album.get('numberOfTracks')
+        if num_tracks is not None and isinstance(num_tracks, (int, float)) and int(num_tracks) <= 4:
+            score -= 0.2
+
+        # Album match bonus
+        norm_item_album = _normalize_match_text_for_scoring(item_album_title)
+        if norm_album and norm_item_album and norm_item_album == norm_album:
+            score += 0.1
+
+        # Quality tiebreaker (small bonus)
+        quality = item.get('maxAudioQuality') or item.get('audioQuality')
+        quality_rank = _get_hifi_quality_rank(quality)
+        score += quality_rank * 0.01
+
+        candidates.append((score, item))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
 
 
 # ── Main entry point ──
 
-_REASON_LOG = {
-    'karaoke/instrumental': 'is Karaoke/Instrumental, will search for a replacement',
-    'live': 'is Live, will search for a replacement',
-    'single/ep': 'is from a Single/EP, will search for a replacement',
-    'compilation': 'is from a Compilation, will search for a replacement',
-    'soundtrack': 'is from a Soundtrack, keeping track',
-    'none': 'is from a Studio Album, keeping track',
-}
+def resolve_track(
+    title: str,
+    track_artist: str,
+    album: str = "",
+    year: Optional[int] = None,
+    isrc: Optional[str] = None,
+    hifi_id: Optional[str] = None,
+    settings: Optional[dict] = None,
+) -> dict:
+    """Resolve a track to the best available hifi ID.
 
+    Pipeline:
+    1. If hifi_id provided, fetch track metadata to get ISRC, album info
+    2. If no ISRC, try MusicBrainz text search
+    3. If ISRC available, search hifi by ISRC and rank results
+    4. Return best hifi_id (or original if no ISRC available)
 
-def resolve_track(hifi_id: Any, settings: Optional[dict] = None, expected_album: Optional[str] = None) -> dict:
-    if settings is None:
-        settings = {}
+    Returns:
+        {
+            'hifi_id': str | None,
+            'reason': str,
+            'source': 'isrc' | 'original' | 'fetch_error',
+        }
+    """
+    settings = settings or {}
+    original_hifi_id = str(hifi_id) if hifi_id else None
 
-    raw = _fetch_hifi_track_info_payload(hifi_id)
-    if not raw:
-        return {'original_id': hifi_id, 'reason': 'fetch_error', 'replacement': None}
-    track_info = extract_hifi_track_info(raw)
-    if not track_info:
-        return {'original_id': hifi_id, 'reason': 'parse_error', 'replacement': None}
+    # Step 1: If hifi_id provided, fetch track metadata
+    track_info = None
+    album_data = None
+    if original_hifi_id:
+        raw = _fetch_hifi_track_info_payload(original_hifi_id)
+        if raw:
+            track_info = extract_hifi_track_info(raw)
 
-    album_id = track_info.get('album_id') or (track_info.get('album') or {}).get('id')
-    album_data = _fetch_album(album_id) if album_id else None
+        if track_info:
+            if not isrc and track_info.get('isrc'):
+                isrc = track_info['isrc']
+            if not title and track_info.get('title'):
+                title = track_info['title']
+            if not track_artist:
+                track_artist = _extract_primary_artist_name(track_info)
 
-    all_problems = detect_problems(track_info, album_data)
-    label = f"track {hifi_id} ({track_info.get('title', '')})"
+            # Fetch album data for soundtrack detection
+            album_id = track_info.get('album_id')
+            if album_id:
+                album_data = _fetch_album(album_id)
 
-    # Check if the track's album matches the expected album (from LB playlist)
-    # If so, skip single/ep replacement — the user explicitly chose this release
-    album_matches_expected = False
-    if expected_album and 'single/ep' in all_problems:
-        track_album_title = str((album_data or track_info.get('album', {})).get('title') or '')
-        if _normalize_match_text_for_scoring(track_album_title) == _normalize_match_text_for_scoring(expected_album):
-            album_matches_expected = True
-            logger.info("%s album '%s' matches expected '%s' — keeping single/ep",
-                        label, track_album_title, expected_album)
+    # Step 2: If no ISRC, try MusicBrainz
+    if not isrc and title and track_artist:
+        isrc = _isrc_from_musicbrainz(title, track_artist, album, year)
+        if isrc:
+            logger.info("[RESOLVE] MusicBrainz resolved ISRC %s for '%s' by '%s'", isrc, title, track_artist)
 
-    # Soundtracks are never replaced
-    active = [p for p in all_problems if p != 'soundtrack' or settings.get('penalty_soundtrack', False)]
-    active_setting = [p for p in all_problems if p == 'soundtrack' or settings.get(
-        {'karaoke/instrumental': 'penalty_karaoke', 'live': 'penalty_live',
-         'single/ep': 'penalty_single', 'compilation': 'penalty_compilation'}.get(p, ''), True)]
+    # Step 3: Determine if original album is a soundtrack
+    original_is_soundtrack = False
+    if track_info and album_data:
+        original_is_soundtrack = _is_soundtrack(track_info, album_data)
 
-    # Wait, this is getting convoluted. Let me simplify:
-    # Soundtrack → never replace (regardless of settings)
-    # Everything else → check settings toggle
-    active_problems = []
-    for p in all_problems:
-        if p == 'soundtrack':
-            continue  # never replace soundtracks
-        # Skip single/ep if the album matches the expected album
-        if p == 'single/ep' and album_matches_expected:
-            continue
-        key = {'karaoke/instrumental': 'penalty_karaoke', 'live': 'penalty_live',
-               'single/ep': 'penalty_single', 'compilation': 'penalty_compilation'}.get(p)
-        if key is None or settings.get(key, True):
-            active_problems.append(p)
+    # Step 4: ISRC search path
+    if isrc:
+        items = _fetch_hifi_search_results('i', isrc, limit=50)
+        if items:
+            best = _filter_and_rank_isrc_results(
+                items, title, track_artist, album,
+                original_is_soundtrack, original_hifi_id
+            )
+            if best:
+                best_id = str(best.get('id'))
+                if best_id == original_hifi_id:
+                    return {'hifi_id': best_id, 'reason': 'isrc_match_original', 'source': 'original'}
+                logger.info("[RESOLVE] ISRC %s: %s (%s) -> %s", isrc, title, track_artist, best_id)
+                return {'hifi_id': best_id, 'reason': 'isrc_match', 'source': 'isrc'}
 
-    # Log
-    for p in all_problems + (['none'] if not all_problems else []):
-        msg = _REASON_LOG.get(p)
-        if msg:
-            logger.info("%s %s", label, msg)
+    # No ISRC available — log and return original (or None)
+    if not isrc:
+        label = f"'{title}' by '{track_artist}'" if title and track_artist else f"hifi_id={original_hifi_id}"
+        logger.info("[RESOLVE] No ISRC for %s, skipping resolution", label)
 
-    reason = '; '.join(all_problems) if all_problems else 'none'
-
-    if not active_problems:
-        return {'original_id': hifi_id, 'reason': reason, 'replacement': None}
-
-    replacement = find_replacement(track_info)
-    if replacement:
-        logger.info("%s → replaced by %s", label, replacement.get('id'))
-    else:
-        logger.info("no replacement found for %s, keeping track", label)
-
-    return {'original_id': hifi_id, 'reason': reason, 'replacement': replacement}
-
-
-# ── Shared helpers for callers ──
-
-def resolve_best_match(best_item: Optional[dict], settings: dict, log_label: str = "", expected_album: Optional[str] = None) -> Optional[dict]:
-    if not best_item:
-        return best_item
-    result = resolve_track(best_item.get('id'), settings, expected_album=expected_album)
-    if result.get('replacement'):
-        logger.info("[%s] Resolved %s (%s) → track %s",
-                    log_label or 'RESOLVE', best_item.get('id'), result['reason'],
-                    result['replacement'].get('id'))
-        return result['replacement']
-    return best_item
-
-
-def merge_replacement_into_rec(rec: dict, replacement: dict) -> dict:
-    rec['hifi_id'] = replacement['id']
-    rec['title'] = replacement.get('title', rec['title'])
-    rec['isrc'] = replacement.get('isrc', rec.get('isrc'))
-    rec['duration'] = replacement.get('duration', rec.get('duration'))
-    if replacement.get('album_id'):
-        rec['album_id'] = replacement['album_id']
-    album_val = replacement.get('album_title') or (
-        replacement['album'] if isinstance(replacement.get('album'), str)
-        else (replacement.get('album') or {}).get('title'))
-    if album_val:
-        rec['album'] = album_val
-    artists = replacement.get('track_artists') or replacement.get('artists') or []
-    if artists and isinstance(artists[0], dict):
-        rec['artist'] = artists[0].get('name', rec.get('artist', ''))
-        rec['artist_id'] = artists[0].get('id', rec.get('artist_id'))
-    if replacement.get('audioQuality'):
-        rec['quality'] = replacement['audioQuality']
-    return rec
+    if original_hifi_id:
+        return {'hifi_id': original_hifi_id, 'reason': 'no_isrc', 'source': 'original'}
+    return {'hifi_id': None, 'reason': 'no_isrc', 'source': 'original'}

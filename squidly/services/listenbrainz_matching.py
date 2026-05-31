@@ -16,7 +16,7 @@ from squidly.services.playlist_matching import (
     _normalize_match_text_for_scoring,
     _score_track_candidate,
 )
-from squidly.services.track_resolver import resolve_best_match
+from squidly.services.track_resolver import resolve_track
 
 logger = logging.getLogger(__name__)
 
@@ -179,14 +179,28 @@ def _match_single_track(
                 best_match = item
                 method = 'text'
 
-    # Resolve (karaoke/live/single/compilation detection + replacement)
     if best_match:
         try:
-            resolved = resolve_best_match(best_match, settings, expected_album=album)
-            if resolved:
-                best_match = resolved
+            result = resolve_track(
+                title=title,
+                track_artist=artist,
+                album=album,
+                isrc=isrcs[0] if isrcs else None,
+                hifi_id=str(best_match.get('id')),
+                settings=settings,
+            )
+            new_id = result.get('hifi_id')
+            if new_id and str(new_id) != str(best_match.get('id')):
+                logger.info("[LB_MATCH] Resolved %s - %s (%s, source=%s) -> %s",
+                            artist, title, result['reason'], result['source'], new_id)
+                from squidly.services.hifi import _fetch_hifi_track_info_payload, extract_hifi_track_info
+                raw = _fetch_hifi_track_info_payload(new_id)
+                if raw:
+                    resolved_info = extract_hifi_track_info(raw)
+                    if resolved_info:
+                        best_match = resolved_info
         except Exception as e:
-            logger.warning("[LB_MATCH] resolve_best_match failed for %s - %s: %s",
+            logger.warning("[LB_MATCH] resolve_track failed for %s - %s: %s",
                            artist, title, e)
 
     return {

@@ -36,7 +36,7 @@ from squidly.infrastructure.storage import (
 from squidly.infrastructure.config import app_timezone, DEFAULT_DOWNLOAD_SETTINGS
 
 from squidly.services.playlist_matching import _score_track_candidate
-from squidly.services.track_resolver import resolve_best_match
+from squidly.services.track_resolver import resolve_track
 from urllib.parse import urlencode, urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)
@@ -739,9 +739,24 @@ def match_ytm_track():
             best_match = item
 
     if best_match:
-        resolved = resolve_best_match(best_match, settings)
-        if resolved:
-            best_match = resolved
+        try:
+            result = resolve_track(
+                title=title,
+                track_artist=artist,
+                album=album,
+                hifi_id=str(best_match.get('id')),
+                settings=settings,
+            )
+            new_id = result.get('hifi_id')
+            if new_id and str(new_id) != str(best_match.get('id')):
+                from squidly.services.hifi import _fetch_hifi_track_info_payload, extract_hifi_track_info
+                raw = _fetch_hifi_track_info_payload(new_id)
+                if raw:
+                    resolved_info = extract_hifi_track_info(raw)
+                    if resolved_info:
+                        best_match = resolved_info
+        except Exception as e:
+            logger.warning("[YTM_MATCH] resolve_track failed: %s", e)
 
         return jsonify({
             'match': best_match,

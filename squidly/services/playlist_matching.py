@@ -43,7 +43,13 @@ def _score_track_candidate(title, artist, album, item):
     """
     score = 0.0
     item_title = _normalize_match_text_for_scoring(item.get('title') or '')
-    item_artist = _normalize_match_text_for_scoring((item.get('artist') or {}).get('name') or '')
+    # Handle both 'artist' (dict) and 'artists' (array) formats
+    item_artist_raw = ''
+    if item.get('artists') and isinstance(item['artists'], list) and item['artists']:
+        item_artist_raw = str(item['artists'][0].get('name') or '')
+    elif item.get('artist') and isinstance(item['artist'], dict):
+        item_artist_raw = str(item['artist'].get('name') or '')
+    item_artist = _normalize_match_text_for_scoring(item_artist_raw)
     item_album = _normalize_match_text_for_scoring((item.get('album') or {}).get('title') or '')
     norm_title = _normalize_match_text_for_scoring(title)
     norm_artist = _normalize_match_text_for_scoring(artist)

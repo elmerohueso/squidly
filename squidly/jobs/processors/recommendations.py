@@ -254,19 +254,27 @@ def process_recommendation_job(job_id, payload):
     jobs.update_job_progress(job_id, {'progress': progress})
 
     # Step 9: Track resolution — only on final selected tracks
-    from squidly.services.track_resolver import resolve_track, merge_replacement_into_rec
+    from squidly.services.track_resolver import resolve_track
     resolved_count = 0
     for rec in top_tracks:
         tid = rec.get('hifi_id')
         if not tid:
             continue
         try:
-            result = resolve_track(tid, settings)
-            if result.get('reason') != 'none' and result.get('replacement'):
-                logger.info("[RECOMMENDATION] Resolved track %s (%s) → %s",
-                            tid, result['reason'], result['replacement'].get('id'))
-                merge_replacement_into_rec(rec, result['replacement'])
+            result = resolve_track(
+                title=rec.get('title', ''),
+                track_artist=rec.get('artist', ''),
+                album=rec.get('album', ''),
+                isrc=rec.get('isrc'),
+                hifi_id=str(tid),
+                settings=settings,
+            )
+            new_id = result.get('hifi_id')
+            if new_id and str(new_id) != str(tid):
+                rec['hifi_id'] = int(new_id)
                 resolved_count += 1
+                logger.info("[RECOMMENDATION] Resolved track %s (%s, source=%s) -> %s",
+                            tid, result['reason'], result['source'], new_id)
         except Exception as e:
             logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
     progress['tracks_resolved'] = resolved_count
