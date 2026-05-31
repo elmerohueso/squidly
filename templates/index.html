@@ -241,6 +241,12 @@
                                     <button type="button" class="source-move-up" data-source="qobuz" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="qobuz" title="Move down">↓</button>
                                 </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="deezer" id="downloadSourceDeezer">
+                                    <span>Deezer (Premium)</span>
+                                    <button type="button" class="source-move-up" data-source="deezer" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="deezer" title="Move down">↓</button>
+                                </label>
                             </div>
                             <label class="settings-label" for="qualityLossless" style="margin-top: 1rem; margin-bottom: 0.5rem;">Quality</label>
                             <div class="format-toggle" role="radiogroup" aria-label="Download quality">
@@ -341,6 +347,20 @@
                                 </p>
                                 <button id="saveYtmConfig" class="save-button" style="margin-top: 0.5rem;">Save YouTube Music Config</button>
                                 <p class="settings-note" id="ytmConfigStatus"></p>
+                            </div>
+
+                            <div class="integration-group" id="deezerSettings">
+                                <div class="integration-group-title">Deezer</div>
+                                <label class="settings-label" for="deezerArl">ARL Cookie</label>
+                                <input type="password" id="deezerArl" class="settings-input"
+                                    placeholder="Paste your Deezer arl cookie here" autocomplete="new-password">
+                                <p class="settings-hint">
+                                    Log into <a href="https://www.deezer.com" target="_blank"
+                                        style="color: var(--accent-primary); text-decoration: none;">Deezer</a>,
+                                    open DevTools (F12) → Storage tab → Cookies, and copy the value of the <code>arl</code> cookie.
+                                </p>
+                                <button id="saveDeezerConfig" class="save-button" style="margin-top: 0.5rem;">Save Deezer Config</button>
+                                <p class="settings-note" id="deezerConfigStatus"></p>
                             </div>
 
                             <div class="integration-group" id="freshFindsSettings">

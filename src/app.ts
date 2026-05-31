@@ -522,6 +522,7 @@ interface DownloadSettings {
     penaltyCompilation: boolean;
     penaltyKaraoke: boolean;
     penaltyLive: boolean;
+    deezerArl: string;
 }
 
 interface AppRouteState {
@@ -684,6 +685,9 @@ class App {
     private ytmCookieInput: HTMLInputElement;
     private saveYtmConfigButton: HTMLButtonElement;
     private ytmConfigStatusEl: HTMLElement;
+    private deezerArlInput: HTMLInputElement;
+    private saveDeezerConfigButton: HTMLButtonElement;
+    private deezerConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsAutoDownloadStatusEl: HTMLElement;
     private freshFindsRetentionInput: HTMLInputElement;
@@ -979,6 +983,9 @@ class App {
         this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
         this.saveYtmConfigButton = document.getElementById('saveYtmConfig') as HTMLButtonElement;
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
+        this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
+        this.saveDeezerConfigButton = document.getElementById('saveDeezerConfig') as HTMLButtonElement;
+        this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
@@ -1046,6 +1053,7 @@ class App {
         this.initializeHistoryControls();
         void this.fetchAppConfig();
         void this.fetchDownloadSettingsFromServer();
+        void this.loadDeezerConfig();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
         void this.loadFreshFindsConfig();
@@ -1313,6 +1321,9 @@ class App {
         }
         if (this.saveYtmConfigButton) {
             this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
+        }
+        if (this.saveDeezerConfigButton) {
+            this.saveDeezerConfigButton.addEventListener('click', () => this.saveDeezerConfig());
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsConfig('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
@@ -5579,6 +5590,7 @@ class App {
             penaltyCompilation: true,
             penaltyKaraoke: true,
             penaltyLive: true,
+            deezerArl: '',
         };
     }
 
@@ -5631,6 +5643,11 @@ class App {
                 }
                 return result;
             })(),
+            deezerArl: typeof (raw as DownloadSettings).deezerArl === 'string'
+                ? (raw as DownloadSettings).deezerArl
+                : typeof (raw as { deezer_arl?: string }).deezer_arl === 'string'
+                    ? (raw as { deezer_arl?: string }).deezer_arl!
+                    : fallback.deezerArl,
         } as DownloadSettings;
     }
 
@@ -5699,6 +5716,7 @@ class App {
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
             ignoreMatches: this.ignoreMatchesCheckbox.checked,
+            deezerArl: this.deezerArlInput.value.trim() || '',
             ...(() => {
                 const result: Record<string, boolean> = {};
                 for (const id of App.TAG_CHECKBOX_IDS) {
@@ -5828,24 +5846,51 @@ class App {
         const lowLabel = this.qualityLowInput.closest('label');
 
         const isQobuz = this.isDownloadSourceChecked('qobuz');
+        const isDeezer = this.isDownloadSourceChecked('deezer');
 
         if (losslessLabel) {
             losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
         }
         if (highLabel) {
+            const highInput = this.qualityHighInput;
+            if (isDeezer) {
+                highInput.disabled = true;
+                highInput.title = 'Deezer does not support HIGH quality';
+                highLabel.title = 'Deezer does not support HIGH quality';
+                highLabel.classList.add('disabled');
+                if (highInput.checked) {
+                    this.qualityLosslessInput.checked = true;
+                    highInput.checked = false;
+                    if (losslessLabel) losslessLabel.classList.add('active');
+                    highLabel.classList.remove('active');
+                }
+            } else {
+                highInput.disabled = false;
+                highInput.title = '';
+                highLabel.title = '';
+                highLabel.classList.remove('disabled');
+            }
             highLabel.classList.toggle('active', this.qualityHighInput.checked);
         }
         if (lowLabel) {
             const lowInput = this.qualityLowInput;
-            if (isQobuz) {
+            if (isQobuz || isDeezer) {
+                let msg: string;
+                if (isQobuz && isDeezer) {
+                    msg = 'Qobuz and Deezer do not support LOW quality';
+                } else if (isQobuz) {
+                    msg = 'Qobuz does not support LOW quality';
+                } else {
+                    msg = 'Deezer does not support LOW quality';
+                }
                 lowInput.disabled = true;
-                lowInput.title = 'Qobuz does not support LOW quality';
-                lowLabel.title = 'Qobuz does not support LOW quality';
+                lowInput.title = msg;
+                lowLabel.title = msg;
                 lowLabel.classList.add('disabled');
                 if (lowInput.checked) {
-                    this.qualityHighInput.checked = true;
+                    this.qualityLosslessInput.checked = true;
                     lowInput.checked = false;
-                    if (highLabel) highLabel.classList.add('active');
+                    if (losslessLabel) losslessLabel.classList.add('active');
                     lowLabel.classList.remove('active');
                 }
             } else {
@@ -5927,19 +5972,19 @@ class App {
         });
     }
 
-    private syncQobuzMirrorAvailability(hasQobuzMirrors: boolean): void {
+    private syncSourceAvailability(source: string, enabled: boolean, tooltip?: string): void {
         if (!this.downloadSourceList) return;
-        const qobuzItem = this.downloadSourceList.querySelector('.download-source-item input[value="qobuz"]')?.closest('.download-source-item');
-        if (!qobuzItem) return;
-        const cb = qobuzItem.querySelector('input[type="checkbox"]') as HTMLInputElement;
-        const label = qobuzItem as HTMLElement;
+        const item = this.downloadSourceList.querySelector(`.download-source-item input[value="${source}"]`)?.closest('.download-source-item');
+        if (!item) return;
+        const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        const label = item as HTMLElement;
 
-        cb.disabled = !hasQobuzMirrors;
-        cb.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
-        label.title = hasQobuzMirrors ? '' : 'No online Qobuz mirrors found';
-        label.classList.toggle('disabled', !hasQobuzMirrors);
+        cb.disabled = !enabled;
+        cb.title = tooltip || '';
+        label.title = tooltip || '';
+        label.classList.toggle('disabled', !enabled);
 
-        if (!hasQobuzMirrors && cb.checked) {
+        if (!enabled && cb.checked) {
             cb.checked = false;
             this.updateSettingsFromForm();
         }
@@ -6153,6 +6198,111 @@ class App {
         } catch (error) {
             console.error('Error saving YouTube Music config:', error);
             this.showStatusMessage(this.ytmConfigStatusEl, '✗ Error saving configuration', true, 0);
+        }
+    }
+
+    private async loadDeezerConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/deezer/status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.has_arl) {
+                    // ARL exists — validate to get offer name
+                    const arl = this.downloadSettings?.deezerArl || '';
+                    if (arl) {
+                        const resp = await fetch('/api/deezer/validate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ arl })
+                        });
+                        if (resp.ok) {
+                            const v = await resp.json();
+                            if (v.valid && v.lossless) {
+                                this.deezerConfigStatusEl.textContent = `✓ Connected — ${v.offer_name || 'Premium'} (FLAC)`;
+                                this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                                this.syncSourceAvailability('deezer', true, `Deezer — ${v.offer_name}`);
+                            } else if (v.valid) {
+                                this.deezerConfigStatusEl.textContent = `⚠ ARL valid but not Premium (${v.offer_name || 'Unknown'})`;
+                                this.deezerConfigStatusEl.style.color = 'var(--warning-color, #f59e0b)';
+                                this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                            } else {
+                                this.deezerConfigStatusEl.textContent = '✗ ARL invalid or expired';
+                                this.deezerConfigStatusEl.style.color = '';
+                                this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                            }
+                        } else {
+                            this.deezerConfigStatusEl.textContent = '✓ ARL configured';
+                            this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                        }
+                    } else {
+                        this.deezerConfigStatusEl.textContent = '✓ ARL configured';
+                        this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                    }
+                } else {
+                    this.deezerConfigStatusEl.textContent = '';
+                    this.deezerConfigStatusEl.style.color = '';
+                    this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Deezer config.', error);
+        }
+    }
+
+    private async saveDeezerConfig(): Promise<void> {
+        const value = this.deezerArlInput.value.trim();
+
+        if (!value) {
+            this.showStatusMessage(this.deezerConfigStatusEl, '⚠ ARL cookie is required', true, 0);
+            return;
+        }
+
+        // Step 1: Validate ARL
+        this.showStatusMessage(this.deezerConfigStatusEl, 'Validating ARL...');
+        try {
+            const validateResp = await fetch('/api/deezer/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ arl: value })
+            });
+
+            if (!validateResp.ok) {
+                const errData = await validateResp.json().catch(() => ({}));
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errData.error || 'Validation failed'}`, true, 0);
+                return;
+            }
+
+            const validateData = await validateResp.json();
+            if (!validateData.valid) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ Invalid ARL: ${validateData.error || 'Could not authenticate'}`, true, 0);
+                return;
+            }
+
+            if (!validateData.lossless) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ARL valid but not Premium (no FLAC). Detected: ${validateData.offer_name || 'Unknown'}`, true, 0);
+                return;
+            }
+
+            // Step 2: Save
+            const saveResp = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deezerArl: value })
+            });
+
+            if (saveResp.ok) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✓ Connected — ${validateData.offer_name || 'Premium'} (FLAC)`);
+                this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                this.deezerArlInput.value = '';
+                this.syncSourceAvailability('deezer', true, `Deezer — ${validateData.offer_name}`);
+                void this.loadDeezerConfig();
+            } else {
+                const errorData = await saveResp.json().catch(() => ({}));
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errorData.error || 'Failed to save'}`, true, 0);
+            }
+        } catch (error) {
+            console.error('Error saving Deezer config:', error);
+            this.showStatusMessage(this.deezerConfigStatusEl, '✗ Error validating configuration', true, 0);
         }
     }
 
@@ -6869,7 +7019,7 @@ class App {
             this.displayEndpointStatus(data);
 
             const hasQobuzMirrors = data.endpoints.some(e => e.mirrorType === 'qobuz');
-            this.syncQobuzMirrorAvailability(hasQobuzMirrors);
+            this.syncSourceAvailability('qobuz', hasQobuzMirrors, hasQobuzMirrors ? '' : 'No online Qobuz mirrors found');
         } catch (error) {
             console.error('Error fetching endpoint status:', error);
         }

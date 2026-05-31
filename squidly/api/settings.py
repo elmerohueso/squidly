@@ -132,6 +132,7 @@ def download_settings():
         'jobs_refresh_interval_seconds': payload.get('jobsRefreshIntervalSeconds', payload.get('jobs_refresh_interval_seconds', current.get('jobs_refresh_interval_seconds', DEFAULT_DOWNLOAD_SETTINGS['jobs_refresh_interval_seconds']))),
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
         'download_source': payload.get('downloadSource', payload.get('download_source', current.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']))),
+        'deezer_arl': payload.get('deezerArl') or payload.get('deezer_arl') or current.get('deezer_arl', ''),
     }
 
     for key in tag_keys:
@@ -145,7 +146,7 @@ def download_settings():
 
     # Validate comma-separated download source priority list
     download_sources = [s.strip() for s in updated['download_source'].split(',')]
-    if not download_sources or not all(s in ('tidal', 'qobuz') for s in download_sources):
+    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer') for s in download_sources):
         return jsonify({'error': 'Invalid download source value(s)'}), 400
     # Normalize: preserve order, remove duplicates
     seen = set()
@@ -183,6 +184,7 @@ def download_settings():
         'jobs_refresh_interval_seconds': updated['jobs_refresh_interval_seconds'],
         'ignore_matches': updated['ignore_matches'],
         'download_source': updated['download_source'],
+        'deezer_arl': updated['deezer_arl'],
     }
     for key in tag_keys:
         result[key] = updated[key]
@@ -190,6 +192,56 @@ def download_settings():
         result[key] = updated[key]
 
     return jsonify(result)
+
+
+@settings_bp.route('/api/deezer/validate', methods=['POST'])
+def validate_deezer_arl():
+    """Validate a Deezer ARL cookie and return account details."""
+    payload = request.get_json(silent=True) or {}
+    arl = payload.get('arl', '').strip()
+    if not arl:
+        return jsonify({'error': 'arl is required'}), 400
+
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:135.0) Gecko/20100101 Firefox/135.0',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': 'https://www.deezer.com',
+            'Accept': '*/*',
+            'Referer': 'https://www.deezer.com/login',
+        }
+        response = requests.post(
+            'https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token=',
+            headers=headers,
+            cookies={'arl': arl, 'comeback': '1'},
+            data='',
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        user_options = data.get('results', {}).get('USER', {}).get('OPTIONS', {})
+        web_sound_quality = user_options.get('web_sound_quality', {})
+        lossless = bool(web_sound_quality.get('lossless', False))
+        offer_name = data.get('results', {}).get('USER', {}).get('OFFER_NAME', '')
+
+        return jsonify({
+            'valid': True,
+            'lossless': lossless,
+            'offer_name': offer_name,
+        })
+    except requests.RequestException as e:
+        return jsonify({'valid': False, 'error': str(e)}), 200
+    except (ValueError, KeyError) as e:
+        return jsonify({'valid': False, 'error': f'Invalid response: {e}'}), 200
+
+
+@settings_bp.route('/api/deezer/status', methods=['GET'])
+def deezer_status():
+    """Check if a Deezer ARL is configured in the database."""
+    settings = get_download_settings()
+    arl = settings.get('deezer_arl', '')
+    return jsonify({'has_arl': bool(arl)})
 
 
 @settings_bp.route('/api/endpoints/status', methods=['GET'])
