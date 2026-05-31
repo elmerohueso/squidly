@@ -49,10 +49,76 @@ SOUNDTRACK_KEYWORDS = (
     'tv series', 'from the motion picture',
 )
 
+LIVE_VERSION_KEYWORDS = (
+    'live', 'concert', 'unplugged', 'acoustic', 'from ',
+)
+
+DELUXE_KEYWORDS = (
+    'deluxe', 'expanded', 'remaster', 'anniversary edition',
+    'special edition', 'extended', 'collector', 'super deluxe',
+    'reissue', 're-master', 'bonus track',
+)
+
 
 def _has_any(texts, keywords):
     t = ' '.join(texts).lower()
     return any(kw in t for kw in keywords)
+
+
+def _has_live_version_indicator(track_data):
+    """Check if the track version indicates a live recording."""
+    version = str(track_data.get('version') or '').strip().lower()
+    if not version:
+        return False
+    return any(kw in version for kw in LIVE_VERSION_KEYWORDS)
+
+
+def _has_deluxe_indicator(album_title, version=''):
+    """Check if album title or version suggests a deluxe/remaster edition."""
+    combined = f"{album_title} {version}".lower()
+    return any(kw in combined for kw in DELUXE_KEYWORDS)
+
+
+def _parse_release_year(release_date):
+    """Extract year from release date string for comparison. Returns '9999' if missing."""
+    if not release_date or not isinstance(release_date, str):
+        return '9999'
+    return release_date[:4] if len(release_date) >= 4 else '9999'
+
+
+def _is_compilation_from_search_data(item):
+    """Lightweight compilation check using only search result data (no album fetch needed)."""
+    album = item.get('album') or {}
+    album_title = str(album.get('title') or '')
+    if _has_any([album_title], COMPILATION_KEYWORDS):
+        return True
+
+    # Artist mismatch: track artists vs album artists
+    track_artists = set()
+    for a in (item.get('artists') or []):
+        if isinstance(a, dict):
+            n = str(a.get('name') or '').strip().lower()
+            if n:
+                track_artists.add(n)
+
+    album_artists_raw = album.get('artists') or []
+    if not album_artists_raw and album.get('artist'):
+        album_artists_raw = [album['artist']]
+    album_artists = set()
+    for a in album_artists_raw:
+        if isinstance(a, dict):
+            n = str(a.get('name') or '').strip().lower()
+            if n:
+                album_artists.add(n)
+
+    if track_artists and album_artists:
+        if any('various' in n for n in album_artists):
+            return True
+        if not (track_artists & album_artists):
+            return True
+        if len(album_artists) >= 3 and track_artists.issubset(album_artists) and len(track_artists) < len(album_artists):
+            return True
+    return False
 
 
 def _is_single(track_data, album_data):
@@ -211,12 +277,27 @@ def _get_hifi_quality_rank(quality: Optional[str]) -> int:
 # ── Filtering and ranking ──
 
 def _filter_and_rank_isrc_results(
-    items: list, title: str, track_artist: str, album: str,
-    original_is_soundtrack: bool, original_hifi_id: Optional[str]
-) -> Optional[dict]:
-    """Filter ISRC results: require title+artist match, rank by penalties and quality."""
+    items, title, track_artist, album,
+    original_is_soundtrack, original_hifi_id,
+    caller_album_data=None, settings=None,
+):
+    """Filter and rank ISRC search results using tiered tuple scoring.
+
+    Ranking dimensions (lower = better):
+      0. compilation_tier: 0=studio, 1=compilation
+      1. release_date: earliest wins ('YYYY'), missing='9999'
+      2. album_mismatch: 0=title matches caller's album, 1=doesn't
+      3. is_deluxe: 0=standard, 1=deluxe/remaster/expanded
+      4. is_live: 0=studio, 1=live variant
+      5. quality_inv: inverted quality rank (lower = better quality)
+    """
+    settings = settings or {}
     norm_title = _normalize_match_text_for_scoring(title)
     norm_album = _normalize_match_text_for_scoring(album)
+
+    penalty_comp = settings.get('penalty_compilation', True)
+    penalty_live = settings.get('penalty_live', True)
+    penalty_single = settings.get('penalty_single', True)
 
     candidates = []
 
@@ -226,15 +307,20 @@ def _filter_and_rank_isrc_results(
         item_artists = item.get('artists') or []
         item_album = item.get('album') or {}
         item_album_title = str(item_album.get('title') or '')
+        item_version = str(item.get('version') or '')
 
-        # Hard filter: title must match (normalized)
+        # ── Hard filters ──
+
+        # Title must match (normalized)
         norm_item_title = _normalize_match_text_for_scoring(item_title)
         if not norm_item_title or not norm_title:
             continue
-        if norm_item_title != norm_title and norm_title not in norm_item_title and norm_item_title not in norm_title:
+        if (norm_item_title != norm_title
+                and norm_title not in norm_item_title
+                and norm_item_title not in norm_title):
             continue
 
-        # Hard filter: artist must overlap
+        # Artist must overlap
         if not _artists_overlap(track_artist, item_artists):
             continue
 
@@ -242,39 +328,83 @@ def _filter_and_rank_isrc_results(
         if item_id == original_hifi_id:
             continue
 
-        # Score: start at 1.0, apply bonuses/penalties
-        score = 1.0
+        # ── Tier 0: compilation detection ──
+        comp_tier = 0
+        if penalty_comp and _is_compilation_from_search_data(item):
+            comp_tier = 1
 
-        # Soundtrack bonus: if original was from a soundtrack and this is too, prefer it
-        if original_is_soundtrack and _has_any([item_album_title], SOUNDTRACK_KEYWORDS):
-            score += 0.5
+        # ── Tier 1: release date (from embedded album data) ──
+        release_date = item_album.get('releaseDate') or ''
+        release_year = _parse_release_year(release_date)
 
-        # Compilation penalty
-        if _has_any([item_album_title], COMPILATION_KEYWORDS):
-            score -= 0.3
-
-        # Single/EP penalty (from album track count if available)
-        num_tracks = item_album.get('numberOfTracks')
-        if num_tracks is not None and isinstance(num_tracks, (int, float)) and int(num_tracks) <= 4:
-            score -= 0.2
-
-        # Album match bonus
+        # ── Tier 2: album title match ──
         norm_item_album = _normalize_match_text_for_scoring(item_album_title)
+        album_mismatch = 1
         if norm_album and norm_item_album and norm_item_album == norm_album:
-            score += 0.1
+            album_mismatch = 0
 
-        # Quality tiebreaker (small bonus)
+        # ── Tier 3: deluxe/remaster indicator ──
+        is_deluxe = 1 if _has_deluxe_indicator(item_album_title, item_version) else 0
+
+        # ── Tier 4: live variant ──
+        is_live = 1 if (penalty_live and _has_live_version_indicator(item)) else 0
+
+        # ── Tier 5: audio quality (inverted — lower rank = better quality) ──
         quality = item.get('maxAudioQuality') or item.get('audioQuality')
-        quality_rank = _get_hifi_quality_rank(quality)
-        score += quality_rank * 0.01
+        quality_inv = 5 - _get_hifi_quality_rank(quality)
 
-        candidates.append((score, item))
+        sort_key = (comp_tier, release_year, album_mismatch, is_deluxe, is_live, quality_inv)
+        candidates.append((sort_key, item))
 
     if not candidates:
         return None
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]
+    candidates.sort(key=lambda x: x[0])
+
+    # ── Phase 2: Resolve ties with full album data if needed ──
+    top_key = candidates[0][0]
+    top_items = [(k, it) for k, it in candidates if k == top_key]
+
+    if len(top_items) == 1:
+        return top_items[0][1]
+
+    # Multiple candidates tie on all dimensions.
+    # Collect distinct album IDs and fetch full album data.
+    album_ids_to_fetch = set()
+    for _, item in top_items:
+        album_id = (item.get('album') or {}).get('id')
+        if album_id:
+            album_ids_to_fetch.add(album_id)
+
+    for album_id in album_ids_to_fetch:
+        _fetch_album(album_id)  # populates _album_cache
+
+    # Re-sort top items using full album data.
+    def _refined_key(item):
+        album_id = (item.get('album') or {}).get('id')
+        full_album = _album_cache.get(album_id) if album_id else None
+
+        # Re-check compilation with full album type info
+        refined_comp = 0
+        if penalty_comp and full_album:
+            if full_album.get('type') in ('SINGLE', 'EP'):
+                pass  # single/EP, not a compilation
+            elif _is_compilation(item, full_album):
+                refined_comp = 1
+
+        # Prefer non-single/EP
+        is_single = 1 if (penalty_single and full_album and full_album.get('type') in ('SINGLE', 'EP')) else 0
+
+        # Use numberOfTracks as tiebreaker (more tracks = more likely a real album)
+        num_tracks = -(full_album.get('numberOfTracks') or 0) if full_album else 0
+
+        quality = item.get('maxAudioQuality') or item.get('audioQuality')
+        quality_inv = 5 - _get_hifi_quality_rank(quality)
+
+        return (refined_comp, is_single, num_tracks, quality_inv)
+
+    top_items.sort(key=lambda x: _refined_key(x[1]))
+    return top_items[0][1]
 
 
 # ── Main entry point ──
@@ -344,13 +474,19 @@ def resolve_track(
         if items:
             best = _filter_and_rank_isrc_results(
                 items, title, track_artist, album,
-                original_is_soundtrack, original_hifi_id
+                original_is_soundtrack, original_hifi_id,
+                caller_album_data=album_data, settings=settings,
             )
             if best:
                 best_id = str(best.get('id'))
                 if best_id == original_hifi_id:
                     return {'hifi_id': best_id, 'reason': 'isrc_match_original', 'source': 'original'}
                 logger.info("[RESOLVE] ISRC %s: %s (%s) -> %s", isrc, title, track_artist, best_id)
+                logger.info(
+                    "[RESOLVE] ISRC %s ranked %d candidates, selected %s from album '%s'",
+                    isrc, len(items), best_id,
+                    (best.get('album') or {}).get('title', 'unknown')
+                )
                 return {'hifi_id': best_id, 'reason': 'isrc_match', 'source': 'isrc'}
 
     # No ISRC available — log and return original (or None)
