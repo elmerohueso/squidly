@@ -141,6 +141,8 @@ def extract_hifi_track_info(info_response: Any) -> Dict[str, Any]:
 
     album_info = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
     album_id = album_info.get('id') if isinstance(album_info, dict) else None
+    album_title = album_info.get('title') if isinstance(album_info, dict) else None
+    album_cover = _format_hifi_image_value(album_info.get('cover')) if isinstance(album_info, dict) else None
 
     return {
         'id': track_id,
@@ -155,7 +157,9 @@ def extract_hifi_track_info(info_response: Any) -> Dict[str, Any]:
         'isrc': isrc,
         'url': url,
         'track_artists': artists,
+        'album': album_title,
         'album_id': album_id,
+        'cover': album_cover,
         'replayGain': replay_gain,
     }
 

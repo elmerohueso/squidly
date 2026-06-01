@@ -280,7 +280,10 @@ def process_recommendation_job(job_id, payload):
                     if info.get('title'):
                         rec['title'] = info['title']
                     if info.get('track_artists'):
-                        rec['artist'] = info['track_artists'][0].get('name', '') if info['track_artists'] else rec.get('artist', '')
+                        first_artist = info['track_artists'][0] if info['track_artists'] else {}
+                        rec['artist'] = first_artist.get('name', '') if first_artist else rec.get('artist', '')
+                        if first_artist.get('id') is not None:
+                            rec['artist_id'] = first_artist['id']
                     if info.get('album'):
                         rec['album'] = info['album']
                     if info.get('album_id'):
@@ -291,6 +294,8 @@ def process_recommendation_job(job_id, payload):
                         rec['cover'] = info['cover']
                     if info.get('isrc'):
                         rec['isrc'] = info['isrc']
+                    if info.get('audioQuality'):
+                        rec['quality'] = info['audioQuality']
                 resolved_count += 1
                 logger.info("[RECOMMENDATION] Resolved track %s (%s, source=%s) -> %s",
                             tid, result['reason'], result['source'], new_id)

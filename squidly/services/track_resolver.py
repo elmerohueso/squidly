@@ -324,10 +324,6 @@ def _filter_and_rank_isrc_results(
         if not _artists_overlap(track_artist, item_artists):
             continue
 
-        # Skip the original track
-        if item_id == original_hifi_id:
-            continue
-
         # ── Tier 0: compilation detection ──
         comp_tier = 0
         if penalty_comp and _is_compilation_from_search_data(item):
