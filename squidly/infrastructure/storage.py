@@ -1025,7 +1025,7 @@ def cleanup_old_fresh_finds(plex_account_id):
     # Fetch all fresh-finds playlists
     cur.execute(
         """
-        SELECT id, name, plex_playlist_key, playlist_date
+        SELECT id, name, playlist_date
         FROM recommendation_playlists
         WHERE plex_account_id = %s
           AND slug = 'fresh-finds'
@@ -1054,7 +1054,6 @@ def cleanup_old_fresh_finds(plex_account_id):
 
     playlist_ids = [p['id'] for p in playlists_to_delete]
     playlist_names = [p['name'] for p in playlists_to_delete]
-    playlist_keys = [p['plex_playlist_key'] for p in playlists_to_delete if p.get('plex_playlist_key')]
 
     # CASCADE on recommendation_playlist_tracks handles child rows
     cur.execute(
@@ -1069,7 +1068,7 @@ def cleanup_old_fresh_finds(plex_account_id):
     try:
         from squidly.infrastructure.plex import delete_plex_playlists_by_keys_or_names
         plex_deleted = delete_plex_playlists_by_keys_or_names(
-            plex_playlist_keys=playlist_keys,
+            plex_playlist_keys=[],
             fallback_names=playlist_names
         )
     except Exception as e:
@@ -1268,7 +1267,7 @@ def get_existing_artist_titles():
     }
 
 
-def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks, plex_playlist_key=None):
+def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
     from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
     from datetime import datetime
@@ -1281,36 +1280,32 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
     try:
         cur.execute(
             """
-            SELECT id, plex_playlist_key FROM recommendation_playlists
+            SELECT id FROM recommendation_playlists
             WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
             """,
             (plex_account_id, slug, playlist_date)
         )
         existing = cur.fetchone()
 
-        # If key was already set on a previous save and we don't have a new one, keep it
-        existing_key = existing.get('plex_playlist_key') if existing else None
-        effective_key = plex_playlist_key or existing_key
-
         if existing:
             cur.execute(
                 """
                 UPDATE recommendation_playlists
                 SET name = %s, strategy = %s, seed_count = %s, track_count = %s,
-                    plex_playlist_key = %s, generated_at = NOW()
+                    generated_at = NOW()
                 WHERE id = %s
                 """,
-                (name, strategy, seed_count, len(tracks), effective_key, existing['id'])
+                (name, strategy, seed_count, len(tracks), existing['id'])
             )
             playlist_id = existing['id']
         else:
             cur.execute(
                 """
-                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, plex_playlist_key, generated_at, playlist_date)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at, playlist_date)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
                 RETURNING id
                 """,
-                (plex_account_id, name, slug, strategy, seed_count, len(tracks), effective_key, playlist_date)
+                (plex_account_id, name, slug, strategy, seed_count, len(tracks), playlist_date)
             )
             playlist_id = cur.fetchone()['id']
 

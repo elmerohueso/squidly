@@ -326,37 +326,7 @@ def process_recommendation_job(job_id, payload):
         tracks=top_tracks
     )
 
-    # Stage 6: Create Plex playlist and store key
-    from squidly.infrastructure.plex import create_fresh_finds_plex_playlist
-    plex_playlist_key = None
-    try:
-        success, result = create_fresh_finds_plex_playlist(
-            plex_account_id=plex_account_id,
-            playlist_name=playlist_name,
-            tracks=top_tracks
-        )
-        if success:
-            plex_playlist_key = result
-            logger.info("[RECOMMENDATION] Job %s created Plex playlist with key=%s", job_id, plex_playlist_key)
-        else:
-            logger.info("[RECOMMENDATION] Job %s Plex playlist creation failed (non-fatal): %s", job_id, result)
-    except Exception as e:
-        logger.info("[RECOMMENDATION] Job %s Plex playlist creation error (non-fatal): %s", job_id, str(e))
-
-    if plex_playlist_key and playlist_id:
-        try:
-            conn_inner = get_db_connection()
-            cur_inner = conn_inner.cursor()
-            cur_inner.execute(
-                "UPDATE recommendation_playlists SET plex_playlist_key = %s WHERE id = %s",
-                (plex_playlist_key, playlist_id)
-            )
-            conn_inner.commit()
-            conn_inner.close()
-        except Exception as e:
-            logger.info("[RECOMMENDATION] Job %s failed to save playlist key (non-fatal): %s", job_id, str(e))
-
-    # Stage 7: Cleanup old Fresh Finds playlists
+    # Stage 6: Cleanup old Fresh Finds playlists
     from squidly.infrastructure.storage import cleanup_old_fresh_finds
     try:
         cleanup_result = cleanup_old_fresh_finds(plex_account_id)

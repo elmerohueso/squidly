@@ -221,8 +221,8 @@ class TestStorageFunctions:
         mock_cursor = MagicMock()
         mock_cursor.fetchone.return_value = {'id': 1, 'name': 'Fresh Finds (1-15)', 'slug': 'fresh-finds', 'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 2, 'generated_at': datetime(2024, 1, 15)}
         mock_cursor.fetchall.return_value = [
-            {'position': 1, 'hifi_id': 100, 'title': 'Track A', 'artist': 'Artist A', 'album': 'Album A', 'duration': 210, 'cover': 'cover1', 'seed_hifi_id': 50, 'score': 3.0, 'quality': 'LOSSLESS', 'artist_id': 1, 'album_id': 1},
-            {'position': 2, 'hifi_id': 200, 'title': 'Track B', 'artist': 'Artist B', 'album': 'Album B', 'duration': 180, 'cover': 'cover2', 'seed_hifi_id': 60, 'score': 2.0, 'quality': 'LOSSLESS', 'artist_id': 2, 'album_id': 2},
+            {'position': 1, 'hifi_id': 100, 'title': 'Track A', 'artist': 'Artist A', 'album': 'Album A', 'duration': 210, 'cover': 'cover1', 'seed_hifi_id': 50, 'score': 3.0, 'quality': 'LOSSLESS', 'artist_id': 1, 'album_id': 1, 'isrc': 'USRC12300001'},
+            {'position': 2, 'hifi_id': 200, 'title': 'Track B', 'artist': 'Artist B', 'album': 'Album B', 'duration': 180, 'cover': 'cover2', 'seed_hifi_id': 60, 'score': 2.0, 'quality': 'LOSSLESS', 'artist_id': 2, 'album_id': 2, 'isrc': 'USRC12300002'},
         ]
         mock_connection = MagicMock()
         mock_connection.cursor.return_value = mock_cursor
