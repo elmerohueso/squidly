@@ -522,7 +522,8 @@ def init_db():
             duration INTEGER,
             cover TEXT,
             seed_hifi_id INTEGER,
-            score FLOAT
+            score FLOAT,
+            isrc TEXT
         )
         """
     )
@@ -669,6 +670,17 @@ def init_db():
     )
     if not cur.fetchone():
         cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN library_id TEXT")
+
+    # Migration: add isrc to recommendation_playlist_tracks
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlist_tracks' AND column_name = 'isrc'
+        """
+    )
+    if not cur.fetchone():
+        cur.execute("ALTER TABLE recommendation_playlist_tracks ADD COLUMN isrc TEXT")
 
     # Migration: add plex_playlist_key to recommendation_playlists
     cur.execute(

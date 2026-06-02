@@ -1323,8 +1323,8 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
             cur.execute(
                 """
                 INSERT INTO recommendation_playlist_tracks
-                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, library_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, library_id, isrc)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     playlist_id,
@@ -1341,6 +1341,7 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
                     track.get('artist_id'),
                     track.get('album_id'),
                     track.get('library_id'),
+                    track.get('isrc'),
                 )
             )
 
@@ -1383,7 +1384,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
 
     cur.execute(
         """
-        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc
         FROM recommendation_playlist_tracks
         WHERE playlist_id = %s
         ORDER BY position
@@ -1415,6 +1416,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
                 'quality': t['quality'],
                 'artist_id': t['artist_id'],
                 'album_id': t['album_id'],
+                'isrc': t['isrc'],
             }
             for t in tracks
         ]
@@ -1446,7 +1448,7 @@ def get_todays_recommendation_playlist(plex_account_id, slug):
 
     cur.execute(
         """
-        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc
         FROM recommendation_playlist_tracks
         WHERE playlist_id = %s
         ORDER BY position
@@ -1478,6 +1480,7 @@ def get_todays_recommendation_playlist(plex_account_id, slug):
                 'quality': t['quality'],
                 'artist_id': t['artist_id'],
                 'album_id': t['album_id'],
+                'isrc': t['isrc'],
             }
             for t in tracks
         ]
