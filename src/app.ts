@@ -2618,11 +2618,17 @@ class App {
             this.renderLibraryBreadcrumb();
             const tracks = Array.isArray(data.tracks) ? data.tracks : [];
 
+            const normalized = tracks.map(t => this.normalizeTrack(t));
+            const durationStr = this.formatTotalDuration(normalized);
+            const subtitleHtml = tracks.length > 0
+                ? `<div class="playlist-subtitle">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'} • ${durationStr}</div>`
+                : '';
             this.libraryResultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
                         <h2>${this.escapeHtml(resolvedTitle)}</h2>
                     </div>
+                    ${subtitleHtml}
                 </div>
                 ${this.renderTrackGrid(tracks, {
                     viewMode: 'multi-album',
@@ -9524,6 +9530,17 @@ class App {
         return qualityMap[quality] || quality;
     }
 
+    private formatTotalDuration(tracks: { duration?: number | null }[]): string {
+        const totalSeconds = tracks.reduce((sum, t) => {
+            const s = typeof t.duration === 'number' ? t.duration : 0;
+            return sum + Math.max(0, s);
+        }, 0);
+        const minutes = Math.floor(totalSeconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const remaining = minutes % 60;
+        return hours > 0 ? `${hours}h ${remaining}m` : `${minutes}m`;
+    }
+
     private getHifiImageUrl(imageIdOrPath: string | undefined, size: number): string {
         if (!imageIdOrPath) {
             return '';
@@ -10205,11 +10222,14 @@ class App {
             this.freshFindsPlaylistName = playlistName;
             this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+            const normalized = tracks.map(t => this.normalizeTrack(t));
+            const durationStr = this.formatTotalDuration(normalized);
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
                     <div class="results-header-top">
                         <h2>${this.escapeHtml(playlistName)}</h2>
                     </div>
+                    <div class="playlist-subtitle">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'} • ${durationStr}</div>
                 </div>
                 <div class="results-list">
                     <div class="tracks-grid-wrapper" data-view-mode="multi-album">
