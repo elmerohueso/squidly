@@ -25,6 +25,7 @@ from squidly.jobs.orchestration import (
     JOB_TYPES,
     handle_on_success,
     is_job_type_running_or_queued,
+    is_pipeline_busy,
     queue_recommendation_generation,
 )
 from squidly.infrastructure.plex import get_last_successful_plex_sync_finished_at
@@ -338,7 +339,8 @@ def plex_sync_scheduler_worker():
             if interval_hours < 1:
                 interval_hours = 1
 
-            if is_job_type_running_or_queued('plex_library_update'):
+            if is_pipeline_busy():
+                logger.info("[PLEX_SYNC_SCHEDULER] Pipeline busy; deferring library update")
                 time.sleep(60)
                 continue
 
@@ -396,6 +398,13 @@ def recommendation_scheduler_worker():
                 continue
 
             last_run_date = today
+
+            if is_pipeline_busy():
+                logger.info("[RECOMMENDATION_SCHEDULER] Pipeline busy; deferring recommendation generation")
+                last_run_date = None  # Allow retry on next pass
+                time.sleep(60)
+                continue
+
             auto_download_pending = False
             logger.info("[RECOMMENDATION_SCHEDULER] Running daily recommendation generation")
 

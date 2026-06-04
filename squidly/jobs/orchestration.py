@@ -109,6 +109,39 @@ def wait_for_job_type(job_type, timeout=300, poll_interval=5, check_cancelled_jo
     return True
 
 
+_PIPELINE_JOB_TYPES = (
+    'plex_library_update',
+    'plex_library_sync',
+    'automatic_matching',
+    'bulk_playlist_add',
+    'generate_recommendations',
+    'fresh_finds_auto_download',
+)
+
+
+def is_pipeline_busy():
+    """Check if any pipeline job is queued or in progress.
+
+    Covers the full pipeline shared by the sync and recommendation schedulers:
+    plex_library_update → plex_library_sync → automatic_matching → bulk_playlist_add,
+    as well as generate_recommendations → fresh_finds_auto_download.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM jobs
+        WHERE job_type IN %s
+          AND status IN ('queued', 'in_progress')
+        """,
+        (_PIPELINE_JOB_TYPES,)
+    )
+    row = cur.fetchone() or {}
+    conn.close()
+    return (row.get('count') or 0) > 0
+
+
 def queue_if_not_running(job_type, payload, priority=0, run_after=None):
     """Enqueue a job only if no job of this type is already queued or in progress.
 
