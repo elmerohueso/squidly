@@ -576,6 +576,32 @@ interface AppHistoryState {
     libraryRoute: LibraryRouteState;
 }
 
+interface HeroCardAction {
+    id?: string;
+    className?: string;
+    title: string;
+    ariaLabel?: string;
+    svgContent: string;
+    disabled?: boolean;
+    dataAttrs?: Record<string, string>;
+}
+
+interface HeroCardConfig {
+    type: 'artist' | 'album';
+    coverUrl?: string;
+    coverAlt: string;
+    title: string;
+    titleBadge?: string;
+    subtitle?: {
+        text: string;
+        artistId?: number;
+        title?: string;
+    };
+    metadataItems?: string[];
+    proxyInfo?: string;
+    actions: HeroCardAction[];
+}
+
 class App {
     private static readonly NEW_PLEX_PLAYLIST_OPTION = '__new_playlist__';
     private static readonly TAG_CHECKBOX_IDS = [
@@ -2256,24 +2282,25 @@ class App {
     private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[], artistPicture?: string): void {
         this.libraryLoadedOnce = true;
         this.renderLibraryBreadcrumb();
+        const heroHtml = this.renderHeroCard({
+            type: 'artist',
+            coverUrl: artistPicture || undefined,
+            coverAlt: artistName,
+            title: artistName,
+            actions: [
+                {
+                    className: 'primary library-artist-hero-play-btn',
+                    title: 'Play artist',
+                    ariaLabel: 'Play artist',
+                    svgContent: this.getPlayIconSvg(),
+                    disabled: albums.length === 0,
+                    dataAttrs: { 'data-library-artist-id': this.libraryCurrentArtist?.id || '' },
+                },
+            ],
+        });
+
         this.libraryResultsContainer.innerHTML = `
-            <div class="artist-hero-section">
-                <div class="artist-hero-content">
-                    <div class="artist-cover-container">
-                        ${artistPicture
-                ? `<img src="${artistPicture}" alt="${this.escapeHtml(artistName)}" class="artist-cover">`
-                : '<div class="artist-cover-placeholder"></div>'}
-                    </div>
-                    <div class="artist-info">
-                        <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
-                    </div>
-                </div>
-                <div class="artist-actions">
-                    <button class="album-action-btn primary library-artist-hero-play-btn" data-library-artist-id="${this.escapeHtml(this.libraryCurrentArtist?.id || '')}" title="Play artist" aria-label="Play artist" ${albums.length === 0 ? 'disabled' : ''}>
-                        ${this.getPlayIconSvg()}
-                    </button>
-                </div>
-            </div>
+            ${heroHtml}
             <div class="results-header">
                 <div class="results-header-top">
                     <h2>Albums</h2>
@@ -2319,30 +2346,35 @@ class App {
             : `${totalDurationMinutes}m`;
 
         this.renderLibraryBreadcrumb();
+
+        const heroHtml = this.renderHeroCard({
+            type: 'album',
+            coverUrl: albumCover || undefined,
+            coverAlt: albumTitle,
+            title: albumTitle,
+            subtitle: {
+                text: albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+                title: `View albums by ${albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist'}`,
+            },
+            metadataItems: [
+                albumYear ? String(albumYear) : '',
+                `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`,
+                durationStr,
+            ].filter(Boolean),
+            actions: [
+                {
+                    className: 'primary library-album-hero-play-btn',
+                    title: 'Play album',
+                    ariaLabel: 'Play album',
+                    svgContent: this.getPlayIconSvg(),
+                    disabled: tracks.length === 0,
+                    dataAttrs: { 'data-library-album-id': this.libraryCurrentAlbum?.id || '' },
+                },
+            ],
+        });
+
         this.libraryResultsContainer.innerHTML = `
-            <div class="album-hero-section">
-                <div class="album-hero-content">
-                    <div class="album-cover-container">
-                        ${albumCover
-                ? `<img src="${albumCover}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">`
-                : '<div class="album-cover-placeholder"></div>'}
-                    </div>
-                    <div class="album-info">
-                        <h1 class="album-title">${this.escapeHtml(albumTitle)}</h1>
-                        <p class="album-artist"><span class="track-artist-name" title="View albums by ${this.escapeHtml(albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist')}">${this.escapeHtml(albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist')}</span></p>
-                        <div class="album-metadata">
-                            ${albumYear ? `<span class="metadata-item">${albumYear}</span>` : ''}
-                            <span class="metadata-item">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}</span>
-                            <span class="metadata-item">${durationStr}</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="album-actions">
-                    <button class="album-action-btn primary library-album-hero-play-btn" data-library-album-id="${this.escapeHtml(this.libraryCurrentAlbum?.id || '')}" title="Play album" aria-label="Play album" ${tracks.length === 0 ? 'disabled' : ''}>
-                        ${this.getPlayIconSvg()}
-                    </button>
-                </div>
-            </div>
+            ${heroHtml}
             <div class="results-header">
                 <div class="results-header-top">
                     <h2>Tracks</h2>
@@ -8203,6 +8235,84 @@ class App {
         }
     }
 
+    private renderHeroCard(config: HeroCardConfig): string {
+        const isArtist = config.type === 'artist';
+        const sectionClass = isArtist ? 'artist-hero-section' : 'album-hero-section';
+        const contentClass = isArtist ? 'artist-hero-content' : 'album-hero-content';
+        const coverContainerClass = isArtist ? 'artist-cover-container' : 'album-cover-container';
+        const coverClass = isArtist ? 'artist-cover' : 'album-cover';
+        const coverPlaceholderClass = isArtist ? 'artist-cover-placeholder' : 'album-cover-placeholder';
+        const infoClass = isArtist ? 'artist-info' : 'album-info';
+        const titleClass = isArtist ? 'artist-hero-name' : 'album-title';
+        const actionsClass = isArtist ? 'artist-actions' : 'album-actions';
+
+        const coverHtml = config.coverUrl
+            ? `<img src="${this.escapeAttribute(config.coverUrl)}" alt="${this.escapeHtml(config.coverAlt)}" class="${coverClass}">`
+            : `<div class="${coverPlaceholderClass}"></div>`;
+
+        const titleHtml = `${this.escapeHtml(config.title)}${config.titleBadge || ''}`;
+
+        let subtitleHtml = '';
+        if (config.subtitle) {
+            const dataAttrs = config.subtitle.artistId
+                ? ` data-artist-id="${config.subtitle.artistId}"`
+                : '';
+            const titleAttr = config.subtitle.title
+                ? ` title="${this.escapeHtml(config.subtitle.title)}"`
+                : '';
+            subtitleHtml = `<p class="album-artist"><span class="track-artist-name"${dataAttrs}${titleAttr}>${this.escapeHtml(config.subtitle.text)}</span></p>`;
+        }
+
+        let metadataHtml = '';
+        if (config.metadataItems && config.metadataItems.length > 0) {
+            const itemsHtml = config.metadataItems
+                .map(item => `<span class="metadata-item">${this.escapeHtml(item)}</span>`)
+                .join('');
+            metadataHtml = `<div class="album-metadata">${itemsHtml}</div>`;
+        }
+
+        let proxyHtml = '';
+        if (config.proxyInfo) {
+            proxyHtml = `<p class="proxy-info">Proxied via: <span class="proxy-name">${this.escapeHtml(config.proxyInfo)}</span></p>`;
+        }
+
+        const actionsHtml = config.actions
+            .map(action => {
+                let attrs = '';
+                if (action.id) attrs += ` id="${this.escapeAttribute(action.id)}"`;
+                attrs += ` class="album-action-btn${action.className ? ' ' + this.escapeAttribute(action.className) : ''}"`;
+                if (action.title) attrs += ` title="${this.escapeAttribute(action.title)}"`;
+                if (action.ariaLabel) attrs += ` aria-label="${this.escapeAttribute(action.ariaLabel)}"`;
+                if (action.disabled) attrs += ' disabled';
+                if (action.dataAttrs) {
+                    for (const [key, value] of Object.entries(action.dataAttrs)) {
+                        attrs += ` ${key}="${this.escapeHtml(value)}"`;
+                    }
+                }
+                return `<button${attrs}>${action.svgContent}</button>`;
+            })
+            .join('');
+
+        return `
+            <div class="${sectionClass}">
+                <div class="${contentClass}">
+                    <div class="${coverContainerClass}">
+                        ${coverHtml}
+                    </div>
+                    <div class="${infoClass}">
+                        <h1 class="${titleClass}">${titleHtml}</h1>
+                        ${subtitleHtml}
+                        ${metadataHtml}
+                        ${proxyHtml}
+                    </div>
+                </div>
+                <div class="${actionsClass}">
+                    ${actionsHtml}
+                </div>
+            </div>
+        `;
+    }
+
     private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean; trackId?: number; albumId?: number }): void {
         if (!container || !match || !match.exists) {
             return;
@@ -9567,27 +9677,32 @@ class App {
             this.exploreArtistName = artistName;
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
-            // Display artist hero with top tracks and albums
+            const heroHtml = this.renderHeroCard({
+                type: 'artist',
+                coverUrl: artistPictureUrl || undefined,
+                coverAlt: artistName,
+                title: artistName,
+                proxyInfo: data.proxied_via || undefined,
+                actions: [
+                    {
+                        id: 'artistPlayBtn',
+                        className: 'primary',
+                        title: 'Play artist',
+                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                        disabled: topTracks.length === 0 && albums.length === 0,
+                    },
+                    {
+                        id: 'findSimilarArtistBtn',
+                        className: 'hero-bottom-right',
+                        title: 'Find similar artists',
+                        svgContent: this.getMoreLikeIconSvg(),
+                        dataAttrs: { 'data-artist-id': String(artistId) },
+                    },
+                ],
+            });
+
             this.resultsContainer.innerHTML = `
-                <div class="artist-hero-section">
-                    <div class="artist-hero-content">
-                        <div class="artist-cover-container">
-                            ${artistPictureUrl ? `<img src="${artistPictureUrl}" alt="${this.escapeHtml(artistName)}" class="artist-cover">` : '<div class="artist-cover-placeholder"></div>'}
-                        </div>
-                        <div class="artist-info">
-                            <h1 class="artist-hero-name">${this.escapeHtml(artistName)}</h1>
-                            ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                        </div>
-                    </div>
-                    <div class="artist-actions">
-                        <button class="album-action-btn primary" id="artistPlayBtn" title="Play artist" ${topTracks.length === 0 && albums.length === 0 ? 'disabled' : ''}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
-                        </button>
-                        <button class="album-action-btn hero-bottom-right" id="findSimilarArtistBtn" title="Find similar artists" data-artist-id="${artistId}">
-                            ${this.getMoreLikeIconSvg()}
-                        </button>
-                    </div>
-                </div>
+                ${heroHtml}
                 ${topTracks.length > 0 ? `
                     <div class="results-header">
                         <div class="results-header-top">
@@ -9737,44 +9852,53 @@ class App {
                 ? this.getHifiImageUrl(albumData.cover, 1280)
                 : '';
 
-            // Display tracks with TIDAL-style album header
+            const heroHtml = this.renderHeroCard({
+                type: 'album',
+                coverUrl: coverArt || undefined,
+                coverAlt: albumTitle,
+                title: albumTitle,
+                titleBadge: albumIsExplicit
+                    ? '<span class="explicit-badge" title="Explicit content">E</span>'
+                    : undefined,
+                subtitle: {
+                    text: artistNames,
+                    artistId: primaryArtistId || undefined,
+                    title: primaryArtistId ? `View albums by ${artistNames}` : undefined,
+                },
+                metadataItems: [
+                    releaseDate ? String(releaseDate) : '',
+                    `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`,
+                    durationStr,
+                ].filter(Boolean),
+                proxyInfo: data.proxied_via || undefined,
+                actions: [
+                    {
+                        id: 'albumPlayBtn',
+                        className: 'primary',
+                        title: 'Play album',
+                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                    },
+                    {
+                        id: 'findSimilarAlbumBtn',
+                        title: 'Find similar albums',
+                        svgContent: this.getMoreLikeIconSvg(),
+                        dataAttrs: { 'data-album-id': String(albumId) },
+                    },
+                    {
+                        id: 'addAllPlaylistBtn',
+                        title: 'Add all tracks to a playlist',
+                        svgContent: this.getAddAllPlaylistIconSvg(),
+                    },
+                    {
+                        id: 'addAllLibraryBtn',
+                        title: 'Add all tracks to library',
+                        svgContent: this.getAddAllLibraryIconSvg(),
+                    },
+                ],
+            });
+
             this.resultsContainer.innerHTML = `
-                <div class="album-hero-section">
-                    <div class="album-hero-content">
-                        <div class="album-cover-container">
-                            ${coverArt ? `<img src="${coverArt}" alt="${this.escapeHtml(albumTitle)}" class="album-cover">` : '<div class="album-cover-placeholder"></div>'}
-                        </div>
-                        <div class="album-info">
-                            <h1 class="album-title">
-                                ${this.escapeHtml(albumTitle)}
-                                ${albumIsExplicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
-                            </h1>
-                            <p class="album-artist">
-                                <span class="track-artist-name" ${primaryArtistId ? `data-artist-id="${primaryArtistId}" title="View albums by ${this.escapeHtml(artistNames)}"` : ''}>${this.escapeHtml(artistNames)}</span>
-                            </p>
-                            <div class="album-metadata">
-                                ${releaseDate ? `<span class="metadata-item">${releaseDate}</span>` : ''}
-                                <span class="metadata-item">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}</span>
-                                <span class="metadata-item">${durationStr}</span>
-                            </div>
-                            ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                        </div>
-                    </div>
-                    <div class="album-actions">
-                        <button class="album-action-btn primary" id="albumPlayBtn" title="Play album">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
-                        </button>
-                        <button class="album-action-btn" id="findSimilarAlbumBtn" title="Find similar albums" data-album-id="${albumId}">
-                            ${this.getMoreLikeIconSvg()}
-                        </button>
-                        <button class="album-action-btn" id="addAllPlaylistBtn" title="Add all tracks to a playlist">
-                            ${this.getAddAllPlaylistIconSvg()}
-                        </button>
-                        <button class="album-action-btn" id="addAllLibraryBtn" title="Add all tracks to library">
-                            ${this.getAddAllLibraryIconSvg()}
-                        </button>
-                    </div>
-                </div>
+                ${heroHtml}
                 <div class="results-list">
                     ${this.formatTracksGrid(tracks, numberOfVolumes)}
                 </div>
