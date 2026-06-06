@@ -597,7 +597,7 @@ def save_download_settings(settings):
     cur.execute(
         """
         INSERT INTO download_settings (
-            id, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+            id, format, quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
             tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
             tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
             tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
@@ -605,13 +605,14 @@ def save_download_settings(settings):
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                 metadata_source, updated_at
             )
-            VALUES (1, %s, %s, %s, %s, %s, %s,
+            VALUES (1, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
+            format = excluded.format,
             quality = excluded.quality,
             parent_folder = excluded.parent_folder,
             file_naming = excluded.file_naming,
@@ -645,6 +646,7 @@ def save_download_settings(settings):
             updated_at = excluded.updated_at
         """,
         (
+            settings.get('format', settings.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])),
             settings.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality']),
             settings['parent_folder'],
             settings['file_naming_album'],
