@@ -132,6 +132,7 @@ def download_settings():
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
         'download_source': payload.get('downloadSource', payload.get('download_source', current.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']))),
         'deezer_arl': payload.get('deezerArl') or payload.get('deezer_arl') or current.get('deezer_arl', ''),
+        'metadata_source': payload.get('metadataSource', payload.get('metadata_source', current.get('metadata_source', DEFAULT_DOWNLOAD_SETTINGS['metadata_source']))),
     }
 
     for key in tag_keys:
@@ -142,6 +143,9 @@ def download_settings():
 
     if updated['quality'] not in ('LOSSLESS', 'HIGH', 'LOW'):
         return jsonify({'error': 'Invalid quality value'}), 400
+
+    if updated['metadata_source'] not in ('tidal', 'musicbrainz'):
+        updated['metadata_source'] = DEFAULT_DOWNLOAD_SETTINGS['metadata_source']
 
     # Validate comma-separated download source priority list
     download_sources = [s.strip() for s in updated['download_source'].split(',')]
@@ -183,6 +187,7 @@ def download_settings():
         'ignore_matches': updated['ignore_matches'],
         'download_source': updated['download_source'],
         'deezer_arl': updated['deezer_arl'],
+        'metadata_source': updated['metadata_source'],
     }
     for key in tag_keys:
         result[key] = updated[key]

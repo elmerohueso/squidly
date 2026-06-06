@@ -100,6 +100,8 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN download_source TEXT NOT NULL DEFAULT 'tidal'")
     if 'deezer_arl' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN deezer_arl TEXT NOT NULL DEFAULT ''")
+    if 'metadata_source' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN metadata_source TEXT NOT NULL DEFAULT 'tidal'")
 
     cur.execute(
         """

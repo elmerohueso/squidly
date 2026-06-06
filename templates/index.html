@@ -225,6 +225,25 @@
                 <div class="page" id="settingsPage" data-page="settings">
                     <h2>Settings</h2>
                     <div class="settings-content">
+                        <div class="settings-section" id="browseSourceSettings">
+                            <h3>Browse Source</h3>
+                            <label class="settings-label" style="margin-bottom: 0.5rem;">Music metadata source for search and browsing</label>
+                            <div class="format-toggle" role="radiogroup" aria-label="Browse source">
+                                <label class="toggle-option">
+                                    <input type="radio" name="browseSource" value="tidal" id="browseSourceTidal" checked>
+                                    <span>Tidal/HiFi</span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="radio" name="browseSource" value="musicbrainz" id="browseSourceMusicbrainz">
+                                    <span>MusicBrainz</span>
+                                </label>
+                            </div>
+                            <p class="settings-hint">
+                                MusicBrainz: open music encyclopedia. No streaming quality info, but broader catalog coverage.
+                                Downloads still use Tidal/Qobuz/Deezer mirrors.
+                            </p>
+                        </div>
+
                         <div class="settings-section" id="downloadsSettings">
                             <h3>Downloads</h3>
                             <label class="settings-label" style="margin-bottom: 0.5rem;">Download Sources (priority order)</label>

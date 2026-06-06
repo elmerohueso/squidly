@@ -8,6 +8,7 @@ import requests
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from squidly.infrastructure import downloads
+from squidly.services.metadata import get_active_metadata_provider
 from squidly.services.hifi import (
     get_hifi_track_object,
     get_hifi_album_object,
@@ -42,180 +43,19 @@ def search():
     if not query:
         return jsonify({'error': 'Query value cannot be empty'}), 400
 
+    provider = get_active_metadata_provider()
+
+    limit = int(request.args.get('limit', 25))
+    offset = int(request.args.get('offset', 0))
+
     if search_type == 'trackid':
-        if not query.isdigit():
-            return jsonify({'error': 'Track ID must be numeric'}), 400
+        result = provider.get_track(query)
+        if 'error' in result:
+            return jsonify({'data': {'items': []}})
+        return jsonify({'data': {'items': [result.get('track', {})]}})
 
-        try:
-            response, target = downloads.make_request_with_retry_rotating_mirrors(
-                f"/info/?{urlencode({'id': query})}",
-                get_squid_urls(),
-                method='GET',
-                timeout=10,
-                max_retries=3
-            )
-
-            if not response.ok:
-                return jsonify({
-                    'error': f'Upstream API error via {target["name"]}',
-                    'status_code': response.status_code
-                }), response.status_code
-
-            result = response.json() if response.content else {}
-            track_item = None
-
-            if isinstance(result, dict):
-                data = result.get('data') or {}
-                if isinstance(data, dict) and data.get('track'):
-                    track_item = data.get('track')
-                elif isinstance(data, dict) and data.get('items'):
-                    items = data.get('items')
-                    if isinstance(items, list) and items:
-                        track_item = items[0]
-                elif isinstance(result.get('track'), dict):
-                    track_item = result.get('track')
-                elif isinstance(result.get('data'), dict):
-                    track_item = result.get('data')
-
-            if not track_item:
-                return jsonify({
-                    'data': {'items': []},
-                    'proxied_via': target['name']
-                })
-
-            if 'id' not in track_item or not track_item.get('id'):
-                track_item['id'] = int(query)
-
-            normalized_track_item = _build_normalized_hifi_track_object(track_item) if isinstance(track_item, dict) else track_item
-
-            return jsonify({
-                'data': {'items': [normalized_track_item]},
-                'proxied_via': target['name']
-            })
-
-        except requests.exceptions.RequestException as e:
-            return jsonify({
-                'error': 'Proxy error',
-                'details': str(e),
-                'query': query
-            }), 502
-
-    upstream_params = [(search_type, query)]
-    for param_name in ('limit', 'offset'):
-        param_value = request.args.get(param_name)
-        if param_value:
-            upstream_params.append((param_name, param_value))
-
-    upstream_query = urlencode(upstream_params)
-    
-    try:
-        response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/search/?{upstream_query}",
-            get_squid_urls(),
-            max_retries=3
-        )
-        
-        if not response.ok:
-            return jsonify({
-                'error': f'Upstream API error via {target["name"]}',
-                'status_code': response.status_code
-            }), response.status_code
-        
-        result = response.json()
-        result['proxied_via'] = target['name']
-        
-        if isinstance(result, dict):
-            data = result.get('data')
-            if isinstance(data, dict):
-                if search_type == 'al':
-                    albums = data.get('albums')
-                    if isinstance(albums, dict):
-                        album_items = albums.get('items')
-                        if isinstance(album_items, list):
-                            best_by_key = {}
-                            for album in album_items:
-                                if not isinstance(album, dict):
-                                    continue
-                                key = _get_hifi_album_dedupe_key(album)
-                                if key is None:
-                                    continue
-                                existing = best_by_key.get(key)
-                                if existing is None:
-                                    best_by_key[key] = album
-                                    continue
-                                current_rank = _get_hifi_audio_quality_rank(album.get('audioQuality'))
-                                existing_rank = _get_hifi_audio_quality_rank(existing.get('audioQuality'))
-                                if current_rank > existing_rank:
-                                    best_by_key[key] = album
-
-                            deduped_items = []
-                            seen_keys = set()
-                            for album in album_items:
-                                if not isinstance(album, dict):
-                                    continue
-                                key = _get_hifi_album_dedupe_key(album)
-                                if key is None:
-                                    deduped_items.append(album)
-                                    continue
-                                if key in seen_keys:
-                                    continue
-                                chosen = best_by_key.get(key)
-                                if chosen is not None:
-                                    deduped_items.append(chosen)
-                                    seen_keys.add(key)
-                                else:
-                                    deduped_items.append(album)
-                                    seen_keys.add(key)
-
-                            albums['items'] = deduped_items
-                elif search_type == 's':
-                    items = data.get('items')
-                    if isinstance(items, list):
-                        best_by_key = {}
-                        for item in items:
-                            if not isinstance(item, dict):
-                                continue
-                            key = _get_hifi_track_dedupe_key(item)
-                            if key is None:
-                                continue
-                            existing = best_by_key.get(key)
-                            if existing is None:
-                                best_by_key[key] = item
-                                continue
-                            current_rank = _get_hifi_audio_quality_rank(item.get('audioQuality'))
-                            existing_rank = _get_hifi_audio_quality_rank(existing.get('audioQuality'))
-                            if current_rank > existing_rank:
-                                best_by_key[key] = item
-
-                        deduped_items = []
-                        seen_keys = set()
-                        for item in items:
-                            if not isinstance(item, dict):
-                                continue
-                            key = _get_hifi_track_dedupe_key(item)
-                            if key is None:
-                                deduped_items.append(item)
-                                continue
-                            if key in seen_keys:
-                                continue
-                            chosen = best_by_key.get(key)
-                            if chosen is not None:
-                                deduped_items.append(chosen)
-                                seen_keys.add(key)
-                            else:
-                                deduped_items.append(item)
-                                seen_keys.add(key)
-
-                        data['items'] = [_build_normalized_hifi_track_object(item) if isinstance(item, dict) else item for item in deduped_items]
-
-        return jsonify(result)
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': f'Proxy error',
-            'details': str(e),
-            'query': query
-        }), 502
+    result = provider.search(query, search_type, limit=limit, offset=offset)
+    return jsonify(result)
 
 
 @search_bp.route('/api/hifi/tracks/<track_id>', methods=['GET'])
@@ -226,36 +66,9 @@ def track_info(track_id=None):
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
 
-    if not track_id.isdigit():
-        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
-
-    upstream_query = urlencode({'id': track_id})
-    
-    try:
-        response, target = downloads.make_request_with_retry_rotating_mirrors(
-            f"/info/?{upstream_query}",
-            get_squid_urls(),
-            method='GET',
-            timeout=10,
-            max_retries=3
-        )
-        
-        if not response.ok:
-            return jsonify({
-                'error': f'Upstream API error via {target["name"]}',
-                'status_code': response.status_code
-            }), response.status_code
-        
-        result = response.json()
-        result['proxied_via'] = target['name']
-        
-        return jsonify(result)
-    
-    except requests.exceptions.RequestException as e:
-        return jsonify({
-            'error': f'Proxy error',
-            'details': str(e)
-        }), 502
+    provider = get_active_metadata_provider()
+    result = provider.get_track(track_id)
+    return jsonify(result)
 
 
 @search_bp.route('/api/hifi/tracks/<track_id>/stream', methods=['GET'])
@@ -267,8 +80,11 @@ def track_stream(track_id=None):
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
 
-    if not track_id.isdigit():
-        return jsonify({'error': 'Track ID parameter must be a numeric Tidal track ID'}), 400
+    # Check if streaming is supported by current source
+    from squidly.infrastructure.storage import get_download_settings
+    settings = get_download_settings()
+    if settings.get('metadata_source', 'tidal') == 'musicbrainz':
+        return jsonify({'error': 'Streaming is not available when using MusicBrainz as the browse source.'}), 501
 
     valid_qualities = {'HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'}
     if quality not in valid_qualities:
@@ -344,21 +160,9 @@ def album_object(album_id=None):
     if not album_id:
         return jsonify({'error': 'Album ID path parameter is required'}), 400
 
-    if not album_id.isdigit():
-        return jsonify({'error': 'Album ID path parameter must be a numeric Tidal album ID'}), 400
-
-    include_streams = str(request.args.get('include_streams', 'false')).strip().lower() in ('1', 'true', 'yes')
-    audio_quality = str(request.args.get('audio_quality', '')).strip() or None
-
-    try:
-        result = get_hifi_album_object(
-            album_id,
-            include_streams=include_streams,
-            audio_quality=audio_quality
-        )
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': 'Failed to build album object', 'details': str(e)}), 500
+    provider = get_active_metadata_provider()
+    result = provider.get_album(album_id)
+    return jsonify(result)
 
 
 @search_bp.route('/api/hifi/artists/<artist_id>', methods=['GET'])
@@ -369,14 +173,9 @@ def artist_object(artist_id=None):
     if not artist_id:
         return jsonify({'error': 'Artist ID path parameter is required'}), 400
 
-    if not artist_id.isdigit():
-        return jsonify({'error': 'Artist ID path parameter must be a numeric Tidal artist ID'}), 400
-
-    try:
-        result = get_hifi_artist_object(artist_id)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': 'Failed to build artist object', 'details': str(e)}), 500
+    provider = get_active_metadata_provider()
+    result = provider.get_artist(artist_id)
+    return jsonify(result)
 
 
 @search_bp.route('/api/hifi/playlists/<playlist_id>', methods=['GET'])
@@ -430,9 +229,6 @@ def track_similar(track_id=None):
     if not track_id:
         return jsonify({'error': 'Track ID parameter is required'}), 400
 
-    if not track_id.isdigit():
-        return jsonify({'error': 'Track ID must be numeric'}), 400
-
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/recommendations/?id={track_id}",
@@ -463,9 +259,6 @@ def artist_similar(artist_id=None):
 
     if not artist_id:
         return jsonify({'error': 'Artist ID parameter is required'}), 400
-
-    if not artist_id.isdigit():
-        return jsonify({'error': 'Artist ID must be numeric'}), 400
 
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
@@ -498,9 +291,6 @@ def album_similar(album_id=None):
     if not album_id:
         return jsonify({'error': 'Album ID parameter is required'}), 400
 
-    if not album_id.isdigit():
-        return jsonify({'error': 'Album ID must be numeric'}), 400
-
     try:
         response, target = downloads.make_request_with_retry_rotating_mirrors(
             f"/album/similar/?id={album_id}",
@@ -522,6 +312,35 @@ def album_similar(album_id=None):
 
     except requests.exceptions.RequestException as e:
         return jsonify({'error': 'Proxy error', 'details': str(e)}), 502
+
+
+@search_bp.route('/api/source', methods=['GET'])
+def get_source_info():
+    """Get current browse source and its capabilities."""
+    from squidly.infrastructure.storage import get_download_settings
+    settings = get_download_settings()
+    source = settings.get('metadata_source', 'tidal')
+
+    capabilities = {
+        'tidal': {
+            'source': 'tidal',
+            'supports_similar': True,
+            'supports_streaming': True,
+            'supports_quality_badges': True,
+            'supports_playlists': True,
+            'supports_artist_images': True,
+        },
+        'musicbrainz': {
+            'source': 'musicbrainz',
+            'supports_similar': False,
+            'supports_streaming': False,
+            'supports_quality_badges': False,
+            'supports_playlists': False,
+            'supports_artist_images': False,
+        },
+    }
+
+    return jsonify(capabilities.get(source, capabilities['tidal']))
 
 
 @search_bp.route('/api/lastfm/playlist', methods=['POST'])

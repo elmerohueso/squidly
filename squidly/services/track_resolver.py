@@ -13,10 +13,7 @@ Usage:
 
 import logging
 import re
-import time
 from typing import Any, Optional
-
-import requests
 
 from squidly.services.hifi import (
     _fetch_hifi_album_payload,
@@ -30,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 _album_cache: dict = {}
 
-_MUSICBRAINZ_USER_AGENT = 'Squidly/1.0 (https://github.com/elmerohueso/squidly)'
+# MusicBrainz requests now use the centralised client in squidly.services.musicbrainz
+# Legacy constant kept as reference but not used directly for MB API calls
 
 # ── Detection helpers ──
 
@@ -209,6 +207,8 @@ def _extract_primary_artist_name(track_info: dict) -> str:
 
 def _isrc_from_musicbrainz(title: str, artist: str, album: str = "", year: Optional[int] = None) -> Optional[str]:
     """Search MusicBrainz for an ISRC by text. Returns first ISRC or None."""
+    from squidly.services.musicbrainz import mb_search_recordings
+
     query_parts = [f'recording:"{title}"', f'artist:"{artist}"']
     if album:
         query_parts.append(f'release:"{album}"')
@@ -217,33 +217,13 @@ def _isrc_from_musicbrainz(title: str, artist: str, album: str = "", year: Optio
     query = ' AND '.join(query_parts)
 
     try:
-        resp = requests.get(
-            'https://musicbrainz.org/ws/2/recording/',
-            params={'query': query, 'fmt': 'json', 'limit': 5},
-            headers={'User-Agent': _MUSICBRAINZ_USER_AGENT},
-            timeout=10,
-        )
-        if resp.status_code == 429:
-            logger.warning("[RESOLVE] MusicBrainz rate limited (429), skipping ISRC lookup for '%s' by '%s'", title, artist)
-            return None
-        if resp.status_code == 503:
-            time.sleep(1)
-            resp = requests.get(
-                'https://musicbrainz.org/ws/2/recording/',
-                params={'query': query, 'fmt': 'json', 'limit': 5},
-                headers={'User-Agent': _MUSICBRAINZ_USER_AGENT},
-                timeout=10,
-            )
-        if not resp.ok:
-            logger.warning("[RESOLVE] MusicBrainz returned %d for '%s' by '%s'", resp.status_code, title, artist)
-            return None
-
-        recordings = resp.json().get('recordings', [])
+        result = mb_search_recordings(query, limit=5)
+        recordings = result.get('recordings', [])
         for rec in recordings:
             isrcs = rec.get('isrcs') or []
             if isrcs:
                 return isrcs[0]
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.warning("[RESOLVE] MusicBrainz request failed: %s", e)
     return None
 

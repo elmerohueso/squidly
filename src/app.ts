@@ -21,7 +21,7 @@ interface SearchResult {
 }
 
 interface Track {
-    id: number;
+    id: string;
     title: string;
     version?: string;
     duration?: number;
@@ -35,24 +35,26 @@ interface Track {
     trackNumber?: number;
     volumeNumber?: number;
     explicit?: boolean;
+    isrc?: string;
     mediaMetadata?: {
         tags?: string[];
     };
 }
 
 interface Artist {
-    id: number;
+    id: string;
     name: string;
+    picture?: string;
 }
 
 interface Album {
-    id: number;
+    id: string;
     title: string;
     cover?: string;
 }
 
 interface AlbumSearchItem {
-    id: number;
+    id: string;
     title: string;
     cover?: string;
     artists?: Artist[];
@@ -72,7 +74,7 @@ interface AlbumSearchItem {
 }
 
 interface ArtistSearchItem {
-    id: number;
+    id: string;
     name: string;
     picture?: string;
     popularity?: number;
@@ -98,7 +100,7 @@ interface NormalizedAlbum {
     id: string;
     title: string;
     artist: string;
-    artistId?: number;
+    artistId?: string;
     year: number | null;
     trackCount: number | null;
     quality: string;
@@ -122,9 +124,9 @@ interface NormalizedTrack {
     title: string;
     version?: string;
     artist: string;
-    artistId?: number;
+    artistId?: string;
     album: string;
-    albumId?: number;
+    albumId?: string;
     albumCover?: string;
     trackNumber: number | null;
     volumeNumber: number;
@@ -257,7 +259,7 @@ interface PlaylistSearchItem {
 
 interface AlbumInfo {
     data?: {
-        id: number;
+        id: string;
         title: string;
         cover?: string;
         explicit?: boolean;
@@ -295,11 +297,11 @@ interface AlbumObjectResponse {
 
 interface ArtistObject {
     artist?: {
-        id?: number;
+        id?: string;
         name?: string;
         picture?: string;
         albums?: AlbumSearchItem[];
-        top_tracks?: Track[] | number[];
+        top_tracks?: Track[] | string[];
     };
     proxied_via?: string;
     error?: string;
@@ -523,20 +525,21 @@ interface DownloadSettings {
     penaltyKaraoke: boolean;
     penaltyLive: boolean;
     deezerArl: string;
+    metadataSource: 'tidal' | 'musicbrainz';
 }
 
 interface AppRouteState {
     view: string;
     searchType?: string;
     query?: string;
-    artistId?: number;
-    albumId?: number;
-    trackId?: number;
+    artistId?: string;
+    albumId?: string;
+    trackId?: string;
     playlistId?: string;
     playlistTitle?: string;
     username?: string;
     playlistType?: string;
-    freshFindsPlaylistId?: number;
+    freshFindsPlaylistId?: string;
 }
 
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
@@ -594,7 +597,7 @@ interface HeroCardConfig {
     titleBadge?: string;
     subtitle?: {
         text: string;
-        artistId?: number;
+        artistId?: string;
         title?: string;
     };
     metadataItems?: string[];
@@ -701,6 +704,8 @@ class App {
     private qualityLosslessInput: HTMLInputElement;
     private qualityHighInput: HTMLInputElement;
     private qualityLowInput: HTMLInputElement;
+    private browseSourceTidalInput: HTMLInputElement;
+    private browseSourceMusicbrainzInput: HTMLInputElement;
     private downloadSourceList: HTMLElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
@@ -762,6 +767,14 @@ class App {
     private mobileMenuToggle: HTMLButtonElement | null;
     private mobileMenuOverlay: HTMLElement | null;
     private downloadSettings: DownloadSettings;
+    private sourceCapabilities = {
+        source: 'tidal' as 'tidal' | 'musicbrainz',
+        supports_similar: true,
+        supports_streaming: true,
+        supports_quality_badges: true,
+        supports_playlists: true,
+        supports_artist_images: true,
+    };
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
@@ -999,6 +1012,8 @@ class App {
         this.qualityLosslessInput = document.getElementById('qualityLossless') as HTMLInputElement;
         this.qualityHighInput = document.getElementById('qualityHigh') as HTMLInputElement;
         this.qualityLowInput = document.getElementById('qualityLow') as HTMLInputElement;
+        this.browseSourceTidalInput = document.getElementById('browseSourceTidal') as HTMLInputElement;
+        this.browseSourceMusicbrainzInput = document.getElementById('browseSourceMusicbrainz') as HTMLInputElement;
         this.downloadSourceList = document.getElementById('downloadSourceList') as HTMLElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
@@ -1078,7 +1093,7 @@ class App {
         this.initializeHistoryNavigation();
         this.initializeHistoryControls();
         void this.fetchAppConfig();
-        void this.fetchDownloadSettingsFromServer();
+        void this.fetchDownloadSettingsFromServer().then(() => this.fetchSourceInfo());
         void this.loadDeezerConfig();
         void this.loadListenbrainzConfig();
         void this.loadYtmConfig();
@@ -1330,6 +1345,14 @@ class App {
                 this.updateSettingsFromForm();
             });
         }
+
+        // Browse source event listeners
+        if (this.browseSourceTidalInput) {
+            this.browseSourceTidalInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.browseSourceMusicbrainzInput) {
+            this.browseSourceMusicbrainzInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
         if (this.fileNamingAlbumInput) {
             this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
         }
@@ -1512,7 +1535,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.handlePlayToggle(parseInt(trackId, 10), trackRow, gridPlayBtn);
+                            void this.handlePlayToggle(trackId, trackRow, gridPlayBtn);
                             return;
                         }
                     }
@@ -1522,7 +1545,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.handlePlayAlbum(parseInt(albumId, 10), gridPlayBtn);
+                            void this.handlePlayAlbum(albumId, gridPlayBtn);
                             return;
                         }
                     }
@@ -1536,7 +1559,7 @@ class App {
                     e.stopPropagation();
                     const albumId = albumRow.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        void this.navigateToRoute({ view: 'album', albumId: albumId }, true);
                     }
                     return;
                 }
@@ -1548,7 +1571,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.handleAddToPlaylist(parseInt(trackId, 10), trackRow, 'loose');
+                            void this.handleAddToPlaylist(trackId, trackRow, 'loose');
                             return;
                         }
                     }
@@ -1558,7 +1581,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.handleAddAlbumToPlaylist(parseInt(albumId, 10), albumRow);
+                            void this.handleAddAlbumToPlaylist(albumId, albumRow);
                             return;
                         }
                     }
@@ -1580,12 +1603,12 @@ class App {
 
                     // Try dataset-based IDs first (set by createPlexMatchChip)
                     if (chipEl.dataset.trackId) {
-                        void this.handleRedownloadTrack(parseInt(chipEl.dataset.trackId, 10), chipEl, chipEl);
+                        void this.handleRedownloadTrack(chipEl.dataset.trackId, chipEl, chipEl);
                         return;
                     }
 
                     if (chipEl.dataset.albumId) {
-                        void this.handleRedownloadAlbum(parseInt(chipEl.dataset.albumId, 10), chipEl, chipEl);
+                        void this.handleRedownloadAlbum(chipEl.dataset.albumId, chipEl, chipEl);
                         return;
                     }
 
@@ -1594,7 +1617,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.handleRedownloadTrack(parseInt(trackId, 10), trackRow, chipEl);
+                            void this.handleRedownloadTrack(trackId, trackRow, chipEl);
                         }
                         return;
                     }
@@ -1603,7 +1626,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.handleRedownloadAlbum(parseInt(albumId, 10), albumRow, chipEl);
+                            void this.handleRedownloadAlbum(albumId, albumRow, chipEl);
                         }
                         return;
                     }
@@ -1622,7 +1645,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.handleDownload(parseInt(trackId, 10), trackRow, 'loose');
+                            void this.handleDownload(trackId, trackRow, 'loose');
                             return;
                         }
                     }
@@ -1632,7 +1655,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.handleDownloadAlbum(parseInt(albumId, 10), albumRow);
+                            void this.handleDownloadAlbum(albumId, albumRow);
                             return;
                         }
                     }
@@ -1648,7 +1671,7 @@ class App {
                     if (trackRow) {
                         const trackId = trackRow.getAttribute('data-track-id');
                         if (trackId) {
-                            void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                            void this.navigateToRoute({ view: 'similar_tracks', trackId: trackId }, true);
                             return;
                         }
                     }
@@ -1658,7 +1681,7 @@ class App {
                     if (albumRow) {
                         const albumId = albumRow.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: albumId }, true);
                             return;
                         }
                     }
@@ -1672,7 +1695,7 @@ class App {
                     const trackCard = playBtn.closest('.track-card') as HTMLElement;
                     const trackId = trackCard?.getAttribute('data-track-id');
                     if (trackId) {
-                        void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
+                        void this.handlePlayToggle(trackId, trackCard, playBtn);
                     }
                     return;
                 }
@@ -1683,7 +1706,7 @@ class App {
                     const trackCard = addPlaylistBtn.closest('.track-card') as HTMLElement;
                     const trackId = trackCard?.getAttribute('data-track-id');
                     if (trackId) {
-                        void this.handleAddToPlaylist(parseInt(trackId, 10), trackCard, 'loose');
+                        void this.handleAddToPlaylist(trackId, trackCard, 'loose');
                     }
                     return;
                 }
@@ -1694,7 +1717,7 @@ class App {
                     const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
                     const trackId = trackCard?.getAttribute('data-track-id');
                     if (trackId) {
-                        void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
+                        void this.handleDownload(trackId, trackCard, 'loose');
                     }
                     return; // Stop here if it was a download button
                 }
@@ -1711,14 +1734,14 @@ class App {
 
                     const trackId = card.getAttribute('data-track-id');
                     if (trackId) {
-                        void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                        void this.navigateToRoute({ view: 'similar_tracks', trackId: trackId }, true);
                         return;
                     }
 
                     if (card.classList.contains('album-card')) {
                         const albumId = card.getAttribute('data-album-id');
                         if (albumId) {
-                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: albumId }, true);
                         }
                         return;
                     }
@@ -1726,7 +1749,7 @@ class App {
                     if (card.classList.contains('artist-card')) {
                         const artistId = card.getAttribute('data-artist-id');
                         if (artistId) {
-                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: artistId }, true);
                         }
                         return;
                     }
@@ -1741,7 +1764,7 @@ class App {
                     if (artistCard) {
                         const artistId = artistCard.getAttribute('data-artist-id');
                         if (artistId) {
-                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: artistId }, true);
                         }
                     }
                     return;
@@ -1754,7 +1777,7 @@ class App {
                     e.stopPropagation();
                     const artistId = artistCardCompact.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                     }
                     return;
                 }
@@ -1766,7 +1789,7 @@ class App {
                     const artistId = trackRow?.getAttribute('data-artist-id');
                     if (artistId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                         return;
                     }
                 }
@@ -1777,7 +1800,7 @@ class App {
                     const artistId = heroArtistName.getAttribute('data-artist-id');
                     if (artistId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                         return;
                     }
                 }
@@ -1789,7 +1812,7 @@ class App {
                     const albumId = trackRow?.getAttribute('data-album-id');
                     if (albumId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        void this.navigateToRoute({ view: 'album', albumId: albumId }, true);
                         return;
                     }
                 }
@@ -1801,7 +1824,7 @@ class App {
                     const artistId = albumRow?.getAttribute('data-artist-id');
                     if (artistId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                         return;
                     }
                 }
@@ -1813,7 +1836,7 @@ class App {
                     const artistId = trackCard?.getAttribute('data-artist-id');
                     if (artistId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                         return;
                     }
                 }
@@ -1825,7 +1848,7 @@ class App {
                     const albumId = trackCard?.getAttribute('data-album-id');
                     if (albumId) {
                         e.stopPropagation();
-                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        void this.navigateToRoute({ view: 'album', albumId: albumId }, true);
                         return;
                     }
                 }
@@ -1855,7 +1878,7 @@ class App {
                 if (clickedCard && clickedCard.classList.contains('album-card')) {
                     const albumId = clickedCard.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        void this.navigateToRoute({ view: 'album', albumId: albumId }, true);
                     }
                 }
 
@@ -1863,7 +1886,7 @@ class App {
                 if (clickedCard && clickedCard.classList.contains('artist-card')) {
                     const artistId = clickedCard.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        void this.navigateToRoute({ view: 'artist', artistId: artistId }, true);
                     }
                 }
             });
@@ -3298,13 +3321,13 @@ class App {
         }
 
         if (view === 'artist') {
-            const artistId = Number(params.get('id') || '0');
-            return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
+            const artistId = params.get('id') || '';
+            return artistId ? { view, artistId } : null;
         }
 
         if (view === 'album') {
-            const albumId = Number(params.get('id') || '0');
-            return Number.isFinite(albumId) && albumId > 0 ? { view, albumId } : null;
+            const albumId = params.get('id') || '';
+            return albumId ? { view, albumId } : null;
         }
 
         if (view === 'playlist') {
@@ -3324,25 +3347,24 @@ class App {
         }
 
         if (view === 'similar_tracks') {
-            const trackId = Number(params.get('id') || '0');
-            return Number.isFinite(trackId) && trackId > 0 ? { view, trackId } : null;
+            const trackId = params.get('id') || '';
+            return trackId ? { view, trackId } : null;
         }
 
         if (view === 'similar_albums') {
-            const albumId = Number(params.get('id') || '0');
-            return Number.isFinite(albumId) && albumId > 0 ? { view, albumId } : null;
+            const albumId = params.get('id') || '';
+            return albumId ? { view, albumId } : null;
         }
 
         if (view === 'similar_artists') {
-            const artistId = Number(params.get('id') || '0');
-            return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
+            const artistId = params.get('id') || '';
+            return artistId ? { view, artistId } : null;
         }
 
         if (view === 'fresh_finds') {
-            const playlistIdParam = params.get('playlist_id');
-            const playlistId = playlistIdParam ? Number(playlistIdParam) : undefined;
-            return playlistId && Number.isFinite(playlistId) && playlistId > 0
-                ? { view: 'fresh_finds', freshFindsPlaylistId: playlistId }
+            const freshFindsPlaylistId = params.get('playlist_id') || undefined;
+            return freshFindsPlaylistId
+                ? { view: 'fresh_finds', freshFindsPlaylistId }
                 : { view: 'fresh_finds' };
         }
 
@@ -4602,14 +4624,13 @@ class App {
             });
         }
 
-        const parsedId = Number.parseInt(normalizedHifiId, 10);
-        if (!Number.isFinite(parsedId) || parsedId <= 0) {
+        if (!normalizedHifiId) {
             return null;
         }
 
         return this.buildExploreHref({
             view: entityType,
-            ...(entityType === 'artist' ? { artistId: parsedId } : { albumId: parsedId })
+            ...(entityType === 'artist' ? { artistId: normalizedHifiId } : { albumId: normalizedHifiId })
         });
     }
 
@@ -5629,6 +5650,7 @@ class App {
             penaltyKaraoke: true,
             penaltyLive: true,
             deezerArl: '',
+            metadataSource: 'tidal',
         };
     }
 
@@ -5648,6 +5670,12 @@ class App {
         if (['LOSSLESS', 'HIGH', 'LOW'].includes(rawQuality)) {
             quality = rawQuality as DownloadQuality;
         }
+
+        const metadataSource = typeof (raw as DownloadSettings).metadataSource === 'string'
+            ? (raw as DownloadSettings).metadataSource
+            : typeof (raw as { metadata_source?: string }).metadata_source === 'string'
+                ? (raw as { metadata_source?: string }).metadata_source!
+                : fallback.metadataSource;
 
         return {
             downloadSource: typeof (raw as DownloadSettings).downloadSource === 'string'
@@ -5682,6 +5710,7 @@ class App {
                 : typeof (raw as { deezer_arl?: string }).deezer_arl === 'string'
                     ? (raw as { deezer_arl?: string }).deezer_arl!
                     : fallback.deezerArl,
+            metadataSource: (['tidal', 'musicbrainz'].includes(metadataSource) ? metadataSource : fallback.metadataSource) as 'tidal' | 'musicbrainz',
         } as DownloadSettings;
     }
 
@@ -5724,6 +5753,12 @@ class App {
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
+        // Apply browse source
+        if (settings.metadataSource === 'musicbrainz') {
+            this.browseSourceMusicbrainzInput.checked = true;
+        } else {
+            this.browseSourceTidalInput.checked = true;
+        }
         for (const id of App.TAG_CHECKBOX_IDS) {
             const s = settings as unknown as Record<string, boolean>;
             if (this.tagCheckboxes[id] && s[id] !== undefined) {
@@ -5744,6 +5779,11 @@ class App {
             quality = 'LOW';
         }
 
+        let metadataSource: 'tidal' | 'musicbrainz' = 'tidal';
+        if (this.browseSourceMusicbrainzInput?.checked) {
+            metadataSource = 'musicbrainz';
+        }
+
         return {
             downloadSource: this.readDownloadSourceFromForm(),
             quality,
@@ -5758,6 +5798,7 @@ class App {
                 }
                 return result;
             })(),
+            metadataSource,
         } as DownloadSettings;
     }
 
@@ -5869,8 +5910,42 @@ class App {
                 },
                 body: JSON.stringify(settings)
             });
+            // Re-fetch source info after saving settings (browse source may have changed)
+            await this.fetchSourceInfo();
         } catch (error) {
             console.warn('Failed to save download settings.', error);
+        }
+    }
+
+    private isValidMbid(id: string | null): boolean {
+        return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
+    }
+
+    private async fetchSourceInfo(): Promise<void> {
+        try {
+            const response = await fetch('/api/source');
+            if (response.ok) {
+                this.sourceCapabilities = await response.json();
+                this.applySourceRestrictions();
+            }
+        } catch (e) {
+            console.warn('Failed to fetch source info', e);
+        }
+    }
+
+    private applySourceRestrictions(): void {
+        const isMb = this.sourceCapabilities.source === 'musicbrainz';
+        const searchTypeSelect = this.searchTypeSelect;
+        if (searchTypeSelect) {
+            for (const option of Array.from(searchTypeSelect.options) as HTMLOptionElement[]) {
+                if (option.value === 'trackid' || option.value === 'p') {
+                    option.disabled = isMb;
+                    if (isMb && option.selected) {
+                        searchTypeSelect.value = 's';
+                        this.updateSearchPlaceholder();
+                    }
+                }
+            }
         }
     }
 
@@ -7486,8 +7561,8 @@ class App {
             return;
         }
 
-        if (searchType === 'trackid' && !/^[0-9]+$/.test(query)) {
-            this.displayMessage('Track ID must be a numeric value');
+        if (searchType === 'trackid' && !/^[0-9]+$/.test(query) && !this.isValidMbid(query)) {
+            this.displayMessage('Track ID must be a numeric Tidal ID or UUID (MBID)');
             return;
         }
 
@@ -7933,14 +8008,14 @@ class App {
         }
 
         return {
-            id: Math.random() * 1000000, // Generate a temporary ID since ListenBrainz doesn't provide numeric IDs
+            id: `lb-${String(Math.random()).slice(2, 10)}`, // Generate a temporary ID since ListenBrainz doesn't provide numeric IDs
             title: lbTrack.title || 'Unknown',
             duration: lbTrack.duration ? Math.floor(lbTrack.duration / 1000) : undefined,
             artists: lbTrack.creator
-                ? [{ id: 0, name: lbTrack.creator }]
+                ? [{ id: '0', name: lbTrack.creator }]
                 : [],
             artist: lbTrack.creator
-                ? { id: 0, name: lbTrack.creator }
+                ? { id: '0', name: lbTrack.creator }
                 : undefined,
             album: undefined,
             quality: undefined,
@@ -8060,7 +8135,7 @@ class App {
             );
     }
 
-    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean; trackId?: number; albumId?: number }): HTMLSpanElement {
+    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean; trackId?: string; albumId?: string }): HTMLSpanElement {
         const chip = document.createElement('span');
         const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
         const incomplete = options?.incomplete === true;
@@ -8115,7 +8190,7 @@ class App {
         return `${heading}\n${details.join('\n')}`;
     }
 
-    private async annotateTrackCardsWithPlexStatus(tracks: Track[], albumId?: number): Promise<void> {
+    private async annotateTrackCardsWithPlexStatus(tracks: Track[], albumId?: string): Promise<void> {
         if (!Array.isArray(tracks) || tracks.length === 0) {
             return;
         }
@@ -8157,7 +8232,7 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
-                metadataEl.appendChild(this.createPlexMatchChip(match, { trackId: parseInt(trackId, 10) }));
+                metadataEl.appendChild(this.createPlexMatchChip(match, { trackId: trackId }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -8167,7 +8242,7 @@ class App {
         }
     }
 
-    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>, albumId?: number): Promise<void> {
+    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>, albumId?: string): Promise<void> {
         const resolvedMatches: HifiTrackLookupMatch[] = [];
 
         for (const row of gridRows) {
@@ -8186,7 +8261,7 @@ class App {
                 continue;
             }
 
-            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, trackId: parseInt(trackId, 10) }));
+            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, trackId: trackId }));
         }
 
         const allRowsInPlex = gridRows.length > 0 && resolvedMatches.length === gridRows.length;
@@ -8227,7 +8302,7 @@ class App {
                     continue;
                 }
 
-                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false, albumId: parseInt(albumId, 10) }));
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false, albumId: albumId }));
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
@@ -8315,7 +8390,7 @@ class App {
         `;
     }
 
-    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean; trackId?: number; albumId?: number }): void {
+    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean; trackId?: string; albumId?: string }): void {
         if (!container || !match || !match.exists) {
             return;
         }
@@ -8386,7 +8461,7 @@ class App {
         }
     }
 
-    private async annotateAlbumHeroWithPlexStatus(albumId: number): Promise<void> {
+    private async annotateAlbumHeroWithPlexStatus(albumId: string): Promise<void> {
         if (!Number.isFinite(albumId)) {
             return;
         }
@@ -8409,7 +8484,7 @@ class App {
         }
     }
 
-    private async annotateArtistHeroWithPlexStatus(artistId: number): Promise<void> {
+    private async annotateArtistHeroWithPlexStatus(artistId: string): Promise<void> {
         if (!Number.isFinite(artistId)) {
             return;
         }
@@ -8432,7 +8507,7 @@ class App {
         }
     }
 
-    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[], albumId?: number): void {
+    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[], albumId?: string): void {
         const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
         if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
             return;
@@ -8869,7 +8944,7 @@ class App {
             id: p.id,
             title: p.title || 'Unknown Track',
             artist: p.artist || this.libraryCurrentArtist?.name || 'Unknown Artist',
-            artistId: p.artist_id ? parseInt(p.artist_id, 10) : undefined,
+            artistId: p.artist_id || undefined,
             album: p.album || 'Unknown Album',
             albumCover: p.cover,
             trackNumber: typeof p.track_number === 'number' ? p.track_number : null,
@@ -8940,6 +9015,12 @@ class App {
             ? Object.entries(options.rowDataAttrs(track)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
             : '';
 
+        const isMb = this.sourceCapabilities.source === 'musicbrainz';
+        const showQuality = this.sourceCapabilities.supports_quality_badges;
+        const showStreaming = this.sourceCapabilities.supports_streaming;
+        const showSimilar = this.sourceCapabilities.supports_similar;
+        const showPlaylists = this.sourceCapabilities.supports_playlists;
+
         let trackTitle = this.escapeHtml(track.title);
         if (track.version && typeof track.version === 'string' && track.version.trim()) {
             trackTitle += ` (${this.escapeHtml(track.version)})`;
@@ -8994,21 +9075,23 @@ class App {
                     <span class="track-album-name" ${track.albumId ? `title="View tracks on ${this.escapeHtml(track.album)}"` : ''}>${this.escapeHtml(track.album)}</span>
                 </div>` : ''}
                 <div class="grid-cell grid-col-duration">${durationDisplay}</div>
-                <div class="grid-cell grid-col-quality">${qualityDisplay}</div>
+                ${showQuality ? `<div class="grid-cell grid-col-quality">${qualityDisplay}</div>` : ''}
                 <div class="grid-cell grid-col-actions">
-                    <button class="grid-play-btn" title="Play" aria-label="Play" ${dataAttr}="${track.id}">
+                    ${showStreaming ? `<button class="grid-play-btn" title="Play" aria-label="Play" ${dataAttr}="${track.id}">
                         ${this.getPlayIconSvg()}
-                    </button>
-                    ${actions === 'full' ? `
+                    </button>` : ''}
+                    ${actions === 'full' && showSimilar ? `
                     <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
                         ${this.getMoreLikeIconSvg()}
-                    </button>
+                    </button>` : ''}
+                    ${actions === 'full' && showPlaylists ? `
                     <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 5v14"></path>
                             <path d="M5 12h14"></path>
                         </svg>
-                    </button>
+                    </button>` : ''}
+                    ${actions === 'full' ? `
                     <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="5" rx="1"></rect>
@@ -9022,6 +9105,7 @@ class App {
     }
 
     private formatTrackGridHeader(showTrackNumber: boolean, showAlbumColumn: boolean, showArtwork: boolean): string {
+        const showQuality = this.sourceCapabilities.supports_quality_badges;
         return `
             <div class="tracks-grid-header">
                 ${showTrackNumber ? '<div class="grid-cell grid-col-track-number">#</div>' : ''}
@@ -9030,7 +9114,7 @@ class App {
                 <div class="grid-cell grid-col-artist">Artist</div>
                 ${showAlbumColumn ? '<div class="grid-cell grid-col-album">Album</div>' : ''}
                 <div class="grid-cell grid-col-duration">Duration</div>
-                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
+                ${showQuality ? '<div class="grid-cell grid-col-quality">MAX QUALITY</div>' : ''}
                 <div class="grid-cell grid-col-actions">Actions</div>
             </div>
         `;
@@ -9135,6 +9219,7 @@ class App {
     }
 
     private formatAlbumGridHeader(hideArtist: boolean = false, includeQuality: boolean = true): string {
+        const showQuality = includeQuality && this.sourceCapabilities.supports_quality_badges;
         return `
             <div class="albums-grid-header${hideArtist ? ' hide-artist' : ''}">
                 <div class="grid-cell grid-col-artwork"></div>
@@ -9142,7 +9227,7 @@ class App {
                 ${!hideArtist ? '<div class="grid-cell grid-col-artist">ARTIST</div>' : ''}
                 <div class="grid-cell grid-col-year">YEAR</div>
                 <div class="grid-cell grid-col-track-count">TRACKS</div>
-                ${includeQuality ? '<div class="grid-cell grid-col-quality">MAX QUALITY</div>' : ''}
+                ${showQuality ? '<div class="grid-cell grid-col-quality">QUALITY</div>' : ''}
                 <div class="grid-cell grid-col-actions">ACTIONS</div>
             </div>
         `;
@@ -9276,7 +9361,7 @@ class App {
     }
 
     private async handlePlayToggle(
-        trackId: number,
+        trackId: string,
         trackCard: HTMLElement,
         playButton: HTMLButtonElement
     ): Promise<void> {
@@ -9284,8 +9369,8 @@ class App {
         await this.handlePlayGeneric(playbackTrackId, playButton, () => this.fetchTrackStreamUrl(trackId));
     }
 
-    private async fetchTrackStreamUrl(trackId: number): Promise<string> {
-        return `/api/hifi/tracks/${encodeURIComponent(String(trackId))}/stream?quality=LOW`;
+    private async fetchTrackStreamUrl(trackId: string): Promise<string> {
+        return `/api/hifi/tracks/${encodeURIComponent(trackId)}/stream?quality=LOW`;
     }
 
     private async handlePlayLibraryToggle(trackId: string, playButton: HTMLButtonElement): Promise<void> {
@@ -9333,6 +9418,9 @@ class App {
             : album.artist?.name || 'Unknown Artist';
         const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
 
+        const showQuality = this.sourceCapabilities.supports_quality_badges;
+        const showSimilar = this.sourceCapabilities.supports_similar;
+
         // Format release year if available
         const releaseYear = album.releaseDate
             ? new Date(album.releaseDate).getFullYear()
@@ -9370,26 +9458,29 @@ class App {
                         ${releaseYear ? `<span>${releaseYear}</span>` : ''}
                         ${releaseYear && trackCount ? `<span>•</span>` : ''}
                         ${trackCount ? `<span>${trackCount}</span>` : ''}
-                        ${trackCount && qualityDisplay ? `<span>•</span>` : ''}
-                        ${qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
+                        ${showQuality && trackCount && qualityDisplay ? `<span>•</span>` : ''}
+                        ${showQuality && qualityDisplay ? `<span>${qualityDisplay}</span>` : ''}
                         ${album.explicit ? `<span>•</span><span class="explicit-badge" title="Explicit content">E</span>` : ''}
                     </div>
                 </div>
+                ${showSimilar ? `
                 <div class="track-actions">
                     <button class="track-more-btn" title="More Like This" aria-label="More Like This">
                         ${this.getMoreLikeIconSvg()}
                     </button>
-                </div>
+                </div>` : ''}
             </div>
         `;
     }
 
     private formatAlbumGridRow(album: NormalizedAlbum, options: AlbumGridOptions): string {
         const hideArtist = options.hideArtist || false;
-        const includeQuality = options.includeQuality !== false;
+        const includeQuality = options.includeQuality !== false && this.sourceCapabilities.supports_quality_badges;
         const dataAttr = options.dataAttr || 'data-album-id';
         const extraRowClass = options.extraRowClass || '';
         const actions = options.actions || 'full';
+        const showSimilar = this.sourceCapabilities.supports_similar;
+        const showPlaylists = this.sourceCapabilities.supports_playlists;
         const rowClasses = ['albums-grid-row', ...(hideArtist ? ['hide-artist'] : []), ...(extraRowClass ? [extraRowClass] : [])].join(' ');
         const extraAttrs = options.rowDataAttrs
             ? Object.entries(options.rowDataAttrs(album)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
@@ -9433,16 +9524,18 @@ class App {
                     <button class="grid-play-btn" title="View Tracks" aria-label="View Tracks" ${dataAttr}="${album.id}">
                         ${this.getPlayIconSvg()}
                     </button>
-                    ${actions === 'full' ? `
+                    ${actions === 'full' && showSimilar ? `
                     <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
                         ${this.getMoreLikeIconSvg()}
-                    </button>
+                    </button>` : ''}
+                    ${actions === 'full' && showPlaylists ? `
                     <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${album.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 5v14"></path>
                             <path d="M5 12h14"></path>
                         </svg>
-                    </button>
+                    </button>` : ''}
+                    ${actions === 'full' ? `
                     <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${album.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="2" y="3" width="20" height="5" rx="1"></rect>
@@ -9472,11 +9565,13 @@ class App {
     }
 
     private formatArtistCard(artist: ArtistSearchItem): string {
+        const showSimilar = this.sourceCapabilities.supports_similar;
+        const showImages = this.sourceCapabilities.supports_artist_images;
         return `
             <div class="artist-card-compact clickable" data-artist-id="${artist.id}" title="Click to view albums">
                 <div class="artist-card-name">${this.escapeHtml(artist.name)}</div>
                 <div class="artist-card-image">
-                    ${artist.picture
+                    ${showImages && artist.picture
                 ? `<img src="${this.getHifiImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
                 : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -9486,9 +9581,10 @@ class App {
                            </div>`
             }
                 </div>
+                ${showSimilar ? `
                 <button class="artist-card-btn" title="Find Similar Artists" aria-label="Find Similar Artists">
                     ${this.getMoreLikeIconSvg()}
-                </button>
+                </button>` : ''}
             </div>
         `;
     }
@@ -9649,7 +9745,7 @@ class App {
         }
     }
 
-    private async fetchArtistAlbums(artistId: number, updateHistory: boolean = true): Promise<void> {
+    private async fetchArtistAlbums(artistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'artist', artistId };
         this.exploreArtistName = null;
@@ -9661,7 +9757,7 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}?include_albums=true&include_tracks=true`, {
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(artistId)}?include_albums=true&include_tracks=true`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -9690,28 +9786,33 @@ class App {
             this.exploreArtistName = artistName;
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
+            const showSimilar = this.sourceCapabilities.supports_similar;
+            const showImages = this.sourceCapabilities.supports_artist_images;
+            const heroActions: HeroCardAction[] = [
+                {
+                    id: 'artistPlayBtn',
+                    className: 'primary',
+                    title: 'Play artist',
+                    svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                    disabled: topTracks.length === 0 && albums.length === 0,
+                },
+            ];
+            if (showSimilar) {
+                heroActions.push({
+                    id: 'findSimilarArtistBtn',
+                    className: 'hero-bottom-right',
+                    title: 'Find similar artists',
+                    svgContent: this.getMoreLikeIconSvg(),
+                    dataAttrs: { 'data-artist-id': String(artistId) },
+                });
+            }
             const heroHtml = this.renderHeroCard({
                 type: 'artist',
-                coverUrl: artistPictureUrl || undefined,
+                coverUrl: showImages && artistPictureUrl ? artistPictureUrl : undefined,
                 coverAlt: artistName,
                 title: artistName,
                 proxyInfo: data.proxied_via || undefined,
-                actions: [
-                    {
-                        id: 'artistPlayBtn',
-                        className: 'primary',
-                        title: 'Play artist',
-                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
-                        disabled: topTracks.length === 0 && albums.length === 0,
-                    },
-                    {
-                        id: 'findSimilarArtistBtn',
-                        className: 'hero-bottom-right',
-                        title: 'Find similar artists',
-                        svgContent: this.getMoreLikeIconSvg(),
-                        dataAttrs: { 'data-artist-id': String(artistId) },
-                    },
-                ],
+                actions: heroActions,
             });
 
             this.resultsContainer.innerHTML = `
@@ -9780,7 +9881,7 @@ class App {
         }
     }
 
-    private async fetchAlbumTracks(albumId: number, updateHistory: boolean = true): Promise<void> {
+    private async fetchAlbumTracks(albumId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'album';
         this.currentExploreRoute = { view: 'album', albumId };
         this.exploreAlbumTitle = null;
@@ -9792,7 +9893,7 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(albumId)}`, {
                 signal: this.pendingRequestController?.signal
             });
 
@@ -9865,6 +9966,37 @@ class App {
                 ? this.getHifiImageUrl(albumData.cover, 1280)
                 : '';
 
+            const showSimilar = this.sourceCapabilities.supports_similar;
+            const showPlaylists = this.sourceCapabilities.supports_playlists;
+            const heroActions: HeroCardAction[] = [
+                {
+                    id: 'albumPlayBtn',
+                    className: 'primary',
+                    title: 'Play album',
+                    svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                },
+            ];
+            if (showSimilar) {
+                heroActions.push({
+                    id: 'findSimilarAlbumBtn',
+                    title: 'Find similar albums',
+                    svgContent: this.getMoreLikeIconSvg(),
+                    dataAttrs: { 'data-album-id': String(albumId) },
+                });
+            }
+            if (showPlaylists) {
+                heroActions.push({
+                    id: 'addAllPlaylistBtn',
+                    title: 'Add all tracks to a playlist',
+                    svgContent: this.getAddAllPlaylistIconSvg(),
+                });
+            }
+            heroActions.push({
+                id: 'addAllLibraryBtn',
+                title: 'Add all tracks to library',
+                svgContent: this.getAddAllLibraryIconSvg(),
+            });
+
             const heroHtml = this.renderHeroCard({
                 type: 'album',
                 coverUrl: coverArt || undefined,
@@ -9884,30 +10016,7 @@ class App {
                     durationStr,
                 ].filter(Boolean),
                 proxyInfo: data.proxied_via || undefined,
-                actions: [
-                    {
-                        id: 'albumPlayBtn',
-                        className: 'primary',
-                        title: 'Play album',
-                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
-                    },
-                    {
-                        id: 'findSimilarAlbumBtn',
-                        title: 'Find similar albums',
-                        svgContent: this.getMoreLikeIconSvg(),
-                        dataAttrs: { 'data-album-id': String(albumId) },
-                    },
-                    {
-                        id: 'addAllPlaylistBtn',
-                        title: 'Add all tracks to a playlist',
-                        svgContent: this.getAddAllPlaylistIconSvg(),
-                    },
-                    {
-                        id: 'addAllLibraryBtn',
-                        title: 'Add all tracks to library',
-                        svgContent: this.getAddAllLibraryIconSvg(),
-                    },
-                ],
+                actions: heroActions,
             });
 
             this.resultsContainer.innerHTML = `
@@ -9954,7 +10063,7 @@ class App {
         }
     }
 
-    private async fetchAlbumObject(albumId: number): Promise<AlbumObject> {
+    private async fetchAlbumObject(albumId: string): Promise<AlbumObject> {
         const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
         if (!response.ok) {
             throw new Error('Failed to fetch album');
@@ -9972,7 +10081,7 @@ class App {
         return data.album;
     }
 
-    private async fetchSimilarTracks(trackId: number, updateHistory: boolean = true): Promise<void> {
+    private async fetchSimilarTracks(trackId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'similar_tracks', trackId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
@@ -10048,7 +10157,7 @@ class App {
         }
     }
 
-    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: number): Promise<void> {
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: string): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
@@ -10194,7 +10303,7 @@ class App {
         `;
     }
 
-    private async renderFreshFindsTracks(userId: string, playlistId?: number): Promise<void> {
+    private async renderFreshFindsTracks(userId: string, playlistId?: string): Promise<void> {
         try {
             let url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
             if (playlistId) {
@@ -10311,7 +10420,7 @@ class App {
         await this.renderFreshFindsTracks(userId);
     }
 
-    private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
+    private async fetchSimilarAlbums(albumId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'similar_albums', albumId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
@@ -10358,7 +10467,7 @@ class App {
         }
     }
 
-    private async fetchSimilarArtists(artistId: number, updateHistory: boolean = true): Promise<void> {
+    private async fetchSimilarArtists(artistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
         this.currentExploreRoute = { view: 'similar_artists', artistId };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
@@ -10441,7 +10550,7 @@ class App {
     }
 
     private async handleRedownloadTrack(
-        trackId: number,
+        trackId: string,
         trackRow: HTMLElement,
         chip: HTMLElement
     ): Promise<void> {
@@ -10485,7 +10594,7 @@ class App {
     }
 
     private async handleRedownloadAlbum(
-        albumId: number,
+        albumId: string,
         albumRow: HTMLElement,
         chip: HTMLElement
     ): Promise<void> {
@@ -10542,7 +10651,7 @@ class App {
                 const trackId = trackRow.getAttribute('data-track-id');
                 if (trackId) {
                     try {
-                        const jobId = await this.downloadTrackToLibrary(parseInt(trackId, 10), this.downloadAllScope);
+                        const jobId = await this.downloadTrackToLibrary(trackId, this.downloadAllScope);
                         jobIds.push(jobId);
                     } catch (error) {
                         console.error(`[RE-DOWNLOAD] Failed to queue track ${trackId}:`, error);
@@ -10564,7 +10673,7 @@ class App {
     }
 
     private async handleDownload(
-        trackId: number,
+        trackId: string,
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose' = 'loose'
     ): Promise<void> {
@@ -10610,7 +10719,7 @@ class App {
     }
 
     private async handleAddToPlaylist(
-        trackId: number,
+        trackId: string,
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose' = 'loose'
     ): Promise<void> {
@@ -10664,7 +10773,7 @@ class App {
 
     private async showPlaylistSelector(
         playlists: string[],
-        trackId: number,
+        trackId: string,
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose'
     ): Promise<void> {
@@ -10788,7 +10897,7 @@ class App {
 
     private async handlePlaylistSelected(
         playlistName: string,
-        trackId: number,
+        trackId: string,
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose'
     ): Promise<void> {
@@ -10828,7 +10937,7 @@ class App {
     }
 
     private async downloadTrackWithPlaylist(
-        trackId: number,
+        trackId: string,
         downloadType: 'album' | 'loose',
         playlistName: string
     ): Promise<number> {
@@ -10887,7 +10996,7 @@ class App {
         }
     }
 
-    private async handleAddAlbumToPlaylist(albumId: number, albumRow: HTMLElement): Promise<void> {
+    private async handleAddAlbumToPlaylist(albumId: string, albumRow: HTMLElement): Promise<void> {
         const addPlaylistBtn = albumRow.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
         if (!addPlaylistBtn) {
             console.error('[ALBUM_PLAYLIST] Add to playlist button not found');
@@ -11113,7 +11222,7 @@ class App {
         }
     }
 
-    private async handleDownloadAlbum(albumId: number, albumRow: HTMLElement): Promise<void> {
+    private async handleDownloadAlbum(albumId: string, albumRow: HTMLElement): Promise<void> {
         const addLibraryBtn = albumRow.querySelector('.grid-add-library-btn') as HTMLButtonElement;
         if (!addLibraryBtn) {
             console.error('[ALBUM_DOWNLOAD] Add to library button not found');
@@ -11174,7 +11283,7 @@ class App {
         }
     }
 
-    private async handlePlayAlbum(albumId: number, playButton: HTMLButtonElement): Promise<void> {
+    private async handlePlayAlbum(albumId: string, playButton: HTMLButtonElement): Promise<void> {
         try {
             const albumData = await this.fetchAlbumObject(albumId);
             const tracks = albumData.tracks || [];
@@ -11248,7 +11357,7 @@ class App {
     }
 
     private async downloadTrackToLibrary(
-        trackId: number,
+        trackId: string,
         downloadType: 'album' | 'loose'
     ): Promise<number> {
         try {
@@ -11256,18 +11365,24 @@ class App {
             console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
 
+            const body: Record<string, any> = {
+                quality: this.downloadSettings.quality,
+                fileNaming: this.downloadSettings.fileNamingAlbum,
+                fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                ignore_matches: this.downloadSettings.ignoreMatches
+            };
+            if (this.isValidMbid(trackId)) {
+                body.mbid = trackId;
+            } else {
+                body.trackId = trackId;
+            }
+
             const response = await this.fetchWithRetry('/api/downloads', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    trackId,
-                    quality: this.downloadSettings.quality,
-                    fileNaming: this.downloadSettings.fileNamingAlbum,
-                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                    ignore_matches: this.downloadSettings.ignoreMatches
-                }),
+                body: JSON.stringify(body),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
@@ -11306,7 +11421,7 @@ class App {
     }
 
     private async downloadTrack(
-        trackId: number,
+        trackId: string,
         downloadType: 'album' | 'loose',
         plexPlaylistName: string | null
     ): Promise<number> {
@@ -11562,7 +11677,7 @@ class App {
                         this.currentDownloadController = new AbortController();
 
                         try {
-                            await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                            await this.handleDownload(trackId, trackCard, this.downloadAllScope);
                         } catch (error) {
                             console.error(`[DOWNLOAD_ALL] Download error for track ${trackId}:`, error);
                         }
@@ -11620,7 +11735,7 @@ class App {
 
                     if (libraryBtn && !libraryBtn.classList.contains('completed')) {
                         const wasQueued = libraryBtn.classList.contains('queued');
-                        await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        await this.handleDownload(trackId, trackCard, this.downloadAllScope);
                         const isQueued = libraryBtn.classList.contains('queued');
 
                         if (!wasQueued && isQueued) {
@@ -11794,7 +11909,7 @@ class App {
                         }
                         addPlaylistBtn.disabled = true;
                         try {
-                            const jobId = await this.downloadTrackWithPlaylist(parseInt(trackId, 10), this.downloadAllScope, playlistName);
+                            const jobId = await this.downloadTrackWithPlaylist(trackId, this.downloadAllScope, playlistName);
                             console.log(`[PLAYLIST_ALL] Job queued successfully: ${jobId}`);
                             this.setDownloadButtonQueued(addPlaylistBtn);
                             this.registerActiveJob(jobId, trackCard, addPlaylistBtn, addPlaylistBtn);

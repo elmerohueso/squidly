@@ -451,16 +451,16 @@ def get_download_settings():
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
-               tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
-               tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
-               tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
-               tag_explicit, tag_explicit_suffix,
-               penalty_compilation, penalty_karaoke, penalty_live, download_source, deezer_arl
-        FROM download_settings
-        WHERE id = 1
-        """
-    )
+             SELECT quality, parent_folder, file_naming, file_naming_album, jobs_refresh_interval_seconds, ignore_matches,
+                    tag_title, tag_artist, tag_album_artist, tag_album, tag_year,
+                    tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
+                    tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
+                    tag_explicit, tag_explicit_suffix,
+                    penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl, metadata_source
+             FROM download_settings
+             WHERE id = 1
+             """
+        )
     row = cur.fetchone()
 
     if row is None:
@@ -474,14 +474,14 @@ def get_download_settings():
                 tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
-                updated_at
+                metadata_source, updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['quality'],
@@ -513,6 +513,7 @@ def get_download_settings():
                 DEFAULT_DOWNLOAD_SETTINGS['penalty_live'],
                 DEFAULT_DOWNLOAD_SETTINGS['download_source'],
                 DEFAULT_DOWNLOAD_SETTINGS['deezer_arl'],
+                DEFAULT_DOWNLOAD_SETTINGS['metadata_source'],
                 now
             )
         )
@@ -524,7 +525,7 @@ def get_download_settings():
                    tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                    tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                    tag_explicit, tag_explicit_suffix,
-                   penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl
+                   penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl, metadata_source
             FROM download_settings
             WHERE id = 1
             """
@@ -585,6 +586,7 @@ def get_download_settings():
         'penalty_live': bool(row.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
         'download_source': row.get('download_source') or DEFAULT_DOWNLOAD_SETTINGS['download_source'],
         'deezer_arl': str(row.get('deezer_arl') or ''),
+        'metadata_source': str(row.get('metadata_source') or DEFAULT_DOWNLOAD_SETTINGS['metadata_source']),
     }
 
 
@@ -601,14 +603,14 @@ def save_download_settings(settings):
             tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
-                updated_at
+                metadata_source, updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             quality = excluded.quality,
             parent_folder = excluded.parent_folder,
@@ -634,10 +636,12 @@ def save_download_settings(settings):
             tag_explicit = excluded.tag_explicit,
             tag_explicit_suffix = excluded.tag_explicit_suffix,
             penalty_compilation = excluded.penalty_compilation,
+            penalty_single = excluded.penalty_single,
             penalty_karaoke = excluded.penalty_karaoke,
             penalty_live = excluded.penalty_live,
             download_source = excluded.download_source,
             deezer_arl = excluded.deezer_arl,
+            metadata_source = excluded.metadata_source,
             updated_at = excluded.updated_at
         """,
         (
@@ -670,6 +674,7 @@ def save_download_settings(settings):
             bool(settings.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
             settings.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']),
             settings.get('deezer_arl', ''),
+            settings.get('metadata_source', DEFAULT_DOWNLOAD_SETTINGS['metadata_source']),
             now
         )
     )

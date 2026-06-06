@@ -9,8 +9,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from squidly.services.hifi import _fetch_hifi_search_results
 from squidly.services.playlist_matching import (
     _normalize_match_text_for_scoring,
@@ -21,7 +19,6 @@ from squidly.services.track_resolver import resolve_track
 logger = logging.getLogger(__name__)
 
 _MBID_RE = re.compile(r'recording/([a-f0-9-]+)', re.IGNORECASE)
-_MUSICBRAINZ_USER_AGENT = 'Squidly/1.0 (https://github.com/brendan/squidly)'
 _ISRC_SCORE_THRESHOLD = 0.80
 _FALLBACK_SCORE_THRESHOLD = 0.90
 
@@ -99,18 +96,15 @@ def _fetch_isrcs_batch(tracks: List[Dict[str, Any]]) -> Dict[str, List[str]]:
 
     def _fetch_one_isrc(mbid: str) -> tuple:
         try:
-            url = f'https://musicbrainz.org/ws/2/recording/{mbid}?inc=isrcs&fmt=json'
-            resp = requests.get(
-                url, timeout=10,
-                headers={'User-Agent': _MUSICBRAINZ_USER_AGENT}
-            )
-            if resp.ok:
-                return (mbid, resp.json().get('isrcs') or [])
-        except requests.exceptions.RequestException:
+            from squidly.services.musicbrainz import mb_get_recording
+            rec = mb_get_recording(mbid)
+            return (mbid, rec.get('isrcs') or [])
+        except Exception:
             pass
         return (mbid, [])
 
-    # MusicBrainz allows ~1 req/sec; 5 workers with natural latency stays compliant
+    # ThreadPoolExecutor is used for convenience; the centralized rate limiter in musicbrainz.py
+    # serializes all requests to ~1 req/sec regardless of worker count.
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(_fetch_one_isrc, mbid): mbid for mbid in mbids}
         for future in as_completed(futures):

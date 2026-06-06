@@ -49,7 +49,32 @@ def process_download_job(job_id, payload):
     }
 
     if not track_id:
-        raise ValueError('trackId is required')
+        mbid = payload.get('mbid')
+        isrc = payload.get('isrc')
+        if mbid:
+            from squidly.services.musicbrainz import mb_get_recording
+            rec = mb_get_recording(mbid)
+            if rec:
+                isrcs = rec.get('isrcs') or []
+                if isrcs and not isrc:
+                    isrc = isrcs[0]
+
+        if isrc:
+            from squidly.services.track_resolver import resolve_track
+            result = resolve_track(
+                title=payload.get('title', ''),
+                track_artist=payload.get('artist', ''),
+                isrc=isrc,
+                settings=get_download_settings(),
+            )
+            track_id = result.get('hifi_id')
+            if track_id:
+                track_id = str(track_id)
+                payload['trackId'] = track_id
+                logger.info("[DOWNLOAD] Resolved ISRC %s to Tidal track ID: %s", isrc, track_id)
+
+    if not track_id:
+        raise ValueError('trackId is required (could not resolve from mbid/isrc)')
 
     logger.info("[DOWNLOAD] Fetching track metadata from normalized HiFi object for quality=%s", quality_choice)
     try:

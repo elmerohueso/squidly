@@ -16,13 +16,15 @@ def download_track():
     
     payload = request.get_json(silent=True) or {}
     track_id = payload.get('trackId')
+    mbid = payload.get('mbid')
+    isrc = payload.get('isrc')
     settings = get_download_settings()
     file_naming_album = settings.get('file_naming_album', DEFAULT_DOWNLOAD_SETTINGS['file_naming_album'])
     file_naming = payload.get('fileNamingAlbum') or payload.get('fileNaming') or file_naming_album
     
-    if not track_id:
-        logger.info("[DOWNLOAD] ERROR: trackId is missing")
-        return jsonify({'error': 'trackId is required'}), 400
+    if not track_id and not mbid and not isrc:
+        logger.info("[DOWNLOAD] ERROR: trackId, mbid, or isrc is required")
+        return jsonify({'error': 'trackId, mbid, or isrc is required'}), 400
     
     quality_choice = str(payload.get('downloadQuality', payload.get('quality', 'LOSSLESS'))).strip().upper()
     if quality_choice not in ('LOSSLESS', 'HIGH', 'LOW'):
@@ -36,24 +38,59 @@ def download_track():
     plex_playlist = payload.get('plex_playlist')
     plex_user_id = payload.get('plex_user_id')
     
-    logger.info("[DOWNLOAD_ENQUEUE] track_id=%s quality=%s playlist=%s user_id=%s ignore_matches=%s",
-                track_id, quality_choice, plex_playlist, plex_user_id, ignore_matches)
+    logger.info("[DOWNLOAD_ENQUEUE] track_id=%s quality=%s playlist=%s user_id=%s ignore_matches=%s mbid=%s isrc=%s",
+                track_id, quality_choice, plex_playlist, plex_user_id, ignore_matches, mbid, isrc)
     
-    artist_name = None
-    title_name = None
-    try:
-        track_obj = get_hifi_track_object(track_id, include_streams=False, include_album=False, audio_quality=quality_choice)
-        track_data = track_obj.get('track') if isinstance(track_obj, dict) else {}
-        if isinstance(track_data, dict):
-            title_name = track_data.get('title')
-            artists = track_data.get('artists')
-            if isinstance(artists, list) and artists:
-                names = [str(a.get('name', '')).strip() for a in artists if isinstance(a, dict) and a.get('name')]
-                artist_name = '; '.join(names) if names else None
-            elif isinstance(artists, dict) and artists.get('name'):
-                artist_name = str(artists.get('name')).strip()
-    except Exception as e:
-        logger.info("[DOWNLOAD] Failed to prefetch track metadata for job payload: %s", e)
+    artist_name = payload.get('artist')
+    title_name = payload.get('title')
+    
+    # If mbid is provided but no track_id, try to resolve ISRC from MusicBrainz
+    if mbid and not isrc:
+        from squidly.services.musicbrainz import mb_get_recording
+        rec = mb_get_recording(mbid)
+        if rec:
+            isrcs = rec.get('isrcs') or []
+            if isrcs:
+                isrc = isrcs[0]
+            if not title_name:
+                title_name = rec.get('title')
+            if not artist_name:
+                artist_credit = rec.get('artist-credit', [])
+                artist_name = '; '.join(c.get('artist', {}).get('name', '') for c in artist_credit if c.get('artist'))
+    
+    # If ISRC available but no track_id, try to resolve to a Tidal ID
+    if not track_id and isrc:
+        from squidly.services.track_resolver import resolve_track
+        result = resolve_track(
+            title=title_name or '',
+            track_artist=artist_name or '',
+            isrc=isrc,
+            settings=settings,
+        )
+        resolved_id = result.get('hifi_id')
+        if resolved_id:
+            track_id = str(resolved_id)
+    
+    if not track_id:
+        logger.info("[DOWNLOAD] ERROR: could not resolve trackId from mbid/isrc")
+        return jsonify({'error': 'Could not resolve track ID from provided identifier'}), 400
+    
+    if not title_name or not artist_name:
+        try:
+            track_obj = get_hifi_track_object(track_id, include_streams=False, include_album=False, audio_quality=quality_choice)
+            track_data = track_obj.get('track') if isinstance(track_obj, dict) else {}
+            if isinstance(track_data, dict):
+                if not title_name:
+                    title_name = track_data.get('title')
+                if not artist_name:
+                    artists = track_data.get('artists')
+                    if isinstance(artists, list) and artists:
+                        names = [str(a.get('name', '')).strip() for a in artists if isinstance(a, dict) and a.get('name')]
+                        artist_name = '; '.join(names) if names else None
+                    elif isinstance(artists, dict) and artists.get('name'):
+                        artist_name = str(artists.get('name')).strip()
+        except Exception as e:
+            logger.info("[DOWNLOAD] Failed to prefetch track metadata for job payload: %s", e)
     
     job_payload = {
         'trackId': track_id,
@@ -65,6 +102,10 @@ def download_track():
         'downloadQuality': quality_choice,
     }
     
+    if mbid:
+        job_payload['mbid'] = mbid
+    if isrc:
+        job_payload['isrc'] = isrc
     if artist_name:
         job_payload['artist'] = artist_name
     if title_name:

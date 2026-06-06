@@ -1,5 +1,6 @@
 """Metadata provider protocol and implementations."""
 
+import copy
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -58,6 +59,42 @@ class MetadataProvider(ABC):
         pass
 
 
+def _stringify_ids(obj):
+    """Recursively convert 'id' fields to strings in a response dict."""
+    if isinstance(obj, dict):
+        for key in ('id', 'artistId', 'albumId', 'trackId', 'album_id', 'artist_id', 'track_id'):
+            if key in obj and obj[key] is not None:
+                obj[key] = str(obj[key])
+        for value in list(obj.values()):
+            _stringify_ids(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _stringify_ids(item)
+    return obj
+
+
+_provider_cache: Dict[str, MetadataProvider] = {}
+
+
+def get_metadata_provider(source: str = 'tidal') -> MetadataProvider:
+    """Get the metadata provider for the given source."""
+    if source not in _provider_cache:
+        if source == 'musicbrainz':
+            from squidly.services.musicbrainz_provider import MusicBrainzMetadataProvider
+            _provider_cache[source] = MusicBrainzMetadataProvider()
+        else:
+            _provider_cache[source] = TidalMetadataProvider()
+    return _provider_cache[source]
+
+
+def get_active_metadata_provider() -> MetadataProvider:
+    """Get the metadata provider based on the current database setting."""
+    from squidly.infrastructure.storage import get_download_settings
+    settings = get_download_settings()
+    source = settings.get('metadata_source', 'tidal')
+    return get_metadata_provider(source)
+
+
 class TidalMetadataProvider(MetadataProvider):
     """Tidal metadata provider using hifi.py functions."""
     
@@ -77,19 +114,19 @@ class TidalMetadataProvider(MetadataProvider):
     
     def search(self, query: str, search_type: str, limit: int = 25, offset: int = 0) -> Dict[str, Any]:
         """Search Tidal library."""
-        return self._search(search_type, query, limit=limit, offset=offset)
+        return _stringify_ids(copy.deepcopy(self._search(search_type, query, limit=limit, offset=offset)))
     
     def get_track(self, track_id: str) -> Dict[str, Any]:
         """Get track by ID."""
-        return self._get_track_object(track_id, include_streams=False, include_album=True)
+        return _stringify_ids(copy.deepcopy(self._get_track_object(track_id, include_streams=False, include_album=True)))
     
     def get_album(self, album_id: str) -> Dict[str, Any]:
         """Get album by ID."""
-        return self._get_album_object(album_id, include_streams=False)
+        return _stringify_ids(copy.deepcopy(self._get_album_object(album_id, include_streams=False)))
     
     def get_artist(self, artist_id: str) -> Dict[str, Any]:
         """Get artist by ID."""
-        return self._get_artist_object(artist_id)
+        return _stringify_ids(copy.deepcopy(self._get_artist_object(artist_id)))
     
     def get_playlist(self, playlist_id: str) -> Dict[str, Any]:
         """Get playlist by ID."""
@@ -101,7 +138,8 @@ class TidalMetadataProvider(MetadataProvider):
             timeout=10,
             max_retries=3
         )
-        return response.json() if response.ok else {}
+        result = response.json() if response.ok else {}
+        return _stringify_ids(result)
     
     def get_similar_tracks(self, track_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar tracks."""
@@ -114,7 +152,8 @@ class TidalMetadataProvider(MetadataProvider):
             max_retries=3
         )
         result = response.json() if response.ok else {}
-        return result.get('data', {}).get('items', [])
+        items = result.get('data', {}).get('items', [])
+        return _stringify_ids(items)
     
     def get_similar_albums(self, album_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar albums."""
@@ -127,7 +166,8 @@ class TidalMetadataProvider(MetadataProvider):
             max_retries=3
         )
         result = response.json() if response.ok else {}
-        return result.get('data', {}).get('items', [])
+        items = result.get('data', {}).get('items', [])
+        return _stringify_ids(items)
     
     def get_similar_artists(self, artist_id: str, limit: int = 25) -> List[Dict[str, Any]]:
         """Get similar artists."""
@@ -140,7 +180,8 @@ class TidalMetadataProvider(MetadataProvider):
             max_retries=3
         )
         result = response.json() if response.ok else {}
-        return result.get('data', {}).get('items', [])
+        items = result.get('data', {}).get('items', [])
+        return _stringify_ids(items)
     
     def get_track_manifest(self, track_id: str, audio_quality: str = 'LOSSLESS') -> Dict[str, Any]:
         """Get track manifest."""

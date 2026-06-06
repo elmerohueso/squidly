@@ -70,6 +70,7 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'penalty_live': True,
     'download_source': 'tidal',
     'deezer_arl': '',
+    'metadata_source': 'tidal',
 }
 
 # Temporary scratch directory used during downloads
