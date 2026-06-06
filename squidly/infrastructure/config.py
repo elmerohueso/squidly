@@ -42,7 +42,6 @@ WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 
 # Default download settings (used when database doesn't yet have values)
 DEFAULT_DOWNLOAD_SETTINGS = {
-    'format': 'original',
     'quality': 'LOSSLESS',
     'parent_folder': '',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',

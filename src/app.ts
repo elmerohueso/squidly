@@ -5632,7 +5632,7 @@ class App {
         };
     }
 
-    private normalizeSettings(raw: Partial<DownloadSettings> & { format?: string; quality?: string }): DownloadSettings {
+    private normalizeSettings(raw: Partial<DownloadSettings> & { quality?: string }): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
@@ -5644,13 +5644,9 @@ class App {
         );
 
         let quality: DownloadQuality = fallback.quality;
-        const rawQuality = String(raw.quality || raw.format || '').trim().toUpperCase();
+        const rawQuality = String(raw.quality || '').trim().toUpperCase();
         if (['LOSSLESS', 'HIGH', 'LOW'].includes(rawQuality)) {
             quality = rawQuality as DownloadQuality;
-        } else if (String(raw.format).trim().toLowerCase() === 'original') {
-            quality = 'LOSSLESS';
-        } else if (String(raw.format).trim().toLowerCase() === 'mp3') {
-            quality = 'HIGH';
         }
 
         return {

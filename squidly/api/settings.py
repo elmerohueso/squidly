@@ -125,7 +125,6 @@ def download_settings():
     ]
 
     updated = {
-        'format': current['format'],
         'quality': payload.get('quality', current.get('quality', DEFAULT_DOWNLOAD_SETTINGS['quality'])),
         'parent_folder': current['parent_folder'],
         'file_naming_album': file_naming_album,
@@ -177,7 +176,6 @@ def download_settings():
     save_download_settings(updated)
 
     result = {
-        'format': updated['format'],
         'quality': updated['quality'],
         'file_naming': updated['file_naming_album'],
         'file_naming_album': updated['file_naming_album'],

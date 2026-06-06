@@ -10,27 +10,6 @@ import re
 from squidly.infrastructure.utils import _safe_int, normalize_match_text
 
 
-def _requested_download_format(file_format):
-    """Normalize requested download format."""
-    normalized = str(file_format or '').strip().lower()
-    if normalized in ('m4a', 'aac', 'mp4'):
-        return 'm4a'
-    if normalized == 'flac':
-        return 'flac'
-    return 'm4a'
-
-
-def _matches_requested_format(file_format, candidate_format):
-    """Check if candidate format matches requested format."""
-    normalized_request = _requested_download_format(file_format)
-    normalized_candidate = str(candidate_format or '').strip().lower()
-
-    if normalized_request == 'flac':
-        return normalized_candidate == 'flac'
-
-    return normalized_candidate in ('m4a', 'aac', 'mp4')
-
-
 def _normalize_match_text_for_scoring(s):
     """Normalize text for scoring by removing non-alphanumeric characters."""
     return re.sub(r'[^a-z0-9]+', '', s.lower().strip())

@@ -17,7 +17,7 @@ from squidly.infrastructure.db import get_db_connection
 from squidly.jobs.orchestration import queue_pending_playlist_addition
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.matching import upsert_download_match_hint
-from squidly.services.playlist_matching import _lookup_track_metadata, _matches_requested_format
+from squidly.services.playlist_matching import _lookup_track_metadata
 from squidly.infrastructure.plex import plex_healthcheck, get_plex_config
 from squidly.services.hifi import get_hifi_track_object
 from squidly.infrastructure.storage import get_download_settings, set_last_download_activity_at
@@ -44,7 +44,6 @@ def process_download_job(job_id, payload):
     stages = {
         'downloaded': 'pending',
         'tagged': 'pending',
-        'converted': 'pending',
         'written': 'pending',
         'playlist_added': 'pending'
     }
@@ -80,12 +79,6 @@ def process_download_job(job_id, payload):
     if not os.path.exists(downloads_folder):
         logger.info("[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: %s", downloads_folder)
         os.makedirs(downloads_folder, exist_ok=True)
-
-    track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
-    album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
-
-    output_format = 'flac' if quality_choice == 'LOSSLESS' else 'm4a'
-    logger.info("[DOWNLOAD] Selected output format=%s for quality='%s'", output_format, quality_choice)
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
     album_data = track_data.get('album') if isinstance(track_data.get('album'), dict) else {}
@@ -208,7 +201,7 @@ def process_download_job(job_id, payload):
 
     # --- Compute file path (shared by both match-found and download branches) ---
 
-    file_ext = output_format
+    file_ext = 'flac'
 
     safe_artist = sanitize_filename_component(effective_artist_name)
     safe_album = sanitize_filename_component(album_name)
@@ -236,7 +229,7 @@ def process_download_job(job_id, payload):
     ignore_matches = bool(payload.get('ignore_matches', False))
     matching_rows = []
     if not ignore_matches:
-        matching_rows = [row for row in metadata_rows if _matches_requested_format(output_format, row.get('format'))]
+        matching_rows = list(metadata_rows)
 
     summary_rows = [
         {
@@ -251,6 +244,14 @@ def process_download_job(job_id, payload):
         matched_row = matching_rows[0]
         matched_path = str(matched_row.get('file_path') or '').strip()
 
+        file_ext = matched_row.get('format', 'flac')
+        file_path = file_naming.replace('{artist}', safe_artist)
+        file_path = file_path.replace('{album}', safe_album)
+        file_path = file_path.replace('{track}', safe_track)
+        file_path = file_path.replace('{title}', safe_title)
+        file_path = file_path.replace('{ext}', file_ext)
+        file_path = clean_path_components(file_path)
+
         full_path = matched_path if matched_path else os.path.join(downloads_folder, file_path)
         full_path = os.path.normpath(full_path)
 
@@ -258,7 +259,6 @@ def process_download_job(job_id, payload):
         logger.info("[DOWNLOAD] Existing metadata match found - skipping download pipeline")
         stages['downloaded'] = 'done'
         stages['tagged'] = 'done'
-        stages['converted'] = 'skipped'
         stages['written'] = 'done'
         set_last_download_activity_at(datetime.utcnow())
         jobs.update_job_progress(job_id, {
@@ -292,7 +292,7 @@ def process_download_job(job_id, payload):
             album_title=album_name,
             album_artist_name=album_artist_name or track_artist_name,
             full_path=full_path,
-            audio_format=output_format,
+            audio_format=matched_row.get('format', 'unknown'),
             hifi_track_id=str(track_id),
             hifi_album_id=str(album_id) if album_id else None,
             track_hifi_artist_id=track_artist_id,
@@ -305,7 +305,7 @@ def process_download_job(job_id, payload):
 
         return {
             'file_path': full_path,
-            'format': output_format,
+            'format': matched_row.get('format', 'unknown'),
             'artist': artist_name,
             'album': album_name,
             'title': track_title,
@@ -314,14 +314,14 @@ def process_download_job(job_id, payload):
             'stages': stages
         }
 
-    logger.info("[DOWNLOAD_DECISION] Job %s: downloading because no existing Plex inventory metadata matched selected format '%s'", job_id, output_format)
+    logger.info("[DOWNLOAD_DECISION] Job %s: downloading because no existing Plex inventory metadata matched", job_id)
 
     full_path = os.path.join(downloads_folder, file_path)
     full_path = os.path.normpath(full_path)
 
     logger.info("[DOWNLOAD_DEBUG] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
     logger.info("[DOWNLOAD_DEBUG] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
-    logger.info("[DOWNLOAD_DECISION] Job %s: selected_format='%s', title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, output_format, track_title, artist_name, album_name, effective_artist_name)
+    logger.info("[DOWNLOAD_DECISION] Job %s: title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, track_title, artist_name, album_name, effective_artist_name)
 
     # --- Download track to temp ---
 
@@ -353,7 +353,7 @@ def process_download_job(job_id, payload):
             continue
 
         # Create a fresh temp path for each attempt
-        temp_source_path = os.path.join(temp_folder, f'temp_{track_id}_{current_source}.{output_format}')
+        temp_source_path = os.path.join(temp_folder, f'temp_{track_id}_{current_source}.flac')
 
         try:
             if current_source == 'qobuz':
@@ -571,69 +571,32 @@ def process_download_job(job_id, payload):
     logger.info("[DOWNLOAD_DEBUG] cover_url='%s' cover_bytes=%s", cover_url, len(cover_image_data) if cover_image_data else 0)
     logger.info("[DOWNLOAD_DEBUG] metadata_dict=%s", metadata_dict)
 
-    temp_folder = '/app/temp'
-    os.makedirs(temp_folder, exist_ok=True)
-
-    temp_target_path = os.path.join(temp_folder, f'temp_{track_id}.{output_format}')
-
     logger.info("[DOWNLOAD] Using temporary source file: %s", temp_source_path)
 
     stages['downloaded'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    logger.info("[DOWNLOAD] Adding metadata to staged %s: %s", output_format.upper(), temp_source_path)
+    logger.info("[DOWNLOAD] Adding metadata to staged file: %s", temp_source_path)
     logger.info("[DOWNLOAD_DEBUG] tagging temp_source_path='%s'", temp_source_path)
     downloads.add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
     logger.info("[DOWNLOAD_DEBUG] tagging complete for temp_source_path='%s'", temp_source_path)
     stages['tagged'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    converted = False
-    if output_format == 'm4a' and audio_format != 'm4a':
-        logger.info("[DOWNLOAD] Output format is AAC - converting staged %s to M4A", audio_format.upper())
-        success = convert_to_aac(temp_source_path, temp_target_path, source_format=audio_format)
-        if not success:
-            downloads.cleanup_file(temp_source_path)
-            downloads.cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {audio_format.upper()} to M4A")
+    audio_format = audio_format or 'flac'
+    if not full_path.endswith(f'.{audio_format}'):
+        full_path = full_path.rsplit('.', 1)[0] + f'.{audio_format}'
+        logger.info("[DOWNLOAD] Updated output path with correct extension: %s", full_path)
 
-        shutil.move(temp_target_path, full_path)
-        logger.info("[DOWNLOAD_DEBUG] tagging final M4A full_path='%s'", full_path)
-        downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
-        logger.info("[DOWNLOAD_DEBUG] tagging complete for final M4A full_path='%s'", full_path)
-        converted = True
-    elif output_format == 'flac' and audio_format != 'flac':
-        logger.info("[DOWNLOAD] Output format is FLAC - converting staged %s to FLAC", audio_format.upper())
-        success = convert_to_flac(temp_source_path, temp_target_path, source_format=audio_format)
-        if not success:
-            downloads.cleanup_file(temp_source_path)
-            downloads.cleanup_file(temp_target_path)
-            raise Exception(f"Failed to convert {audio_format.upper()} to FLAC")
+    logger.info("[DOWNLOAD] Moving %s to final destination", audio_format.upper())
+    shutil.move(temp_source_path, full_path)
 
-        shutil.move(temp_target_path, full_path)
-        logger.info("[DOWNLOAD_DEBUG] tagging final FLAC full_path='%s'", full_path)
-        downloads.add_id3_tags_to_file(full_path, metadata_dict, cover_image_data, tag_settings)
-        logger.info("[DOWNLOAD_DEBUG] tagging complete for final FLAC full_path='%s'", full_path)
-        converted = True
-    else:
-        if not full_path.endswith(f'.{output_format}'):
-            full_path = full_path.rsplit('.', 1)[0] + f'.{output_format}'
-            logger.info("[DOWNLOAD] Updated output path with correct extension: %s", full_path)
-
-        logger.info("[DOWNLOAD] Output is %s - moving from temp", output_format.upper())
-        shutil.move(temp_source_path, full_path)
-
-    stages['converted'] = 'done' if converted else 'skipped'
     stages['written'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    if converted:
-        downloads.cleanup_file(temp_source_path)
-        downloads.cleanup_file(temp_target_path)
-    else:
-        downloads.cleanup_file(temp_source_path)
+    downloads.cleanup_file(temp_source_path)
 
     logger.info("[DOWNLOAD] SUCCESS: Downloaded and saved to %s", full_path)
 
@@ -654,14 +617,13 @@ def process_download_job(job_id, payload):
         stages['playlist_added'] = 'skipped'
         jobs.update_job_progress(job_id, {'stages': stages})
 
-    final_audio_format = output_format
     upsert_download_match_hint(
         track_title=track_title,
         track_artist_name=track_artist_name,
         album_title=album_name,
         album_artist_name=album_artist_name or track_artist_name,
         full_path=full_path,
-        audio_format=final_audio_format,
+        audio_format=audio_format or 'flac',
         hifi_track_id=str(track_id),
         hifi_album_id=str(album_id) if album_id else None,
         track_hifi_artist_id=track_artist_id,
@@ -674,7 +636,7 @@ def process_download_job(job_id, payload):
 
     result = {
         'file_path': full_path,
-        'format': output_format,
+        'format': audio_format or 'flac',
         'artist': artist_name,
         'album': album_name,
         'title': track_title,

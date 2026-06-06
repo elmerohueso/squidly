@@ -60,17 +60,6 @@ class TestDownloadTrackAllStagesDone:
         stages = {
             "downloaded": "done",
             "tagged": "done",
-            "converted": "done",
-            "written": "done",
-            "playlist_added": "done",
-        }
-        assert download_track_all_stages_done(stages) is True
-
-    def test_converted_skipped(self):
-        stages = {
-            "downloaded": "done",
-            "tagged": "done",
-            "converted": "skipped",
             "written": "done",
             "playlist_added": "done",
         }
@@ -80,7 +69,6 @@ class TestDownloadTrackAllStagesDone:
         stages = {
             "downloaded": "done",
             "tagged": "done",
-            "converted": "done",
             "written": "done",
             "playlist_added": "skipped",
         }
@@ -94,7 +82,6 @@ class TestDownloadTrackAllStagesDone:
         stages = {
             "downloaded": "done",
             "tagged": "pending",
-            "converted": "done",
             "written": "done",
             "playlist_added": "done",
         }

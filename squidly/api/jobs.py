@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from squidly import jobs
 from squidly.infrastructure.db import get_db_connection
 from squidly.infrastructure.storage import get_download_settings
-from squidly.services.playlist_matching import _requested_download_format, _matches_requested_format
+
 
 jobs_bp = Blueprint('jobs', __name__)
 
@@ -25,13 +25,8 @@ def _download_job_exists_in_plex(cur, result_payload, job_payload):
     if not artist or not title:
         return False
 
-    requested_format = _requested_download_format(
-        job_payload.get('format') if isinstance(job_payload, dict) else None
-    )
-
     rows = _lookup_track_metadata(cur, title, artist, album)
-    exists = any(_matches_requested_format(requested_format, row.get('format')) for row in rows)
-    return exists
+    return len(rows) > 0
 
 
 def _lookup_track_metadata(cur, title, artist, album):
