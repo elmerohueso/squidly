@@ -164,7 +164,7 @@ def mb_get_artist(mbid: str) -> dict:
     cached = _cache_get(cache_key)
     if cached:
         return cached
-    resp = _rate_limited_get(f'{_MB_BASE_URL}/artist/{mbid}', params={'inc': 'release-groups', 'fmt': 'json', 'limit': 100})
+    resp = _rate_limited_get(f'{_MB_BASE_URL}/artist/{mbid}', params={'inc': 'release-groups', 'fmt': 'json', 'release-groups-limit': 100})
     if not resp.ok:
         return {}
     result = resp.json()
