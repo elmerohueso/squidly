@@ -16,7 +16,7 @@ _CAA_BASE_URL = 'https://coverartarchive.org'
 
 _rate_lock = threading.Lock()
 _last_request_ts: float = 0.0
-_MIN_INTERVAL_SECONDS: float = 1.0
+_MIN_INTERVAL_SECONDS: float = 0.02  # 50 req/sec for anonymous MB user agents
 
 _cache_lock = threading.Lock()
 _response_cache: dict = {}
