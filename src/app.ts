@@ -1302,7 +1302,7 @@ class App {
         if (this.downloadSourceList) {
             this.downloadSourceList.addEventListener('change', (e) => {
                 const target = e.target as HTMLInputElement;
-                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz')) {
+                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer')) {
                     // Ensure at least one source is checked
                     const checkedBoxes = this.downloadSourceList.querySelectorAll('input[type="checkbox"]:checked');
                     if (checkedBoxes.length === 0) {
