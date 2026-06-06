@@ -359,7 +359,7 @@ def normalize_mb_artist(artist: dict) -> dict:
     # Group release-groups as "albums" (only album type)
     albums = []
     for rg in release_groups:
-        rg_type = rg.get('type', '').lower()
+        rg_type = rg.get('primary-type', '').lower()
         if rg_type == 'album':
             first_release = rg.get('first-release-date', '')
             albums.append({
