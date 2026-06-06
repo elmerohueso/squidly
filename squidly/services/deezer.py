@@ -6,6 +6,7 @@ and Blowfish-decrypted download.
 
 import hashlib
 import logging
+import os
 from typing import Optional
 
 import requests
@@ -262,6 +263,11 @@ def download_deezer_track(
         return None
 
     logger.info("[DEEZER] Download complete for ISRC %s -> %s", isrc, output_path)
+    try:
+        actual_size = os.path.getsize(output_path)
+        logger.info("[DEEZER] Written file size: %d bytes (%s)", actual_size, output_path)
+    except OSError:
+        logger.info("[DEEZER] Written file size: unknown (%s)", output_path)
     return {
         'track': track,
         'file_path': output_path,

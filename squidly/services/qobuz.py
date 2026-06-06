@@ -5,6 +5,7 @@ for Qobuz-DL mirror endpoints.
 """
 
 import logging
+import os
 import time
 from typing import Optional
 
@@ -230,6 +231,20 @@ def download_qobuz_track(
             "[QOBUZ] Downloaded %d bytes for track %s (ISRC: %s)",
             downloaded, track_id, isrc
         )
+
+        try:
+            actual_size = os.path.getsize(output_path)
+            logger.info("[QOBUZ] Written file size: %d bytes (%s)", actual_size, output_path)
+        except OSError:
+            logger.info("[QOBUZ] Written file size: unknown (%s)", output_path)
+
+        try:
+            with open(output_path, 'rb') as fmt_file:
+                from squidly.infrastructure.downloads import detect_audio_format
+                detected_fmt = detect_audio_format(fmt_file.read(32))
+            logger.info("[QOBUZ] Detected format: %s (%s)", detected_fmt, output_path)
+        except Exception:
+            pass
 
     except requests.RequestException as exc:
         logger.error("[QOBUZ] Download failed for track %s: %s", track_id, exc)

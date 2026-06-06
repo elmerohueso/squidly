@@ -24,6 +24,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _log_file_size(file_path, label="file"):
+    """Log the size of a file in bytes. Returns the size or -1 on error."""
+    try:
+        size = os.path.getsize(file_path)
+        logger.info("[DOWNLOAD] %s size: %d bytes (%s)", label, size, file_path)
+        return size
+    except OSError as exc:
+        logger.info("[DOWNLOAD] Could not read %s size: %s (%s)", label, exc, file_path)
+        return -1
+
+
 # ---------------------------------------------------------------------------
 # SQUID_URLS shared accessor
 # ---------------------------------------------------------------------------
@@ -152,6 +163,7 @@ def download_binary(url: str, timeout: int = 30) -> bytes:
     if response is None:
         raise requests.exceptions.RequestException(f'Failed to download binary URL: {url}')
     response.raise_for_status()
+    logger.info("[DOWNLOAD] download_binary: %d bytes from %s", len(response.content), url[:120])
     return response.content
 
 
@@ -183,6 +195,12 @@ def demux_flac(input_path: Path, output_path: Path) -> None:
             capture_output=True,
             text=True,
         )
+        try:
+            input_size = os.path.getsize(input_path)
+            output_size = os.path.getsize(output_path)
+            logger.info("[DOWNLOAD] Demux result: input=%d bytes, output=%d bytes, delta=%+d bytes", input_size, output_size, output_size - input_size)
+        except OSError:
+            pass
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f'ffmpeg failed while demuxing {input_path} -> {output_path}: {exc.returncode}\n{exc.stderr}'
@@ -215,6 +233,12 @@ def download_dash_audio(manifest_uri: str, output_path: Path) -> None:
             capture_output=True,
             text=True,
         )
+        logger.info("[DOWNLOAD] DASH download complete: %s", output_path)
+        try:
+            file_size = os.path.getsize(output_path)
+            logger.info("[DOWNLOAD] DASH output file size: %d bytes", file_size)
+        except OSError:
+            pass
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
             f'ffmpeg failed while downloading DASH audio from {manifest_uri} -> {output_path}: {exc.returncode}\n{exc.stderr}'
@@ -272,6 +296,7 @@ def download_track_manifest(
     for_download: bool = False,
 ):
     formats, manifest_type = resolve_formats_and_manifest_type(quality, manifest_type)
+    logger.info("[DOWNLOAD] Manifest request: track_id=%s, quality=%s, formats=%s, manifest_type=%s", track_id, quality, formats, manifest_type)
     params = {
         'id': str(track_id),
         'formats': ','.join(formats),
@@ -352,13 +377,20 @@ def download_track_manifest(
 
                 logger.info("[DOWNLOAD] Downloaded %d/%d HLS segments", downloaded_segments, len(segment_uris))
 
+                output_file.flush()
+                total_bytes = output_file.tell()
+                logger.info("[DOWNLOAD] HLS download total bytes written: %d bytes (%d segments + init)", total_bytes, len(segment_uris))
+
             if should_demux:
                 logger.info("[DOWNLOAD] Demuxing FLAC from MP4 container: %s -> %s", intermediate_path, output_path)
+                _log_file_size(intermediate_path, "M4A input before demux")
                 demux_flac(intermediate_path, output_path)
+                _log_file_size(output_path, "FLAC output after demux")
                 intermediate_path.unlink()
                 logger.info("[DOWNLOAD] Demux complete: %s", output_path)
             else:
                 logger.info("[DOWNLOAD] Download complete: %s", output_path)
+                _log_file_size(output_path, "HLS output")
 
         elif manifest_type == 'MPEG_DASH' or playlist_uri.endswith('.mpd') or '<MPD' in playlist_text:
             if output_path.suffix.lower() == '.mpd':
@@ -369,6 +401,7 @@ def download_track_manifest(
                 logger.info("[DOWNLOAD] Downloading MPEG-DASH audio from manifest: %s", playlist_uri)
                 download_dash_audio(playlist_uri, output_path)
                 logger.info("[DOWNLOAD] Download complete: %s", output_path)
+                _log_file_size(output_path, "DASH output")
         else:
             raise ValueError('Unsupported manifest type or response content for download.')
     except Exception:
@@ -1039,6 +1072,11 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
         disc_num = metadata.get('disc_number', '')
         file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
         logger.info("[TAGGING_DEBUG] Writing tags for '%s' type='%s'", file_path, file_type)
+        try:
+            size_before = os.path.getsize(file_path)
+            logger.info("[DOWNLOAD] File size before tagging: %d bytes (%s)", size_before, file_path)
+        except OSError:
+            size_before = -1
         logger.info(
             "[TAGGING_DEBUG] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
             artist, metadata.get('track_artists'), metadata.get('album_artist'), metadata.get('album_artists'), title, album, year, track_num, disc_num, metadata.get('version'), metadata.get('isrc'), metadata.get('audio_quality')
@@ -1094,6 +1132,11 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     audio.add_picture(pic)
 
                 audio.save()
+                try:
+                    size_after = os.path.getsize(file_path)
+                    logger.info("[DOWNLOAD] File size after FLAC tagging: %d bytes (delta=%+d)", size_after, size_after - size_before)
+                except OSError:
+                    pass
                 logger.info("[ID3] Successfully added FLAC metadata to %s", file_path)
             except Exception as e:
                 logger.info("[ID3] Warning: Could not write FLAC tags: %s", str(e))
@@ -1159,6 +1202,11 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     audio['covr'] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
                 audio.save()
+                try:
+                    size_after = os.path.getsize(file_path)
+                    logger.info("[DOWNLOAD] File size after M4A tagging: %d bytes (delta=%+d)", size_after, size_after - size_before)
+                except OSError:
+                    pass
                 logger.info("[ID3] Successfully added M4A metadata to %s", file_path)
             except Exception as e:
                 logger.info("[ID3] Warning: Could not write M4A tags: %s", str(e))
@@ -1225,6 +1273,12 @@ def validate_audio_duration(file_path, expected_duration_seconds):
         return
 
     try:
+        file_size = os.path.getsize(file_path)
+        logger.info("[DOWNLOAD] Duration validation: file=%s, size=%d bytes, expected_duration=%ds", file_path, file_size, expected)
+    except OSError:
+        logger.info("[DOWNLOAD] Duration validation: file=%s, size=unknown, expected_duration=%ds", file_path, expected)
+
+    try:
         result = subprocess.run(
             ['ffmpeg', '-i', file_path, '-f', 'null', '/dev/null'],
             capture_output=True,
@@ -1251,4 +1305,8 @@ def validate_audio_duration(file_path, expected_duration_seconds):
             f"Downloaded audio is truncated: expected ~{expected}s but actual decoded duration is {actual_seconds:.1f}s"
         )
 
-    logger.info("[DOWNLOAD] Duration validation passed: expected ~%ds, actual %.1fs", expected, actual_seconds)
+    try:
+        file_size = os.path.getsize(file_path)
+    except OSError:
+        file_size = -1
+    logger.info("[DOWNLOAD] Duration validation passed: expected ~%ds, actual %.1fs, file_size=%d bytes", expected, actual_seconds, file_size)

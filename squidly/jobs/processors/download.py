@@ -340,6 +340,8 @@ def process_download_job(job_id, payload):
     any_source_had_mirrors = False  # Track if any source had eligible mirrors to try
     audio_format = None
     expected_duration = track_data.get('duration')
+    logger.info("[DOWNLOAD] Pre-download: quality=%s, expected_duration=%s, download_sources=%s, track_id=%s",
+                quality_choice, expected_duration, download_sources, track_id)
 
     for current_source in download_sources:
         if current_source == 'qobuz' and not track_data.get('isrc'):
@@ -402,6 +404,11 @@ def process_download_job(job_id, payload):
                 if audio_format == 'unknown':
                     audio_format = 'flac'
                 logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+                try:
+                    temp_size = os.path.getsize(temp_source_path)
+                    logger.info("[DOWNLOAD] Qobuz temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
+                except OSError:
+                    logger.info("[DOWNLOAD] Qobuz temp file: size unknown (%s)", temp_source_path)
 
                 # Validate duration
                 downloads.validate_audio_duration(temp_source_path, expected_duration)
@@ -434,6 +441,11 @@ def process_download_job(job_id, payload):
                 if audio_format == 'unknown':
                     audio_format = 'flac'
                 logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
+                try:
+                    temp_size = os.path.getsize(temp_source_path)
+                    logger.info("[DOWNLOAD] Deezer temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
+                except OSError:
+                    logger.info("[DOWNLOAD] Deezer temp file: size unknown (%s)", temp_source_path)
 
                 # Validate duration
                 downloads.validate_audio_duration(temp_source_path, expected_duration)
@@ -458,6 +470,11 @@ def process_download_job(job_id, payload):
                 if audio_format == 'unknown':
                     logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
                     audio_format = 'flac'
+                try:
+                    temp_size = os.path.getsize(temp_source_path)
+                    logger.info("[DOWNLOAD] Tidal temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
+                except OSError:
+                    logger.info("[DOWNLOAD] Tidal temp file: size unknown (%s)", temp_source_path)
 
                 # Validate duration
                 try:
@@ -473,6 +490,7 @@ def process_download_job(job_id, payload):
         except (ValueError, downloads.TransientDownloadError, RuntimeError, requests.exceptions.RequestException) as e:
             error_str = str(e)
             last_download_error = error_str
+            download_mirror = None
             # If this source had eligible mirrors to try (even if they failed),
             # the failure might be transient — keep the door open for retry.
             # "No mirror" errors are permanent per-source, but other sources
@@ -480,7 +498,7 @@ def process_download_job(job_id, payload):
             _is_permanent_no_mirror = any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
             if not _is_permanent_no_mirror:
                 any_source_had_mirrors = True
-            logger.info("[DOWNLOAD] Source '%s' failed, %s", current_source,
+            logger.info("[DOWNLOAD] Source '%s' failed: %s — %s", current_source, error_str,
                         "trying next source..." if len(download_sources) > 1 else "no more sources")
             downloads.cleanup_file(temp_source_path)
             continue
@@ -581,6 +599,11 @@ def process_download_job(job_id, payload):
     logger.info("[DOWNLOAD_DEBUG] tagging temp_source_path='%s'", temp_source_path)
     downloads.add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
     logger.info("[DOWNLOAD_DEBUG] tagging complete for temp_source_path='%s'", temp_source_path)
+    try:
+        tagged_size = os.path.getsize(temp_source_path)
+        logger.info("[DOWNLOAD] Tagged temp file size: %d bytes (%s)", tagged_size, temp_source_path)
+    except OSError:
+        logger.info("[DOWNLOAD] Tagged temp file size: unknown (%s)", temp_source_path)
     stages['tagged'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
@@ -591,6 +614,11 @@ def process_download_job(job_id, payload):
 
     logger.info("[DOWNLOAD] Moving %s to final destination", audio_format.upper())
     shutil.move(temp_source_path, full_path)
+    try:
+        final_size = os.path.getsize(full_path)
+        logger.info("[DOWNLOAD] Final file: %d bytes, format=%s (%s)", final_size, audio_format, full_path)
+    except OSError:
+        logger.info("[DOWNLOAD] Final file: size unknown (%s)", full_path)
 
     stages['written'] = 'done'
     set_last_download_activity_at(datetime.utcnow())
