@@ -114,7 +114,7 @@ class TidalMetadataProvider(MetadataProvider):
     
     def search(self, query: str, search_type: str, limit: int = 25, offset: int = 0) -> Dict[str, Any]:
         """Search Tidal library."""
-        return _stringify_ids(copy.deepcopy(self._search(search_type, query, limit=limit, offset=offset)))
+        return _stringify_ids(copy.deepcopy(self._search(search_type, query, limit=limit)))
     
     def get_track(self, track_id: str) -> Dict[str, Any]:
         """Get track by ID."""
