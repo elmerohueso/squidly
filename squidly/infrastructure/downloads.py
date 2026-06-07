@@ -38,22 +38,10 @@ def _log_file_size(file_path, label="file"):
 # ---------------------------------------------------------------------------
 # SQUID_URLS shared accessor
 # ---------------------------------------------------------------------------
-# Cache for enabled mirror URLs, populated at app startup.
-# Use refresh_squid_urls() to update the cache.
-# Use get_squid_urls() to read the current cache.
-
-_SQUID_URLS_CACHE = []
-
 
 def get_squid_urls():
-    """Return the current cache of enabled mirror URLs."""
-    return _SQUID_URLS_CACHE
-
-
-def refresh_squid_urls():
-    """Refresh the SQUID_URLS cache from the database."""
-    global _SQUID_URLS_CACHE
-    _SQUID_URLS_CACHE = load_enabled_mirror_urls()
+    """Return all enabled mirror URLs directly from the database."""
+    return load_enabled_mirror_urls()
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +730,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             """
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
-            WHERE enabled = 1 AND is_premium = 1 AND mirror_type = %s
+            WHERE enabled = 1 AND mirror_type = %s
             """,
             (mirror_type,)
         )
@@ -751,7 +739,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             """
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
-            WHERE enabled = 1 AND is_premium = 1
+            WHERE enabled = 1
             """
         )
     rows = cur.fetchall()
