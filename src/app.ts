@@ -312,8 +312,8 @@ interface Endpoint {
     responseTime: number | null;
     lastChecked: string | null;
     enabled: boolean;
-    downloadsEnabled: boolean;
     mirrorType: string;
+    isPremium: number | null;
 }
 
 interface MirrorRateLimitStatus {
@@ -677,6 +677,7 @@ class App {
     private closeFlyoutButton: HTMLButtonElement;
     private flyoutContent: HTMLElement;
     private addMirrorButton: HTMLButtonElement;
+    private validateAllPremiumButton: HTMLButtonElement;
     private jobsButton: HTMLButtonElement;
     private jobsFlyout: HTMLElement;
     private jobsOverlay: HTMLElement;
@@ -765,6 +766,7 @@ class App {
     private settingsSaveTimer: number | null = null;
     private readonly settingsSaveDelayMs = 500;
     private statusUpdateInterval: number | null = null;
+    private premiumPollingInterval: number | null = null;
     private jobStatusInterval: number | null = null;
     private jobStatusPolling = false;
     private activeJobMap = new Map<number, {
@@ -973,6 +975,7 @@ class App {
         this.closeFlyoutButton = document.getElementById('closeFlyout') as HTMLButtonElement;
         this.flyoutContent = document.getElementById('flyoutContent') as HTMLElement;
         this.addMirrorButton = document.getElementById('addMirrorButton') as HTMLButtonElement;
+        this.validateAllPremiumButton = document.getElementById('validateAllPremiumButton') as HTMLButtonElement;
         this.jobsButton = document.getElementById('jobsButton') as HTMLButtonElement;
         this.jobsFlyout = document.getElementById('jobsFlyout') as HTMLElement;
         this.jobsOverlay = document.getElementById('jobsOverlay') as HTMLElement;
@@ -1205,6 +1208,22 @@ class App {
 
         if (this.addMirrorButton) {
             this.addMirrorButton.addEventListener('click', () => this.openAddMirrorModal());
+        }
+
+        if (this.validateAllPremiumButton) {
+            this.validateAllPremiumButton.addEventListener('click', async () => {
+                this.validateAllPremiumButton.disabled = true;
+                this.validateAllPremiumButton.textContent = 'Validating...';
+                try {
+                    const resp = await fetch('/api/endpoints/validate-all-premium', { method: 'POST' });
+                    if (!resp.ok) throw new Error('Failed to start validation');
+                    this.startPremiumPolling();
+                } catch (err) {
+                    this.validateAllPremiumButton.disabled = false;
+                    this.validateAllPremiumButton.textContent = 'Validate All Premium';
+                    alert(err instanceof Error ? err.message : 'Failed to start validation');
+                }
+            });
         }
 
         if (this.jobsButton) {
@@ -3704,6 +3723,26 @@ class App {
         this.statusFlyout.classList.remove('active');
         this.flyoutOverlay.classList.remove('active');
         document.body.style.overflow = '';
+        this.stopPremiumPolling();
+    }
+
+    private startPremiumPolling(): void {
+        this.stopPremiumPolling();
+        let elapsed = 0;
+        this.premiumPollingInterval = window.setInterval(async () => {
+            elapsed += 5;
+            await this.updateEndpointStatus();
+            if (elapsed >= 60) {
+                this.stopPremiumPolling();
+            }
+        }, 5000);
+    }
+
+    private stopPremiumPolling(): void {
+        if (this.premiumPollingInterval !== null) {
+            window.clearInterval(this.premiumPollingInterval);
+            this.premiumPollingInterval = null;
+        }
     }
 
     private openJobsFlyout(): void {
@@ -7156,6 +7195,18 @@ class App {
                 : 'Never';
             const disabledClass = endpoint.enabled ? '' : ' disabled';
 
+            const premiumLabel = endpoint.isPremium === null
+                ? '\u2014 Not Checked'
+                : endpoint.isPremium === 1
+                    ? '\u2713 Verified'
+                    : '\u2715 Preview Only';
+
+            const premiumClass = endpoint.isPremium === null
+                ? 'premium-stat-unchecked'
+                : endpoint.isPremium === 1
+                    ? 'premium-stat-verified'
+                    : 'premium-stat-preview';
+
             return `
                 <div class="endpoint-item${disabledClass}">
                     <div class="endpoint-header">
@@ -7177,13 +7228,7 @@ class App {
                             <input type="checkbox" data-endpoint-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.enabled ? 'checked' : ''}>
                             <span class="endpoint-toggle-slider"></span>
                         </label>
-                        ${endpoint.mirrorType !== 'qobuz' ? `
-                        <label class="endpoint-toggle-row" title="${endpoint.downloadsEnabled ? 'Disable downloads' : 'Enable downloads'}">
-                            <span class="endpoint-toggle-label">Downloads</span>
-                            <input type="checkbox" data-endpoint-download-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.downloadsEnabled ? 'checked' : ''}>
-                            <span class="endpoint-toggle-slider"></span>
-                        </label>
-                        ` : ''}
+
                     </div>
                     <div class="endpoint-details">
                         <div class="endpoint-detail">
@@ -7197,6 +7242,10 @@ class App {
                         <div class="endpoint-detail">
                             <span class="detail-label">Safe Rate</span>
                             <span class="detail-value">${safeRateLabel}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Premium</span>
+                            <span class="endpoint-stat-value ${premiumClass}" data-validate-premium="${this.escapeHtml(endpoint.name)}" style="cursor:pointer; text-decoration:underline;">${premiumLabel}</span>
                         </div>
                     </div>
                 </div>
@@ -7393,27 +7442,19 @@ class App {
             return;
         }
 
-        const downloadToggleInput = target.closest('[data-endpoint-download-toggle]') as HTMLInputElement | null;
-        if (downloadToggleInput) {
-            const name = downloadToggleInput.getAttribute('data-endpoint-download-toggle');
-            if (!name) {
-                return;
-            }
-            const prevState = downloadToggleInput.checked;
-            downloadToggleInput.disabled = true;
+        const validateSpan = target.closest('[data-validate-premium]') as HTMLElement | null;
+        if (validateSpan) {
+            const mirrorName = validateSpan.getAttribute('data-validate-premium');
+            if (!mirrorName) return;
+            const originalText = validateSpan.textContent || '';
+            validateSpan.textContent = 'Checking...';
             try {
-                const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}/toggle-download`, {
-                    method: 'POST',
-                });
-                if (!resp.ok) {
-                    const err = await resp.json();
-                    throw new Error(err.error || 'Failed to toggle downloads');
-                }
-                void this.updateEndpointStatus();
+                const resp = await fetch(`/api/endpoints/${encodeURIComponent(mirrorName)}/validate-premium`, { method: 'POST' });
+                if (!resp.ok) throw new Error('Failed to start validation');
+                setTimeout(() => this.updateEndpointStatus(), 5000);
             } catch (err) {
-                downloadToggleInput.checked = prevState;
-                downloadToggleInput.disabled = false;
-                alert(err instanceof Error ? err.message : 'Failed to toggle downloads');
+                validateSpan.textContent = originalText;
+                alert(err instanceof Error ? err.message : 'Failed to start validation');
             }
             return;
         }

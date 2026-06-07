@@ -124,8 +124,14 @@ def init_db():
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
     if 'mirror_type' not in mirror_columns:
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN mirror_type TEXT NOT NULL DEFAULT 'tidal'")
-    if 'downloads_enabled' not in mirror_columns:
-        cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN downloads_enabled INTEGER NOT NULL DEFAULT 1")
+    if 'is_premium' not in mirror_columns:
+        cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN is_premium INTEGER")
+    # One-time backfill: mirrors that were download-enabled but never premium-checked
+    cur.execute("""
+        UPDATE mirror_endpoints
+        SET is_premium = 1
+        WHERE downloads_enabled = 1 AND is_premium IS NULL
+    """)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS plex_config (

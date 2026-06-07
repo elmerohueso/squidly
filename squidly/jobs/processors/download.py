@@ -480,8 +480,6 @@ def process_download_job(job_id, payload):
                 try:
                     downloads.validate_audio_duration(temp_source_path, expected_duration)
                 except RuntimeError:
-                    if tidal_target:
-                        downloads.disable_mirror_downloads(tidal_target['name'])
                     raise
 
             # Success — exit the source loop

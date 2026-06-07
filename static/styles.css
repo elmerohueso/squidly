@@ -876,6 +876,7 @@ body {
 .mirrors-actions {
     display: flex;
     justify-content: flex-end;
+    gap: 0.75rem;
     margin-bottom: 1rem;
 }
 
@@ -1027,6 +1028,20 @@ body {
 .endpoint-remove-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+/* Premium stat values */
+.premium-stat-verified {
+    color: #1db954;
+}
+.premium-stat-preview {
+    color: #e74c3c;
+}
+.premium-stat-unchecked {
+    color: var(--color-text-muted, #999);
+}
+.endpoint-stat-value[data-validate-premium]:hover {
+    opacity: 0.8;
 }
 
 .endpoint-status {

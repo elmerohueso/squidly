@@ -53,7 +53,7 @@ def search_qobuz_track(
     base_url: str,
     isrc: str,
     timeout: int = 30,
-) -> Optional[dict]:
+) -> tuple[dict | None, str | None]:
     """Search the Qobuz catalog by ISRC and return the first matching track
     whose ISRC matches exactly.
 
@@ -67,7 +67,10 @@ def search_qobuz_track(
         timeout: Request timeout in seconds
 
     Returns:
-        The first track dict with a matching ISRC, or None if no match is found.
+        (track_dict, None) on success
+        (None, 'http_error') on HTTP 4xx/5xx
+        (None, 'network_error') on connection/timeout failures
+        (None, 'not_found') when no matching track is found
     """
     url = f'{base_url.rstrip("/")}/api/get-music'
     params = {'q': isrc, 'offset': 0}
@@ -78,18 +81,21 @@ def search_qobuz_track(
         response = requests.get(url, params=params, timeout=timeout, headers={'User-Agent': _USER_AGENT})
         response.raise_for_status()
     except requests.RequestException as exc:
-        logger.error("[QOBUZ] Search request failed: %s", exc)
-        return None
+        if isinstance(exc, requests.exceptions.HTTPError):
+            logger.error("[QOBUZ] Search request returned HTTP error: %s", exc)
+            return None, 'http_error'
+        logger.error("[QOBUZ] Search request failed (network error): %s", exc)
+        return None, 'network_error'
 
     data = response.json()
     if not data.get('success'):
         logger.error("[QOBUZ] Search returned success=false for ISRC %s", isrc)
-        return None
+        return None, 'http_error'
 
     result_data = data.get('data', {})
     if not isinstance(result_data, dict):
         logger.error("[QOBUZ] Unexpected search response format for ISRC %s", isrc)
-        return None
+        return None, 'http_error'
 
     tracks_obj = result_data.get('tracks', {})
     if isinstance(tracks_obj, dict):
@@ -101,7 +107,7 @@ def search_qobuz_track(
 
     if not items:
         logger.warning("[QOBUZ] No tracks found for ISRC %s", isrc)
-        return None
+        return None, 'not_found'
 
     # Find the first track whose ISRC matches exactly
     for track in items:
@@ -113,13 +119,13 @@ def search_qobuz_track(
                 "[QOBUZ] Found ISRC match: %s (Qobuz ID: %s, title: %s)",
                 track_isrc, track_id, track_title
             )
-            return track
+            return track, None
 
     logger.warning(
         "[QOBUZ] No track with matching ISRC found for %s (searched %d results)",
         isrc, len(items)
     )
-    return None
+    return None, 'not_found'
 
 
 def get_qobuz_stream_url(
@@ -197,7 +203,7 @@ def download_qobuz_track(
     quality_code = get_qobuz_quality_code(tidal_quality)
 
     # Step 1: Search by ISRC and validate match
-    track = search_qobuz_track(base_url, isrc, timeout=timeout)
+    track, search_error = search_qobuz_track(base_url, isrc, timeout=timeout)
     if track is None:
         logger.error("[QOBUZ] No track with matching ISRC found for %s — cannot download", isrc)
         return None

@@ -249,7 +249,7 @@ def endpoints_status():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT name, encoded_url, online, response_time, last_checked, enabled, mirror_type, downloads_enabled
+        SELECT name, encoded_url, online, response_time, last_checked, enabled, mirror_type, is_premium
         FROM mirror_endpoints
         ORDER BY response_time ASC NULLS LAST, name ASC
         """
@@ -267,10 +267,10 @@ def endpoints_status():
             'lastChecked': row['last_checked'],
             'enabled': bool(row['enabled']),
             'mirrorType': row.get('mirror_type', 'tidal'),
-            'downloadsEnabled': bool(row.get('downloads_enabled', True)),
+            'isPremium': row.get('is_premium'),  # None=unchecked, True=premium, False=not premium
         })
 
-        mirror_rate_limit_status = {}
+    mirror_rate_limit_status = {}
     try:
         mirror_rate_limit_status = downloads.get_mirror_rate_limit_status() or {}
     except Exception as e:
@@ -310,6 +310,9 @@ def add_endpoint():
 
     _async_validate_endpoints()
 
+    name = downloads.derive_mirror_name(url)
+    _run_async(lambda: downloads.validate_mirror_premium(name))
+
     return jsonify({'url': url, 'added': True, 'mirrorType': mirror_type}), 201
 
 
@@ -344,17 +347,18 @@ def toggle_endpoint(name):
     return jsonify({'name': name, 'enabled': bool(new_state)}), 200
 
 
-@settings_bp.route('/api/endpoints/<name>/toggle-download', methods=['POST'])
-def toggle_endpoint_downloads(name):
-    """Toggle whether a mirror is enabled for downloads."""
-    try:
-        new_state = downloads.toggle_mirror_downloads(name)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 404
-    except Exception as e:
-        logger.info("[ENDPOINTS] Failed to toggle mirror downloads: %s", e)
-        return jsonify({'error': str(e)}), 500
-    return jsonify({'name': name, 'downloadsEnabled': bool(new_state)}), 200
+@settings_bp.route('/api/endpoints/<name>/validate-premium', methods=['POST'])
+def validate_premium_endpoint(name):
+    """Trigger premium validation for a single mirror. Returns immediately."""
+    _run_async(lambda: downloads.validate_mirror_premium(name))
+    return jsonify({'name': name, 'status': 'validation_started'}), 202
+
+
+@settings_bp.route('/api/endpoints/validate-all-premium', methods=['POST'])
+def validate_all_premium():
+    """Trigger premium validation for all mirrors. Returns immediately."""
+    _run_async(downloads.validate_all_premium_from_db)
+    return jsonify({'status': 'validation_started'}), 202
 
 
 @settings_bp.route('/api/listenbrainz/config', methods=['GET'])

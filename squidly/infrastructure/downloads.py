@@ -108,6 +108,9 @@ def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
     return f"https://resources.tidal.com/images/{image_path}/{size}x{size}.jpg"
 
 
+_PREMIUM_TEST_ISRC = 'USGF19942502'  # Nirvana - "In Bloom"
+_PREMIUM_EXPECTED_DURATION = 255      # seconds
+
 HLS_TAG_MAP_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
 QUALITY_PRESETS = {
@@ -483,7 +486,7 @@ def _get_ordered_online_mirrors(url_list, mirror_type=None, for_download=False):
             SELECT name, response_time
             FROM mirror_endpoints
             WHERE online = 1 AND enabled = 1 AND mirror_type = %s
-            """ + (" AND downloads_enabled = 1" if for_download else ""),
+            """ + (" AND is_premium = 1" if for_download else ""),
             (mirror_type,)
         )
     else:
@@ -492,7 +495,7 @@ def _get_ordered_online_mirrors(url_list, mirror_type=None, for_download=False):
             SELECT name, response_time
             FROM mirror_endpoints
             WHERE online = 1 AND enabled = 1
-            """ + (" AND downloads_enabled = 1" if for_download else "")
+            """ + (" AND is_premium = 1" if for_download else "")
         )
     online_rows = cur.fetchall()
     conn.close()
@@ -650,7 +653,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     Args:
         url_base: The URL path to append to the base mirror URL (e.g. "/search/?s=...").
         url_list: List of mirror dicts ({'name', 'url'}).
-        for_download: If True, only consider mirrors with downloads_enabled=1.
+        for_download: If True, only consider mirrors with is_premium=1.
         mirror_type: If set, only consider mirrors of this type ('tidal' or 'qobuz').
     """
     last_exception = None
@@ -739,7 +742,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             """
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
-            WHERE enabled = 1 AND mirror_type = %s
+            WHERE enabled = 1 AND is_premium = 1 AND mirror_type = %s
             """,
             (mirror_type,)
         )
@@ -748,7 +751,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             """
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
-            WHERE enabled = 1
+            WHERE enabled = 1 AND is_premium = 1
             """
         )
     rows = cur.fetchall()
@@ -843,33 +846,7 @@ def toggle_mirror(name):
     return new_state
 
 
-def toggle_mirror_downloads(name):
-    """Toggle the downloads-enabled state of a mirror. Returns the new state."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT downloads_enabled FROM mirror_endpoints WHERE name = %s', (name,))
-    row = cur.fetchone()
-    if row is None:
-        conn.close()
-        raise ValueError(f'Mirror "{name}" not found')
-    new_state = 0 if row['downloads_enabled'] else 1
-    cur.execute('UPDATE mirror_endpoints SET downloads_enabled = %s WHERE name = %s', (new_state, name))
-    conn.commit()
-    conn.close()
-    return new_state
 
-
-def disable_mirror_downloads(name):
-    """Disable downloads for a mirror by name.
-
-    Sets downloads_enabled = 0 so the mirror is excluded from download
-    rotation but still usable for metadata/search requests.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('UPDATE mirror_endpoints SET downloads_enabled = 0 WHERE name = %s', (name,))
-    conn.commit()
-    conn.close()
 
 
 def validate_single_endpoint(name):
@@ -940,13 +917,15 @@ def validate_all_endpoints_from_db():
         cur.execute(
             """
             UPDATE mirror_endpoints
-            SET online = %s, response_time = %s, last_checked = %s
+            SET online = %s, response_time = %s, last_checked = %s,
+                is_premium = CASE WHEN %s THEN NULL ELSE is_premium END
             WHERE name = %s
             """,
             (
                 1 if result['online'] else 0,
                 result['responseTime'],
                 result['lastChecked'],
+                False if result['online'] else True,
                 name
             )
         )
@@ -1248,6 +1227,31 @@ def download_cover_image(cover_url):
 _DURATION_RE = re.compile(r'time=(\d+):(\d+):(\d+)\.(\d+)')
 
 
+def _measure_audio_duration(file_path: str) -> float | None:
+    """Measure actual decoded audio duration via ffmpeg.
+
+    Runs a full decode and parses the ffmpeg stderr output for the
+    decoded duration. Returns the duration in seconds, or None if
+    measurement fails (timeout, parse error, missing file).
+    """
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-i', file_path, '-f', 'null', '/dev/null'],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except (subprocess.TimeoutExpired, Exception):
+        return None
+
+    match = _DURATION_RE.search(result.stderr)
+    if not match:
+        return None
+
+    hours, minutes, seconds, fraction = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(fraction) / (10 ** len(fraction))
+
+
 def validate_audio_duration(file_path, expected_duration_seconds):
     """Validate that the actual decoded audio duration matches expectations.
 
@@ -1278,27 +1282,10 @@ def validate_audio_duration(file_path, expected_duration_seconds):
     except OSError:
         logger.info("[DOWNLOAD] Duration validation: file=%s, size=unknown, expected_duration=%ds", file_path, expected)
 
-    try:
-        result = subprocess.run(
-            ['ffmpeg', '-i', file_path, '-f', 'null', '/dev/null'],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-    except subprocess.TimeoutExpired:
-        logger.info("[DOWNLOAD] Duration validation timed out for %s", file_path)
-        return
-    except Exception as e:
-        logger.info("[DOWNLOAD] Duration validation skipped: %s", e)
-        return
-
-    match = _DURATION_RE.search(result.stderr)
-    if not match:
+    actual_seconds = _measure_audio_duration(file_path)
+    if actual_seconds is None:
         logger.info("[DOWNLOAD] Duration validation skipped: could not parse ffmpeg output for %s", file_path)
         return
-
-    hours, minutes, seconds, fraction = match.groups()
-    actual_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(fraction) / (10 ** len(fraction))
 
     if actual_seconds < expected * 0.5:
         raise RuntimeError(
@@ -1310,3 +1297,282 @@ def validate_audio_duration(file_path, expected_duration_seconds):
     except OSError:
         file_size = -1
     logger.info("[DOWNLOAD] Duration validation passed: expected ~%ds, actual %.1fs, file_size=%d bytes", expected, actual_seconds, file_size)
+
+
+def _download_tidal_test_track(base_url: str, output_path: str) -> tuple[str, float | None]:
+    """Download the premium test track directly from a single Tidal mirror.
+
+    Uses make_request_with_retry (direct HTTP) instead of the rotation layer.
+    Returns (audio_format, actual_duration_seconds).
+    Raises on network/search/download failure.
+    """
+    base = base_url.rstrip('/')
+
+    # Step 1: Search by ISRC
+    search_params = urlencode({'i': _PREMIUM_TEST_ISRC, 'limit': '10'})
+    search_url = f'{base}/search/?{search_params}'
+    response = make_request_with_retry(search_url, method='GET', timeout=15, max_retries=2)
+    response.raise_for_status()
+
+    data = response.json()
+    items = data.get('data', {}).get('items', [])
+    if not items:
+        raise RuntimeError(f'Track with ISRC {_PREMIUM_TEST_ISRC} not found on mirror')
+
+    # Extract track ID from first result
+    track_id = items[0].get('id')
+    if not track_id:
+        raise RuntimeError('No track ID in search results')
+
+    # Step 2: Fetch track manifest
+    manifest_params = urlencode({
+        'id': str(track_id),
+        'formats': 'FLAC',
+        'usage': 'DOWNLOAD',
+        'manifestType': 'HLS',
+        'adaptive': 'true',
+        'uriScheme': 'HTTPS',
+    })
+    manifest_url = f'{base}/trackManifests/?{manifest_params}'
+    response = make_request_with_retry(manifest_url, method='GET', timeout=15, max_retries=2)
+    response.raise_for_status()
+
+    manifest_data = response.json()
+    manifest_uri = extract_track_manifest_uri(manifest_data)
+
+    # Step 3: Fetch playlist and handle variant/master playlists
+    response = make_request_with_retry(manifest_uri, method='GET', timeout=30, max_retries=2)
+    response.raise_for_status()
+    playlist_text = response.text
+    playlist_uri = manifest_uri
+
+    # If this is a master playlist with variant streams, fetch the variant playlist
+    if '#EXT-X-STREAM-INF' in playlist_text:
+        _, variant_uris = parse_hls_playlist(playlist_text, playlist_uri)
+        if variant_uris:
+            playlist_uri = variant_uris[0]
+            response = make_request_with_retry(playlist_uri, method='GET', timeout=30, max_retries=2)
+            response.raise_for_status()
+            playlist_text = response.text
+
+    init_uri, segment_uris = parse_hls_playlist(playlist_text, playlist_uri)
+
+    logger.info("[PREMIUM] Found %d segment URIs for test track", len(segment_uris))
+
+    # Step 4: Download segments
+    intermediate_path = output_path.replace('.flac', '.m4a')
+    with open(intermediate_path, 'wb') as output_file:
+        if init_uri:
+            logger.info("[PREMIUM] Downloading HLS init segment")
+            output_file.write(download_binary(init_uri))
+
+        logger.info("[PREMIUM] Downloading %d HLS segments", len(segment_uris))
+        for i, segment_url in enumerate(segment_uris):
+            output_file.write(download_binary(segment_url))
+
+        output_file.flush()
+        logger.info("[PREMIUM] HLS download complete: %d segments written", len(segment_uris))
+
+    # Step 5: Demux to FLAC
+    demux_flac(intermediate_path, output_path)
+
+    # Step 6: Detect format
+    with open(output_path, 'rb') as f:
+        audio_format = detect_audio_format(f.read(32))
+
+    # Step 7: Measure duration
+    actual_duration = _measure_audio_duration(output_path)
+
+    return (audio_format, actual_duration)
+
+
+def validate_mirror_premium(name: str) -> dict:
+    """Validate whether a mirror can download full-length, correct-format tracks.
+
+    Downloads a test track (ISRC USGF19942502, ~255s) at LOSSLESS quality
+    and validates the audio format and duration.
+
+    Args:
+        name: Mirror endpoint name from mirror_endpoints table.
+
+    Returns:
+        dict with keys: is_premium (bool|None), error (str|None),
+        format (str|None), actual_duration (float|None).
+        is_premium=None means inconclusive (network/search failure).
+    """
+    result = {'is_premium': None, 'error': None, 'format': None, 'actual_duration': None, 'mark_offline': False}
+    safe_name = ''.join(c for c in name if c.isalnum() or c in '-_.')
+    import uuid
+    temp_path = f'/app/temp/premium_test_{safe_name}_{uuid.uuid4().hex[:8]}.flac'
+
+    try:
+        # 1. Look up mirror from DB
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT encoded_url, mirror_type FROM mirror_endpoints WHERE name = %s', (name,))
+        mirror = cur.fetchone()
+        conn.close()
+        if not mirror:
+            result['error'] = f'Mirror "{name}" not found'
+            return result
+
+        decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
+        mirror_type = mirror.get('mirror_type', 'tidal')
+
+        # 2. Download test track
+        if mirror_type == 'qobuz':
+            # Step 2a: Search by ISRC
+            track, search_error = qobuz.search_qobuz_track(decoded_url, _PREMIUM_TEST_ISRC)
+            if track is None:
+                if search_error == 'http_error':
+                    result['error'] = 'Qobuz search returned HTTP error — marking mirror offline'
+                    result['mark_offline'] = True
+                    return result
+                else:
+                    result['error'] = f'Qobuz search failed ({search_error}) — inconclusive'
+                    return result  # inconclusive
+
+            track_id = track.get('id')
+            if not track_id:
+                result['error'] = 'Qobuz search returned track without ID'
+                return result  # inconclusive
+
+            # Step 2b: Get stream URL
+            quality_code = qobuz.get_qobuz_quality_code('LOSSLESS')
+            stream_url = qobuz.get_qobuz_stream_url(decoded_url, track_id, quality_code)
+            if stream_url is None:
+                result['error'] = 'Qobuz stream URL request failed — marking mirror offline'
+                result['mark_offline'] = True
+                return result
+
+            # Step 2c: Download the stream
+            logger.info("[PREMIUM] Downloading Qobuz test track from %s", stream_url[:80])
+            try:
+                resp = requests.get(stream_url, stream=True, timeout=120, headers={'User-Agent': qobuz._USER_AGENT})
+                resp.raise_for_status()
+                with open(temp_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=32768):
+                        f.write(chunk)
+            except Exception as e:
+                result['error'] = f'Qobuz download failed: {e}'
+                result['mark_offline'] = True
+                return result
+        else:
+            # Tidal — direct HTTP to mirror
+            try:
+                _download_tidal_test_track(decoded_url, temp_path)
+            except RuntimeError as e:
+                error_msg = str(e)
+                # Distinguish search failure (inconclusive) from manifest/stream failure (offline)
+                if 'not found' in error_msg.lower() or 'no track' in error_msg.lower():
+                    result['error'] = error_msg
+                    return result  # inconclusive — track might not be in catalog
+                else:
+                    result['error'] = f'Tidal stream/manifest failed — marking mirror offline: {error_msg}'
+                    result['mark_offline'] = True
+                    return result
+
+        # 3. Detect format
+        with open(temp_path, 'rb') as f:
+            audio_format = detect_audio_format(f.read(32))
+        result['format'] = audio_format
+
+        if audio_format != 'flac':
+            result['is_premium'] = False
+            result['error'] = f'Expected FLAC format, got {audio_format}'
+            return result
+
+        # 4. Measure duration
+        actual_duration = _measure_audio_duration(temp_path)
+        result['actual_duration'] = actual_duration
+
+        if actual_duration is None:
+            result['is_premium'] = False
+            result['error'] = 'Could not measure audio duration'
+            return result
+
+        if actual_duration < _PREMIUM_EXPECTED_DURATION * 0.5:
+            result['is_premium'] = False
+            result['error'] = f'Truncated: {actual_duration:.1f}s actual vs {_PREMIUM_EXPECTED_DURATION}s expected'
+            return result
+
+        # 5. All checks passed
+        result['is_premium'] = True
+        return result
+
+    except Exception as e:
+        result['error'] = str(e)
+        logger.info("[PREMIUM] Validation inconclusive for '%s': %s", name, e)
+        return result
+
+    finally:
+        cleanup_file(temp_path)
+        cleanup_file(temp_path.replace('.flac', '.m4a'))
+        # Update DB
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            if result.get('mark_offline'):
+                # Mark offline and reset premium status
+                cur.execute(
+                    "UPDATE mirror_endpoints SET online = 0, is_premium = NULL WHERE name = %s",
+                    (name,)
+                )
+                logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
+            elif result['is_premium'] is not None:
+                cur.execute(
+                    "UPDATE mirror_endpoints SET is_premium = %s WHERE name = %s",
+                    (1 if result['is_premium'] else 0, name)
+                )
+            conn.commit()
+            conn.close()
+        except Exception as db_err:
+            logger.info("[PREMIUM] Failed to update DB for '%s': %s", name, db_err)
+
+
+def validate_all_premium_from_db() -> dict:
+    """Run premium validation for all enabled mirrors sequentially.
+
+    Returns summary: {'total': int, 'premium': int, 'non_premium': int, 'inconclusive': int}.
+    """
+    logger.info("[PREMIUM] Starting premium validation for all mirrors")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT name FROM mirror_endpoints WHERE enabled = 1')
+    mirrors = cur.fetchall()
+    conn.close()
+
+    premium_count = 0
+    non_premium_count = 0
+    inconclusive_count = 0
+    offline_count = 0
+
+    for mirror in mirrors:
+        name = mirror['name']
+        logger.info("[PREMIUM] Validating mirror: %s", name)
+        result = validate_mirror_premium(name)
+
+        if result['is_premium'] is True:
+            premium_count += 1
+            logger.info("[PREMIUM] ✓ %s is PREMIUM (format=%s, duration=%.1fs)", name, result.get('format'), result.get('actual_duration', 0))
+        elif result['is_premium'] is False:
+            non_premium_count += 1
+            logger.info("[PREMIUM] ✕ %s is NOT PREMIUM: %s", name, result.get('error'))
+        else:
+            inconclusive_count += 1
+            logger.info("[PREMIUM] ? %s INCONCLUSIVE: %s", name, result.get('error'))
+
+        if result.get('mark_offline'):
+            offline_count += 1
+            logger.info("[PREMIUM] ⚠ %s marked OFFLINE: %s", name, result.get('error'))
+
+    summary = {
+        'total': len(mirrors),
+        'premium': premium_count,
+        'non_premium': non_premium_count,
+        'inconclusive': inconclusive_count,
+        'offline': offline_count,
+    }
+    logger.info("[PREMIUM] Validation complete: %s", summary)
+    return summary
