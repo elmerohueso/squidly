@@ -98,10 +98,8 @@ else:
 if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
     recover_stale_in_progress_jobs()
-    downloads.seed_mirrors_from_json()
-    downloads.refresh_squid_urls()
     logger.info("Squidly starting up...")
-    downloads.validate_all_endpoints_from_db()
+    downloads.validate_all_premium_from_db()
     plex_healthcheck()
     start_workers()
 

@@ -771,33 +771,6 @@ def derive_mirror_name(url):
     return parsed.hostname or url
 
 
-def seed_mirrors_from_json():
-    """Seed mirror_endpoints table from squidurls.json only if empty."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT COUNT(*) FROM mirror_endpoints')
-    count = cur.fetchone()['count']
-    if count > 0:
-        logger.info("[MIRRORS] Skipping seed — mirror_endpoints table is not empty")
-        conn.close()
-        return
-
-    logger.info("[MIRRORS] Seeding mirror_endpoints from squidurls.json")
-    with open('squidurls.json', 'r', encoding='utf-8') as f:
-        urls_data = json.load(f)
-
-    for entry in urls_data:
-        decoded_url = base64.b64decode(entry['encodedUrl']).decode('utf-8')
-        name = derive_mirror_name(decoded_url)
-        cur.execute(
-            """
-            INSERT INTO mirror_endpoints (name, encoded_url, online, response_time, last_checked, enabled, mirror_type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """,
-            (name, entry['encodedUrl'], 0, None, None, 1, 'tidal')
-        )
-
-
 def add_mirror(url, mirror_type='tidal'):
     """Add a new mirror endpoint to the database from a plain URL.
 
@@ -882,77 +855,6 @@ def validate_single_endpoint(name):
     conn.commit()
     conn.close()
     return result
-
-
-def validate_all_endpoints_from_db():
-    """Validate all enabled mirror endpoints from the database and update their status."""
-    logger.info("\n%s", "=" * 60)
-    logger.info("Starting Squid URL Validation")
-    logger.info("%s", "=" * 60)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT name, encoded_url, mirror_type FROM mirror_endpoints WHERE enabled = 1')
-    mirrors = cur.fetchall()
-    conn.close()
-
-    online_count = 0
-    offline_count = 0
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    for mirror in mirrors:
-        name = mirror['name']
-        mirror_type = mirror['mirror_type']
-        decoded_url = base64.b64decode(mirror['encoded_url']).decode('utf-8')
-
-        logger.info("\n[%s] Checking %s (type: %s)...", name, decoded_url, mirror_type)
-
-        if mirror_type == 'qobuz':
-            result = qobuz.validate_qobuz_endpoint(decoded_url, timeout=5)
-        else:
-            result = validate_endpoint(decoded_url, name, timeout=5)
-
-        cur.execute(
-            """
-            UPDATE mirror_endpoints
-            SET online = %s, response_time = %s, last_checked = %s,
-                is_premium = CASE WHEN %s THEN NULL ELSE is_premium END
-            WHERE name = %s
-            """,
-            (
-                1 if result['online'] else 0,
-                result['responseTime'],
-                result['lastChecked'],
-                False if result['online'] else True,
-                name
-            )
-        )
-
-        if result['online']:
-            online_count += 1
-            logger.info("  ✓ ONLINE - Response time: %sms", result['responseTime'])
-        else:
-            offline_count += 1
-            logger.info("  ✗ OFFLINE - %s", result.get('error', 'Unknown error'))
-
-    conn.commit()
-    conn.close()
-
-    logger.info("\n%s", "=" * 60)
-    logger.info("Validation Complete")
-    logger.info("%s", "=" * 60)
-    logger.info("Total endpoints: %d", len(mirrors))
-    logger.info("Online: %d", online_count)
-    logger.info("Offline: %d", offline_count)
-    logger.info("%s\n", "=" * 60)
-
-    return {
-        'total': len(mirrors),
-        'online': online_count,
-        'offline': offline_count
-    }
 
 
 def validate_endpoint(url, name, timeout=5):
@@ -1400,10 +1302,14 @@ def validate_mirror_premium(name: str) -> dict:
         format (str|None), actual_duration (float|None).
         is_premium=None means inconclusive (network/search failure).
     """
-    result = {'is_premium': None, 'error': None, 'format': None, 'actual_duration': None, 'mark_offline': False}
+    result = {'is_premium': None, 'error': None, 'format': None, 'actual_duration': None, 'is_online': False}
     safe_name = ''.join(c for c in name if c.isalnum() or c in '-_.')
     import uuid
     temp_path = f'/app/temp/premium_test_{safe_name}_{uuid.uuid4().hex[:8]}.flac'
+
+    # Ensure temp directory exists (startup creates it, but this function
+    # can be called before startup completes or independently via API)
+    os.makedirs('/app/temp', exist_ok=True)
 
     try:
         # 1. Look up mirror from DB
@@ -1424,25 +1330,22 @@ def validate_mirror_premium(name: str) -> dict:
             # Step 2a: Search by ISRC
             track, search_error = qobuz.search_qobuz_track(decoded_url, _PREMIUM_TEST_ISRC)
             if track is None:
-                if search_error == 'http_error':
-                    result['error'] = 'Qobuz search returned HTTP error — marking mirror offline'
-                    result['mark_offline'] = True
-                    return result
-                else:
-                    result['error'] = f'Qobuz search failed ({search_error}) — inconclusive'
-                    return result  # inconclusive
+                result['error'] = 'Qobuz search failed — marking mirror offline'
+                result['is_online'] = False
+                return result
 
             track_id = track.get('id')
             if not track_id:
-                result['error'] = 'Qobuz search returned track without ID'
-                return result  # inconclusive
+                result['error'] = 'Qobuz search returned track without ID — marking mirror offline'
+                result['is_online'] = False
+                return result
 
             # Step 2b: Get stream URL
             quality_code = qobuz.get_qobuz_quality_code('LOSSLESS')
             stream_url = qobuz.get_qobuz_stream_url(decoded_url, track_id, quality_code)
             if stream_url is None:
                 result['error'] = 'Qobuz stream URL request failed — marking mirror offline'
-                result['mark_offline'] = True
+                result['is_online'] = False
                 return result
 
             # Step 2c: Download the stream
@@ -1450,12 +1353,20 @@ def validate_mirror_premium(name: str) -> dict:
             try:
                 resp = requests.get(stream_url, stream=True, timeout=120, headers={'User-Agent': qobuz._USER_AGENT})
                 resp.raise_for_status()
+                downloaded = 0
+                
                 with open(temp_path, 'wb') as f:
                     for chunk in resp.iter_content(chunk_size=32768):
                         f.write(chunk)
+                        downloaded += len(chunk)
+                logger.info(
+                    "[PREMIUM] Downloaded %d bytes for track %s (ISRC: %s)",
+                    downloaded, track_id, _PREMIUM_TEST_ISRC
+                )
             except Exception as e:
+                logger.error("[PREMIUM] Downloading Qobuz failed: %s", str(e))
                 result['error'] = f'Qobuz download failed: {e}'
-                result['mark_offline'] = True
+                result['is_online'] = False
                 return result
         else:
             # Tidal — direct HTTP to mirror
@@ -1469,7 +1380,7 @@ def validate_mirror_premium(name: str) -> dict:
                     return result  # inconclusive — track might not be in catalog
                 else:
                     result['error'] = f'Tidal stream/manifest failed — marking mirror offline: {error_msg}'
-                    result['mark_offline'] = True
+                    result['is_online'] = False
                     return result
 
         # 3. Detect format
@@ -1479,6 +1390,7 @@ def validate_mirror_premium(name: str) -> dict:
 
         if audio_format != 'flac':
             result['is_premium'] = False
+            result['is_online'] = True  # Mirror responded, so it's online, just not serving correct format
             result['error'] = f'Expected FLAC format, got {audio_format}'
             return result
 
@@ -1488,46 +1400,52 @@ def validate_mirror_premium(name: str) -> dict:
 
         if actual_duration is None:
             result['is_premium'] = False
+            result['is_online'] = True  # Mirror responded, so it's online, just not serving correct format
             result['error'] = 'Could not measure audio duration'
             return result
 
         if actual_duration < _PREMIUM_EXPECTED_DURATION * 0.5:
             result['is_premium'] = False
+            result['is_online'] = True  # Mirror responded, so it's online, just not serving correct format
             result['error'] = f'Truncated: {actual_duration:.1f}s actual vs {_PREMIUM_EXPECTED_DURATION}s expected'
             return result
 
         # 5. All checks passed
+        result['is_online'] = True
         result['is_premium'] = True
         return result
 
     except Exception as e:
         result['error'] = str(e)
         logger.info("[PREMIUM] Validation inconclusive for '%s': %s", name, e)
-        return result
-
     finally:
         cleanup_file(temp_path)
         cleanup_file(temp_path.replace('.flac', '.m4a'))
-        # Update DB
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            if result.get('mark_offline'):
-                # Mark offline and reset premium status
-                cur.execute(
-                    "UPDATE mirror_endpoints SET online = 0, is_premium = NULL WHERE name = %s",
-                    (name,)
-                )
-                logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
-            elif result['is_premium'] is not None:
-                cur.execute(
-                    "UPDATE mirror_endpoints SET is_premium = %s WHERE name = %s",
-                    (1 if result['is_premium'] else 0, name)
-                )
-            conn.commit()
-            conn.close()
-        except Exception as db_err:
-            logger.info("[PREMIUM] Failed to update DB for '%s': %s", name, db_err)
+        _update_premium_db(name, result)
+
+    return result
+
+
+def _update_premium_db(name: str, result: dict) -> None:
+    """Update mirror_endpoints DB based on validation result."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        if result['is_online'] is not None:
+            cur.execute(
+                "UPDATE mirror_endpoints SET online = %s, is_premium = NULL WHERE name = %s",
+                (1 if result['is_online'] else 0, name)
+            )
+            logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
+        if result['is_premium'] is not None:
+            cur.execute(
+                "UPDATE mirror_endpoints SET is_premium = %s WHERE name = %s",
+                (1 if result['is_premium'] else 0, name)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as db_err:
+        logger.info("[PREMIUM] Failed to update DB for '%s': %s", name, db_err)
 
 
 def validate_all_premium_from_db() -> dict:
@@ -1545,7 +1463,6 @@ def validate_all_premium_from_db() -> dict:
 
     premium_count = 0
     non_premium_count = 0
-    inconclusive_count = 0
     offline_count = 0
 
     for mirror in mirrors:
@@ -1553,17 +1470,15 @@ def validate_all_premium_from_db() -> dict:
         logger.info("[PREMIUM] Validating mirror: %s", name)
         result = validate_mirror_premium(name)
 
-        if result['is_premium'] is True:
-            premium_count += 1
-            logger.info("[PREMIUM] ✓ %s is PREMIUM (format=%s, duration=%.1fs)", name, result.get('format'), result.get('actual_duration', 0))
-        elif result['is_premium'] is False:
-            non_premium_count += 1
-            logger.info("[PREMIUM] ✕ %s is NOT PREMIUM: %s", name, result.get('error'))
-        else:
-            inconclusive_count += 1
-            logger.info("[PREMIUM] ? %s INCONCLUSIVE: %s", name, result.get('error'))
+        if result['is_online'] is True:
+            if result['is_premium'] is True:
+                premium_count += 1
+                logger.info("[PREMIUM] ✓ %s is ONLINE AND PREMIUM (format=%s, duration=%.1fs)", name, result.get('format'), result.get('actual_duration', 0))
+            elif result['is_premium'] is False:
+                non_premium_count += 1
+                logger.info("[PREMIUM] ✕ %s is ONLINE BUT NOT PREMIUM: %s", name, result.get('error'))
 
-        if result.get('mark_offline'):
+        if result['is_online'] is False:
             offline_count += 1
             logger.info("[PREMIUM] ⚠ %s marked OFFLINE: %s", name, result.get('error'))
 
@@ -1571,7 +1486,6 @@ def validate_all_premium_from_db() -> dict:
         'total': len(mirrors),
         'premium': premium_count,
         'non_premium': non_premium_count,
-        'inconclusive': inconclusive_count,
         'offline': offline_count,
     }
     logger.info("[PREMIUM] Validation complete: %s", summary)

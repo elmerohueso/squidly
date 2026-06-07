@@ -7105,18 +7105,26 @@ class App {
 
         // Compute separate stats
         const tidalOnline = tidalEndpoints.filter(e => e.online).length;
+        const tidalPremium = tidalEndpoints.filter(e => e.isPremium === 1).length;
+        const tidalOffline = tidalEndpoints.filter(e => !e.online).length;
         const qobuzOnline = qobuzEndpoints.filter(e => e.online).length;
+        const qobuzPremium = qobuzEndpoints.filter(e => e.isPremium === 1).length;
+        const qobuzOffline = qobuzEndpoints.filter(e => !e.online).length;
 
         // Update per-type stat elements
         const tidalOnlineCount = document.getElementById('tidalOnlineCount');
-        const tidalTotalCount = document.getElementById('tidalTotalCount');
+        const tidalPremiumCount = document.getElementById('tidalPremiumCount');
+        const tidalOfflineCount = document.getElementById('tidalOfflineCount');
         const qobuzOnlineCount = document.getElementById('qobuzOnlineCount');
-        const qobuzTotalCount = document.getElementById('qobuzTotalCount');
+        const qobuzPremiumCount = document.getElementById('qobuzPremiumCount');
+        const qobuzOfflineCount = document.getElementById('qobuzOfflineCount');
 
         if (tidalOnlineCount) tidalOnlineCount.textContent = tidalOnline.toString();
-        if (tidalTotalCount) tidalTotalCount.textContent = tidalEndpoints.length.toString();
+        if (tidalPremiumCount) tidalPremiumCount.textContent = tidalPremium.toString();
+        if (tidalOfflineCount) tidalOfflineCount.textContent = tidalOffline.toString();
         if (qobuzOnlineCount) qobuzOnlineCount.textContent = qobuzOnline.toString();
-        if (qobuzTotalCount) qobuzTotalCount.textContent = qobuzEndpoints.length.toString();
+        if (qobuzPremiumCount) qobuzPremiumCount.textContent = qobuzPremium.toString();
+        if (qobuzOfflineCount) qobuzOfflineCount.textContent = qobuzOffline.toString();
 
         // Legacy: update old stat elements if they still exist
         const totalCount = document.getElementById('totalCount');

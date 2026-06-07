@@ -53,11 +53,6 @@ def _run_async(fn):
     threading.Thread(target=_wrapper, daemon=True).start()
 
 
-def _async_validate_endpoints():
-    """Run endpoint validation in a background thread."""
-    _run_async(lambda: downloads.validate_all_endpoints_from_db())
-
-
 def _get_ytmusic(user_id):
     """Load YTM headers from DB and return an authenticated YTMusic instance."""
     from ytmusicapi import YTMusic
@@ -308,8 +303,6 @@ def add_endpoint():
         logger.info("[ENDPOINTS] Failed to add mirror: %s", e)
         return jsonify({'error': str(e)}), 500
 
-    _async_validate_endpoints()
-
     name = downloads.derive_mirror_name(url)
     _run_async(lambda: downloads.validate_mirror_premium(name))
 
@@ -324,8 +317,6 @@ def delete_endpoint(name):
     except Exception as e:
         logger.info("[ENDPOINTS] Failed to remove mirror: %s", e)
         return jsonify({'error': str(e)}), 500
-
-    _async_validate_endpoints()
 
     return jsonify({'name': name, 'removed': True}), 200
 

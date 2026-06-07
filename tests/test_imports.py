@@ -106,7 +106,6 @@ def test_import_downloads():
         format_tidal_image_url,
         make_request_with_retry,
         make_request_with_retry_rotating_mirrors,
-        seed_mirrors_from_json,
         validate_endpoint,
     )
 
