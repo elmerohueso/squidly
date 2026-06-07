@@ -187,11 +187,27 @@ def get_deezer_stream_url(
         logger.error("[DEEZER] Stream URL request failed: %s", exc)
         return None
 
+    data = resp.json()
+
+    data_list = data.get('data')
+    if not isinstance(data_list, list) or not data_list:
+        logger.error("[DEEZER] Stream URL response has empty or missing data array")
+        return None
+
+    track_media = data_list[0]
+    if not isinstance(track_media, dict):
+        logger.error("[DEEZER] Stream URL response data entry is not a dict")
+        return None
+
+    media_list = track_media.get('media')
+    if not isinstance(media_list, list) or not media_list:
+        logger.warning("[DEEZER] Track not available in FLAC on Deezer (empty media list)")
+        return None
+
     try:
-        data = resp.json()
-        url = data['data'][0]['media'][0]['sources'][0]['url']
-    except (KeyError, IndexError, TypeError, ValueError) as exc:
-        logger.error("[DEEZER] Failed to parse stream URL response: %s", exc)
+        url = media_list[0]['sources'][0]['url']
+    except (KeyError, IndexError, TypeError) as exc:
+        logger.error("[DEEZER] Failed to parse stream URL from media entry: %s", exc)
         return None
 
     return url
@@ -218,8 +234,8 @@ def download_deezer_track(
     # Step 1: Search by ISRC
     track = search_deezer_track(isrc, timeout=timeout)
     if track is None:
-        logger.error("[DEEZER] No track found for ISRC %s — cannot download", isrc)
-        return None
+        logger.warning("[DEEZER] Track ISRC %s not found on Deezer", isrc)
+        raise ValueError("not found on Deezer")
 
     track_token = track.get('track_token') or track.get('TRACK_TOKEN')
     song_id = track.get('id') or track.get('SNG_ID')
@@ -244,8 +260,8 @@ def download_deezer_track(
     # Step 3: Get stream URL
     stream_url = get_deezer_stream_url(track_token, license_token, session, timeout=timeout)
     if stream_url is None:
-        logger.error("[DEEZER] Could not get stream URL for ISRC %s", isrc)
-        return None
+        logger.warning("[DEEZER] Track %s (ISRC: %s) not available in FLAC on Deezer", song_id, isrc)
+        raise ValueError("not available in FLAC on Deezer")
 
     # Step 4: Download and decrypt
     logger.info("[DEEZER] Downloading from %s", stream_url[:80])

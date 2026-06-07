@@ -205,7 +205,10 @@ def download_qobuz_track(
     # Step 1: Search by ISRC and validate match
     track, search_error = search_qobuz_track(base_url, isrc, timeout=timeout)
     if track is None:
-        logger.error("[QOBUZ] No track with matching ISRC found for %s — cannot download", isrc)
+        if search_error == 'not_found':
+            logger.warning("[QOBUZ] Track ISRC %s not found in Qobuz catalog", isrc)
+            raise ValueError("not found in Qobuz catalog")
+        logger.error("[QOBUZ] Search failed for ISRC %s (error: %s)", isrc, search_error)
         return None
 
     track_id = track.get('id')

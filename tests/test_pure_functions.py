@@ -264,6 +264,23 @@ class TestPermanentErrorKeywords:
         error_str = "NO QOBUZ MIRRORS AVAILABLE"
         assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
 
+    def test_not_found_in_qobuz_catalog_matches(self):
+        error_str = "not found in Qobuz catalog"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_not_found_on_deezer_matches(self):
+        error_str = "not found on Deezer"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_not_available_in_flac_on_deezer_matches(self):
+        error_str = "not available in FLAC on Deezer"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_permanent_error_keywords_contains_new_entries(self):
+        assert 'not found in qobuz catalog' in _PERMANENT_ERROR_KEYWORDS
+        assert 'not found on deezer' in _PERMANENT_ERROR_KEYWORDS
+        assert 'not available in flac on deezer' in _PERMANENT_ERROR_KEYWORDS
+
 
 class TestLoadEnabledMirrorUrls:
     """Tests for load_enabled_mirror_urls SQL construction."""

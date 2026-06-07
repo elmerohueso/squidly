@@ -14,6 +14,9 @@ os.environ.setdefault("POSTGRES_DB", "squidly_test")
 os.environ.setdefault("POSTGRES_USER", "squidly_test")
 os.environ.setdefault("POSTGRES_PASSWORD", "squidly_test")
 
+# Redirect logs to /tmp to avoid PermissionError on /logs
+os.environ.setdefault("SQUIDLY_LOG_DIR_OVERRIDE", "/tmp/squidly_test_logs")
+
 # Skip the module-level startup sequence (init_db, workers, etc.)
 # so tests can import squidly modules without a live database.
 os.environ.setdefault("SQUIDLY_SKIP_STARTUP", "1")

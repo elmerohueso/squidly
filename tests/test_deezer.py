@@ -230,6 +230,48 @@ class TestGetDeezerStreamUrl:
 
         assert result is None
 
+    @patch("squidly.services.deezer.requests.Session")
+    def test_empty_media_returns_none(self, mock_session_cls):
+        """Response has data array with entry but media list is empty."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"media": []}]}
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+
+        result = get_deezer_stream_url("track_token_abc", "lic_xyz", mock_session)
+
+        assert result is None
+
+    @patch("squidly.services.deezer.requests.Session")
+    def test_missing_sources_returns_none(self, mock_session_cls):
+        """Response has media entry but no sources key."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"media": [{}]}]}
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+
+        result = get_deezer_stream_url("track_token_abc", "lic_xyz", mock_session)
+
+        assert result is None
+
+    @patch("squidly.services.deezer.requests.Session")
+    def test_missing_data_key_returns_none(self, mock_session_cls):
+        """Response has no 'data' key at all."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {}
+
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+
+        result = get_deezer_stream_url("track_token_abc", "lic_xyz", mock_session)
+
+        assert result is None
+
 
 # =============================================================================
 # decryptfile (mocked)

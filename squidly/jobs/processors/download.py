@@ -33,6 +33,9 @@ _PERMANENT_ERROR_KEYWORDS = (
     'no qobuz mirrors available',
     'no arl configured',
     'deezer requires isrc',
+    'not found in qobuz catalog',
+    'not found on deezer',
+    'not available in flac on deezer',
 )
 
 def process_download_job(job_id, payload):
