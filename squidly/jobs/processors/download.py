@@ -30,7 +30,7 @@ from squidly.infrastructure.utils import (
 
 _PERMANENT_ERROR_KEYWORDS = (
     'no configured mirror',
-    'no qobuz mirrors configured',
+    'no qobuz mirrors available',
     'no arl configured',
     'deezer requires isrc',
 )
@@ -366,9 +366,9 @@ def process_download_job(job_id, payload):
                     logger.info("[DOWNLOAD] Qobuz does not support quality '%s', falling back to LOSSLESS", current_quality)
                     current_quality = 'LOSSLESS'
 
-                qobuz_mirrors = downloads.load_enabled_mirror_urls(mirror_type='qobuz')
+                qobuz_mirrors = downloads.load_enabled_mirror_urls(mirror_type='qobuz', for_download=True)
                 if not qobuz_mirrors:
-                    raise ValueError("No Qobuz mirrors configured")
+                    raise ValueError("No Qobuz mirrors available (need enabled, online, premium)")
 
                 qobuz_result = None
                 src_error = None

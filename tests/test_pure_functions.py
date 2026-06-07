@@ -1,16 +1,23 @@
 """Tests for pure functions that require no database access."""
 
 import json
+import os
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+# Patch logging before importing squidly modules to avoid /logs PermissionError
+os.environ.setdefault("SQUIDLY_LOG_DIR_OVERRIDE", "/tmp/squidly_test_logs")
 
 from squidly.jobs import (
     compute_job_backoff_seconds,
     serialize_job_payload,
 )
+from squidly.jobs.processors.download import _PERMANENT_ERROR_KEYWORDS
 from squidly.infrastructure.downloads import (
     download_track_all_stages_done,
     detect_audio_format,
     format_tidal_image_url,
+    load_enabled_mirror_urls,
 )
 from squidly.infrastructure.utils import (
     clean_path_components,
@@ -226,3 +233,93 @@ class TestNormalizeDbTimestamp:
 
     def test_invalid_string(self):
         assert normalize_db_timestamp("not-a-date") is None
+
+
+class TestPermanentErrorKeywords:
+    """Tests for permanent error keyword matching in download processor."""
+
+    def test_new_qobuz_message_matches(self):
+        error_str = "No Qobuz mirrors available (need enabled, online, premium)"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_similar_but_different_message_does_not_match(self):
+        """Old keyword 'no qobuz mirrors configured' was replaced with 'no qobuz mirrors available',
+        so the old error wording no longer matches the new keywords."""
+        error_str = "no qobuz mirrors configured"
+        assert not any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_none_keyword_still_matches(self):
+        error_str = "no configured mirror"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_unrelated_error_does_not_match(self):
+        error_str = "Some other error occurred"
+        assert not any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_each_keyword_matches_itself(self):
+        for keyword in _PERMANENT_ERROR_KEYWORDS:
+            assert any(kw in keyword.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+    def test_case_insensitive_matching(self):
+        error_str = "NO QOBUZ MIRRORS AVAILABLE"
+        assert any(kw in error_str.lower() for kw in _PERMANENT_ERROR_KEYWORDS)
+
+
+class TestLoadEnabledMirrorUrls:
+    """Tests for load_enabled_mirror_urls SQL construction."""
+
+    @patch('squidly.infrastructure.downloads.get_db_connection')
+    def test_accepts_for_download_keyword_arg(self, mock_get_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_get_db.return_value = mock_conn
+        result = load_enabled_mirror_urls(for_download=True)
+        assert result == []
+
+    @patch('squidly.infrastructure.downloads.get_db_connection')
+    def test_default_no_premium_filter(self, mock_get_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_get_db.return_value = mock_conn
+        load_enabled_mirror_urls()
+        sql = mock_cur.execute.call_args[0][0]
+        assert 'AND online = 1 AND is_premium = 1' not in sql
+
+    @patch('squidly.infrastructure.downloads.get_db_connection')
+    def test_for_download_adds_premium_filter(self, mock_get_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_get_db.return_value = mock_conn
+        load_enabled_mirror_urls(for_download=True)
+        sql = mock_cur.execute.call_args[0][0]
+        assert 'AND online = 1 AND is_premium = 1' in sql
+
+    @patch('squidly.infrastructure.downloads.get_db_connection')
+    def test_for_download_with_mirror_type(self, mock_get_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_get_db.return_value = mock_conn
+        load_enabled_mirror_urls(mirror_type='qobuz', for_download=True)
+        sql = mock_cur.execute.call_args[0][0]
+        assert 'AND online = 1 AND is_premium = 1' in sql
+        assert 'mirror_type = %s' in sql
+
+    @patch('squidly.infrastructure.downloads.get_db_connection')
+    def test_default_no_premium_with_mirror_type(self, mock_get_db):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = []
+        mock_get_db.return_value = mock_conn
+        load_enabled_mirror_urls(mirror_type='tidal')
+        sql = mock_cur.execute.call_args[0][0]
+        assert 'AND online = 1 AND is_premium = 1' not in sql
+        assert 'mirror_type = %s' in sql

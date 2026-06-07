@@ -717,7 +717,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
     return None, None
 
 
-def load_enabled_mirror_urls(mirror_type=None):
+def load_enabled_mirror_urls(mirror_type=None, for_download=False):
     """Load enabled mirror URLs from the database.
 
     Args:
@@ -731,7 +731,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
             WHERE enabled = 1 AND mirror_type = %s
-            """,
+            """ + (" AND online = 1 AND is_premium = 1" if for_download else ""),
             (mirror_type,)
         )
     else:
@@ -740,7 +740,7 @@ def load_enabled_mirror_urls(mirror_type=None):
             SELECT name, encoded_url, mirror_type
             FROM mirror_endpoints
             WHERE enabled = 1
-            """
+            """ + (" AND online = 1 AND is_premium = 1" if for_download else "")
         )
     rows = cur.fetchall()
     conn.close()
