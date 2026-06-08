@@ -11,6 +11,8 @@ import logging
 import os
 from unittest.mock import MagicMock, patch
 
+import requests
+
 # Patch logging before importing squidly modules to avoid /logs PermissionError
 os.environ.setdefault("SQUIDLY_LOG_DIR_OVERRIDE", "/tmp/squidly_test_logs")
 
@@ -222,6 +224,30 @@ class TestValidateMirrorPremiumVerdict:
         assert '⚠' in caplog.text
         assert 'OFFLINE' in caplog.text
 
+    @patch('squidly.infrastructure.downloads.os.makedirs')
+    @patch('squidly.infrastructure.downloads.cleanup_file')
+    @patch('squidly.infrastructure.downloads._download_tidal_test_track')
+    def test_verdict_inconclusive_on_http_error(
+        self, mock_download, mock_cleanup, mock_makedirs, caplog
+    ):
+        """Verdict ? INCONCLUSIVE when HTTPError (e.g. 429) hits the broad except."""
+        caplog.set_level(logging.INFO)
+        mock_download.side_effect = requests.exceptions.HTTPError(
+            '429 Client Error: Too Many Requests'
+        )
+        mock_cleanup.return_value = None
+
+        with patch('squidly.infrastructure.downloads.get_db_connection') as m:
+            m.return_value = _mock_tidal_mirror_conn()
+            result = validate_mirror_premium('test-mirror')
+
+        assert result['is_online'] is None
+        assert '?' in caplog.text
+        assert 'INCONCLUSIVE' in caplog.text
+        assert '⚠' not in caplog.text
+        assert 'OFFLINE' not in caplog.text
+        assert '429' in caplog.text
+
     def test_verdict_inconclusive_log_format(self, caplog):
         """Verdict ? log format — the else branch guard exists.
 
@@ -340,4 +366,24 @@ class TestValidateAllPremiumFromDb:
             summary = validate_all_premium_from_db()
 
         assert summary == {'total': 0, 'premium': 0, 'non_premium': 0, 'offline': 0}
+        assert 'Validation complete' in caplog.text
+
+    @patch('squidly.infrastructure.downloads.validate_mirror_premium')
+    def test_inconclusive_not_counted_in_summary(self, mock_validate, caplog):
+        """Mirror with is_online=None (inconclusive) counted only in total, not in any bucket."""
+        caplog.set_level(logging.INFO)
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value = mock_cur
+        mock_cur.fetchall.return_value = [{'name': 'inconclusive-mirror'}]
+        mock_validate.return_value = {
+            'is_online': None, 'is_premium': None, 'error': '429 Too Many Requests',
+            'format': None, 'actual_duration': None,
+        }
+
+        with patch('squidly.infrastructure.downloads.get_db_connection') as m:
+            m.return_value = mock_conn
+            summary = validate_all_premium_from_db()
+
+        assert summary == {'total': 1, 'premium': 0, 'non_premium': 0, 'offline': 0}
         assert 'Validation complete' in caplog.text

@@ -1405,6 +1405,7 @@ def validate_mirror_premium(name: str) -> dict:
 
     except Exception as e:
         result['error'] = str(e)
+        result['is_online'] = None
         logger.info("[PREMIUM] Validation inconclusive for '%s': %s", name, e)
     finally:
         cleanup_file(temp_path)

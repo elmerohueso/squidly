@@ -3150,44 +3150,35 @@ class App {
 
     private async loadSquidlySection(container: HTMLUListElement): Promise<void> {
         const userId = this.getSelectedPlexUserId();
-        if (!userId) {
-            const li = document.createElement('li');
-            li.style.padding = '0.5rem 0.75rem';
-            li.style.color = 'var(--text-muted)';
-            li.style.fontSize = '0.75rem';
-            li.textContent = 'Not enough listen history to generate recommendations';
-            container.appendChild(li);
-            return;
-        }
 
         try {
-            const response = await fetch(`/api/recommendations/playlists?user_id=${encodeURIComponent(userId)}`);
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/recommendations/playlists${query}`);
             if (!response.ok) {
                 throw new Error('Failed to load recommendations');
             }
             const data = await response.json();
             const hasHistory = data.has_history as boolean;
             const playlists = Array.isArray(data.playlists) ? data.playlists : [];
+            const today = data.today as { name: string; exists: boolean };
 
-            if (!hasHistory) {
-                const li = document.createElement('li');
-                li.style.padding = '0.5rem 0.75rem';
-                li.style.color = 'var(--text-muted)';
-                li.style.fontSize = '0.75rem';
-                li.textContent = 'Not enough listen history to generate recommendations';
-                container.appendChild(li);
-                return;
-            }
-
-            if (playlists.length === 0) {
-                const li = this.createSidebarPlaylistItem('Fresh Finds', () => {
-                    this.closeMobileMenu();
-                    this.switchPage('explore');
+            // Always show today's Fresh Finds entry
+            const todayLi = this.createSidebarPlaylistItem(today.name, () => {
+                this.closeMobileMenu();
+                this.switchPage('explore');
+                if (today.exists) {
+                    const todayPlaylist = playlists.find((p: any) => p.name === today.name);
+                    void this.fetchFreshFindsPlaylist(false, todayPlaylist?.id);
+                } else {
                     void this.fetchFreshFindsPlaylist();
-                });
-                container.appendChild(li);
-            } else {
+                }
+            });
+            container.appendChild(todayLi);
+
+            // Show older playlists (excluding today's if already shown)
+            if (hasHistory) {
                 for (const playlist of playlists) {
+                    if (playlist.name === today.name) continue;
                     const li = this.createSidebarPlaylistItem(playlist.name || 'Fresh Finds', () => {
                         this.closeMobileMenu();
                         this.switchPage('explore');
@@ -3197,11 +3188,11 @@ class App {
                 }
             }
         } catch {
-            const li = document.createElement('li');
-            li.style.padding = '0.5rem 0.75rem';
-            li.style.color = 'var(--text-muted)';
-            li.style.fontSize = '0.75rem';
-            li.textContent = 'Not enough listen history to generate recommendations';
+            const li = this.createSidebarPlaylistItem('Fresh Finds', () => {
+                this.closeMobileMenu();
+                this.switchPage('explore');
+                void this.fetchFreshFindsPlaylist();
+            });
             container.appendChild(li);
         }
     }

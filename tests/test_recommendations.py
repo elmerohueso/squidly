@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 from unittest.mock import MagicMock, patch, call
 
@@ -869,3 +870,616 @@ class TestProcessRecommendationJobIsrcSection:
         # The removal and refill should have happened
         assert result['progress']['tracks_removed_by_isrc'] > 0
         assert result['progress']['tracks_saved'] > 0
+
+
+class TestProcessRecommendationJobMirrorType:
+    """Focused tests verifying mirror_type='tidal' is passed to make_request_with_retry_rotating_mirrors."""
+
+    @patch('squidly.jobs.processors.recommendations._filter_available_tracks')
+    @patch('squidly.jobs.processors.recommendations.downloads')
+    @patch('squidly.jobs.processors.recommendations.jobs.update_job_progress')
+    @patch('squidly.jobs.processors.recommendations.queue_plex_listen_history_sync')
+    @patch('squidly.jobs.orchestration.wait_for_job_type')
+    @patch('squidly.jobs.processors.recommendations.get_random_listen_history_seeds')
+    @patch('squidly.jobs.processors.recommendations.get_existing_fresh_finds_isrcs')
+    @patch('squidly.jobs.processors.recommendations.get_download_settings')
+    @patch('squidly.jobs.processors.recommendations._get_hifi_audio_quality_rank')
+    @patch('squidly.infrastructure.storage.get_recently_played_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_artist_titles')
+    @patch('squidly.infrastructure.storage.get_fresh_finds_new_track_pct')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_track_count')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_history_days')
+    @patch('squidly.services.track_resolver.resolve_track')
+    @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
+    @patch('squidly.services.hifi.extract_hifi_track_info')
+    @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
+    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
+    def test_mirror_type_tidal_in_make_request_call(
+        self,
+        mock_raise_cancelled,
+        mock_cleanup,
+        mock_save_playlist,
+        mock_extract_info,
+        mock_fetch_payload,
+        mock_resolve_track,
+        mock_history_days,
+        mock_track_count,
+        mock_new_track_pct,
+        mock_existing_artist_titles,
+        mock_existing_isrcs,
+        mock_recently_played,
+        mock_quality_rank,
+        mock_dl_settings,
+        mock_existing_ff_isrcs,
+        mock_get_seeds,
+        mock_wait,
+        mock_queue_sync,
+        mock_update_progress,
+        mock_downloads,
+        mock_filter,
+    ):
+        """Verify that make_request_with_retry_rotating_mirrors is called with mirror_type='tidal'."""
+        from squidly.jobs.processors.recommendations import process_recommendation_job
+
+        mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
+
+        mock_wait.return_value = None
+        mock_queue_sync.return_value = None
+
+        mock_get_seeds.return_value = [
+            {'hifi_id': 100, 'title': 'Seed 1', 'artist': 'Artist 1', 'album': 'Album 1'},
+        ]
+
+        mock_dl_settings.return_value = {
+            'download_source': 'tidal',
+            'quality': 'LOSSLESS',
+            'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
+        }
+
+        mock_quality_rank.side_effect = lambda q: {
+            'HI_RES_LOSSLESS': 3, 'LOSSLESS': 2, 'HIGH': 1, '': 0,
+        }.get(q, 0)
+
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            'data': {
+                'items': [{
+                    'track': {
+                        'id': 200,
+                        'title': 'Rec Track',
+                        'artists': [{'id': 10, 'name': 'Rec Artist'}],
+                        'album': {'id': 20, 'title': 'Rec Album'},
+                        'duration': 240,
+                        'maxAudioQuality': 'LOSSLESS',
+                        'isrc': 'USRC1230001',
+                    }
+                }]
+            }
+        }
+        mock_downloads.make_request_with_retry_rotating_mirrors.return_value = (mock_response, 'test-mirror')
+
+        mock_existing_ff_isrcs.return_value = set()
+        mock_recently_played.return_value = set()
+        mock_existing_isrcs.return_value = set()
+        mock_existing_artist_titles.return_value = set()
+        mock_new_track_pct.return_value = 70
+        mock_track_count.return_value = 20
+        mock_history_days.return_value = 90
+
+        mock_resolve_track.return_value = {'hifi_id': '200', 'reason': 'exact', 'source': 'hifi_id'}
+        mock_fetch_payload.return_value = None
+
+        mock_save_playlist.return_value = 42
+        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        mock_downloads.get_squid_urls.return_value = []
+
+        process_recommendation_job(1, {
+            'plex_account_id': 123,
+            'plex_username': 'testuser',
+            'slug': 'fresh-finds',
+            'trigger': 'manual',
+        })
+
+        # Verify mirror_type='tidal' was passed
+        mock_downloads.make_request_with_retry_rotating_mirrors.assert_called()
+        _args, kwargs = mock_downloads.make_request_with_retry_rotating_mirrors.call_args
+        assert kwargs.get('mirror_type') == 'tidal', (
+            f"Expected mirror_type='tidal' in call kwargs, got: {kwargs}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests for empty top_tracks guard clause in process_recommendation_job
+# ---------------------------------------------------------------------------
+
+class TestProcessRecommendationJobEmptyPlaylistGuard:
+    """Tests for the empty top_tracks guard in process_recommendation_job (lines 485-495).
+
+    When top_tracks is empty, the function must skip save_recommendation_playlist(),
+    mark saving_playlist as done, set tracks_saved=0, and return early with the
+    expected result shape. When top_tracks is non-empty, the normal save path runs.
+    """
+
+    @patch('squidly.jobs.processors.recommendations._filter_available_tracks')
+    @patch('squidly.jobs.processors.recommendations.downloads')
+    @patch('squidly.jobs.processors.recommendations.jobs.update_job_progress')
+    @patch('squidly.jobs.processors.recommendations.queue_plex_listen_history_sync')
+    @patch('squidly.jobs.orchestration.wait_for_job_type')
+    @patch('squidly.jobs.processors.recommendations.get_random_listen_history_seeds')
+    @patch('squidly.jobs.processors.recommendations.get_existing_fresh_finds_isrcs')
+    @patch('squidly.jobs.processors.recommendations.get_download_settings')
+    @patch('squidly.jobs.processors.recommendations._get_hifi_audio_quality_rank')
+    @patch('squidly.infrastructure.storage.get_recently_played_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_artist_titles')
+    @patch('squidly.infrastructure.storage.get_fresh_finds_new_track_pct')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_track_count')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_history_days')
+    @patch('squidly.services.track_resolver.resolve_track')
+    @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
+    @patch('squidly.services.hifi.extract_hifi_track_info')
+    @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
+    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
+    def test_empty_top_tracks_skips_playlist_save(
+        self,
+        mock_raise_cancelled,
+        mock_cleanup,
+        mock_save_playlist,
+        mock_extract_info,
+        mock_fetch_payload,
+        mock_resolve_track,
+        mock_history_days,
+        mock_track_count,
+        mock_new_track_pct,
+        mock_existing_artist_titles,
+        mock_existing_isrcs,
+        mock_recently_played,
+        mock_quality_rank,
+        mock_dl_settings,
+        mock_existing_ff_isrcs,
+        mock_get_seeds,
+        mock_wait,
+        mock_queue_sync,
+        mock_update_progress,
+        mock_downloads,
+        mock_filter,
+    ):
+        """When top_tracks is empty, save_recommendation_playlist and
+        cleanup_old_fresh_finds are NOT called."""
+        from squidly.jobs.processors.recommendations import process_recommendation_job
+
+        # Mock _filter_available_tracks — receives empty lists, returns empty
+        mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
+
+        # Mock listen history sync
+        mock_wait.return_value = None
+        mock_queue_sync.return_value = None
+
+        # Mock seeds
+        mock_get_seeds.return_value = [
+            {'hifi_id': 100, 'title': 'Seed 1', 'artist': 'Artist 1', 'album': 'Album 1'},
+        ]
+
+        # Mock settings
+        mock_dl_settings.return_value = {
+            'download_source': 'tidal',
+            'quality': 'LOSSLESS',
+            'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
+        }
+
+        # Mock quality rank
+        mock_quality_rank.side_effect = lambda q: {
+            'HI_RES_LOSSLESS': 3, 'LOSSLESS': 2, 'HIGH': 1, '': 0,
+        }.get(q, 0)
+
+        # Mock recommendations API response with NO items → empty top_tracks
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            'data': {
+                'items': []
+            }
+        }
+        mock_downloads.make_request_with_retry_rotating_mirrors.return_value = (mock_response, 'test-mirror')
+
+        # Mock existing data
+        mock_existing_ff_isrcs.return_value = set()
+        mock_recently_played.return_value = set()
+        mock_existing_isrcs.return_value = set()
+        mock_existing_artist_titles.return_value = set()
+        mock_new_track_pct.return_value = 70
+        mock_track_count.return_value = 20
+        mock_history_days.return_value = 90
+
+        # Track resolution — won't be reached, but needs a return value
+        mock_resolve_track.return_value = {'hifi_id': '200', 'reason': 'exact', 'source': 'hifi_id'}
+        mock_fetch_payload.return_value = None
+
+        # Playlist save mock
+        mock_save_playlist.return_value = 42
+
+        # Cleanup mock
+        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+
+        # Mock get_squid_urls
+        mock_downloads.get_squid_urls.return_value = []
+
+        # Execute
+        result = process_recommendation_job(1, {
+            'plex_account_id': 123,
+            'plex_username': 'testuser',
+            'slug': 'fresh-finds',
+            'trigger': 'manual',
+        })
+
+        # Assert save_recommendation_playlist was NOT called
+        mock_save_playlist.assert_not_called()
+        # Assert cleanup_old_fresh_finds was NOT called
+        mock_cleanup.assert_not_called()
+        # Sanity check — result is not None
+        assert result is not None
+
+    @patch('squidly.jobs.processors.recommendations._filter_available_tracks')
+    @patch('squidly.jobs.processors.recommendations.downloads')
+    @patch('squidly.jobs.processors.recommendations.jobs.update_job_progress')
+    @patch('squidly.jobs.processors.recommendations.queue_plex_listen_history_sync')
+    @patch('squidly.jobs.orchestration.wait_for_job_type')
+    @patch('squidly.jobs.processors.recommendations.get_random_listen_history_seeds')
+    @patch('squidly.jobs.processors.recommendations.get_existing_fresh_finds_isrcs')
+    @patch('squidly.jobs.processors.recommendations.get_download_settings')
+    @patch('squidly.jobs.processors.recommendations._get_hifi_audio_quality_rank')
+    @patch('squidly.infrastructure.storage.get_recently_played_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_artist_titles')
+    @patch('squidly.infrastructure.storage.get_fresh_finds_new_track_pct')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_track_count')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_history_days')
+    @patch('squidly.services.track_resolver.resolve_track')
+    @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
+    @patch('squidly.services.hifi.extract_hifi_track_info')
+    @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
+    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
+    def test_empty_top_tracks_returns_expected_result(
+        self,
+        mock_raise_cancelled,
+        mock_cleanup,
+        mock_save_playlist,
+        mock_extract_info,
+        mock_fetch_payload,
+        mock_resolve_track,
+        mock_history_days,
+        mock_track_count,
+        mock_new_track_pct,
+        mock_existing_artist_titles,
+        mock_existing_isrcs,
+        mock_recently_played,
+        mock_quality_rank,
+        mock_dl_settings,
+        mock_existing_ff_isrcs,
+        mock_get_seeds,
+        mock_wait,
+        mock_queue_sync,
+        mock_update_progress,
+        mock_downloads,
+        mock_filter,
+    ):
+        """When top_tracks is empty, the function returns the expected dict shape
+        with tracks_saved=0 and saving_playlist='done'."""
+        from squidly.jobs.processors.recommendations import process_recommendation_job
+
+        # Identical setup to test_empty_top_tracks_skips_playlist_save
+        mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
+        mock_wait.return_value = None
+        mock_queue_sync.return_value = None
+        mock_get_seeds.return_value = [
+            {'hifi_id': 100, 'title': 'Seed 1', 'artist': 'Artist 1', 'album': 'Album 1'},
+        ]
+        mock_dl_settings.return_value = {
+            'download_source': 'tidal',
+            'quality': 'LOSSLESS',
+            'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
+        }
+        mock_quality_rank.side_effect = lambda q: {
+            'HI_RES_LOSSLESS': 3, 'LOSSLESS': 2, 'HIGH': 1, '': 0,
+        }.get(q, 0)
+
+        # Empty recommendations → empty top_tracks
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.json.return_value = {'data': {'items': []}}
+        mock_downloads.make_request_with_retry_rotating_mirrors.return_value = (mock_response, 'test-mirror')
+
+        mock_existing_ff_isrcs.return_value = set()
+        mock_recently_played.return_value = set()
+        mock_existing_isrcs.return_value = set()
+        mock_existing_artist_titles.return_value = set()
+        mock_new_track_pct.return_value = 70
+        mock_track_count.return_value = 20
+        mock_history_days.return_value = 90
+        mock_resolve_track.return_value = {'hifi_id': '200', 'reason': 'exact', 'source': 'hifi_id'}
+        mock_fetch_payload.return_value = None
+        mock_save_playlist.return_value = 42
+        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        mock_downloads.get_squid_urls.return_value = []
+
+        # Execute
+        result = process_recommendation_job(1, {
+            'plex_account_id': 123,
+            'plex_username': 'testuser',
+            'slug': 'fresh-finds',
+            'trigger': 'manual',
+        })
+
+        # Assert result dict shape
+        assert result is not None
+        assert 'stages' in result
+        assert 'progress' in result
+        assert 'trigger' in result
+        assert 'plex_username' in result
+
+        # Assert stage values
+        assert result['stages']['syncing_listen_history'] == 'done'
+        assert result['stages']['gathering_seeds'] == 'done'
+        assert result['stages']['fetching_recommendations'] == 'done'
+        assert result['stages']['processing_tracks'] == 'done'
+        assert result['stages']['saving_playlist'] == 'done'
+
+        # Assert progress values
+        assert result['progress']['tracks_saved'] == 0
+        assert result['progress']['seeds_found'] == 1
+        assert result['progress']['recommendations_fetched'] == 0
+        assert result['progress']['tracks_after_filter'] == 0
+        assert result['progress']['tracks_removed_by_isrc'] == 0
+
+        # Assert top-level fields match payload
+        assert result['trigger'] == 'manual'
+        assert result['plex_username'] == 'testuser'
+
+    @patch('squidly.jobs.processors.recommendations._filter_available_tracks')
+    @patch('squidly.jobs.processors.recommendations.downloads')
+    @patch('squidly.jobs.processors.recommendations.jobs.update_job_progress')
+    @patch('squidly.jobs.processors.recommendations.queue_plex_listen_history_sync')
+    @patch('squidly.jobs.orchestration.wait_for_job_type')
+    @patch('squidly.jobs.processors.recommendations.get_random_listen_history_seeds')
+    @patch('squidly.jobs.processors.recommendations.get_existing_fresh_finds_isrcs')
+    @patch('squidly.jobs.processors.recommendations.get_download_settings')
+    @patch('squidly.jobs.processors.recommendations._get_hifi_audio_quality_rank')
+    @patch('squidly.infrastructure.storage.get_recently_played_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_isrcs')
+    @patch('squidly.infrastructure.storage.get_existing_artist_titles')
+    @patch('squidly.infrastructure.storage.get_fresh_finds_new_track_pct')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_track_count')
+    @patch('squidly.jobs.processors.recommendations.get_fresh_finds_history_days')
+    @patch('squidly.services.track_resolver.resolve_track')
+    @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
+    @patch('squidly.services.hifi.extract_hifi_track_info')
+    @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
+    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
+    def test_non_empty_top_tracks_calls_save(
+        self,
+        mock_raise_cancelled,
+        mock_cleanup,
+        mock_save_playlist,
+        mock_extract_info,
+        mock_fetch_payload,
+        mock_resolve_track,
+        mock_history_days,
+        mock_track_count,
+        mock_new_track_pct,
+        mock_existing_artist_titles,
+        mock_existing_isrcs,
+        mock_recently_played,
+        mock_quality_rank,
+        mock_dl_settings,
+        mock_existing_ff_isrcs,
+        mock_get_seeds,
+        mock_wait,
+        mock_queue_sync,
+        mock_update_progress,
+        mock_downloads,
+        mock_filter,
+    ):
+        """When top_tracks has items, save_recommendation_playlist and
+        cleanup_old_fresh_finds ARE called."""
+        from squidly.jobs.processors.recommendations import process_recommendation_job
+
+        # Mock _filter_available_tracks to pass all tracks through
+        mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
+
+        # Mock listen history sync
+        mock_wait.return_value = None
+        mock_queue_sync.return_value = None
+
+        # Mock seeds
+        mock_get_seeds.return_value = [
+            {'hifi_id': 100, 'title': 'Seed 1', 'artist': 'Artist 1', 'album': 'Album 1'},
+        ]
+
+        # Mock settings
+        mock_dl_settings.return_value = {
+            'download_source': 'tidal',
+            'quality': 'LOSSLESS',
+            'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
+        }
+
+        # Mock quality rank
+        mock_quality_rank.side_effect = lambda q: {
+            'HI_RES_LOSSLESS': 3, 'LOSSLESS': 2, 'HIGH': 1, '': 0,
+        }.get(q, 0)
+
+        # Mock recommendations — return items so top_tracks is non-empty
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.json.return_value = {
+            'data': {
+                'items': [{
+                    'track': {
+                        'id': 200,
+                        'title': 'Rec Track',
+                        'artists': [{'id': 10, 'name': 'Rec Artist'}],
+                        'album': {'id': 20, 'title': 'Rec Album'},
+                        'duration': 240,
+                        'maxAudioQuality': 'LOSSLESS',
+                        'isrc': 'USRC1230001',
+                    }
+                }]
+            }
+        }
+        mock_downloads.make_request_with_retry_rotating_mirrors.return_value = (mock_response, 'test-mirror')
+
+        # Mock existing data — prevent dedup from filtering out the track
+        mock_existing_ff_isrcs.return_value = set()
+        mock_recently_played.return_value = set()
+        mock_existing_isrcs.return_value = set()
+        mock_existing_artist_titles.return_value = set()
+        mock_new_track_pct.return_value = 70
+        mock_track_count.return_value = 20
+        mock_history_days.return_value = 90
+
+        # Mock track resolution
+        mock_resolve_track.return_value = {'hifi_id': '200', 'reason': 'exact', 'source': 'hifi_id'}
+        mock_fetch_payload.return_value = None
+
+        # Playlist save mock
+        mock_save_playlist.return_value = 42
+
+        # Cleanup mock
+        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+
+        # Mock get_squid_urls
+        mock_downloads.get_squid_urls.return_value = []
+
+        # Execute
+        result = process_recommendation_job(1, {
+            'plex_account_id': 123,
+            'plex_username': 'testuser',
+            'slug': 'fresh-finds',
+            'trigger': 'manual',
+        })
+
+        # Assert save_recommendation_playlist WAS called
+        mock_save_playlist.assert_called_once()
+        # Assert cleanup_old_fresh_finds WAS called
+        mock_cleanup.assert_called_once()
+        # Sanity check — tracks were saved
+        assert result is not None
+        assert result['progress']['tracks_saved'] > 0
+        assert result['stages']['saving_playlist'] == 'done'
+
+
+# ---------------------------------------------------------------------------
+# Tests for GET /api/recommendations/playlists — today field
+# ---------------------------------------------------------------------------
+
+class TestListRecommendationPlaylistsRouteToday:
+    """Tests for the `today` field in list_recommendation_playlists_route.
+
+    The route uses inline imports (from X import Y inside the function body),
+    so patches target squidly.infrastructure.storage where the import reads from.
+    datetime.now() is NOT mocked — instead we use a "discovery" pattern:
+    make a no-param request first (which returns early without DB calls) to
+    obtain the real today_name, then use it to construct matching/non-matching
+    mock data for subsequent requests.
+    """
+
+    def test_today_field_present_when_no_user_id(self):
+        """Call without user_id — returns today with exists: false and valid format."""
+        from squidly.app import app
+
+        with app.test_client() as client:
+            response = client.get('/api/recommendations/playlists')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'today' in data
+        assert data['today']['exists'] is False
+        assert data['playlists'] == []
+        assert data['has_history'] is False
+
+        # Validate name format: Fresh Finds (M-D)
+        name = data['today']['name']
+        assert re.match(r'^Fresh Finds \(\d{1,2}-\d{1,2}\)$', name), \
+            f"Expected 'Fresh Finds (M-D)' format, got: {name}"
+
+    def test_today_name_format(self):
+        """Verify today.name always matches Fresh Finds (M-D) pattern."""
+        from squidly.app import app
+
+        with app.test_client() as client:
+            response = client.get('/api/recommendations/playlists')
+
+        data = response.get_json()
+        name = data['today']['name']
+        assert re.match(r'^Fresh Finds \(\d{1,2}-\d{1,2}\)$', name), \
+            f"Name '{name}' does not match Fresh Finds (M-D) format"
+
+    def test_today_exists_true_when_playlist_matches(self):
+        """today.exists is True when a playlist with today's name exists."""
+        from squidly.app import app
+
+        # Step 1: Discover today's name via a no-param request.
+        # This returns early without hitting any storage/database functions.
+        with app.test_client() as client:
+            discovery_resp = client.get('/api/recommendations/playlists')
+        today_name = discovery_resp.get_json()['today']['name']
+
+        # Step 2: Mock storage to return a playlist whose name matches today_name
+        with (
+            patch('squidly.infrastructure.storage.resolve_plex_account_id', return_value=123),
+            patch('squidly.infrastructure.storage.has_listen_history', return_value=True),
+            patch('squidly.infrastructure.storage.list_recommendation_playlists', return_value=[
+                {
+                    'id': 1, 'name': today_name, 'slug': 'fresh-finds',
+                    'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 25,
+                    'generated_at': None,
+                },
+            ]),
+        ):
+            with app.test_client() as client:
+                response = client.get('/api/recommendations/playlists?user_id=test-user')
+
+        data = response.get_json()
+        assert data['today']['exists'] is True
+        assert data['today']['name'] == today_name
+
+    def test_today_exists_false_when_no_matching_playlist(self):
+        """today.exists is False when no playlist matches today's name."""
+        from squidly.app import app
+
+        # Step 1: Discover today's name
+        with app.test_client() as client:
+            discovery_resp = client.get('/api/recommendations/playlists')
+        today_name = discovery_resp.get_json()['today']['name']
+
+        # Build names that definitely do NOT match today
+        non_matching_name = today_name + '-old'
+
+        # Step 2: Mock storage to return only non-matching playlists
+        with (
+            patch('squidly.infrastructure.storage.resolve_plex_account_id', return_value=456),
+            patch('squidly.infrastructure.storage.has_listen_history', return_value=True),
+            patch('squidly.infrastructure.storage.list_recommendation_playlists', return_value=[
+                {
+                    'id': 1, 'name': non_matching_name, 'slug': 'fresh-finds',
+                    'strategy': 'fresh-finds', 'seed_count': 20, 'track_count': 25,
+                    'generated_at': None,
+                },
+                {
+                    'id': 2, 'name': 'Fresh Finds (1-1)', 'slug': 'fresh-finds',
+                    'strategy': 'fresh-finds', 'seed_count': 15, 'track_count': 20,
+                    'generated_at': None,
+                },
+            ]),
+        ):
+            with app.test_client() as client:
+                response = client.get('/api/recommendations/playlists?user_id=other-user')
+
+        data = response.get_json()
+        assert data['today']['exists'] is False
+        assert data['today']['name'] == today_name

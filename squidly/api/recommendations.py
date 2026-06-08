@@ -5,13 +5,25 @@ recommendations_bp = Blueprint("recommendations", __name__)
 @recommendations_bp.route('/api/recommendations/playlists', methods=['GET'])
 def list_recommendation_playlists_route():
     from squidly.infrastructure.storage import list_recommendation_playlists, has_listen_history, resolve_plex_account_id
+    from squidly.infrastructure.config import app_timezone
+    from zoneinfo import ZoneInfo
     from datetime import datetime
+
     user_id = request.args.get('user_id', '').strip() or None
     plex_account_id = resolve_plex_account_id(user_id) if user_id else None
+
+    # Compute today's Fresh Finds name using server timezone
+    now_tz = datetime.now(ZoneInfo(app_timezone))
+    today_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
+
     if plex_account_id is None:
-        return jsonify({'playlists': [], 'has_history': False})
+        return jsonify({'playlists': [], 'has_history': False, 'today': {'name': today_name, 'exists': False}})
+
     has_history = has_listen_history(plex_account_id)
     playlists = list_recommendation_playlists(plex_account_id)
+
+    today_exists = any(p['name'] == today_name for p in playlists)
+
     result = []
     for p in playlists:
         generated_at = p.get('generated_at')
@@ -20,7 +32,7 @@ def list_recommendation_playlists_route():
             'seed_count': p['seed_count'], 'track_count': p['track_count'],
             'generated_at': generated_at.isoformat() + 'Z' if isinstance(generated_at, datetime) else str(generated_at),
         })
-    return jsonify({'playlists': result, 'has_history': has_history})
+    return jsonify({'playlists': result, 'has_history': has_history, 'today': {'name': today_name, 'exists': today_exists}})
 
 @recommendations_bp.route('/api/recommendations/generate', methods=['POST'])
 def generate_recommendation_playlist():

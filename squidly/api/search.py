@@ -439,7 +439,8 @@ def track_similar(track_id=None):
             get_squid_urls(),
             method='GET',
             timeout=10,
-            max_retries=3
+            max_retries=3,
+            mirror_type='tidal'
         )
 
         if not response.ok:

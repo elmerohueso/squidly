@@ -195,7 +195,8 @@ def process_recommendation_job(job_id, payload):
                 downloads.get_squid_urls(),
                 method='GET',
                 timeout=10,
-                max_retries=2
+                max_retries=2,
+                mirror_type='tidal'
             )
             if response.ok:
                 data = response.json()
@@ -480,6 +481,18 @@ def process_recommendation_job(job_id, payload):
     stages['saving_playlist'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
     logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
+
+    if not top_tracks:
+        logger.info("[RECOMMENDATION] Job %s no tracks found, skipping playlist save", job_id)
+        stages['saving_playlist'] = 'done'
+        progress['tracks_saved'] = 0
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        return {
+            'stages': stages,
+            'progress': progress,
+            'trigger': trigger,
+            'plex_username': plex_username,
+        }
 
     from squidly.infrastructure.config import app_timezone
     from zoneinfo import ZoneInfo
