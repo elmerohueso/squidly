@@ -172,7 +172,7 @@ def test_import_workers():
         plex_sync_worker,
         plex_library_update_worker,
         plex_sync_scheduler_worker,
-        recommendation_scheduler_worker,
+        nightly_maintenance_scheduler_worker,
     )
 
     assert issubclass(JobCancelledError, Exception)

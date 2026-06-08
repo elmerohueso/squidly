@@ -363,12 +363,12 @@ def plex_sync_scheduler_worker():
         time.sleep(60)
 
 
-def recommendation_scheduler_worker():
-    """Queue Fresh Finds recommendation generation daily at midnight."""
+def nightly_maintenance_scheduler_worker():
+    """Run nightly maintenance at midnight: validate premium mirrors, then queue Fresh Finds recommendation generation."""
     from squidly.infrastructure.storage import get_all_plex_account_mappings, has_listen_history
     from squidly.jobs.orchestration import is_job_type_running_or_queued
 
-    logger.info("[RECOMMENDATION_SCHEDULER] Background scheduler started")
+    logger.info("[NIGHTLY_MAINTENANCE] Background scheduler started")
 
     last_run_date = None
     tz = ZoneInfo(app_timezone)
@@ -386,10 +386,10 @@ def recommendation_scheduler_worker():
                     try:
                         auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
                         if auto_job_id:
-                            logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds auto-download (job %s)", auto_job_id)
+                            logger.info("[NIGHTLY_MAINTENANCE] Queued Fresh Finds auto-download (job %s)", auto_job_id)
                         auto_download_pending = False
                     except Exception as e:
-                        logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue auto-download: %s", e)
+                        logger.info("[NIGHTLY_MAINTENANCE] Failed to queue auto-download: %s", e)
                 time.sleep(60)
                 continue
 
@@ -399,14 +399,23 @@ def recommendation_scheduler_worker():
 
             last_run_date = today
 
+            # --- Step 1: Validate all premium mirrors (non-blocking) ---
+            try:
+                from squidly.infrastructure.downloads import validate_all_premium_from_db
+                logger.info("[NIGHTLY_MAINTENANCE] Running premium mirror validation")
+                summary = validate_all_premium_from_db()
+                logger.info("[NIGHTLY_MAINTENANCE] Mirror validation complete: %s", summary)
+            except Exception as e:
+                logger.info("[NIGHTLY_MAINTENANCE] Mirror validation failed (continuing to recommendations): %s", e)
+
             if is_pipeline_busy():
-                logger.info("[RECOMMENDATION_SCHEDULER] Pipeline busy; deferring recommendation generation")
+                logger.info("[NIGHTLY_MAINTENANCE] Pipeline busy; deferring recommendation generation")
                 last_run_date = None  # Allow retry on next pass
                 time.sleep(60)
                 continue
 
             auto_download_pending = False
-            logger.info("[RECOMMENDATION_SCHEDULER] Running daily recommendation generation")
+            logger.info("[NIGHTLY_MAINTENANCE] Running daily recommendation generation")
 
             mappings = get_all_plex_account_mappings()
             for mapping in mappings:
@@ -426,16 +435,16 @@ def recommendation_scheduler_worker():
                         trigger='scheduled'
                     )
                     if job_id:
-                        logger.info("[RECOMMENDATION_SCHEDULER] Queued Fresh Finds for %s (job %s)", plex_username, job_id)
+                        logger.info("[NIGHTLY_MAINTENANCE] Queued Fresh Finds for %s (job %s)", plex_username, job_id)
                 except Exception as e:
-                    logger.info("[RECOMMENDATION_SCHEDULER] Failed to queue for %s: %s", plex_username, e)
+                    logger.info("[NIGHTLY_MAINTENANCE] Failed to queue for %s: %s", plex_username, e)
 
             # Mark auto-download as pending — will be queued on a later pass
             # once all generate_recommendations jobs have finished.
             auto_download_pending = True
 
         except Exception as e:
-            logger.info("[RECOMMENDATION_SCHEDULER] Error: %s", str(e))
+            logger.info("[NIGHTLY_MAINTENANCE] Error: %s", str(e))
 
         time.sleep(60)
 
@@ -489,7 +498,7 @@ def start_workers():
     # Scheduler threads
     schedulers = [
         (plex_sync_scheduler_worker, 'plex_sync_scheduler'),
-        (recommendation_scheduler_worker, 'recommendation_scheduler'),
+        (nightly_maintenance_scheduler_worker, 'nightly_maintenance_scheduler'),
     ]
     for fn, name in schedulers:
         t = threading.Thread(target=fn, daemon=True, name=name)
