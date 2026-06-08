@@ -14,6 +14,8 @@ from squidly.jobs.orchestration import queue_plex_listen_history_sync
 from squidly.jobs.orchestration import queue_recommendation_generation
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.hifi import _get_hifi_audio_quality_rank
+from squidly.services import qobuz
+from squidly.services import deezer
 from squidly.infrastructure.storage import get_download_settings
 from squidly.infrastructure.storage import get_fresh_finds_auto_download_users
 from squidly.infrastructure.storage import (
@@ -24,6 +26,101 @@ from squidly.infrastructure.storage import (
 )
 from squidly.infrastructure.storage import save_recommendation_playlist
 from zoneinfo import ZoneInfo
+
+def _filter_available_tracks(tracks, settings):
+    """Filter a list of track dicts, keeping only those whose ISRC is available
+    on at least one configured download source with active premium mirrors.
+
+    Args:
+        tracks: List of track dicts (each has 'isrc' key, may be None/empty).
+        settings: Download settings dict from get_download_settings().
+
+    Returns:
+        Tuple of (available_tracks, removed_count).
+        available_tracks: List of tracks that passed the check.
+        removed_count: Number of tracks filtered out.
+    """
+    # Parse configured download sources
+    raw_source = (settings.get('download_source') or '').strip()
+    if not raw_source:
+        sources = ['tidal']
+    else:
+        sources = [s.strip().lower() for s in raw_source.split(',') if s.strip()]
+        valid_sources = {'tidal', 'qobuz', 'deezer'}
+        sources = [s for s in sources if s in valid_sources]
+        if not sources:
+            sources = ['tidal']
+
+    # Load premium mirrors (lazy, once)
+    tidal_online = False
+    qobuz_mirrors = []
+
+    if 'tidal' in sources:
+        try:
+            tidal_online = bool(downloads.load_enabled_mirror_urls(mirror_type='tidal', for_download=True))
+        except Exception:
+            tidal_online = False
+
+    if 'qobuz' in sources:
+        try:
+            qobuz_mirrors = downloads.load_enabled_mirror_urls(mirror_type='qobuz', for_download=True)
+        except Exception:
+            qobuz_mirrors = []
+
+    # Determine usable sources
+    has_tidal = 'tidal' in sources and tidal_online
+    has_qobuz = 'qobuz' in sources and bool(qobuz_mirrors)
+    has_deezer = 'deezer' in sources  # Public API, always callable
+
+    if not (has_tidal or has_qobuz or has_deezer):
+        # No usable source to validate against — pass everything through
+        return list(tracks), 0
+
+    available = []
+    removed = 0
+
+    for track in tracks:
+        isrc = track.get('isrc')
+        if not isrc or not str(isrc).strip():
+            available.append(track)
+            continue
+
+        isrc = str(isrc).strip().upper()
+        found = False
+
+        for source in sources:
+            if found:
+                break
+
+            if source == 'tidal':
+                if has_tidal:
+                    found = True
+
+            elif source == 'qobuz' and has_qobuz:
+                try:
+                    result, error = qobuz.search_qobuz_track(
+                        qobuz_mirrors[0]['url'], isrc, timeout=15
+                    )
+                    if result is not None:
+                        found = True
+                except Exception:
+                    logger.debug("[RECOMMENDATION] Qobuz ISRC check exception for %s", isrc)
+
+            elif source == 'deezer':
+                try:
+                    result = deezer.search_deezer_track(isrc, timeout=15)
+                    if result is not None:
+                        found = True
+                except Exception:
+                    logger.debug("[RECOMMENDATION] Deezer ISRC check exception for %s", isrc)
+
+        if found:
+            available.append(track)
+        else:
+            removed += 1
+
+    return available, removed
+
 
 def process_recommendation_job(job_id, payload):
     from urllib.parse import urlencode
@@ -39,6 +136,7 @@ def process_recommendation_job(job_id, payload):
         'seeds_found': 0,
         'recommendations_fetched': 0,
         'tracks_after_filter': 0,
+        'tracks_removed_by_isrc': 0,
         'tracks_saved': 0
     }
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -232,6 +330,77 @@ def process_recommendation_job(job_id, payload):
     progress['tracks_library_candidates'] = len(library_candidates)
     progress['tracks_selected_new'] = len(selected_new)
     progress['tracks_selected_library'] = len(selected_library)
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    # ── ISRC availability pre-check ──
+    # Filter selected tracks and refill from overflow remainders.
+    # Uses stable offsets n_new_consumed / n_library_consumed for overflow slicing.
+
+    # Compute overflow remainders using stable offsets
+    n_new_consumed = len(selected_new)
+    n_library_consumed = len(selected_library)
+    new_overflow = new_candidates[n_new_consumed:]
+    lib_overflow = library_candidates[n_library_consumed:]
+
+    # Filter new pool
+    filtered_new, removed_new = _filter_available_tracks(selected_new, settings)
+    logger.info("[RECOMMENDATION] ISRC pre-check: new pool %d kept, %d removed",
+                len(filtered_new), removed_new)
+
+    # Refill new pool from same-pool overflow first, then cross-pool
+    if removed_new > 0:
+        for rec in new_overflow:
+            if len(filtered_new) >= n_new_consumed:
+                break
+            avail, _ = _filter_available_tracks([rec], settings)
+            if avail:
+                filtered_new.append(rec)
+        # Cross-pool refill if still short
+        if len(filtered_new) < n_new_consumed:
+            for rec in lib_overflow:
+                if len(filtered_new) >= n_new_consumed:
+                    break
+                # Skip if this track is already in the new pool
+                if any(r.get('isrc') and r['isrc'] == rec.get('isrc') for r in filtered_new):
+                    continue
+                avail, _ = _filter_available_tracks([rec], settings)
+                if avail:
+                    filtered_new.append(rec)
+
+    # Filter library pool
+    filtered_library, removed_lib = _filter_available_tracks(selected_library, settings)
+    logger.info("[RECOMMENDATION] ISRC pre-check: library pool %d kept, %d removed",
+                len(filtered_library), removed_lib)
+
+    # Refill library pool from same-pool overflow first, then cross-pool
+    if removed_lib > 0:
+        for rec in lib_overflow:
+            if len(filtered_library) >= n_library_consumed:
+                break
+            avail, _ = _filter_available_tracks([rec], settings)
+            if avail:
+                filtered_library.append(rec)
+        # Cross-pool refill if still short
+        if len(filtered_library) < n_library_consumed:
+            for rec in new_overflow:
+                if len(filtered_library) >= n_library_consumed:
+                    break
+                # Skip if this track was already consumed by the new pool refill
+                if any(r.get('isrc') and r['isrc'] == rec.get('isrc') for r in filtered_new):
+                    continue
+                avail, _ = _filter_available_tracks([rec], settings)
+                if avail:
+                    filtered_library.append(rec)
+
+    selected_new = filtered_new
+    selected_library = filtered_library
+
+    total_removed = removed_new + removed_lib
+    if total_removed > 0:
+        logger.info("[RECOMMENDATION] Job %s: ISRC pre-check removed %d tracks, refilled from overflow",
+                    job_id, total_removed)
+
+    progress['tracks_removed_by_isrc'] = total_removed
     jobs.update_job_progress(job_id, {'progress': progress})
 
     # Step 7: Resolve library picks to local library instance
