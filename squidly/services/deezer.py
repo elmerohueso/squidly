@@ -78,7 +78,7 @@ def search_deezer_track(isrc: str, timeout: int = 30) -> Optional[dict]:
         ``isrc``, etc.), or None on failure.
     """
     url = f"https://api.deezer.com/track/isrc:{isrc}"
-    logger.info("[DEEZER] Searching for ISRC: %s", isrc)
+    logger.debug("[DEEZER] Searching for ISRC: %s", isrc)
 
     try:
         resp = requests.get(url, timeout=timeout, headers={'User-Agent': _USER_AGENT})
@@ -120,7 +120,7 @@ def get_deezer_session(arl: str, timeout: int = 30) -> Optional[dict]:
     session.headers.update(headers)
     session.cookies.update({'arl': arl, 'comeback': '1'})
 
-    logger.info("[DEEZER] Getting user data from gw-light API")
+    logger.debug("[DEEZER] Getting user data from gw-light API")
 
     try:
         resp = session.post(
@@ -174,7 +174,7 @@ def get_deezer_stream_url(
         'track_tokens': [track_token],
     }
 
-    logger.info("[DEEZER] Getting stream URL for track token %s", track_token[:20])
+    logger.debug("[DEEZER] Getting stream URL for track token %s", track_token[:20])
 
     try:
         resp = session.post(

@@ -225,7 +225,7 @@ def process_recommendation_job(job_id, payload):
                 progress['recommendations_fetched'] = len(raw_recommendations)
                 jobs.update_job_progress(job_id, {'progress': progress})
         except Exception as e:
-            logger.info("[RECOMMENDATION] Job %s failed to fetch recommendations for seed %s: %s", job_id, hifi_id, e)
+            logger.warning("[RECOMMENDATION] Job %s failed to fetch recommendations for seed %s: %s", job_id, hifi_id, e)
             continue
 
     stages['fetching_recommendations'] = 'done'
@@ -504,7 +504,7 @@ def process_recommendation_job(job_id, payload):
             job_id, cleanup_result.get('deleted_count', 0), cleanup_result.get('plex_deleted', 0)
         )
     except Exception as e:
-        logger.info("[RECOMMENDATION] Job %s cleanup failed (non-fatal): %s", job_id, str(e))
+        logger.warning("[RECOMMENDATION] Job %s cleanup failed (non-fatal): %s", job_id, str(e))
 
     progress['tracks_saved'] = len(top_tracks)
     stages['saving_playlist'] = 'done'

@@ -80,7 +80,7 @@ def process_download_job(job_id, payload):
     downloads_folder = DOWNLOADS_ROOT
 
     if not os.path.exists(downloads_folder):
-        logger.info("[DOWNLOAD] WARNING: Downloads folder does not exist, creating it: %s", downloads_folder)
+        logger.warning("[DOWNLOAD] Downloads folder does not exist, creating it: %s", downloads_folder)
         os.makedirs(downloads_folder, exist_ok=True)
 
     track_data = track_object.get('track') if isinstance(track_object.get('track'), dict) else {}
@@ -322,8 +322,8 @@ def process_download_job(job_id, payload):
     full_path = os.path.join(downloads_folder, file_path)
     full_path = os.path.normpath(full_path)
 
-    logger.info("[DOWNLOAD_DEBUG] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
-    logger.info("[DOWNLOAD_DEBUG] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
+    logger.debug("[DOWNLOAD] file_naming='%s' template -> file_path='%s'", file_naming, file_path)
+    logger.debug("[DOWNLOAD] resolved full_path='%s' downloads_folder='%s'", full_path, downloads_folder)
     logger.info("[DOWNLOAD_DECISION] Job %s: title='%s', artist='%s', album='%s', effective_artist='%s'", job_id, track_title, artist_name, album_name, effective_artist_name)
 
     # --- Download track to temp ---
@@ -471,7 +471,7 @@ def process_download_job(job_id, payload):
                     audio_format = downloads.detect_audio_format(tmp_file.read(32))
                 logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
                 if audio_format == 'unknown':
-                    logger.info("[DOWNLOAD] WARNING: Could not detect audio format, assuming FLAC")
+                    logger.warning("[DOWNLOAD] Could not detect audio format, assuming FLAC")
                     audio_format = 'flac'
                 try:
                     temp_size = os.path.getsize(temp_source_path)
@@ -515,7 +515,7 @@ def process_download_job(job_id, payload):
             f"All download sources failed: {last_download_error or 'unknown error'}"
         )
 
-    logger.info(" [DOWNLOAD] Job %s starting for track %s", job_id, track_id)
+    logger.info("[DOWNLOAD] Job %s starting for track %s", job_id, track_id)
 
     jobs.update_job_progress(job_id, {
         'artist': artist_name,
@@ -544,7 +544,7 @@ def process_download_job(job_id, payload):
     logger.info("[DOWNLOAD] Creating directory structure: %s", output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
-    logger.info("[DOWNLOAD] SUCCESS: Directory created/exists: %s", output_dir)
+    logger.info("[DOWNLOAD] Directory created/exists: %s", output_dir)
 
     logger.info("[DOWNLOAD] Download complete. Using temporary source file: %s", temp_source_path)
 
@@ -587,8 +587,8 @@ def process_download_job(job_id, payload):
         'audio_quality': track_data.get('maxAudioQuality') or track_data.get('audioQuality'),
     }
 
-    logger.info("[DOWNLOAD_DEBUG] cover_url='%s' cover_bytes=%s", cover_url, len(cover_image_data) if cover_image_data else 0)
-    logger.info("[DOWNLOAD_DEBUG] metadata_dict=%s", metadata_dict)
+    logger.debug("[DOWNLOAD] cover_url='%s' cover_bytes=%s", cover_url, len(cover_image_data) if cover_image_data else 0)
+    logger.debug("[DOWNLOAD] metadata_dict=%s", metadata_dict)
 
     logger.info("[DOWNLOAD] Using temporary source file: %s", temp_source_path)
 
@@ -597,9 +597,9 @@ def process_download_job(job_id, payload):
     jobs.update_job_progress(job_id, {'stages': stages})
 
     logger.info("[DOWNLOAD] Adding metadata to staged file: %s", temp_source_path)
-    logger.info("[DOWNLOAD_DEBUG] tagging temp_source_path='%s'", temp_source_path)
+    logger.debug("[DOWNLOAD] tagging temp_source_path='%s'", temp_source_path)
     downloads.add_id3_tags_to_file(temp_source_path, metadata_dict, cover_image_data, tag_settings)
-    logger.info("[DOWNLOAD_DEBUG] tagging complete for temp_source_path='%s'", temp_source_path)
+    logger.debug("[DOWNLOAD] tagging complete for temp_source_path='%s'", temp_source_path)
     try:
         tagged_size = os.path.getsize(temp_source_path)
         logger.info("[DOWNLOAD] Tagged temp file size: %d bytes (%s)", tagged_size, temp_source_path)
@@ -627,7 +627,7 @@ def process_download_job(job_id, payload):
 
     downloads.cleanup_file(temp_source_path)
 
-    logger.info("[DOWNLOAD] SUCCESS: Downloaded and saved to %s", full_path)
+    logger.info("[DOWNLOAD] Downloaded and saved to %s", full_path)
 
     playlist_name = payload.get('plex_playlist')
     if playlist_name:

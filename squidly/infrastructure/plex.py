@@ -55,7 +55,7 @@ def _get_or_create_playlist(plex, playlist_name, items=None):
             if pl.title == playlist_name:
                 return pl, False
     except Exception as e:
-        logger.info("[PLEX] Error listing playlists: %s", str(e))
+        logger.warning("[PLEX] Error listing playlists: %s", str(e))
 
     if items:
         playlist = plex.createPlaylist(playlist_name, items=items)
@@ -82,7 +82,7 @@ def _add_items_to_playlist(playlist, items):
             if 'already in' in str(e).lower():
                 skipped += 1
             else:
-                logger.info("[PLEX] Error adding item to playlist '%s': %s", playlist.title, str(e))
+                logger.warning("[PLEX] Error adding item to playlist '%s': %s", playlist.title, str(e))
                 failed += 1
     return added, skipped, failed
 
@@ -195,7 +195,7 @@ def get_all_plex_users():
 
         return True, users, None
     except Exception as e:
-        logger.info("[PLEX] Failed to fetch Plex users: %s", str(e))
+        logger.exception("[PLEX] Failed to fetch Plex users")
         return False, [], str(e)
 
 
@@ -228,14 +228,14 @@ def _get_plex_server_for_user(server_url, api_token, user_id=None):
                         # Use switchUser to get a PlexServer instance scoped to the managed user
                         return plex.switchUser(u)
                     except Exception as e:
-                        logger.info("[PLEX] Failed to switch to managed user %s: %s", user_id_str, e)
+                        logger.warning("[PLEX] Failed to switch to managed user %s: %s", user_id_str, e)
                         continue
         except Exception as e:
-                logger.info("[PLEX] Failed to fetch managed users for user selection %s: %s", user_id, e)
+                logger.warning("[PLEX] Failed to fetch managed users for user selection %s: %s", user_id, e)
 
         return plex
     except Exception as e:
-        logger.info("[PLEX] Failed to create PlexServer for user %s: %s", user_id, e)
+        logger.exception("[PLEX] Failed to create PlexServer for user %s", user_id)
         raise
 
 
@@ -269,7 +269,7 @@ def get_plex_music_playlists(server_url, api_token, user_id=None):
         return True, sorted(playlists, key=lambda p: p['name'].casefold()), None
 
     except Exception as e:
-        logger.info("[PLEX] Failed to fetch playlists: %s", str(e))
+        logger.exception("[PLEX] Failed to fetch playlists")
         return False, [], str(e)
 
 
@@ -357,7 +357,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
                     logger.info("[PLEX] Resolved track using ratingKey=%s", rating_key)
                     break
             except Exception as e:
-                logger.info("[PLEX] Failed to fetch item for ratingKey=%s: %s", rating_key, str(e))
+                logger.warning("[PLEX] Failed to fetch item for ratingKey=%s: %s", rating_key, str(e))
 
         if track is None:
             return False, (
@@ -378,7 +378,7 @@ def add_tracks_to_plex_playlist(server_url, api_token, library_name, playlist_na
             return False, f'Failed to add track to playlist "{playlist_name}"'
 
     except Exception as e:
-        logger.info("[PLEX] Unexpected error: %s", str(e))
+        logger.exception("[PLEX] Unexpected error in add_tracks_to_plex_playlist")
         return False, f'Unexpected error: {str(e)}'
 
 
@@ -449,7 +449,7 @@ def wait_for_plex_library_scan_completion(plex, library, timeout_seconds=600, po
             return False, False
 
         if elapsed >= timeout_seconds:
-            logger.info('[LIBRARY_UPDATE] Timed out waiting for Plex scan completion.')
+            logger.warning('[LIBRARY_UPDATE] Timed out waiting for Plex scan completion.')
             return False, saw_active
 
         time.sleep(max(1, poll_interval_seconds))
@@ -488,7 +488,7 @@ def _resolve_plex_user_context(plex, user_id):
             logger.info("[PLEX_LIBRARY] Switched to user %s (requested %s)", switch_target, requested_user_id)
             return switched, switch_target
         except Exception as e:
-            logger.info("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
+            logger.warning("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
             return plex, None
 
     if selected_user and bool(selected_user.get('is_owner')):
@@ -556,7 +556,7 @@ def _get_match_review_plex_context():
 
         return server_url, api_token, library
     except Exception as e:
-        logger.info("[MATCH_REVIEW] Unable to resolve Plex context for artwork: %s", str(e))
+        logger.warning("[MATCH_REVIEW] Unable to resolve Plex context for artwork: %s", str(e))
         return None, None, None
 
 
@@ -582,7 +582,7 @@ def _fetch_plex_item_image_map(library, server_url, api_token, library_ids, imag
                 image_size=image_size,
             ) if item else None
         except Exception as e:
-            logger.info("[MATCH_REVIEW] Failed to fetch Plex artwork for %s: %s", normalized_id, str(e))
+            logger.warning("[MATCH_REVIEW] Failed to fetch Plex artwork for %s: %s", normalized_id, str(e))
             image_map[normalized_id] = None
 
     return image_map
@@ -665,7 +665,7 @@ def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
                     logger.info("[PLEX] Deleted playlist by key '%s': '%s'", key, pl.title)
                     deleted += 1
                 except Exception as e:
-                    logger.info("[PLEX] Failed to delete playlist by key '%s': %s", key, str(e))
+                    logger.warning("[PLEX] Failed to delete playlist by key '%s': %s", key, str(e))
                 keys_to_delete.discard(key)
 
         # Fallback name matching for keys that weren't resolved and provided fallback names
@@ -681,9 +681,9 @@ def delete_plex_playlists_by_keys_or_names(plex_playlist_keys, fallback_names):
                     logger.info("[PLEX] Deleted playlist by name: '%s'", title)
                     deleted += 1
                 except Exception as e:
-                    logger.info("[PLEX] Failed to delete playlist '%s': %s", title, str(e))
+                    logger.warning("[PLEX] Failed to delete playlist '%s': %s", title, str(e))
     except Exception as e:
-        logger.info("[PLEX] Failed to list playlists for key/name deletion: %s", str(e))
+        logger.exception("[PLEX] Failed to list playlists for key/name deletion")
 
     return deleted
 

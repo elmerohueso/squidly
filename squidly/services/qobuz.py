@@ -75,7 +75,7 @@ def search_qobuz_track(
     url = f'{base_url.rstrip("/")}/api/get-music'
     params = {'q': isrc, 'offset': 0}
 
-    logger.info("[QOBUZ] Searching for ISRC: %s", isrc)
+    logger.debug("[QOBUZ] Searching for ISRC: %s", isrc)
 
     try:
         response = requests.get(url, params=params, timeout=timeout, headers={'User-Agent': _USER_AGENT})
@@ -148,7 +148,7 @@ def get_qobuz_stream_url(
     url = f'{base_url.rstrip("/")}/api/download-music'
     params = {'track_id': str(track_id), 'quality': str(quality_code)}
 
-    logger.info("[QOBUZ] Getting stream URL for track %s, quality %s", track_id, quality_code)
+    logger.debug("[QOBUZ] Getting stream URL for track %s, quality %s", track_id, quality_code)
 
     try:
         response = requests.get(url, params=params, timeout=timeout, headers={'User-Agent': _USER_AGENT})
@@ -243,9 +243,9 @@ def download_qobuz_track(
 
         try:
             actual_size = os.path.getsize(output_path)
-            logger.info("[QOBUZ] Written file size: %d bytes (%s)", actual_size, output_path)
+            logger.debug("[QOBUZ] Written file size: %d bytes (%s)", actual_size, output_path)
         except OSError:
-            logger.info("[QOBUZ] Written file size: unknown (%s)", output_path)
+            logger.debug("[QOBUZ] Written file size: unknown (%s)", output_path)
 
         try:
             with open(output_path, 'rb') as fmt_file:

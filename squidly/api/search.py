@@ -579,7 +579,7 @@ def lastfm_playlist():
         })
 
     except Exception as e:
-        logger.info("Last.fm scraping error: %s", e)
+        logger.exception("[LASTFM] Playlist scraping error")
         return jsonify({
             'error': 'Failed to process Last.fm playlist',
             'details': str(e)

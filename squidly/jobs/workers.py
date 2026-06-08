@@ -110,17 +110,17 @@ def worker_loop(job_type, idle_sleep=None):
                 time.sleep(1)
 
             except RetryableError as e:
-                logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
+                logger.warning("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
                 mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
-                logger.info("%s Job %s failed (permanent): %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed (permanent): %s", log_prefix, job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except Exception as e:
-                logger.info("%s Job %s failed: %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed: %s", log_prefix, job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
@@ -166,7 +166,7 @@ def download_track_worker():
                 else:
                     stage_state = stages if isinstance(stages, dict) else {}
                     error_message = f"Download stages incomplete: {serialize_job_payload(stage_state)}"
-                    logger.info("%s Job %s failed: %s", log_prefix, job['id'], error_message)
+                    logger.error("%s Job %s failed: %s", log_prefix, job['id'], error_message)
                     mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], error_message)
 
             except JobCancelledError:
@@ -175,17 +175,17 @@ def download_track_worker():
                 time.sleep(1)
 
             except RetryableError as e:
-                logger.info("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
+                logger.warning("%s Job %s retrying: %s", log_prefix, job['id'], str(e))
                 mark_job_retrying(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except PermanentError as e:
-                logger.info("%s Job %s failed (permanent): %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed (permanent): %s", log_prefix, job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
             except Exception as e:
-                logger.info("%s Job %s failed: %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed: %s", log_prefix, job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
 
@@ -235,11 +235,11 @@ def plex_sync_worker():
                 logger.info("%s Job %s cancelled", log_prefix, job['id'])
                 time.sleep(1)
             except Exception as e:
-                logger.info("%s Job %s failed: %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed: %s", log_prefix, job['id'], str(e))
                 mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            logger.info("%s Error in background worker: %s", log_prefix, str(e))
+            logger.exception("%s Error in background worker", log_prefix)
             time.sleep(5)
 
 
@@ -298,11 +298,11 @@ def plex_library_update_worker():
                 logger.info("%s Job %s completed", log_prefix, job['id'])
                 handle_on_success('plex_library_update', result)
             except Exception as e:
-                logger.info("%s Job %s failed: %s", log_prefix, job['id'], str(e))
+                logger.error("%s Job %s failed: %s", log_prefix, job['id'], str(e))
                 jobs_module.mark_job_failed(job['id'], job['attempt_count'], job['max_attempts'], str(e))
                 time.sleep(1)
         except Exception as e:
-            logger.info("%s Error in background worker: %s", log_prefix, str(e))
+            logger.exception("%s Error in background worker", log_prefix)
             time.sleep(5)
 
 
@@ -358,7 +358,7 @@ def plex_sync_scheduler_worker():
                     logger.info("[PLEX_SYNC_SCHEDULER] Queued interval library update job %s", queued)
 
         except Exception as e:
-            logger.info("[PLEX_SYNC_SCHEDULER] Error: %s", str(e))
+            logger.exception("[PLEX_SYNC_SCHEDULER] Error")
 
         time.sleep(60)
 
@@ -389,7 +389,7 @@ def nightly_maintenance_scheduler_worker():
                             logger.info("[NIGHTLY_MAINTENANCE] Queued Fresh Finds auto-download (job %s)", auto_job_id)
                         auto_download_pending = False
                     except Exception as e:
-                        logger.info("[NIGHTLY_MAINTENANCE] Failed to queue auto-download: %s", e)
+                        logger.warning("[NIGHTLY_MAINTENANCE] Failed to queue auto-download: %s", e)
                 time.sleep(60)
                 continue
 
@@ -406,7 +406,7 @@ def nightly_maintenance_scheduler_worker():
                 summary = validate_all_premium_from_db()
                 logger.info("[NIGHTLY_MAINTENANCE] Mirror validation complete: %s", summary)
             except Exception as e:
-                logger.info("[NIGHTLY_MAINTENANCE] Mirror validation failed (continuing to recommendations): %s", e)
+                logger.warning("[NIGHTLY_MAINTENANCE] Mirror validation failed (continuing to recommendations): %s", e)
 
             if is_pipeline_busy():
                 logger.info("[NIGHTLY_MAINTENANCE] Pipeline busy; deferring recommendation generation")
@@ -437,14 +437,14 @@ def nightly_maintenance_scheduler_worker():
                     if job_id:
                         logger.info("[NIGHTLY_MAINTENANCE] Queued Fresh Finds for %s (job %s)", plex_username, job_id)
                 except Exception as e:
-                    logger.info("[NIGHTLY_MAINTENANCE] Failed to queue for %s: %s", plex_username, e)
+                    logger.warning("[NIGHTLY_MAINTENANCE] Failed to queue for %s: %s", plex_username, e)
 
             # Mark auto-download as pending — will be queued on a later pass
             # once all generate_recommendations jobs have finished.
             auto_download_pending = True
 
         except Exception as e:
-            logger.info("[NIGHTLY_MAINTENANCE] Error: %s", str(e))
+            logger.exception("[NIGHTLY_MAINTENANCE] Error")
 
         time.sleep(60)
 
@@ -481,7 +481,7 @@ def start_workers():
         )
         t.start()
         threads.append(t)
-        logger.info("%s worker started", job_type)
+        logger.info("[WORKER] %s worker started", job_type)
 
     # Special-case workers with pre-claim logic
     special_workers = [
@@ -493,7 +493,7 @@ def start_workers():
         t = threading.Thread(target=fn, daemon=True, name=name)
         t.start()
         threads.append(t)
-        logger.info("%s started", name)
+        logger.info("[WORKER] %s started", name)
 
     # Scheduler threads
     schedulers = [
@@ -504,6 +504,6 @@ def start_workers():
         t = threading.Thread(target=fn, daemon=True, name=name)
         t.start()
         threads.append(t)
-        logger.info("%s started", name)
+        logger.info("[WORKER] %s started", name)
 
     return threads

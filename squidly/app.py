@@ -88,9 +88,9 @@ app.register_blueprint(hifi_matches_bp)
 
 # Verify downloads directory
 if not os.path.exists(DOWNLOADS_ROOT):
-    logger.error("Error: Downloads directory does not exist: %s", DOWNLOADS_ROOT)
+    logger.error("[APP] Downloads directory does not exist: %s", DOWNLOADS_ROOT)
 elif not os.access(DOWNLOADS_ROOT, os.W_OK):
-    logger.error("Error: Downloads directory is not writable: %s", DOWNLOADS_ROOT)
+    logger.error("[APP] Downloads directory is not writable: %s", DOWNLOADS_ROOT)
 else:
     logger.info("Downloads directory ready: %s", DOWNLOADS_ROOT)
 
@@ -107,4 +107,4 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
         os.makedirs("/app/temp", exist_ok=True)
         logger.info("Temp folder ready (/app/temp)")
     except Exception as e:
-        logger.info("Failed to create temp folder: %s", e)
+        logger.warning("[APP] Failed to create temp folder: %s", e)

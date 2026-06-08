@@ -49,7 +49,7 @@ def _run_async(fn):
         try:
             fn()
         except Exception as e:
-            logger.info("[ENDPOINTS] Async operation failed: %s", e)
+            logger.exception("[ENDPOINTS] Async operation failed")
     threading.Thread(target=_wrapper, daemon=True).start()
 
 
@@ -269,7 +269,7 @@ def endpoints_status():
     try:
         mirror_rate_limit_status = downloads.get_mirror_rate_limit_status() or {}
     except Exception as e:
-        logger.info("[ENDPOINTS] Failed to get mirror rate limit status: %s", e)
+        logger.warning("[ENDPOINTS] Failed to get mirror rate limit status: %s", e)
 
     return jsonify({
         'endpoints': endpoints,
@@ -300,7 +300,7 @@ def add_endpoint():
     try:
         downloads.add_mirror(url, mirror_type=mirror_type)
     except Exception as e:
-        logger.info("[ENDPOINTS] Failed to add mirror: %s", e)
+        logger.exception("[ENDPOINTS] Failed to add mirror")
         return jsonify({'error': str(e)}), 500
 
     name = downloads.derive_mirror_name(url)
@@ -315,7 +315,7 @@ def delete_endpoint(name):
     try:
         downloads.remove_mirror(name)
     except Exception as e:
-        logger.info("[ENDPOINTS] Failed to remove mirror: %s", e)
+        logger.exception("[ENDPOINTS] Failed to remove mirror")
         return jsonify({'error': str(e)}), 500
 
     return jsonify({'name': name, 'removed': True}), 200
@@ -329,7 +329,7 @@ def toggle_endpoint(name):
     except ValueError as e:
         return jsonify({'error': str(e)}), 404
     except Exception as e:
-        logger.info("[ENDPOINTS] Failed to toggle mirror: %s", e)
+        logger.exception("[ENDPOINTS] Failed to toggle mirror")
         return jsonify({'error': str(e)}), 500
 
     if new_state == 1:
@@ -630,7 +630,7 @@ def youtube_music_playlist():
         })
 
     except Exception as e:
-        logger.info("YouTube Music playlist parsing error: %s", e)
+        logger.exception("[YTM] Playlist parsing error")
         return jsonify({
             'error': 'Failed to process YouTube Music playlist',
             'details': str(e)
@@ -705,7 +705,7 @@ def get_ytm_playlists():
         return jsonify({'playlists': result})
 
     except Exception as e:
-        logger.info("YouTube Music playlists error: %s", e)
+        logger.exception("[YTM] Playlists fetch error")
         return jsonify({'error': f'Failed to fetch playlists: {str(e)}'}), 500
 
 
@@ -739,7 +739,7 @@ def get_ytm_playlist(playlist_id):
         })
 
     except Exception as e:
-        logger.info("YouTube Music playlist error: %s", e)
+        logger.exception("[YTM] Playlist fetch error")
         return jsonify({'error': f'Failed to fetch playlist: {str(e)}'}), 500
 
 

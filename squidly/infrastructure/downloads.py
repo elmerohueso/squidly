@@ -631,7 +631,7 @@ def enforce_mirror_rate_limit():
     elapsed = time.time() - last
     needed = _mirror_rate_limit_state['current_interval'] - elapsed
     if needed > 0:
-        logger.info("[DOWNLOAD] Rate limiter sleeping %.2fs to enforce interval %ss", needed, _mirror_rate_limit_state['current_interval'])
+        logger.debug("[DOWNLOAD] Rate limiter sleeping %.2fs to enforce interval %ss", needed, _mirror_rate_limit_state['current_interval'])
         time.sleep(needed)
 
 
@@ -668,7 +668,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
             full_url = f"{target_url}{url_base}"
             last_target = target
 
-            logger.info("[DOWNLOAD] Trying mirror '%s' (%s) attempt %d/%d", target['name'], full_url, attempt + 1, max_retries + 1)
+            logger.debug("[DOWNLOAD] Trying mirror '%s' (%s) attempt %d/%d", target['name'], full_url, attempt + 1, max_retries + 1)
             response = make_request_with_retry(full_url, method=method, timeout=timeout, backoff_factor=backoff_factor, **kwargs)
 
             if response is not None:
@@ -913,7 +913,7 @@ def cleanup_file(path: str) -> None:
             os.remove(path)
             logger.info("[DOWNLOAD] Cleaned up temporary file")
     except Exception as e:
-        logger.info("[DOWNLOAD] WARNING: Failed to clean up temp file: %s", str(e))
+        logger.warning("[DOWNLOAD] Failed to clean up temp file: %s", str(e))
 
 
 def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_settings=None):
@@ -940,14 +940,14 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
         track_num = metadata.get('track_number', '1')
         disc_num = metadata.get('disc_number', '')
         file_type = os.path.splitext(file_path)[1].lower().lstrip('.')
-        logger.info("[TAGGING_DEBUG] Writing tags for '%s' type='%s'", file_path, file_type)
+        logger.debug("[ID3] Writing tags for '%s' type='%s'", file_path, file_type)
         try:
             size_before = os.path.getsize(file_path)
             logger.info("[DOWNLOAD] File size before tagging: %d bytes (%s)", size_before, file_path)
         except OSError:
             size_before = -1
-        logger.info(
-            "[TAGGING_DEBUG] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
+        logger.debug(
+            "[ID3] tag payload artist=%r track_artists=%r album_artist=%r album_artists=%r title=%r album=%r year=%r track_number=%r disc_number=%r version=%r isrc=%r audio_quality=%r",
             artist, metadata.get('track_artists'), metadata.get('album_artist'), metadata.get('album_artists'), title, album, year, track_num, disc_num, metadata.get('version'), metadata.get('isrc'), metadata.get('audio_quality')
         )
 
@@ -1008,7 +1008,7 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     pass
                 logger.info("[ID3] Successfully added FLAC metadata to %s", file_path)
             except Exception as e:
-                logger.info("[ID3] Warning: Could not write FLAC tags: %s", str(e))
+                logger.warning("[ID3] Could not write FLAC tags: %s", str(e))
 
         # Handle M4A/AAC files
         elif file_path.lower().endswith('.m4a'):
@@ -1078,13 +1078,13 @@ def add_id3_tags_to_file(file_path, metadata, cover_image_data=None, tag_setting
                     pass
                 logger.info("[ID3] Successfully added M4A metadata to %s", file_path)
             except Exception as e:
-                logger.info("[ID3] Warning: Could not write M4A tags: %s", str(e))
+                logger.warning("[ID3] Could not write M4A tags: %s", str(e))
 
         # MP3 tagging is not supported
 
 
     except Exception as e:
-        logger.info("[ID3] Error adding ID3 tags: %s", str(e))
+        logger.exception("[ID3] Error adding ID3 tags")
 
 
 def download_cover_image(cover_url):
@@ -1107,10 +1107,10 @@ def download_cover_image(cover_url):
             logger.info("[COVER] Failed to download cover image. Status: %d", response.status_code)
             return None
     except requests.exceptions.Timeout:
-        logger.info("[COVER] ERROR: Timeout downloading cover image from %s", cover_url)
+        logger.error("[COVER] Timeout downloading cover image from %s", cover_url)
         return None
     except Exception as e:
-        logger.info("[COVER] Error downloading cover image: %s", str(e))
+        logger.exception("[COVER] Error downloading cover image")
         return None
 
 

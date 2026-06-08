@@ -255,7 +255,7 @@ def scan_library_for_tags(progress_callback=None):
                     filled += 1
             except Exception as e:
                 errors += 1
-                logger.info("[TAG_SCAN] Error processing %s: %s", track_row.get('path'), e)
+                logger.warning("[TAG_SCAN] Error processing %s: %s", track_row.get('path'), e)
 
             if progress_callback and idx % 10 == 0:
                 progress_callback(idx, total)

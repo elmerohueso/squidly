@@ -17,7 +17,7 @@ SQUIDLY_LOG = os.path.join(LOG_DIR, 'squidly.log')
 GUNICORN_ACCESS_LOG = os.path.join(LOG_DIR, 'gunicorn_access.log')
 GUNICORN_ERROR_LOG = os.path.join(LOG_DIR, 'gunicorn_error.log')
 
-_LOG_FORMAT = '%(asctime)s %(levelname)s %(message)s'
+_LOG_FORMAT = '%(asctime)s %(levelname)s [%(name)s] %(message)s'
 _DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
@@ -37,7 +37,7 @@ def _make_file_handler(path, level=logging.DEBUG):
 
 def setup_logging():
     root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
+    root.setLevel(logging.INFO)
 
     stream = logging.StreamHandler()
     stream.setLevel(logging.DEBUG)

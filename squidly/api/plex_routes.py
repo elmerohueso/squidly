@@ -48,11 +48,11 @@ def plex_list_users():
                         try:
                             save_plex_user_setting(username, plex_client_id, plex_owner)
                         except Exception as e:
-                            logger.info("[PLEX] Failed to save user setting for %s/%s: %s", username, plex_client_id, e)
+                            logger.exception("[PLEX] Failed to save user setting for %s/%s", username, plex_client_id)
             else:
-                logger.info("[PLEX] Failed to fetch users for sync: %s", error)
+                logger.warning("[PLEX] Failed to fetch users for sync: %s", error)
         except Exception as e:
-            logger.info("[PLEX] /api/plex/users?sync failed: %s", e)
+            logger.exception("[PLEX] /api/plex/users?sync failed")
             return jsonify({'users': []}), 200
 
         result = [
@@ -80,7 +80,7 @@ def plex_list_users():
             })
         return jsonify({'users': result})
     except Exception as e:
-        logger.info("[PLEX] /api/plex/users failed to read saved users: %s", e)
+        logger.warning("[PLEX] /api/plex/users failed to read saved users: %s", e)
         return jsonify({'users': []}), 200
 
 
@@ -111,61 +111,60 @@ def plex_clear_credentials():
 
 @plex_bp.route('/api/plex/pin/start', methods=['POST'])
 def plex_pin_start():
-    logger.info("[DEBUG] /api/plex/pin/start called")
+    logger.debug("[PLEX] /api/plex/pin/start called")
     try:
-        logger.info("[DEBUG] Attempting to create MyPlexPinLogin...")
+        logger.debug("[PLEX] Creating MyPlexPinLogin")
         pinlogin = MyPlexPinLogin(oauth=False)
-        logger.info("[DEBUG] MyPlexPinLogin created")
+        logger.debug("[PLEX] MyPlexPinLogin created")
         pin = pinlogin.pin
-        logger.info("[DEBUG] PIN generated: %s", pin)
         client_id = id(pinlogin)
+        logger.debug("[PLEX] PIN generated for client_id: %s", client_id)
         plex_pin_sessions[client_id] = pinlogin
-        logger.info("[DEBUG] Stored pinlogin in session with client_id: %s", client_id)
+        logger.debug("[PLEX] Stored pinlogin in session with client_id: %s", client_id)
         return jsonify({
             'ok': True,
             'pin': pin,
             'client_id': client_id
         })
     except Exception as e:
-        logger.info("[ERROR] Exception in /api/plex/pin/start: %s", e)
-        import traceback; traceback.print_exc()
+        logger.exception("[PLEX] Exception in /api/plex/pin/start")
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @plex_bp.route('/api/plex/pin/status', methods=['POST'])
 def plex_pin_status():
-    logger.info("[DEBUG] /api/plex/pin/status called")
+    logger.debug("[PLEX] /api/plex/pin/status called")
     data = request.get_json(force=True)
     client_id = data.get('client_id')
     pin = data.get('pin')
-    logger.info("[DEBUG] Received client_id=%s, pin=%s", client_id, pin)
+    logger.debug("[PLEX] Received pin status check for client_id=%s", client_id)
     if not client_id or not pin:
-        logger.info("[DEBUG] Missing client_id or pin")
+        logger.debug("[PLEX] Missing client_id or pin")
         return jsonify({'ok': False, 'error': 'Missing client_id or pin'}), 400
     pinlogin = plex_pin_sessions.get(client_id)
     if not pinlogin:
-        logger.info("[DEBUG] Session expired or not found for client_id")
+        logger.debug("[PLEX] Session expired or not found for client_id")
         return jsonify({'ok': False, 'error': 'Session expired or not found'}), 404
     if getattr(pinlogin, 'expired', False):
-        logger.info("[DEBUG] PIN expired for client_id")
+        logger.debug("[PLEX] PIN expired for client_id")
         return jsonify({'ok': False, 'expired': True, 'error': 'PIN expired'}), 410
     try:
-        logger.info("[DEBUG] Calling pinlogin.checkLogin()")
+        logger.debug("[PLEX] Calling pinlogin.checkLogin()")
         if pinlogin.checkLogin():
-            logger.info("[DEBUG] pinlogin.checkLogin() returned True")
+            logger.debug("[PLEX] pinlogin.checkLogin() returned True")
             token = getattr(pinlogin, 'token', None)
             acc = None
             try:
-                logger.info("[DEBUG] Creating MyPlexAccount")
+                logger.debug("[PLEX] Creating MyPlexAccount")
                 acc = MyPlexAccount(token=token)
             except Exception as e:
-                logger.info("[DEBUG] Failed to create MyPlexAccount: %s", e)
+                logger.exception("[PLEX] Failed to create MyPlexAccount")
                 return jsonify({'ok': False, 'error': f'Login succeeded but failed to create MyPlexAccount: {e}'}), 500
             try:
-                logger.info("[DEBUG] Fetching acc.resources()")
+                logger.debug("[PLEX] Fetching acc.resources()")
                 res = acc.resources()
             except Exception as e:
-                logger.info("[DEBUG] Failed to fetch resources: %s", e)
+                logger.exception("[PLEX] Failed to fetch resources")
                 return jsonify({'ok': False, 'error': f'Login succeeded but failed to fetch resources: {e}'}), 500
             server_res = None
             for r in res:
@@ -179,24 +178,23 @@ def plex_pin_status():
                 local_conn = next((c for c in conns if getattr(c, 'local', False)), None)
                 if local_conn:
                     baseurl = getattr(local_conn, 'uri', None)
-            logger.info("[DEBUG] baseurl=%s, token=%s", baseurl, token)
+            logger.debug("[PLEX] baseurl=%s, token present=%s", baseurl, bool(token))
             if baseurl and token:
-                logger.info("[DEBUG] Saving Plex config to DB")
+                logger.debug("[PLEX] Saving Plex config to DB")
                 save_plex_config(baseurl, token, '')
-                logger.info("[DEBUG] Plex config saved")
+                logger.debug("[PLEX] Plex config saved")
             plex_pin_sessions.pop(client_id, None)
-            logger.info("[DEBUG] Removed pinlogin from session")
+            logger.debug("[PLEX] Removed pinlogin from session")
             return jsonify({
                 'ok': True,
                 'baseurl': baseurl,
                 'token': token
             })
         else:
-            logger.info("[DEBUG] pinlogin.checkLogin() returned False")
+            logger.debug("[PLEX] pinlogin.checkLogin() returned False")
             return jsonify({'ok': False, 'expired': False}), 202
     except Exception as e:
-        logger.info("[ERROR] Exception in /api/plex/pin/status: %s", e)
-        import traceback; traceback.print_exc()
+        logger.exception("[PLEX] Exception in /api/plex/pin/status")
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 
@@ -348,7 +346,7 @@ def get_plex_playlist_tracks():
         })
 
     except Exception as e:
-        logger.info("[PLEX] Failed to fetch playlist tracks: %s", str(e))
+        logger.exception("[PLEX] Failed to fetch playlist tracks")
         return jsonify({'error': f'Failed to fetch playlist tracks: {str(e)}'}), 500
 
 
@@ -377,7 +375,7 @@ def create_plex_playlist_endpoint():
                 plex = plex.switchUser(user_id)
                 logger.info("[PLEX] Switched to user %s for playlist creation", user_id)
             except Exception as e:
-                logger.info("[PLEX] Failed to switch user: %s", str(e))
+                logger.warning("[PLEX] Failed to switch user: %s", str(e))
                 return jsonify({'error': f'Failed to switch user: {str(e)}'}), 400
 
         logger.info("[PLEX] Checking if playlist exists: %s", playlist_name)
@@ -388,12 +386,12 @@ def create_plex_playlist_endpoint():
                     logger.info("[PLEX] Playlist already exists: %s", playlist_name)
                     return jsonify({'success': True, 'playlist_name': playlist_name, 'already_exists': True})
         except Exception as e:
-            logger.info("[PLEX] Error checking playlists: %s", str(e))
+            logger.warning("[PLEX] Error checking playlists: %s", str(e))
 
         logger.info("[PLEX] Playlist will be created on first track add: %s", playlist_name)
         return jsonify({'success': True, 'playlist_name': playlist_name})
     except Exception as e:
-        logger.info("[PLEX] Error validating playlist: %s", str(e))
+        logger.exception("[PLEX] Error validating playlist")
         return jsonify({'error': f'Failed to validate playlist: {str(e)}'}), 500
 
 
@@ -469,7 +467,7 @@ def _resolve_plex_user_context(plex, user_id):
             logger.info("[PLEX_LIBRARY] Switched to user %s (requested %s)", switch_target, requested_user_id)
             return switched, switch_target
         except Exception as e:
-            logger.info("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
+            logger.warning("[PLEX_LIBRARY] Failed to switch user %s via '%s': %s. Using owner context.", requested_user_id, switch_target, str(e))
             return plex, None
 
     if selected_user and bool(selected_user.get('is_owner')):
@@ -550,7 +548,7 @@ def get_plex_library_artists_endpoint():
             'artists': artists,
         })
     except Exception as e:
-        logger.info("[PLEX_LIBRARY] Failed to fetch artists: %s", str(e))
+        logger.exception("[PLEX_LIBRARY] Failed to fetch artists")
         return jsonify({'error': f'Failed to fetch Plex artists: {str(e)}'}), 500
 
 
@@ -754,7 +752,7 @@ def get_plex_library_track_stream_endpoint(track_id):
             'stream_url': stream_url,
         })
     except Exception as e:
-        logger.info("[PLEX_LIBRARY] Failed to fetch track stream %s: %s", track_id, str(e))
+        logger.exception("[PLEX_LIBRARY] Failed to fetch track stream %s", track_id)
         return jsonify({'error': f'Failed to fetch Plex track stream URL: {str(e)}'}), 500
 
 

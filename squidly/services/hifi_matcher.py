@@ -457,7 +457,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_tracks += 1
             except Exception as e:
                 errors += 1
-                logger.info("[HIFI_MATCH] Error matching track %s: %s", track_row.get('track_id'), e)
+                logger.warning("[HIFI_MATCH] Error matching track %s: %s", track_row.get('track_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('tracks', idx, total_tracks)
@@ -497,7 +497,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_albums += 1
             except Exception as e:
                 errors += 1
-                logger.info("[HIFI_MATCH] Error matching album %s: %s", album_row.get('album_id'), e)
+                logger.warning("[HIFI_MATCH] Error matching album %s: %s", album_row.get('album_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('albums', idx, total_albums)
@@ -517,7 +517,7 @@ def find_missing_hifi_ids(progress_callback=None):
                     matched_artists += 1
             except Exception as e:
                 errors += 1
-                logger.info("[HIFI_MATCH] Error matching artist %s: %s", artist_row.get('artist_id'), e)
+                logger.warning("[HIFI_MATCH] Error matching artist %s: %s", artist_row.get('artist_id'), e)
 
             if progress_callback and idx % 5 == 0:
                 progress_callback('artists', idx, total_artists)
