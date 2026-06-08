@@ -53,6 +53,7 @@ interface Album {
 
 interface AlbumSearchItem {
     id: number;
+    type?: string;
     title: string;
     cover?: string;
     artists?: Artist[];
@@ -96,6 +97,7 @@ interface PlexLibraryAlbum {
 
 interface NormalizedAlbum {
     id: string;
+    type?: string;
     title: string;
     artist: string;
     artistId?: number;
@@ -299,6 +301,8 @@ interface ArtistObject {
         name?: string;
         picture?: string;
         albums?: AlbumSearchItem[];
+        singles?: AlbumSearchItem[];
+        eps?: AlbumSearchItem[];
         top_tracks?: Track[] | number[];
     };
     proxied_via?: string;
@@ -9160,6 +9164,7 @@ class App {
             const quality = a.maxAudioQuality || a.audioQuality || '';
             return {
                 id: String(a.id),
+                type: a.type,
                 title: a.title,
                 artist: artistNames,
                 artistId: primaryArtistId,
@@ -9453,7 +9458,7 @@ class App {
         const qualityDisplay = album.quality ? this.formatQuality(album.quality) : '—';
 
         return `
-            <div class="${rowClasses}" ${dataAttr}="${album.id}" ${album.artistId ? `data-artist-id="${album.artistId}"` : ''} ${extraAttrs}>
+            <div class="${rowClasses}" ${dataAttr}="${album.id}" ${album.artistId ? `data-artist-id="${album.artistId}"` : ''} data-album-type="${album.type || ''}" ${extraAttrs}>
                 <div class="grid-cell grid-col-artwork">
                     ${artworkSrc
                 ? `<img src="${artworkSrc}" alt="${this.escapeHtml(album.title)}" loading="lazy">`
@@ -9727,10 +9732,13 @@ class App {
 
             const artistData = data.artist || {};
             const albums = Array.isArray(artistData.albums) ? artistData.albums : [];
+            const singles = Array.isArray(artistData.singles) ? artistData.singles : [];
+            const eps = Array.isArray(artistData.eps) ? artistData.eps : [];
             const topTracks = Array.isArray(artistData.top_tracks) ? (artistData.top_tracks as Track[]).slice(0, 5) : [];
 
-            if (albums.length === 0 && topTracks.length === 0) {
-                this.displayMessage('No albums or top tracks found for this artist');
+            // Check all groups for empty state
+            if (albums.length === 0 && singles.length === 0 && eps.length === 0 && topTracks.length === 0) {
+                this.displayMessage('No releases or top tracks found for this artist');
                 return;
             }
 
@@ -9751,7 +9759,7 @@ class App {
                         className: 'primary',
                         title: 'Play artist',
                         svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
-                        disabled: topTracks.length === 0 && albums.length === 0,
+                        disabled: topTracks.length === 0 && albums.length === 0 && singles.length === 0 && eps.length === 0,
                     },
                     {
                         id: 'findSimilarArtistBtn',
@@ -9773,12 +9781,30 @@ class App {
                     </div>
                     ${this.formatTracksGrid(topTracks, undefined, false)}
                 ` : ''}
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>Albums</h2>
+                ${albums.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Albums</h2>
+                        </div>
                     </div>
-                </div>
-                ${this.renderAlbumGrid(albums, { viewMode: 'artist-albums', hideArtist: true })}
+                    ${this.renderAlbumGrid(albums, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
+                ${singles.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Singles</h2>
+                        </div>
+                    </div>
+                    ${this.renderAlbumGrid(singles, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
+                ${eps.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>EPs</h2>
+                        </div>
+                    </div>
+                    ${this.renderAlbumGrid(eps, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
             `;
 
             // Attach event listener to play button
@@ -9790,9 +9816,10 @@ class App {
                         return;
                     }
 
-                    // Fallback to the first track from the first album when no top tracks are available.
-                    if (albums.length > 0) {
-                        const firstAlbumId = albums[0].id;
+                    // Fallback to the first track from the first album/single/ep when no top tracks are available.
+                    const allReleases = [...albums, ...singles, ...eps];
+                    if (allReleases.length > 0) {
+                        const firstAlbumId = allReleases[0].id;
                         try {
                             const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(firstAlbumId))}`, {
                                 signal: this.pendingRequestController?.signal
@@ -9821,7 +9848,7 @@ class App {
             }
 
             // Annotate with Plex status
-            void this.annotateAlbumGridsWithPlexStatus(albums);
+            void this.annotateAlbumGridsWithPlexStatus([...albums, ...singles, ...eps]);
             void this.annotateArtistHeroWithPlexStatus(artistId);
         } catch (error) {
             this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));

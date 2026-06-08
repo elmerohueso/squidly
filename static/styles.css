@@ -1919,6 +1919,7 @@ body {
 /* === Tracks Grid === */
 .tracks-grid-wrapper {
     width: 100%;
+    margin-bottom: 2rem;
 }
 
 .tracks-grid {
@@ -2296,6 +2297,7 @@ body {
 /* === Albums Grid === */
 .albums-grid-wrapper {
     width: 100%;
+    margin-bottom: 2rem;
 }
 
 .albums-grid {

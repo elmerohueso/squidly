@@ -516,6 +516,7 @@ def _build_hifi_album_object_from_artist_item(album_item: Any) -> Dict[str, Any]
 
     return {
         'id': album_item.get('id'),
+        'type': album_item.get('type'),
         'title': str(album_item.get('title') or '').strip(),
         'version': str(album_item.get('version') or '').strip() if album_item.get('version') is not None else '',
         'cover': _format_hifi_image_value(album_item.get('cover'), size=640),
@@ -582,6 +583,7 @@ def _get_hifi_album_dedupe_key(album: Any) -> Any:
         number_of_discs,
         tuple(artists),
         album.get('explicit'),
+        album.get('type'),  # type affects dedup for search results too; Tidal always provides it
     )
 
 
@@ -809,6 +811,22 @@ def get_hifi_artist_object(artist_id: Any, include_tracks: bool = True, include_
 
         album_objects = list(deduped_albums.values())
 
+        # Split by type into Albums, Singles, EPs
+        albums_list = []
+        singles_list = []
+        eps_list = []
+        for album in album_objects:
+            album_type = (album.get('type') or '').upper()
+            if album_type == 'SINGLE':
+                singles_list.append(album)
+            elif album_type == 'EP':
+                eps_list.append(album)
+            else:
+                # Default: ALBUM, None, or unknown → Albums section
+                albums_list.append(album)
+
+        album_objects = albums_list
+
     top_track_items = _extract_hifi_artist_top_track_items(artist_response)
 
     top_tracks = []
@@ -829,7 +847,9 @@ def get_hifi_artist_object(artist_id: Any, include_tracks: bool = True, include_
             'id': artist_info.get('id'),
             'name': artist_info.get('name'),
             'picture': artist_info.get('picture'),
-            'albums': album_objects,
+            'albums': albums_list,
+            'singles': singles_list,
+            'eps': eps_list,
             'top_tracks': top_tracks,
         }
     }
