@@ -1411,6 +1411,17 @@ def validate_mirror_premium(name: str) -> dict:
         cleanup_file(temp_path.replace('.flac', '.m4a'))
         _update_premium_db(name, result)
 
+        # Verdict log — fires on ALL paths (early returns, exceptions, normal completion)
+        if result['is_online'] is True and result['is_premium'] is True:
+            logger.info("[PREMIUM] ✓ %s is ONLINE AND PREMIUM (format=%s, duration=%.1fs)",
+                         name, result.get('format'), result.get('actual_duration', 0))
+        elif result['is_online'] is True and result['is_premium'] is False:
+            logger.info("[PREMIUM] ✕ %s is ONLINE BUT NOT PREMIUM: %s", name, result.get('error'))
+        elif result['is_online'] is False:
+            logger.info("[PREMIUM] ⚠ %s is OFFLINE: %s", name, result.get('error'))
+        else:
+            logger.info("[PREMIUM] ? %s is INCONCLUSIVE: %s", name, result.get('error'))
+
     return result
 
 
@@ -1420,16 +1431,18 @@ def _update_premium_db(name: str, result: dict) -> None:
         conn = get_db_connection()
         cur = conn.cursor()
         if result['is_online'] is not None:
-            cur.execute(
-                "UPDATE mirror_endpoints SET online = %s, is_premium = NULL WHERE name = %s",
-                (1 if result['is_online'] else 0, name)
-            )
-            logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
-        if result['is_premium'] is not None:
-            cur.execute(
-                "UPDATE mirror_endpoints SET is_premium = %s WHERE name = %s",
-                (1 if result['is_premium'] else 0, name)
-            )
+            if result['is_online']:
+                cur.execute(
+                    "UPDATE mirror_endpoints SET online = 1, is_premium = %s WHERE name = %s",
+                    (1 if result.get('is_premium') else 0, name)
+                )
+                logger.info("[PREMIUM] Marked mirror '%s' as online, is_premium=%s", name, result.get('is_premium'))
+            else:
+                cur.execute(
+                    "UPDATE mirror_endpoints SET online = 0, is_premium = NULL WHERE name = %s",
+                    (name,)
+                )
+                logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
         conn.commit()
         conn.close()
     except Exception as db_err:
@@ -1461,14 +1474,11 @@ def validate_all_premium_from_db() -> dict:
         if result['is_online'] is True:
             if result['is_premium'] is True:
                 premium_count += 1
-                logger.info("[PREMIUM] ✓ %s is ONLINE AND PREMIUM (format=%s, duration=%.1fs)", name, result.get('format'), result.get('actual_duration', 0))
             elif result['is_premium'] is False:
                 non_premium_count += 1
-                logger.info("[PREMIUM] ✕ %s is ONLINE BUT NOT PREMIUM: %s", name, result.get('error'))
 
         if result['is_online'] is False:
             offline_count += 1
-            logger.info("[PREMIUM] ⚠ %s marked OFFLINE: %s", name, result.get('error'))
 
     summary = {
         'total': len(mirrors),
