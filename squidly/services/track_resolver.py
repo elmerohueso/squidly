@@ -39,7 +39,7 @@ COMPILATION_KEYWORDS = (
     'hits of', 'throwback', 'anthology', 'collection', 'singles collection',
     'number ones', 'greatest', 'ultimate', 'essential', 'definitive',
     'now that', 'presents', 'the best', 'complete', 'vol. ',
-    'direct hits', 'original hits', 'gold', 'chronicles', 'decades',
+    'direct hits', 'original hits', 'chronicles', 'decades',
     'icon', 'playlist', 'b-sides', 'b sides', 'bsides', 'rarities',
     'grandes exitos', 'lo mejor de', 'exitos', 'lo mejor',
 )
@@ -54,7 +54,7 @@ LIVE_VERSION_KEYWORDS = (
 )
 
 DELUXE_KEYWORDS = (
-    'deluxe', 'expanded', 'remaster', 'anniversary edition',
+    'deluxe', 'expanded', 'remastered','remaster', 'anniversary edition',
     'special edition', 'extended', 'collector', 'super deluxe',
     'reissue', 're-master', 'bonus track',
 )
