@@ -1,7 +1,21 @@
 """Shared utility helpers for Squidly."""
 
+import logging
 import re
+import threading
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+def _run_async(fn):
+    """Run a callable in a background daemon thread."""
+    def _wrapper():
+        try:
+            fn()
+        except Exception:
+            logger.exception("[ASYNC] Background task failed")
+    threading.Thread(target=_wrapper, daemon=True).start()
 
 
 def _safe_int(value):

@@ -12,6 +12,7 @@ from squidly.infrastructure.db import init_db
 from squidly.infrastructure.job_queue import recover_stale_in_progress_jobs
 from squidly.infrastructure import downloads
 from squidly.infrastructure.plex import plex_healthcheck
+from squidly.infrastructure.utils import _run_async
 from squidly.jobs.workers import start_workers
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
     recover_stale_in_progress_jobs()
     logger.info("Squidly starting up...")
-    downloads.validate_all_premium_from_db()
+    _run_async(downloads.validate_all_premium_from_db)
     plex_healthcheck()
     start_workers()
 

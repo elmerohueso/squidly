@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-import threading
 import time
 import hashlib
 from http.cookies import SimpleCookie
@@ -13,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from squidly.infrastructure import downloads
 from squidly.infrastructure.db import get_db_connection
+from squidly.infrastructure.utils import _run_async
 from squidly.infrastructure.storage import (
     get_download_settings,
     save_download_settings,
@@ -41,16 +41,6 @@ from urllib.parse import urlencode, urlparse, parse_qs
 
 settings_bp = Blueprint('settings', __name__)
 logger = logging.getLogger(__name__)
-
-
-def _run_async(fn):
-    """Run a callable in a background daemon thread."""
-    def _wrapper():
-        try:
-            fn()
-        except Exception as e:
-            logger.exception("[ENDPOINTS] Async operation failed")
-    threading.Thread(target=_wrapper, daemon=True).start()
 
 
 def _get_ytmusic(user_id):

@@ -113,6 +113,7 @@ def test_import_downloads():
 def test_import_utils():
     from squidly.infrastructure.utils import (
         _now_utc,
+        _run_async,
         _safe_float,
         _safe_int,
         clean_path_components,
