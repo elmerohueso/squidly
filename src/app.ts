@@ -825,6 +825,7 @@ class App {
     private listenbrainzCurrentUsername: string | null = null;
     private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
     private freshFindsPlaylistName: string | null = null;
+    private freshFindsPolling: boolean = false;
     private plexUserNameById: Record<string, string> = {};
 
     private historyTableContainer: HTMLElement;
@@ -10123,6 +10124,7 @@ class App {
             this.pushHistoryRoute({ view: 'fresh_finds', freshFindsPlaylistId: playlistId });
         }
         this.stopPlayback();
+        this.freshFindsPolling = false;
 
         if (playlistId) {
             await this.renderFreshFindsTracks(this.getSelectedPlexUserId() || '', playlistId);
@@ -10190,7 +10192,11 @@ class App {
     }
 
     private async pollForFreshFindsCompletion(userId: string): Promise<void> {
+        if (this.freshFindsPolling) return;
+        this.freshFindsPolling = true;
+
         const poll = async (): Promise<void> => {
+            if (!this.freshFindsPolling) return;
             try {
                 const response = await fetch(`/api/jobs?jobs_filter=incomplete&exclude_bulk_playlist_add=0`);
                 if (!response.ok) throw new Error('Failed to check job status');
@@ -10201,9 +10207,11 @@ class App {
                     this.renderFreshFindsProgress(activeJob);
                     setTimeout(poll, 3000);
                 } else {
+                    this.freshFindsPolling = false;
                     await this.renderFreshFindsTracks(userId);
                 }
             } catch {
+                if (!this.freshFindsPolling) return;
                 setTimeout(poll, 3000);
             }
         };
@@ -10361,6 +10369,7 @@ class App {
 
     private async refreshFreshFindsPlaylist(userId: string): Promise<void> {
         this.stopPlayback();
+        this.freshFindsPolling = false;
         this.resultsContainer.innerHTML = `
             <div class="results-header">
                 <div class="results-header-top">
