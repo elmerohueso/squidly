@@ -245,7 +245,8 @@ def process_download_job(job_id, payload):
     logger.info("[DOWNLOAD_DECISION] Job %s: metadata_candidates=%s, matching_selected_format=%s, candidate_summary=%s", job_id, len(metadata_rows), len(matching_rows), summary_rows)
     if matching_rows:
         matched_row = matching_rows[0]
-        matched_path = str(matched_row.get('file_path') or '').strip()
+        matched_path = str(matched_row.get('path') or '').strip()
+        matched_path = os.path.join(downloads_folder, matched_path) if matched_path else ''
 
         file_ext = matched_row.get('format', 'flac')
         file_path = file_naming.replace('{artist}', safe_artist)
