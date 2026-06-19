@@ -46,6 +46,7 @@
             </div>
         </div>
     </div>
+    <div id="globalToast" class="global-toast" style="display: none;"></div>
     <div class="app-wrapper">
         <!-- Left Sidebar -->
         <aside class="sidebar" id="leftSidebar">
@@ -227,7 +228,9 @@
                     <div class="settings-content">
                         <div class="settings-section" id="downloadsSettings">
                             <h3>Downloads</h3>
+
                             <div class="settings-section-title">Download Sources</div>
+                            <div class="settings-section-title">Source Priority</div>
                             <div id="downloadSourceList" class="download-source-list">
                                 <label class="toggle-option download-source-item">
                                     <input type="checkbox" value="tidal" id="downloadSourceTidal" checked>
@@ -254,18 +257,20 @@
                                     <button type="button" class="source-move-down" data-source="deezer_mirror" title="Move down">↓</button>
                                 </label>
                             </div>
-                            <label class="settings-label" for="deezerArl" style="margin-top: 1rem;">Deezer ARL (for Direct Download)</label>
+
+                            <div class="settings-section-title">Deezer ARL</div>
+                            <label class="settings-label" for="deezerArl">ARL Cookie (for Direct Download)</label>
                             <input type="password" id="deezerArl" class="settings-input"
                                 placeholder="Paste your Deezer arl cookie here" autocomplete="new-password">
                             <p class="settings-hint">
                                 Log into <a href="https://www.deezer.com" target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;">Deezer</a>,
+                                    class="settings-link">Deezer</a>,
                                 open DevTools (F12) → Storage tab → Cookies, and copy the value of the <code>arl</code> cookie.
                             </p>
                             <p class="settings-note" id="deezerConfigStatus"></p>
 
-                            <div class="settings-section-title" style="margin-top: 1.5rem;">Download Settings</div>
-                            <label class="settings-label" for="qualityLossless" style="margin-top: 0; margin-bottom: 0.5rem;">Quality</label>
+                            <div class="settings-section-title">Download Settings</div>
+                            <label class="settings-label" for="qualityLossless">Quality</label>
                             <div class="format-toggle" role="radiogroup" aria-label="Download quality">
                                 <label class="toggle-option">
                                     <input type="radio" name="downloadQuality" value="LOSSLESS" id="qualityLossless">
@@ -286,7 +291,7 @@
                             <p class="settings-hint">Folder: /downloads</p>
                             <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
 
-                            <div class="settings-section-title settings-collapsible" id="taggingToggle" style="margin-top: 1.5rem;">
+                            <div class="settings-section-title settings-collapsible" id="taggingToggle">
                                 <span class="collapse-arrow">▸</span>
                                 <span>Metadata Tagging</span>
                             </div>
@@ -309,29 +314,29 @@
                         <div class="settings-section" id="libraryIntegrationSettings">
                             <h3>Library Integration</h3>
 
-                            <div class="settings-section-title">Plex</div>
+                            <div class="settings-section-title">Plex Server</div>
                             <div id="plexConnectedStatus"
                                 style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
                             </div>
-                            <label class="settings-label" for="plexSyncIntervalHours">Library Sync Interval (hours)</label>
-                            <div class="retention-spinner">
-                                <button type="button" class="retention-spinner-btn" id="plexSyncIntervalDec" aria-label="Decrease sync interval" data-spinner-dec="plexSyncIntervalHours">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                </button>
-                                <input type="number" id="plexSyncIntervalHours" class="retention-spinner-input" min="1" max="168" value="24" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="168" data-spinner-step="1">
-                                <button type="button" class="retention-spinner-btn" id="plexSyncIntervalInc" aria-label="Increase sync interval" data-spinner-inc="plexSyncIntervalHours">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                </button>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="plexSyncIntervalHours">Library Sync Interval (hours)</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="plexSyncIntervalDec" aria-label="Decrease sync interval" data-spinner-dec="plexSyncIntervalHours">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="plexSyncIntervalHours" class="retention-spinner-input" min="1" max="168" value="24" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="168" data-spinner-step="1">
+                                    <button type="button" class="retention-spinner-btn" id="plexSyncIntervalInc" aria-label="Increase sync interval" data-spinner-inc="plexSyncIntervalHours">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
                             </div>
                             <p class="settings-hint">Default: 24 hours</p>
-                            <p class="settings-note" id="plexConfigStatus"></p>
-                            <button id="startPlexSync" class="save-button" style="margin-top: 0.5rem;">Update &amp; Sync
+                            <button id="startPlexSync" class="save-button">Update &amp; Sync
                                 Library</button>
                             <p class="settings-note" id="plexSyncStatus"></p>
 
-                            <div class="settings-section-title" style="margin-top: 1.5rem;">Force Re-Download</div>
-                            <label class="settings-label" for="ignoreMatchesCheckbox"
-                                style="display: flex; align-items: center; gap: 0.5rem;">
+                            <div class="settings-section-title">Force Re-Download</div>
+                            <label class="settings-label settings-checkbox-label" for="ignoreMatchesCheckbox">
                                 <input type="checkbox" id="ignoreMatchesCheckbox">
                                 <span>Force re-download (ignore existing library matches)</span>
                             </label>
@@ -341,12 +346,10 @@
                             <h3>Music &amp; Playlist Discovery</h3>
 
                             <div class="settings-section-title">Fresh Finds</div>
-                            <p class="settings-hint" style="margin-bottom: 1rem;">Fresh Finds playlists are generated nightly with recommendations based on your Plex listening history.</p>
+                            <p class="settings-hint">Fresh Finds playlists are generated nightly with recommendations based on your Plex listening history.</p>
 
-                            <div class="history-days-setting" style="margin: 0.75rem 0;">
-                                <label class="settings-label" for="freshFindsHistoryDays" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
-                                    Listening history window
-                                </label>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsHistoryDays">Listening history window</label>
                                 <div class="retention-spinner">
                                     <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days" data-spinner-dec="freshFindsHistoryDays">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -356,29 +359,23 @@
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                     </button>
                                 </div>
-                                <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">days</span>
+                                <span class="settings-unit-label">days</span>
                             </div>
-                            <p class="settings-note" id="freshFindsHistoryDaysStatus"></p>
 
-                            <div class="fresh-finds-slider-setting" style="margin: 1rem 0 0.75rem;">
-                                <label class="settings-label" style="display: block; margin-bottom: 0.5rem;">
-                                    Mix of tracks
-                                </label>
-                                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Already Owned</span>
-                                    <input type="range" id="freshFindsNewPct" min="0" max="100" step="5" value="50" style="flex: 1; max-width: 200px;">
-                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Fresh</span>
+                            <div class="settings-row">
+                                <label class="settings-label" for="freshFindsNewPct">Mix of tracks</label>
+                                <div class="settings-slider-row">
+                                    <span class="settings-slider-label">Already Owned</span>
+                                    <input type="range" id="freshFindsNewPct" class="settings-slider" min="0" max="100" step="5" value="50">
+                                    <span class="settings-slider-label">Fresh</span>
                                 </div>
-                                <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-primary);">
+                                <div class="settings-slider-value">
                                     <span id="freshFindsNewPctValue">50%</span> new tracks
                                 </div>
                             </div>
-                            <p class="settings-note" id="freshFindsNewPctStatus"></p>
 
-                            <div class="track-count-setting" style="margin: 0.75rem 0;">
-                                <label class="settings-label" for="freshFindsTrackCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
-                                    Tracks per playlist
-                                </label>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsTrackCount">Tracks per playlist</label>
                                 <div class="retention-spinner">
                                     <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -389,12 +386,9 @@
                                     </button>
                                 </div>
                             </div>
-                            <p class="settings-note" id="freshFindsTrackCountStatus"></p>
 
-                            <div class="retention-setting" style="margin: 0.75rem 0;">
-                                <label class="settings-label" for="freshFindsRetentionCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
-                                    Keep up to
-                                </label>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsRetentionCount">Keep up to</label>
                                 <div class="retention-spinner">
                                     <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention" data-spinner-dec="freshFindsRetentionCount">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -404,10 +398,9 @@
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                     </button>
                                 </div>
-                                <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">Fresh Finds playlists</span>
+                                <span class="settings-unit-label">Fresh Finds playlists</span>
                             </div>
                             <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
-                            <p class="settings-note" id="freshFindsRetentionStatus"></p>
 
                             <div class="tag-toggle-row">
                                 <span class="tag-toggle-label">Auto-download Fresh Finds tracks to Plex</span>
@@ -417,25 +410,24 @@
                                 </label>
                             </div>
                             <p class="settings-hint">When enabled, tracks from the nightly Fresh Finds playlist are automatically queued for download to your Plex library.</p>
-                            <p class="settings-note" id="freshFindsAutoDownloadStatus"></p>
 
-                            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
+                            <hr class="settings-divider">
 
                             <div class="settings-section-title">ListenBrainz</div>
                             <label class="settings-label" for="listenbrainzUsername">Username</label>
                             <input type="text" id="listenbrainzUsername" class="settings-input"
                                 placeholder="Your ListenBrainz username" autocomplete="off">
-                            <label class="settings-label" for="listenbrainzToken" style="margin-top: 0.75rem;">User
+                            <label class="settings-label" for="listenbrainzToken">User
                                 Token</label>
                             <input type="password" id="listenbrainzToken" class="settings-input"
                                 placeholder="Your ListenBrainz user token" autocomplete="new-password">
                             <p class="settings-hint">Get your token from your <a
                                     href="https://listenbrainz.org/profile/" target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;">ListenBrainz
+                                    class="settings-link">ListenBrainz
                                     profile</a></p>
                             <p class="settings-note" id="lbConfigStatus"></p>
 
-                            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
+                            <hr class="settings-divider">
 
                             <div class="settings-section-title">YouTube Music</div>
                             <label class="settings-label" for="ytmCookie">Browser Cookie</label>
@@ -443,13 +435,12 @@
                                 placeholder="Paste your YouTube Music cookie here">
                             <p class="settings-hint">
                                 Go to <a href="https://music.youtube.com" target="_blank"
-                                    style="color: var(--accent-primary); text-decoration: none;">music.youtube.com</a>,
-                                open DevTools (F12) → Network tab, filter for "browse", refresh the page,
-                                click a browse request, and copy the full Cookie header value.
+                                    class="settings-link">music.youtube.com</a>,
+                                open DevTools (F12) → Network tab, filter for "browse", refresh, click a browse request, and copy the full Cookie header value.
                             </p>
                             <p class="settings-note" id="ytmConfigStatus"></p>
 
-                            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
+                            <hr class="settings-divider">
 
                             <div class="settings-section-title" id="penaltiesGroup">Playlist Matching Penalties</div>
                             <div class="tag-group" id="penaltyTagGroup" style="margin-bottom: 0;"></div>
@@ -462,22 +453,23 @@
                                 <option value="tidal">Squidly</option>
                                 <option value="github-dark">GitHub Dark</option>
                             </select>
-                            <label class="settings-label" for="jobsRefreshIntervalSeconds" style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
-                            <div class="retention-spinner">
-                                <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalDec" aria-label="Decrease jobs refresh interval" data-spinner-dec="jobsRefreshIntervalSeconds">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                </button>
-                                <input type="number" id="jobsRefreshIntervalSeconds" class="retention-spinner-input" min="1" max="3600" value="30" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="3600" data-spinner-step="1">
-                                <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalInc" aria-label="Increase jobs refresh interval" data-spinner-inc="jobsRefreshIntervalSeconds">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                </button>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="jobsRefreshIntervalSeconds">Jobs Refresh Interval (seconds)</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalDec" aria-label="Decrease jobs refresh interval" data-spinner-dec="jobsRefreshIntervalSeconds">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="jobsRefreshIntervalSeconds" class="retention-spinner-input" min="1" max="3600" value="30" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="3600" data-spinner-step="1">
+                                    <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalInc" aria-label="Increase jobs refresh interval" data-spinner-inc="jobsRefreshIntervalSeconds">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
                             </div>
                             <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
                         </div>
 
                         <div id="saveAllBar">
                             <button id="saveAllSettings" class="save-button">Save All</button>
-                            <span id="saveAllStatus" class="settings-note" style="margin-left: 0.5rem;"></span>
                         </div>
 
                         <div id="plexDangerZone" class="settings-section settings-danger-zone">

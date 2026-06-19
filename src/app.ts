@@ -717,17 +717,13 @@ class App {
     private deezerArlInput: HTMLInputElement;
     private deezerConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
-    private freshFindsAutoDownloadStatusEl: HTMLElement;
     private freshFindsRetentionInput: HTMLInputElement;
-    private freshFindsRetentionStatusEl: HTMLElement;
     private freshFindsNewPctSlider: HTMLInputElement;
     private freshFindsNewPctValueEl: HTMLElement;
-    private freshFindsNewPctStatusEl: HTMLElement;
     private freshFindsTrackCountInput: HTMLInputElement;
-    private freshFindsTrackCountStatusEl: HTMLElement;
     private freshFindsHistoryDaysInput: HTMLInputElement;
-    private freshFindsHistoryDaysStatusEl: HTMLElement;
     private plexLoginButton: HTMLButtonElement;
+    private globalToastEl: HTMLElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
     private plexPinCopyButton: HTMLButtonElement;
@@ -749,7 +745,6 @@ class App {
     private plexSyncIntervalHoursInput: HTMLInputElement;
     private startPlexSyncButton: HTMLButtonElement;
     private plexSyncStatusEl: HTMLElement;
-    private plexConfigStatusEl: HTMLElement;
     private plexConnectedStatusEl: HTMLElement;
     private plexClearCredentialsButton: HTMLButtonElement;
     private plexUserDropdownContainer: HTMLElement;
@@ -763,8 +758,8 @@ class App {
     private mobileMenuToggle: HTMLButtonElement | null;
     private mobileMenuOverlay: HTMLElement | null;
     private downloadSettings: DownloadSettings;
-    private settingsSaveTimer: number | null = null;
-    private readonly settingsSaveDelayMs = 500;
+    private debounceTimers: Map<string, number> = new Map();
+    private readonly debounceDelayMs = 500;
     private statusUpdateInterval: number | null = null;
     private premiumPollingInterval: number | null = null;
     private jobStatusInterval: number | null = null;
@@ -1014,16 +1009,12 @@ class App {
         this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
         this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
-        this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
-        this.freshFindsRetentionStatusEl = document.getElementById('freshFindsRetentionStatus') as HTMLElement;
         this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
         this.freshFindsNewPctValueEl = document.getElementById('freshFindsNewPctValue') as HTMLElement;
-        this.freshFindsNewPctStatusEl = document.getElementById('freshFindsNewPctStatus') as HTMLElement;
         this.freshFindsTrackCountInput = document.getElementById('freshFindsTrackCount') as HTMLInputElement;
-        this.freshFindsTrackCountStatusEl = document.getElementById('freshFindsTrackCountStatus') as HTMLElement;
         this.freshFindsHistoryDaysInput = document.getElementById('freshFindsHistoryDays') as HTMLInputElement;
-        this.freshFindsHistoryDaysStatusEl = document.getElementById('freshFindsHistoryDaysStatus') as HTMLElement;
+        this.globalToastEl = document.getElementById('globalToast') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
@@ -1046,7 +1037,6 @@ class App {
         this.plexSyncIntervalHoursInput = document.getElementById('plexSyncIntervalHours') as HTMLInputElement;
         this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
         this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
-        this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
         this.plexConnectedStatusEl = document.getElementById('plexConnectedStatus') as HTMLElement;
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
@@ -1396,13 +1386,13 @@ class App {
             });
         }
         if (this.autoDownloadFreshFindsCheckbox) {
-            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsConfig('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
+            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.queueFreshFindsSave('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
         }
         if (this.freshFindsRetentionInput) {
-            this.freshFindsRetentionInput.addEventListener('change', () => this.saveFreshFindsConfig('retention', parseInt(this.freshFindsRetentionInput.value, 10)));
+            this.freshFindsRetentionInput.addEventListener('change', () => this.queueFreshFindsSave('retention', parseInt(this.freshFindsRetentionInput.value, 10)));
         }
         if (this.freshFindsNewPctSlider) {
-            this.freshFindsNewPctSlider.addEventListener('change', () => this.saveFreshFindsConfig('new_track_pct', parseInt(this.freshFindsNewPctSlider.value, 10)));
+            this.freshFindsNewPctSlider.addEventListener('change', () => this.queueFreshFindsSave('new_track_pct', parseInt(this.freshFindsNewPctSlider.value, 10)));
             if (this.freshFindsNewPctValueEl) {
                 this.freshFindsNewPctSlider.addEventListener('input', () => {
                     this.freshFindsNewPctValueEl!.textContent = this.freshFindsNewPctSlider.value + '%';
@@ -1410,10 +1400,10 @@ class App {
             }
         }
         if (this.freshFindsTrackCountInput) {
-            this.freshFindsTrackCountInput.addEventListener('change', () => this.saveFreshFindsConfig('track_count', parseInt(this.freshFindsTrackCountInput.value, 10)));
+            this.freshFindsTrackCountInput.addEventListener('change', () => this.queueFreshFindsSave('track_count', parseInt(this.freshFindsTrackCountInput.value, 10)));
         }
         if (this.freshFindsHistoryDaysInput) {
-            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.saveFreshFindsConfig('history_days', parseInt(this.freshFindsHistoryDaysInput.value, 10)));
+            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.queueFreshFindsSave('history_days', parseInt(this.freshFindsHistoryDaysInput.value, 10)));
         }
 
         // Collapsible sections for settings
@@ -1436,6 +1426,13 @@ class App {
         const saveAllSettingsButton = document.getElementById('saveAllSettings');
         if (saveAllSettingsButton) {
             saveAllSettingsButton.addEventListener('click', () => this.saveAllSettings());
+        }
+
+        // Plex sync interval — auto-save (debounced) on change
+        if (this.plexSyncIntervalHoursInput) {
+            this.plexSyncIntervalHoursInput.addEventListener('change', () => {
+                this.queuePlexSyncSave();
+            });
         }
 
         // Remove save/test config listeners, add PIN login logic
@@ -5924,33 +5921,48 @@ class App {
         return match ? decodeURIComponent(match[1]) : null;
     }
 
-    private queueSettingsSave(): void {
-        if (this.settingsSaveTimer) {
-            window.clearTimeout(this.settingsSaveTimer);
+    private debounce(key: string, fn: () => void): void {
+        const existing = this.debounceTimers.get(key);
+        if (existing !== undefined) {
+            window.clearTimeout(existing);
         }
-
-        this.settingsSaveTimer = window.setTimeout(() => {
-            void this.saveSettingsToServer(this.downloadSettings);
-        }, this.settingsSaveDelayMs);
+        const timer = window.setTimeout(() => {
+            this.debounceTimers.delete(key);
+            fn();
+        }, this.debounceDelayMs);
+        this.debounceTimers.set(key, timer);
     }
 
-    private async saveSettingsToServer(settings: DownloadSettings): Promise<void> {
+    private queueSettingsSave(): void {
+        this.debounce('settings', () => {
+            void this.saveSettingsToServer(this.downloadSettings);
+        });
+    }
+
+    private async saveSettingsToServer(settings: DownloadSettings, silent: boolean = false): Promise<void> {
         try {
-            await fetch('/api/settings', {
+            const response = await fetch('/api/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(settings)
             });
+            if (response.ok) {
+                if (!silent) this.showToast('✓ Saved');
+            } else {
+                this.showToast('✗ Failed to save', true);
+            }
         } catch (error) {
             console.warn('Failed to save download settings.', error);
+            this.showToast('✗ Failed to save', true);
         }
     }
 
     private async saveAllSettings(): Promise<void> {
-        await this.saveSettingsToServer(this.readSettingsFromForm());
-        this.showStatusMessage(document.getElementById('saveAllStatus'), '✓ All changes saved');
+        await this.saveSettingsToServer(this.readSettingsFromForm(), true);
+        await this.savePlexSyncInterval(true);
+        this.showToast('✓ All changes saved');
     }
 
     private syncQualityToggleStyles(): void {
@@ -6136,6 +6148,26 @@ class App {
         }
     }
 
+    private toastTimer: number | null = null;
+    private showToast(message: string, isError: boolean = false): void {
+        if (!this.globalToastEl) return;
+        if (this.toastTimer !== null) {
+            window.clearTimeout(this.toastTimer);
+        }
+        this.globalToastEl.textContent = message;
+        this.globalToastEl.style.display = 'block';
+        this.globalToastEl.classList.toggle('error', isError);
+        // Force reflow so transition runs
+        void this.globalToastEl.offsetWidth;
+        this.globalToastEl.classList.add('visible');
+        this.toastTimer = window.setTimeout(() => {
+            this.globalToastEl.classList.remove('visible');
+            this.toastTimer = window.setTimeout(() => {
+                this.globalToastEl.style.display = 'none';
+            }, 250);
+        }, 2000);
+    }
+
     private async saveListenbrainzConfig(): Promise<void> {
         const userToken = this.listenbrainzTokenInput.value.trim();
         const username = this.listenbrainzUsernameInput.value.trim();
@@ -6216,10 +6248,22 @@ class App {
         }
     }
 
+    private pendingFreshFindsSave: { field: string, value: any } | null = null;
+    private queueFreshFindsSave(field: string, value: any): void {
+        this.pendingFreshFindsSave = { field, value };
+        this.debounce('fresh-finds', () => {
+            const pending = this.pendingFreshFindsSave;
+            this.pendingFreshFindsSave = null;
+            if (pending) {
+                void this.saveFreshFindsConfig(pending.field, pending.value);
+            }
+        });
+    }
+
     private async saveFreshFindsConfig(field: string, value: any): Promise<void> {
         const userId = this.getSelectedPlexUserId();
         if (!userId) {
-            this.showStatusMessage(this.getFreshFindsStatusEl(field), '⚠ Select a Plex user first', true, 0);
+            this.showToast('Select a Plex user first', true);
             return;
         }
 
@@ -6231,36 +6275,13 @@ class App {
             });
 
             if (response.ok) {
-                const label = this.getFreshFindsStatusLabel(field, value);
-                this.showStatusMessage(this.getFreshFindsStatusEl(field), `✓ ${label}`);
+                this.showToast('✓ Saved');
             } else {
-                this.showStatusMessage(this.getFreshFindsStatusEl(field), '✗ Failed to save setting', true, 0);
+                this.showToast('✗ Failed to save', true);
             }
         } catch (error) {
             console.error(`Error saving Fresh Finds ${field}:`, error);
-            this.showStatusMessage(this.getFreshFindsStatusEl(field), '✗ Error saving setting', true, 0);
-        }
-    }
-
-    private getFreshFindsStatusEl(field: string): HTMLElement | null {
-        const map: Record<string, HTMLElement | null> = {
-            auto_download: this.freshFindsAutoDownloadStatusEl,
-            retention: this.freshFindsRetentionStatusEl,
-            new_track_pct: this.freshFindsNewPctStatusEl,
-            track_count: this.freshFindsTrackCountStatusEl,
-            history_days: this.freshFindsHistoryDaysStatusEl,
-        };
-        return map[field] ?? null;
-    }
-
-    private getFreshFindsStatusLabel(field: string, value: any): string {
-        switch (field) {
-            case 'auto_download': return value ? 'Auto-download enabled' : 'Auto-download disabled';
-            case 'retention': return `Retention set to ${value} playlists`;
-            case 'new_track_pct': return `Mix set to ${value}% new tracks`;
-            case 'track_count': return `Track count set to ${value}`;
-            case 'history_days': return `History window set to ${value} days`;
-            default: return 'Setting saved';
+            this.showToast('✗ Failed to save', true);
         }
     }
 
@@ -6441,7 +6462,6 @@ class App {
                     ? String(intervalHours)
                     : '24';
                 this.isPlexConfigured = data.has_config ? true : false;
-                this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
 
                 const configuredLibraryName = String(data.library_name || '').trim();
                 const savedUserId = window.localStorage.getItem('plexSelectedUserId') || '';
@@ -6595,6 +6615,39 @@ class App {
         }
     }
 
+    private queuePlexSyncSave(): void {
+        this.debounce('plex-sync', () => {
+            void this.savePlexSyncInterval();
+        });
+    }
+
+    private async savePlexSyncInterval(silent: boolean = false): Promise<void> {
+        if (!this.plexSyncIntervalHoursInput) return;
+        const hours = parseInt(this.plexSyncIntervalHoursInput.value, 10);
+        if (!Number.isFinite(hours) || hours < 1) {
+            this.showToast('✗ Invalid sync interval', true);
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sync_interval_hours: hours })
+            });
+
+            if (response.ok) {
+                if (!silent) this.showToast('✓ Saved');
+            } else {
+                const data = await response.json().catch(() => ({}));
+                this.showToast(`✗ ${data.error || 'Failed to save'}`, true);
+            }
+        } catch (error) {
+            console.error('Failed to save Plex sync interval:', error);
+            this.showToast('✗ Failed to save', true);
+        }
+    }
+
 
 
 
@@ -6721,7 +6774,6 @@ class App {
                         this.plexLoginOnlyPinContainer.style.display = 'none';
                     }
                     this.isPlexConfigured = true;
-                    this.updatePlexConfigStatus('✓ Configured');
                     await this.loadPlexConfig();
                     await this.loadPlexLibraries();
                     await this.loadPlexUsers(false, true);
@@ -6803,15 +6855,6 @@ class App {
         } finally {
             this.startPlexSyncButton.disabled = false;
         }
-    }
-
-    private updatePlexConfigStatus(message: string): void {
-        if (!this.plexConfigStatusEl) {
-            console.debug('[PLEX_UI] updatePlexConfigStatus: plexConfigStatusEl not found');
-            return;
-        }
-        this.plexConfigStatusEl.textContent = message;
-        this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
     }
 
     private async updatePlexClearCredentialsButton(): Promise<void> {
