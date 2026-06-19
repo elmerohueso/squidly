@@ -1430,19 +1430,7 @@ class App {
                 taggingToggle.classList.toggle('collapsed', !isHidden);
             });
         }
-        const penaltiesToggle = document.getElementById('penaltiesToggle');
-        const penaltiesGroup = document.getElementById('penaltiesGroup');
-        if (penaltiesToggle && penaltiesGroup) {
-            penaltiesToggle.addEventListener('click', () => {
-                const isHidden = penaltiesGroup.style.display === 'none';
-                penaltiesGroup.style.display = isHidden ? '' : 'none';
-                const arrow = penaltiesToggle.querySelector('.collapse-arrow');
-                if (arrow) {
-                    arrow.textContent = isHidden ? '▾' : '▸';
-                }
-                penaltiesToggle.classList.toggle('collapsed', !isHidden);
-            });
-        }
+        // Playlist Matching Penalties: no longer collapsible, sub-gated in updateUserTypeAccess
 
         // Save All button
         const saveAllSettingsButton = document.getElementById('saveAllSettings');
@@ -7001,12 +6989,11 @@ class App {
             }
         });
 
-        // Within music discovery, hide Playlist Matching Penalties from non-owners
-        const penaltyToggle = document.getElementById('penaltiesToggle');
-        if (penaltyToggle) {
-            penaltyToggle.style.display = isOwner ? '' : 'none';
+        // Sub-gate: hide Playlist Matching Penalties from non-owners
+        const penaltiesGroup = document.getElementById('penaltiesGroup');
+        if (penaltiesGroup) {
+            penaltiesGroup.style.display = isOwner ? '' : 'none';
         }
-
 
         if (!isOwner && hidePages.includes(this.currentPage)) {
             this.switchPage('explore', false);

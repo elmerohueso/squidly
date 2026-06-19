@@ -243,7 +243,7 @@
                                 </label>
                                 <label class="toggle-option download-source-item">
                                     <input type="checkbox" value="deezer" id="downloadSourceDeezer">
-                                    <span>Deezer (ARL)</span>
+                                    <span>Deezer (Direct Download)</span>
                                     <button type="button" class="source-move-up" data-source="deezer" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="deezer" title="Move down">↓</button>
                                 </label>
@@ -254,7 +254,7 @@
                                     <button type="button" class="source-move-down" data-source="deezer_mirror" title="Move down">↓</button>
                                 </label>
                             </div>
-                            <label class="settings-label" for="deezerArl" style="margin-top: 1rem;">Deezer ARL Cookie</label>
+                            <label class="settings-label" for="deezerArl" style="margin-top: 1rem;">Deezer ARL (for Direct Download)</label>
                             <input type="password" id="deezerArl" class="settings-input"
                                 placeholder="Paste your Deezer arl cookie here" autocomplete="new-password">
                             <p class="settings-hint">
@@ -314,8 +314,15 @@
                                 style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
                             </div>
                             <label class="settings-label" for="plexSyncIntervalHours">Library Sync Interval (hours)</label>
-                            <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1"
-                                value="24" placeholder="24">
+                            <div class="retention-spinner">
+                                <button type="button" class="retention-spinner-btn" id="plexSyncIntervalDec" aria-label="Decrease sync interval" data-spinner-dec="plexSyncIntervalHours">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                                <input type="number" id="plexSyncIntervalHours" class="retention-spinner-input" min="1" max="168" value="24" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="168" data-spinner-step="1">
+                                <button type="button" class="retention-spinner-btn" id="plexSyncIntervalInc" aria-label="Increase sync interval" data-spinner-inc="plexSyncIntervalHours">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                            </div>
                             <p class="settings-hint">Default: 24 hours</p>
                             <p class="settings-note" id="plexConfigStatus"></p>
                             <button id="startPlexSync" class="save-button" style="margin-top: 0.5rem;">Update &amp; Sync
@@ -334,16 +341,57 @@
                             <h3>Music &amp; Playlist Discovery</h3>
 
                             <div class="settings-section-title">Fresh Finds</div>
-                            <div class="tag-toggle-row">
-                                <span class="tag-toggle-label">Auto-download Fresh Finds nightly</span>
-                                <label class="tag-switch">
-                                    <input type="checkbox" id="autoDownloadFreshFinds">
-                                    <span class="tag-switch-slider"></span>
+                            <p class="settings-hint" style="margin-bottom: 1rem;">Fresh Finds playlists are generated nightly with recommendations based on your Plex listening history.</p>
+
+                            <div class="history-days-setting" style="margin: 0.75rem 0;">
+                                <label class="settings-label" for="freshFindsHistoryDays" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
+                                    Listening history window
                                 </label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days" data-spinner-dec="freshFindsHistoryDays">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="60" data-spinner-step="5">
+                                    <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days" data-spinner-inc="freshFindsHistoryDays">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                                <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">days</span>
                             </div>
-                            <p class="settings-hint">Automatically download all tracks from your nightly Fresh Finds playlist to Plex.</p>
-                            <p class="settings-note" id="freshFindsAutoDownloadStatus"></p>
-                            <div class="retention-setting" style="margin: 1rem 0 0.75rem;">
+                            <p class="settings-note" id="freshFindsHistoryDaysStatus"></p>
+
+                            <div class="fresh-finds-slider-setting" style="margin: 1rem 0 0.75rem;">
+                                <label class="settings-label" style="display: block; margin-bottom: 0.5rem;">
+                                    Mix of tracks
+                                </label>
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Already Owned</span>
+                                    <input type="range" id="freshFindsNewPct" min="0" max="100" step="5" value="50" style="flex: 1; max-width: 200px;">
+                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Fresh</span>
+                                </div>
+                                <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-primary);">
+                                    <span id="freshFindsNewPctValue">50%</span> new tracks
+                                </div>
+                            </div>
+                            <p class="settings-note" id="freshFindsNewPctStatus"></p>
+
+                            <div class="track-count-setting" style="margin: 0.75rem 0;">
+                                <label class="settings-label" for="freshFindsTrackCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
+                                    Tracks per playlist
+                                </label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="50" data-spinner-step="5">
+                                    <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count" data-spinner-inc="freshFindsTrackCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="settings-note" id="freshFindsTrackCountStatus"></p>
+
+                            <div class="retention-setting" style="margin: 0.75rem 0;">
                                 <label class="settings-label" for="freshFindsRetentionCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
                                     Keep up to
                                 </label>
@@ -358,56 +406,18 @@
                                 </div>
                                 <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">Fresh Finds playlists</span>
                             </div>
-
                             <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
                             <p class="settings-note" id="freshFindsRetentionStatus"></p>
-                            <div class="fresh-finds-slider-setting" style="margin: 1.25rem 0 0.75rem;">
-                                <label class="settings-label" style="display: block; margin-bottom: 0.5rem;">
-                                    Mix of tracks
-                                </label>
-                                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Already Owned</span>
-                                    <input type="range" id="freshFindsNewPct" min="0" max="100" step="5" value="50" style="flex: 1; max-width: 200px;">
-                                    <span style="font-size: 0.8125rem; color: var(--text-secondary); white-space: nowrap;">Fresh</span>
-                                </div>
-                                <div style="margin-top: 0.25rem; font-size: 0.875rem; color: var(--text-primary);">
-                                    <span id="freshFindsNewPctValue">50%</span> new tracks
-                                </div>
-                            </div>
-                            <p class="settings-note" id="freshFindsNewPctStatus"></p>
-                            <div class="track-count-setting" style="margin: 1rem 0 0.75rem;">
-                                <label class="settings-label" for="freshFindsTrackCount" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
-                                    Tracks per playlist
-                                </label>
-                                <div class="retention-spinner">
-                                    <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                    <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="50" data-spinner-step="5">
-                                    <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count" data-spinner-inc="freshFindsTrackCount">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                </div>
-                            </div>
 
-                            <p class="settings-note" id="freshFindsTrackCountStatus"></p>
-                            <div class="history-days-setting" style="margin: 1rem 0 0.75rem;">
-                                <label class="settings-label" for="freshFindsHistoryDays" style="display: inline; margin-right: 0.5rem; margin-bottom: 0;">
-                                    History window
+                            <div class="tag-toggle-row">
+                                <span class="tag-toggle-label">Auto-download Fresh Finds tracks to Plex</span>
+                                <label class="tag-switch">
+                                    <input type="checkbox" id="autoDownloadFreshFinds">
+                                    <span class="tag-switch-slider"></span>
                                 </label>
-                                <div class="retention-spinner">
-                                    <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days" data-spinner-dec="freshFindsHistoryDays">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                    <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="60" data-spinner-step="5">
-                                    <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days" data-spinner-inc="freshFindsHistoryDays">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                </div>
-                                <span style="display: inline; margin-left: 0.5rem; color: var(--text-secondary); font-size: 0.9375rem;">days</span>
                             </div>
-
-                            <p class="settings-note" id="freshFindsHistoryDaysStatus"></p>
+                            <p class="settings-hint">When enabled, tracks from the nightly Fresh Finds playlist are automatically queued for download to your Plex library.</p>
+                            <p class="settings-note" id="freshFindsAutoDownloadStatus"></p>
 
                             <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
 
@@ -441,13 +451,8 @@
 
                             <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border-color);">
 
-                            <div class="settings-section-title settings-collapsible" id="penaltiesToggle">
-                                <span class="collapse-arrow">▸</span>
-                                <span>Playlist Matching Penalties</span>
-                            </div>
-                            <div id="penaltiesGroup" style="display: none;">
-                                <div class="tag-group" id="penaltyTagGroup" style="margin-bottom: 0;"></div>
-                            </div>
+                            <div class="settings-section-title" id="penaltiesGroup">Playlist Matching Penalties</div>
+                            <div class="tag-group" id="penaltyTagGroup" style="margin-bottom: 0;"></div>
                         </div>
 
                         <div class="settings-section" id="systemSettings">
@@ -458,8 +463,15 @@
                                 <option value="github-dark">GitHub Dark</option>
                             </select>
                             <label class="settings-label" for="jobsRefreshIntervalSeconds" style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
-                            <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1"
-                                value="30" placeholder="30">
+                            <div class="retention-spinner">
+                                <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalDec" aria-label="Decrease jobs refresh interval" data-spinner-dec="jobsRefreshIntervalSeconds">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                                <input type="number" id="jobsRefreshIntervalSeconds" class="retention-spinner-input" min="1" max="3600" value="30" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="3600" data-spinner-step="1">
+                                <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalInc" aria-label="Increase jobs refresh interval" data-spinner-inc="jobsRefreshIntervalSeconds">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                </button>
+                            </div>
                             <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
                         </div>
 
