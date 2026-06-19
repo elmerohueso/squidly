@@ -631,7 +631,18 @@ def init_db():
         """
     )
     if not cur.fetchone():
-        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_retention_count INTEGER NOT NULL DEFAULT 10")
+        cur.execute("ALTER TABLE user_settings ADD COLUMN fresh_finds_retention_count INTEGER NOT NULL DEFAULT 7")
+
+    # Update the column default for existing tables (greenfield already got 7 above)
+    cur.execute("ALTER TABLE user_settings ALTER COLUMN fresh_finds_retention_count SET DEFAULT 7")
+
+    # Backfill: clamp stale values written by old default (10) to new default (7).
+    # Safe to re-run: matches zero rows once all values are <= 7.
+    cur.execute("""
+        UPDATE user_settings
+        SET fresh_finds_retention_count = 7
+        WHERE fresh_finds_retention_count > 7
+    """)
 
     # Migration: add fresh_finds_new_track_pct to user_settings
     cur.execute(
