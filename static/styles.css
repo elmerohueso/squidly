@@ -2464,17 +2464,138 @@ body {
 }
 
 .settings-section h3 {
-    font-size: 1.125rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 1.25rem;
     color: var(--text-primary);
 }
 
 .settings-section-title {
-    font-size: 1rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-primary);
+    margin: 1rem 0 0.5rem;
+}
+
+.settings-section-title:first-of-type {
+    margin-top: 0;
+}
+
+/* Horizontal divider between sub-sections within a settings section */
+.settings-divider {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 1.5rem 0;
+}
+
+/* Inline label for spinner/slider rows (label sits next to the control) */
+.settings-inline-label {
+    display: inline;
+    margin-right: 0.5rem;
+    margin-bottom: 0;
+}
+
+/* Trailing unit text for spinner rows (e.g. "days", "playlists") */
+.settings-unit-label {
+    display: inline;
+    margin-left: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+}
+
+/* Row containing an inline label + spinner/slider control */
+.settings-row {
+    margin: 0.75rem 0;
+}
+
+/* Labels for slider endpoints (e.g. "Already Owned" / "Fresh") */
+.settings-slider-label {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Label wrapping a checkbox/radio + text (inline, with gap) */
+.settings-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Inline links inside settings hints */
+.settings-link {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+/* Slider row: label endpoints + range input, inline */
+.settings-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.settings-slider {
+    flex: 1;
+    max-width: 200px;
+}
+
+.settings-slider-value {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+}
+
+/* Collapsible section heading */
+.settings-collapsible {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settings-collapsible .collapse-arrow {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+}
+
+.settings-collapsible.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+
+/* "Save All" bar */
+#saveAllBar {
+    text-align: right;
     margin-bottom: 1rem;
+}
+
+/* Global toast for save confirmations */
+.global-toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 1rem;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.global-toast.visible {
+    opacity: 1;
+}
+
+.global-toast.error {
+    border-color: #6b2a2a;
+    color: #f85149;
 }
 
 .format-toggle {
