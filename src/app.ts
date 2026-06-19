@@ -711,13 +711,10 @@ class App {
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
     private listenbrainzUsernameInput: HTMLInputElement;
-    private saveLbConfigButton: HTMLButtonElement;
     private lbConfigStatusEl: HTMLElement;
     private ytmCookieInput: HTMLInputElement;
-    private saveYtmConfigButton: HTMLButtonElement;
     private ytmConfigStatusEl: HTMLElement;
     private deezerArlInput: HTMLInputElement;
-    private saveDeezerConfigButton: HTMLButtonElement;
     private deezerConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsAutoDownloadStatusEl: HTMLElement;
@@ -749,7 +746,6 @@ class App {
     private plexPlaylistNameInput: HTMLInputElement | null;
     private plexPlaylistOptions: HTMLSelectElement | null;
     private plexPlaylistBackButton: HTMLButtonElement | null;
-    private savePlexConfigButton: HTMLButtonElement;
     private plexSyncIntervalHoursInput: HTMLInputElement;
     private startPlexSyncButton: HTMLButtonElement;
     private plexSyncStatusEl: HTMLElement;
@@ -1012,13 +1008,10 @@ class App {
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
         this.listenbrainzUsernameInput = document.getElementById('listenbrainzUsername') as HTMLInputElement;
-        this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
         this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
-        this.saveYtmConfigButton = document.getElementById('saveYtmConfig') as HTMLButtonElement;
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
         this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
-        this.saveDeezerConfigButton = document.getElementById('saveDeezerConfig') as HTMLButtonElement;
         this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsAutoDownloadStatusEl = document.getElementById('freshFindsAutoDownloadStatus') as HTMLElement;
@@ -1050,7 +1043,6 @@ class App {
         this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement | null;
         this.plexPlaylistOptions = document.getElementById('plexPlaylistOptions') as HTMLSelectElement | null;
         this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement | null;
-        this.savePlexConfigButton = document.getElementById('savePlexConfig') as HTMLButtonElement;
         this.plexSyncIntervalHoursInput = document.getElementById('plexSyncIntervalHours') as HTMLInputElement;
         this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
         this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
@@ -1326,7 +1318,7 @@ class App {
         if (this.downloadSourceList) {
             this.downloadSourceList.addEventListener('change', (e) => {
                 const target = e.target as HTMLInputElement;
-                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer')) {
+                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer' || target.value === 'deezer_mirror')) {
                     // Ensure at least one source is checked
                     const checkedBoxes = this.downloadSourceList.querySelectorAll('input[type="checkbox"]:checked');
                     if (checkedBoxes.length === 0) {
@@ -1366,14 +1358,42 @@ class App {
         for (const id of App.TAG_CHECKBOX_IDS) {
             this.tagCheckboxes[id]?.addEventListener('change', () => this.updateSettingsFromForm());
         }
-        if (this.saveLbConfigButton) {
-            this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
+        // ENTER key auto-save for integration inputs
+        const lbUsername = document.getElementById('listenbrainzUsername');
+        if (lbUsername) {
+            lbUsername.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveListenbrainzConfig();
+                }
+            });
         }
-        if (this.saveYtmConfigButton) {
-            this.saveYtmConfigButton.addEventListener('click', () => this.saveYtmConfig());
+        const lbToken = document.getElementById('listenbrainzToken');
+        if (lbToken) {
+            lbToken.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveListenbrainzConfig();
+                }
+            });
         }
-        if (this.saveDeezerConfigButton) {
-            this.saveDeezerConfigButton.addEventListener('click', () => this.saveDeezerConfig());
+        const ytmInput = document.getElementById('ytmCookie');
+        if (ytmInput) {
+            ytmInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveYtmConfig();
+                }
+            });
+        }
+        const deezerInput = document.getElementById('deezerArl');
+        if (deezerInput) {
+            deezerInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveDeezerConfig();
+                }
+            });
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.saveFreshFindsConfig('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
@@ -1395,11 +1415,41 @@ class App {
         if (this.freshFindsHistoryDaysInput) {
             this.freshFindsHistoryDaysInput.addEventListener('change', () => this.saveFreshFindsConfig('history_days', parseInt(this.freshFindsHistoryDaysInput.value, 10)));
         }
-        if (this.savePlexConfigButton) {
-            this.savePlexConfigButton.addEventListener('click', () => {
-                void this.savePlexConfig();
+
+        // Collapsible sections for settings
+        const taggingToggle = document.getElementById('taggingToggle');
+        const taggingGroup = document.getElementById('taggingGroup');
+        if (taggingToggle && taggingGroup) {
+            taggingToggle.addEventListener('click', () => {
+                const isHidden = taggingGroup.style.display === 'none';
+                taggingGroup.style.display = isHidden ? '' : 'none';
+                const arrow = taggingToggle.querySelector('.collapse-arrow');
+                if (arrow) {
+                    arrow.textContent = isHidden ? '▾' : '▸';
+                }
+                taggingToggle.classList.toggle('collapsed', !isHidden);
             });
         }
+        const penaltiesToggle = document.getElementById('penaltiesToggle');
+        const penaltiesGroup = document.getElementById('penaltiesGroup');
+        if (penaltiesToggle && penaltiesGroup) {
+            penaltiesToggle.addEventListener('click', () => {
+                const isHidden = penaltiesGroup.style.display === 'none';
+                penaltiesGroup.style.display = isHidden ? '' : 'none';
+                const arrow = penaltiesToggle.querySelector('.collapse-arrow');
+                if (arrow) {
+                    arrow.textContent = isHidden ? '▾' : '▸';
+                }
+                penaltiesToggle.classList.toggle('collapsed', !isHidden);
+            });
+        }
+
+        // Save All button
+        const saveAllSettingsButton = document.getElementById('saveAllSettings');
+        if (saveAllSettingsButton) {
+            saveAllSettingsButton.addEventListener('click', () => this.saveAllSettings());
+        }
+
         // Remove save/test config listeners, add PIN login logic
         if (this.plexLoginButton) {
             this.plexLoginButton.addEventListener('click', async () => {
@@ -5910,6 +5960,11 @@ class App {
         }
     }
 
+    private async saveAllSettings(): Promise<void> {
+        await this.saveSettingsToServer(this.readSettingsFromForm());
+        this.showStatusMessage(document.getElementById('saveAllStatus'), '✓ All changes saved');
+    }
+
     private syncQualityToggleStyles(): void {
         const losslessLabel = this.qualityLosslessInput.closest('label');
         const highLabel = this.qualityHighInput.closest('label');
@@ -6123,7 +6178,6 @@ class App {
 
             if (response.ok) {
                 this.showStatusMessage(this.lbConfigStatusEl, '✓ Configuration saved');
-                this.listenbrainzTokenInput.value = '';
                 void this.updateSidebarPlaylists();
             } else {
                 this.showStatusMessage(this.lbConfigStatusEl, '✗ Failed to save configuration', true, 0);
@@ -6259,7 +6313,6 @@ class App {
 
             if (response.ok) {
                 this.showStatusMessage(this.ytmConfigStatusEl, '✓ Configuration saved');
-                this.ytmCookieInput.value = '';
                 void this.updateSidebarPlaylists();
             } else {
                 const errorData = await response.json().catch(() => ({}));
@@ -6363,7 +6416,6 @@ class App {
             if (saveResp.ok) {
                 this.showStatusMessage(this.deezerConfigStatusEl, `✓ Connected — ${validateData.offer_name || 'Premium'} (FLAC)`);
                 this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
-                this.deezerArlInput.value = '';
                 this.syncSourceAvailability('deezer', true, `Deezer — ${validateData.offer_name}`);
                 void this.loadDeezerConfig();
             } else {
@@ -6941,19 +6993,20 @@ class App {
         const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
         settingsSections.forEach(section => {
             const sectionEl = section as HTMLElement;
-            if (sectionEl.id === 'integrationsSettings') {
-                // Always show integrations section — it contains per-user integration groups
+            if (sectionEl.id === 'musicDiscoverySettings') {
+                // Always show music discovery section — it contains per-user integration groups
                 sectionEl.style.display = '';
             } else {
                 sectionEl.style.display = isOwner ? '' : 'none';
             }
         });
 
-        // Within integrations, hide Plex settings from non-owners
-        const plexSettingsGroup = document.querySelector('#integrationsSettings #plexSettings') as HTMLElement | null;
-        if (plexSettingsGroup) {
-            plexSettingsGroup.style.display = isOwner ? '' : 'none';
+        // Within music discovery, hide Playlist Matching Penalties from non-owners
+        const penaltyToggle = document.getElementById('penaltiesToggle');
+        if (penaltyToggle) {
+            penaltyToggle.style.display = isOwner ? '' : 'none';
         }
+
 
         if (!isOwner && hidePages.includes(this.currentPage)) {
             this.switchPage('explore', false);

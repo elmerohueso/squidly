@@ -2477,6 +2477,31 @@ body {
     margin-bottom: 1rem;
 }
 
+/* Collapsible section heading */
+.settings-collapsible {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.settings-collapsible .collapse-arrow {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+}
+
+.settings-collapsible.collapsed .collapse-arrow {
+    transform: rotate(-90deg);
+}
+
+/* "Save All" bar */
+#saveAllBar {
+    text-align: right;
+    margin-bottom: 1rem;
+}
+
 .format-toggle {
     display: flex;
     gap: 1rem;
