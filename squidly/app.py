@@ -100,6 +100,7 @@ if os.environ.get("SQUIDLY_SKIP_STARTUP") != "1":
     init_db()
     recover_stale_in_progress_jobs()
     logger.info("Squidly starting up...")
+    _run_async(downloads.validate_all_enabled_endpoints)
     _run_async(downloads.validate_all_premium_from_db)
     plex_healthcheck()
     start_workers()

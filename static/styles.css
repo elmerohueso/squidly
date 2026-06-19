@@ -45,6 +45,8 @@
     --color-tidal-bg: rgba(0, 200, 255, 0.15);
     --color-qobuz-brand: #ffa500;
     --color-qobuz-bg: rgba(255, 165, 0, 0.15);
+    --color-deezer-brand: #a238ff;
+    --color-deezer-bg: rgba(162, 56, 255, 0.15);
     --color-danger-zone-bg: rgba(216, 39, 39, 0.06);
     --color-danger-zone-border: rgba(216, 39, 39, 0.35);
     --color-danger-zone-text: #b91c1c;
@@ -100,6 +102,8 @@
     --color-tidal-bg: rgba(88, 166, 255, 0.15);
     --color-qobuz-brand: #d29922;
     --color-qobuz-bg: rgba(210, 153, 34, 0.15);
+    --color-deezer-brand: #c084fc;
+    --color-deezer-bg: rgba(192, 132, 252, 0.15);
     --color-danger-zone-bg: rgba(220, 38, 38, 0.08);
     --color-danger-zone-border: rgba(220, 38, 38, 0.3);
     --color-danger-zone-text: #ef4444;
@@ -2595,6 +2599,16 @@ body {
     color: var(--color-qobuz-brand);
 }
 
+.mirror-type-deezer {
+    background: var(--color-deezer-bg);
+    color: var(--color-deezer-brand);
+}
+
+.mirror-type-deezer_mirror {
+    background: var(--color-deezer-bg);
+    color: var(--color-deezer-brand);
+}
+
 .settings-label {
     display: block;
     font-weight: 600;
@@ -3496,7 +3510,7 @@ body {
 /* === Mirror Page Stats === */
 .mirror-stats-row {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 1rem;
     margin-bottom: 1.5rem;
 }
@@ -3569,6 +3583,18 @@ body {
 
 .mirror-stats-qobuz .mirror-stat-value {
     color: var(--color-qobuz-brand);
+}
+
+.mirror-stats-deezer {
+    border-color: var(--color-deezer-bg);
+}
+
+.mirror-stats-deezer .mirror-stats-header {
+    color: var(--color-deezer-brand);
+}
+
+.mirror-stats-deezer .mirror-stat-value {
+    color: var(--color-deezer-brand);
 }
 
 .mirror-stat-label {

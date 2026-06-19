@@ -98,6 +98,7 @@ def format_tidal_image_url(image_id_or_path: str, size: int) -> str:
 
 _PREMIUM_TEST_ISRC = 'USGF19942502'  # Nirvana - "In Bloom"
 _PREMIUM_EXPECTED_DURATION = 255      # seconds
+_DEEZER_PREMIUM_TEST_ISRC = 'USSM11204980'  # Track available on Deezer (~247s)
 
 HLS_TAG_MAP_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
@@ -642,7 +643,7 @@ def make_request_with_retry_rotating_mirrors(url_base, url_list, method='GET', t
         url_base: The URL path to append to the base mirror URL (e.g. "/search/?s=...").
         url_list: List of mirror dicts ({'name', 'url'}).
         for_download: If True, only consider mirrors with is_premium=1.
-        mirror_type: If set, only consider mirrors of this type ('tidal' or 'qobuz').
+        mirror_type:     If set, only consider mirrors of this type ('tidal', 'qobuz', or 'deezer').
     """
     last_exception = None
     last_target = None
@@ -721,7 +722,7 @@ def load_enabled_mirror_urls(mirror_type=None, for_download=False):
     """Load enabled mirror URLs from the database.
 
     Args:
-        mirror_type: Optional filter for mirror type ('tidal' or 'qobuz').
+        mirror_type: Optional filter for mirror type ('tidal', 'qobuz', or 'deezer').
     """
     conn = get_db_connection()
     cur = conn.cursor()
@@ -764,7 +765,7 @@ def add_mirror(url, mirror_type='tidal'):
 
     Args:
         url: The plain URL of the mirror endpoint.
-        mirror_type: The type of mirror ('tidal' or 'qobuz'). Defaults to 'tidal'.
+        mirror_type: The type of mirror ('tidal', 'qobuz', or 'deezer'). Defaults to 'tidal'.
     """
     name = derive_mirror_name(url)
     encoded_url = base64.b64encode(url.encode('utf-8')).decode('utf-8')
@@ -824,6 +825,9 @@ def validate_single_endpoint(name):
 
     if mirror_type == 'qobuz':
         result = qobuz.validate_qobuz_endpoint(decoded_url, timeout=5)
+    elif mirror_type == 'deezer':
+        from squidly.services.deezer_mirror import validate_deezer_mirror_endpoint
+        result = validate_deezer_mirror_endpoint(decoded_url, timeout=5)
     else:
         result = validate_endpoint(decoded_url, name, timeout=5)
 
@@ -1356,6 +1360,32 @@ def validate_mirror_premium(name: str) -> dict:
                 result['error'] = f'Qobuz download failed: {e}'
                 result['is_online'] = False
                 return result
+        elif mirror_type == 'deezer':
+            # Deezer — direct stream by ISRC
+            stream_url = f'{decoded_url.rstrip("/")}/stream/'
+            params = {'isrc': _DEEZER_PREMIUM_TEST_ISRC, 'format': 'FLAC'}
+            headers = {
+                'User-Agent': 'Squidly/1.0 (+https://github.com/elmerohueso/squidly)',
+                'Origin': 'https://monochrome.tf',
+                'Referer': 'https://monochrome.tf/',
+            }
+            try:
+                resp = requests.get(stream_url, params=params, headers=headers, stream=True, timeout=120)
+                resp.raise_for_status()
+                downloaded = 0
+                with open(temp_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=32768):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                logger.info(
+                    "[PREMIUM] Downloaded %d bytes for test track (ISRC: %s, mirror: deezer)",
+                    downloaded, _DEEZER_PREMIUM_TEST_ISRC
+                )
+            except Exception as e:
+                logger.error("[PREMIUM] Deezer download failed: %s", str(e))
+                result['error'] = f'Deezer download failed — marking mirror offline: {e}'
+                result['is_online'] = False
+                return result
         else:
             # Tidal — direct HTTP to mirror
             try:
@@ -1431,23 +1461,50 @@ def _update_premium_db(name: str, result: dict) -> None:
     try:
         conn = get_db_connection()
         cur = conn.cursor()
+        now = datetime.utcnow().isoformat() + 'Z'
         if result['is_online'] is not None:
             if result['is_online']:
                 cur.execute(
-                    "UPDATE mirror_endpoints SET online = 1, is_premium = %s WHERE name = %s",
-                    (1 if result.get('is_premium') else 0, name)
+                    "UPDATE mirror_endpoints SET online = 1, is_premium = %s, last_checked = %s WHERE name = %s",
+                    (1 if result.get('is_premium') else 0, now, name)
                 )
                 logger.info("[PREMIUM] Marked mirror '%s' as online, is_premium=%s", name, result.get('is_premium'))
             else:
                 cur.execute(
-                    "UPDATE mirror_endpoints SET online = 0, is_premium = NULL WHERE name = %s",
-                    (name,)
+                    "UPDATE mirror_endpoints SET online = 0, is_premium = NULL, last_checked = %s WHERE name = %s",
+                    (now, name)
                 )
                 logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
         conn.commit()
         conn.close()
     except Exception as db_err:
         logger.info("[PREMIUM] Failed to update DB for '%s': %s", name, db_err)
+
+
+def validate_all_enabled_endpoints() -> None:
+    """Run health check for all enabled mirrors.
+
+    Sets response_time, online status, and last_checked for every enabled mirror.
+    Called at startup before premium validation.
+    """
+    logger.info("[ENDPOINTS] Running health check for all enabled mirrors")
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT name FROM mirror_endpoints WHERE enabled = 1')
+        mirrors = cur.fetchall()
+    finally:
+        conn.close()
+
+    for mirror in mirrors:
+        name = mirror['name']
+        try:
+            validate_single_endpoint(name)
+        except Exception as e:
+            logger.warning("[ENDPOINTS] Health check failed for %s: %s", name, e)
+
+    logger.info("[ENDPOINTS] Health check complete for %d mirrors", len(mirrors))
 
 
 def validate_all_premium_from_db() -> dict:

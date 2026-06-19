@@ -130,7 +130,7 @@ def download_settings():
 
     # Validate comma-separated download source priority list
     download_sources = [s.strip() for s in updated['download_source'].split(',')]
-    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer') for s in download_sources):
+    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer', 'deezer_mirror') for s in download_sources):
         return jsonify({'error': 'Invalid download source value(s)'}), 400
     # Normalize: preserve order, remove duplicates
     seen = set()
@@ -284,8 +284,8 @@ def add_endpoint():
         return jsonify({'error': 'url is required'}), 400
 
     mirror_type = payload.get('mirrorType', 'tidal').strip().lower()
-    if mirror_type not in ('tidal', 'qobuz'):
-        return jsonify({'error': 'mirrorType must be "tidal" or "qobuz"'}), 400
+    if mirror_type not in ('tidal', 'qobuz', 'deezer'):
+        return jsonify({'error': 'mirrorType must be "tidal", "qobuz", or "deezer"'}), 400
 
     try:
         downloads.add_mirror(url, mirror_type=mirror_type)
@@ -294,6 +294,8 @@ def add_endpoint():
         return jsonify({'error': str(e)}), 500
 
     name = downloads.derive_mirror_name(url)
+    # Run health check first to record response time, then premium validation
+    _run_async(lambda: downloads.validate_single_endpoint(name))
     _run_async(lambda: downloads.validate_mirror_premium(name))
 
     return jsonify({'url': url, 'added': True, 'mirrorType': mirror_type}), 201
@@ -330,7 +332,10 @@ def toggle_endpoint(name):
 
 @settings_bp.route('/api/endpoints/<name>/validate-premium', methods=['POST'])
 def validate_premium_endpoint(name):
-    """Trigger premium validation for a single mirror. Returns immediately."""
+    """Trigger premium validation for a single mirror. Returns immediately.
+    Runs a health check first so response_time is always updated.
+    """
+    _run_async(lambda: downloads.validate_single_endpoint(name))
     _run_async(lambda: downloads.validate_mirror_premium(name))
     return jsonify({'name': name, 'status': 'validation_started'}), 202
 

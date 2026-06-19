@@ -7,7 +7,7 @@ validates that extraction logic.
 """
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
 
@@ -262,3 +262,257 @@ class TestMatchedPathExistingMatchExtraction:
             assert call_path.startswith(DOWNLOADS_ROOT)
             assert os.path.isabs(call_path)
             assert call_path.endswith('Artist/Album/Track.flac')
+
+
+# =============================================================================
+# Deezer Mirror source branch in the download pipeline
+# =============================================================================
+
+
+class TestDeezerMirrorSource:
+    """Tests for the deezer_mirror source branch in process_download_job.
+
+    Validates:
+    - Early-continue when track has no ISRC
+    - Full download path when ISRC is available and mirror succeeds
+    """
+
+    @staticmethod
+    def _make_track_with_isrc(isrc="USRC12345678"):
+        """Build a hifi track object that includes an ISRC."""
+        track = _make_mock_hifi_track_object()
+        track['track']['isrc'] = isrc
+        return track
+
+    def test_skipped_when_no_isrc(self):
+        """deezer_mirror is skipped (early-continue) when track has no ISRC,
+        resulting in a PermanentDownloadError since no source succeeded."""
+        from squidly.jobs.processors.download import process_download_job
+        from squidly.infrastructure.downloads import PermanentDownloadError
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            # No ISRC in the track data
+            get_hifi_track_object=MagicMock(
+                return_value=_make_mock_hifi_track_object(),
+            ),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'deezer_mirror',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    with pytest.raises(PermanentDownloadError) as excinfo:
+                        process_download_job(
+                            'test-job-no-isrc',
+                            {
+                                'trackId': '987654321',
+                                'downloadQuality': 'LOSSLESS',
+                                'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                'ignore_matches': False,
+                                'plex_playlist': 'Test Playlist',
+                            },
+                        )
+                    error_msg = str(excinfo.value).lower()
+                    assert 'isrc' in error_msg or 'deezer' in error_msg
+
+    def test_download_attempted_when_isrc_available(self):
+        """deezer_mirror downloads successfully when ISRC is present."""
+        from squidly.jobs.processors.download import process_download_job
+        import squidly.jobs.processors.download as download_module
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+        mirror_url = 'https://deezer-mirror.example.com'
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'deezer_mirror',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    # Mock mirror loading at the source module
+                    with patch(
+                        'squidly.infrastructure.downloads.load_enabled_mirror_urls',
+                        return_value=[
+                            {'name': 'deezer-mirror-1', 'url': mirror_url},
+                        ],
+                    ):
+                        # Mock the deezer_mirror download function at source
+                        with patch(
+                            'squidly.services.deezer_mirror.download_deezer_mirror_track',
+                            return_value={
+                                'file_path': '/app/temp/temp_987654321_deezer_mirror.flac',
+                            },
+                        ) as mock_download:
+                            # Mock post-download infrastructure
+                            with patch(
+                                'squidly.infrastructure.downloads.detect_audio_format',
+                                return_value='flac',
+                            ):
+                                with patch(
+                                    'squidly.infrastructure.downloads.validate_audio_duration',
+                                ):
+                                    with patch(
+                                        'squidly.infrastructure.downloads.add_id3_tags_to_file',
+                                    ):
+                                        with patch(
+                                            'squidly.jobs.processors.download.os.path.getsize',
+                                            return_value=2048,
+                                        ):
+                                            with patch(
+                                                'squidly.jobs.processors.download.shutil.move',
+                                            ):
+                                                with patch(
+                                                    'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                                                ):
+                                                    # Mock open() for the format-detection
+                                                    # block inside the deezer_mirror branch
+                                                    with patch(
+                                                        'builtins.open',
+                                                        mock_open(
+                                                            read_data=b'fLaC\x00\x00\x00\x00'
+                                                        ),
+                                                    ):
+                                                        result = process_download_job(
+                                                            'test-job-isrc',
+                                                            {
+                                                                'trackId': '987654321',
+                                                                'downloadQuality': 'LOSSLESS',
+                                                                'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                                                'ignore_matches': False,
+                                                                'plex_playlist': 'Test Playlist',
+                                                            },
+                                                        )
+
+        # Verify the mirror download was called correctly
+        mock_download.assert_called_once()
+        call_kwargs = mock_download.call_args[1]
+        assert call_kwargs['isrc'] == 'USRC12345678'
+        assert call_kwargs['base_url'] == mirror_url
+        assert '/app/temp/' in call_kwargs['output_path']
+
+        # Verify overall success
+        assert result['stages']['downloaded'] == 'done'
+        assert result['stages']['tagged'] == 'done'
+        assert result['stages']['written'] == 'done'
+        assert result['file_path'] is not None
+
+    def test_skipped_when_no_mirrors_available(self):
+        """deezer_mirror raises PermanentDownloadError when no mirrors are
+        enabled/online/premium for the deezer type."""
+        from squidly.jobs.processors.download import process_download_job
+        from squidly.infrastructure.downloads import PermanentDownloadError
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'deezer_mirror',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    # Return empty mirror list (no enabled mirrors)
+                    with patch(
+                        'squidly.infrastructure.downloads.load_enabled_mirror_urls',
+                        return_value=[],
+                    ):
+                        with pytest.raises(PermanentDownloadError) as excinfo:
+                            process_download_job(
+                                'test-job-no-mirrors',
+                                {
+                                    'trackId': '987654321',
+                                    'downloadQuality': 'LOSSLESS',
+                                    'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                    'ignore_matches': False,
+                                    'plex_playlist': 'Test Playlist',
+                                },
+                            )
+                        error_msg = str(excinfo.value).lower()
+                        assert 'deezer' in error_msg or 'mirror' in error_msg
+
+    def test_fallback_from_deezer_mirror_to_tidal(self):
+        """When deezer_mirror fails (no mirrors), the processor falls back to
+        tidal if it is in the priority list."""
+        from squidly.jobs.processors.download import process_download_job
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'deezer_mirror,tidal',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    # Return empty list for deezer mirrors, then set up tidal
+                    with patch(
+                        'squidly.infrastructure.downloads.load_enabled_mirror_urls',
+                        return_value=[],
+                    ):
+                        with patch(
+                            'squidly.services.deezer_mirror.download_deezer_mirror_track',
+                        ):
+                            with patch(
+                                'squidly.jobs.processors.download.downloads.download_track_manifest',
+                                side_effect=ValueError(
+                                    "No configured mirror"
+                                ),
+                            ):
+                                from squidly.infrastructure.downloads import (
+                                    PermanentDownloadError,
+                                )
+                                with pytest.raises(PermanentDownloadError):
+                                    process_download_job(
+                                        'test-job-fallback',
+                                        {
+                                            'trackId': '987654321',
+                                            'downloadQuality': 'LOSSLESS',
+                                            'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                            'ignore_matches': False,
+                                            'plex_playlist': 'Test Playlist',
+                                        },
+                                    )

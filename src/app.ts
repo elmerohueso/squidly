@@ -5474,7 +5474,8 @@ class App {
                 sections.push(`<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>`);
             }
             if (downloadMirror) {
-                const badge = mirrorType ? `<span class="mirror-type-badge mirror-type-${this.escapeHtml(mirrorType)}">${this.escapeHtml(mirrorType)}</span> ` : '';
+                const mirrorLabel = mirrorType === 'deezer_mirror' || mirrorType === 'deezer' ? 'Deezer' : mirrorType || '';
+                const badge = mirrorLabel ? `<span class="mirror-type-badge mirror-type-${this.escapeHtml(mirrorType || '')}">${this.escapeHtml(mirrorLabel)}</span> ` : '';
                 sections.push(`<div class="job-sync-progress">${badge}Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
             }
             if (effectiveStatus === 'failed' && job.error_message) {
@@ -5915,7 +5916,7 @@ class App {
         const lowLabel = this.qualityLowInput.closest('label');
 
         const isQobuz = this.isDownloadSourceChecked('qobuz');
-        const isDeezer = this.isDownloadSourceChecked('deezer');
+        const isDeezer = this.isDownloadSourceChecked('deezer') || this.isDownloadSourceChecked('deezer_mirror');
 
         if (losslessLabel) {
             losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
@@ -7089,6 +7090,8 @@ class App {
 
             const hasQobuzMirrors = data.endpoints.some(e => e.mirrorType === 'qobuz');
             this.syncSourceAvailability('qobuz', hasQobuzMirrors, hasQobuzMirrors ? '' : 'No online Qobuz mirrors found');
+            const hasDeezerMirrors = data.endpoints.some(e => e.mirrorType === 'deezer');
+            this.syncSourceAvailability('deezer_mirror', hasDeezerMirrors, hasDeezerMirrors ? '' : 'No online Deezer mirrors found');
         } catch (error) {
             console.error('Error fetching endpoint status:', error);
         }
@@ -7096,8 +7099,9 @@ class App {
 
     private displayEndpointStatus(data: EndpointStatus): void {
         // Split endpoints by type
-        const tidalEndpoints = data.endpoints.filter(e => e.mirrorType !== 'qobuz');
+        const tidalEndpoints = data.endpoints.filter(e => e.mirrorType === 'tidal' || e.mirrorType === '');
         const qobuzEndpoints = data.endpoints.filter(e => e.mirrorType === 'qobuz');
+        const deezerEndpoints = data.endpoints.filter(e => e.mirrorType === 'deezer');
 
         // Compute separate stats
         const tidalOnline = tidalEndpoints.filter(e => e.online).length;
@@ -7106,6 +7110,9 @@ class App {
         const qobuzOnline = qobuzEndpoints.filter(e => e.online).length;
         const qobuzPremium = qobuzEndpoints.filter(e => e.isPremium === 1).length;
         const qobuzOffline = qobuzEndpoints.filter(e => !e.online).length;
+        const deezerOnline = deezerEndpoints.filter(e => e.online).length;
+        const deezerPremium = deezerEndpoints.filter(e => e.isPremium === 1).length;
+        const deezerOffline = deezerEndpoints.filter(e => !e.online).length;
 
         // Update per-type stat elements
         const tidalOnlineCount = document.getElementById('tidalOnlineCount');
@@ -7114,6 +7121,9 @@ class App {
         const qobuzOnlineCount = document.getElementById('qobuzOnlineCount');
         const qobuzPremiumCount = document.getElementById('qobuzPremiumCount');
         const qobuzOfflineCount = document.getElementById('qobuzOfflineCount');
+        const deezerOnlineCount = document.getElementById('deezerOnlineCount');
+        const deezerPremiumCount = document.getElementById('deezerPremiumCount');
+        const deezerOfflineCount = document.getElementById('deezerOfflineCount');
 
         if (tidalOnlineCount) tidalOnlineCount.textContent = tidalOnline.toString();
         if (tidalPremiumCount) tidalPremiumCount.textContent = tidalPremium.toString();
@@ -7121,6 +7131,9 @@ class App {
         if (qobuzOnlineCount) qobuzOnlineCount.textContent = qobuzOnline.toString();
         if (qobuzPremiumCount) qobuzPremiumCount.textContent = qobuzPremium.toString();
         if (qobuzOfflineCount) qobuzOfflineCount.textContent = qobuzOffline.toString();
+        if (deezerOnlineCount) deezerOnlineCount.textContent = deezerOnline.toString();
+        if (deezerPremiumCount) deezerPremiumCount.textContent = deezerPremium.toString();
+        if (deezerOfflineCount) deezerOfflineCount.textContent = deezerOffline.toString();
 
         // Legacy: update old stat elements if they still exist
         const totalCount = document.getElementById('totalCount');
@@ -7276,8 +7289,9 @@ class App {
 
         const tidalGroup = renderMirrorGroup('Tidal Mirrors', tidalEndpoints, 'No Tidal mirrors configured');
         const qobuzGroup = renderMirrorGroup('Qobuz Mirrors', qobuzEndpoints, 'No Qobuz mirrors configured');
+        const deezerGroup = renderMirrorGroup('Deezer Mirrors', deezerEndpoints, 'No Deezer mirrors configured');
 
-        this.flyoutContent.innerHTML = `${rateLimitSummary}${tidalGroup}${qobuzGroup}`;
+        this.flyoutContent.innerHTML = `${rateLimitSummary}${tidalGroup}${qobuzGroup}${deezerGroup}`;
     }
 
     private openAddMirrorModal(): void {
@@ -7340,8 +7354,21 @@ class App {
         qobuzLabel.appendChild(qobuzRadio);
         qobuzLabel.appendChild(qobuzSpan);
 
+        const deezerLabel = document.createElement('label');
+        deezerLabel.className = 'toggle-option';
+        const deezerRadio = document.createElement('input');
+        deezerRadio.type = 'radio';
+        deezerRadio.name = 'mirrorType';
+        deezerRadio.value = 'deezer';
+        deezerRadio.id = 'mirrorTypeDeezer';
+        const deezerSpan = document.createElement('span');
+        deezerSpan.textContent = 'Deezer';
+        deezerLabel.appendChild(deezerRadio);
+        deezerLabel.appendChild(deezerSpan);
+
         mirrorTypeToggle.appendChild(tidalLabel);
         mirrorTypeToggle.appendChild(qobuzLabel);
+        mirrorTypeToggle.appendChild(deezerLabel);
         mirrorTypeGroup.appendChild(mirrorTypeLabel);
         mirrorTypeGroup.appendChild(mirrorTypeToggle);
 
@@ -7378,7 +7405,7 @@ class App {
             if (!url) {
                 return;
             }
-            const mirrorType = tidalRadio.checked ? 'tidal' : 'qobuz';
+            const mirrorType = tidalRadio.checked ? 'tidal' : deezerRadio.checked ? 'deezer' : 'qobuz';
             submitBtn.disabled = true;
             submitBtn.textContent = 'Adding...';
             try {

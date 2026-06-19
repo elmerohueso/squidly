@@ -231,21 +231,27 @@
                             <div id="downloadSourceList" class="download-source-list">
                                 <label class="toggle-option download-source-item">
                                     <input type="checkbox" value="tidal" id="downloadSourceTidal" checked>
-                                    <span>Tidal</span>
+                                    <span>Tidal (API Mirror)</span>
                                     <button type="button" class="source-move-up" data-source="tidal" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="tidal" title="Move down">↓</button>
                                 </label>
                                 <label class="toggle-option download-source-item">
                                     <input type="checkbox" value="qobuz" id="downloadSourceQobuz">
-                                    <span>Qobuz</span>
+                                    <span>Qobuz (API Mirror)</span>
                                     <button type="button" class="source-move-up" data-source="qobuz" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="qobuz" title="Move down">↓</button>
                                 </label>
                                 <label class="toggle-option download-source-item">
                                     <input type="checkbox" value="deezer" id="downloadSourceDeezer">
-                                    <span>Deezer (Premium)</span>
+                                    <span>Deezer (ARL)</span>
                                     <button type="button" class="source-move-up" data-source="deezer" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="deezer" title="Move down">↓</button>
+                                </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="deezer_mirror" id="downloadSourceDeezerMirror">
+                                    <span>Deezer (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="deezer_mirror" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="deezer_mirror" title="Move down">↓</button>
                                 </label>
                             </div>
                             <label class="settings-label" for="qualityLossless" style="margin-top: 1rem; margin-bottom: 0.5rem;">Quality</label>
@@ -508,6 +514,26 @@
                                     </div>
                                     <div class="mirror-stat">
                                         <span class="mirror-stat-value" id="qobuzOfflineCount">-</span>
+                                        <span class="mirror-stat-label">Offline</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mirror-stats-card mirror-stats-deezer">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12a4 4 0 1 0 8 0a4 4 0 0 0-8 0"/></svg>
+                                    <span>Deezer</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerPremiumCount">-</span>
+                                        <span class="mirror-stat-label">Premium</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerOfflineCount">-</span>
                                         <span class="mirror-stat-label">Offline</span>
                                     </div>
                                 </div>
