@@ -112,6 +112,21 @@ QUALITY_PRESETS = {
 }
 
 
+def expected_download_format(source: str, quality: str) -> str:
+    """Map a download source and quality preset to the expected audio container format."""
+    if source in ('deezer', 'deezer_mirror'):
+        return 'flac'
+    if quality in ('HIGH', 'LOW', 'DOLBY_ATMOS'):
+        return 'm4a'
+    return 'flac'
+
+
+def make_temp_download_path(identifier: str, source: str, quality: str, temp_folder: str = '/app/temp') -> str:
+    """Build a temp download path with the correct extension for source+quality."""
+    ext = expected_download_format(source, quality)
+    return os.path.join(temp_folder, f'temp_{identifier}_{source}.{ext}')
+
+
 def resolve_formats_and_manifest_type(
     quality: str | None,
     manifest_type: str | None = None,

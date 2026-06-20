@@ -288,3 +288,34 @@ def download_deezer_track(
         'track': track,
         'file_path': output_path,
     }
+
+
+def download_track_by_isrc(
+    isrc: str,
+    quality: str,
+    *,
+    track_id: str | None = None,
+) -> dict:
+    """Download a track from Deezer by ISRC. Returns {'file_path', 'source'}.
+
+    Uses the ARL from download settings. Raises on failure.
+    """
+    from squidly.infrastructure.downloads import make_temp_download_path, cleanup_file
+    from squidly.infrastructure.storage import get_download_settings
+
+    settings = get_download_settings()
+    arl = settings.get('deezer_arl', '')
+
+    temp_path = make_temp_download_path(isrc, 'deezer', quality)
+
+    result = download_deezer_track(
+        isrc=isrc,
+        output_path=temp_path,
+        arl=arl,
+    )
+
+    if result is None:
+        cleanup_file(temp_path)
+        raise ValueError(f"Failed to download from Deezer (ISRC: {isrc})")
+
+    return {'file_path': temp_path, 'source': 'deezer'}

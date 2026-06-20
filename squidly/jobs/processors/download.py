@@ -12,6 +12,7 @@ from squidly import jobs
 from squidly.services import deezer
 from squidly.services import deezer_mirror
 from squidly.services import qobuz
+from squidly.services import hifi
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.infrastructure.config import DOWNLOADS_ROOT
 from squidly.infrastructure.db import get_db_connection
@@ -39,6 +40,72 @@ _PERMANENT_ERROR_KEYWORDS = (
     'not found on deezer',
     'not available in flac on deezer',
 )
+
+_DOWNLOAD_SOURCE_HANDLERS = {
+    'qobuz': qobuz.download_track_by_isrc,
+    'deezer': deezer.download_track_by_isrc,
+    'deezer_mirror': deezer_mirror.download_track_by_isrc,
+    'tidal': hifi.download_track_by_isrc,
+}
+
+
+def _finalize_download(
+    temp_path: str,
+    source: str,
+    expected_duration,
+    expected_format: str = 'flac',
+) -> str:
+    """Detect format, log size, validate duration. Raise on format mismatch.
+
+    Returns the detected audio format. Order: format check first (cheap),
+    duration check second (expensive, runs ffmpeg).
+
+    Raises:
+        ValueError: detected format does not match expected_format.
+        ValueError: file is suspiciously small (< 1KB) and unidentifiable.
+        RuntimeError: duration validation fails (from validate_audio_duration).
+    """
+    file_size = 0
+    try:
+        file_size = os.path.getsize(temp_path)
+    except OSError:
+        pass
+
+    with open(temp_path, 'rb') as tmp_file:
+        audio_format = downloads.detect_audio_format(tmp_file.read(32))
+
+    if audio_format == 'unknown':
+        if file_size < 1024:
+            raise ValueError(
+                f"Expected {expected_format} format from {source}, but file is "
+                f"suspiciously small ({file_size} bytes) and unidentifiable"
+            )
+        logger.warning(
+            "[DOWNLOAD] Could not detect format of %d-byte file from %s, "
+            "assuming %s",
+            file_size, source, expected_format,
+        )
+        audio_format = expected_format
+
+    try:
+        temp_size = file_size if file_size else os.path.getsize(temp_path)
+        logger.info(
+            "[DOWNLOAD] %s temp file: %d bytes, format=%s (%s)",
+            source, temp_size, audio_format, temp_path,
+        )
+    except OSError:
+        pass
+
+    if audio_format != expected_format:
+        raise ValueError(
+            f"Expected {expected_format} format from {source}, but detected "
+            f"{audio_format} ({file_size} bytes)"
+        )
+
+    downloads.validate_audio_duration(temp_path, expected_duration)
+
+    return audio_format
+
 
 def process_download_job(job_id, payload):
     track_id = payload.get('trackId')
@@ -344,6 +411,7 @@ def process_download_job(job_id, payload):
 
     last_download_error = None
     any_source_had_mirrors = False  # Track if any source had eligible mirrors to try
+    per_source_errors = {}
     audio_format = None
     expected_duration = track_data.get('duration')
     logger.info("[DOWNLOAD] Pre-download: quality=%s, expected_duration=%s, download_sources=%s, track_id=%s",
@@ -365,192 +433,37 @@ def process_download_job(job_id, payload):
             last_download_error = "Deezer Mirror requires ISRC (permanent)"
             continue
 
-        # Create a fresh temp path for each attempt
-        temp_source_path = os.path.join(temp_folder, f'temp_{track_id}_{current_source}.flac')
+        temp_source_path = ''
 
         try:
-            if current_source == 'qobuz':
-                # --- Qobuz download path ---
-                isrc = track_data['isrc']
-                current_quality = quality_choice
-                if current_quality not in qobuz.QOBUZ_SUPPORTED_QUALITIES:
-                    logger.info("[DOWNLOAD] Qobuz does not support quality '%s', falling back to LOSSLESS", current_quality)
-                    current_quality = 'LOSSLESS'
+            handler = _DOWNLOAD_SOURCE_HANDLERS.get(current_source)
+            if handler is None:
+                logger.warning("[DOWNLOAD] Unknown source '%s', skipping", current_source)
+                last_download_error = f"Unknown source '{current_source}' (permanent)"
+                continue
 
-                qobuz_mirrors = downloads.load_enabled_mirror_urls(mirror_type='qobuz', for_download=True)
-                if not qobuz_mirrors:
-                    raise ValueError("No Qobuz mirrors available (need enabled, online, premium)")
-
-                qobuz_result = None
-                src_error = None
-                for mirror in qobuz_mirrors:
-                    base_url = mirror['url']
-                    logger.info("[QOBUZ] Trying mirror: %s", base_url)
-                    try:
-                        qobuz_result = qobuz.download_qobuz_track(
-                            base_url=base_url,
-                            isrc=isrc,
-                            tidal_quality=current_quality,
-                            output_path=temp_source_path,
-                        )
-                        if qobuz_result:
-                            download_mirror = base_url
-                            break
-                    except Exception as e:
-                        logger.warning("[QOBUZ] Mirror %s failed: %s", base_url, e)
-                        src_error = e
-                        continue
-
-                if qobuz_result is None:
-                    error_msg = f"Failed to download from Qobuz (ISRC: {isrc})"
-                    if src_error:
-                        error_msg += f": {src_error}"
-                    raise ValueError(error_msg)
-
-                logger.info("[QOBUZ] Successfully downloaded track via Qobuz (ISRC: %s)", isrc)
-
-                # Detect format
-                with open(temp_source_path, 'rb') as tmp_file:
-                    audio_format = downloads.detect_audio_format(tmp_file.read(32))
-                if audio_format == 'unknown':
-                    audio_format = 'flac'
-                logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-                try:
-                    temp_size = os.path.getsize(temp_source_path)
-                    logger.info("[DOWNLOAD] Qobuz temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
-                except OSError:
-                    logger.info("[DOWNLOAD] Qobuz temp file: size unknown (%s)", temp_source_path)
-
-                # Validate duration
-                downloads.validate_audio_duration(temp_source_path, expected_duration)
-
-            elif current_source == 'deezer':
-                # --- Deezer download path ---
-                isrc = track_data.get('isrc')
-                if not isrc:
-                    raise ValueError("Deezer requires ISRC")
-
-                arl = tag_settings.get('deezer_arl', '')
-                if not arl:
-                    raise ValueError("Deezer ARL not configured")
-
-                deezer_result = deezer.download_deezer_track(
-                    isrc=isrc,
-                    output_path=temp_source_path,
-                    arl=arl,
-                )
-
-                if deezer_result is None:
-                    raise ValueError(f"Failed to download from Deezer (ISRC: {isrc})")
-
-                logger.info("[DEEZER] Successfully downloaded track via Deezer (ISRC: %s)", isrc)
-                download_mirror = 'deezer'
-
-                # Detect format
-                with open(temp_source_path, 'rb') as tmp_file:
-                    audio_format = downloads.detect_audio_format(tmp_file.read(32))
-                if audio_format == 'unknown':
-                    audio_format = 'flac'
-                logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-                try:
-                    temp_size = os.path.getsize(temp_source_path)
-                    logger.info("[DOWNLOAD] Deezer temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
-                except OSError:
-                    logger.info("[DOWNLOAD] Deezer temp file: size unknown (%s)", temp_source_path)
-
-                # Validate duration
-                downloads.validate_audio_duration(temp_source_path, expected_duration)
-
-            elif current_source == 'deezer_mirror':
-                # --- Deezer Mirror download path ---
-                isrc = track_data.get('isrc')
-                if not isrc:
-                    raise ValueError("Deezer Mirror requires ISRC")
-
-                deezer_mirrors = downloads.load_enabled_mirror_urls(mirror_type='deezer', for_download=True)
-                if not deezer_mirrors:
-                    raise ValueError("No Deezer mirrors available (need enabled, online, premium)")
-
-                deezer_result = None
-                src_error = None
-                for mirror in deezer_mirrors:
-                    base_url = mirror['url']
-                    logger.info("[DEEZER_MIRROR] Trying mirror: %s", base_url)
-                    try:
-                        deezer_result = deezer_mirror.download_deezer_mirror_track(
-                            base_url=base_url,
-                            isrc=isrc,
-                            output_path=temp_source_path,
-                        )
-                        if deezer_result:
-                            download_mirror = base_url
-                            break
-                    except Exception as e:
-                        logger.warning("[DEEZER_MIRROR] Mirror %s failed: %s", base_url, e)
-                        src_error = e
-                        continue
-
-                if deezer_result is None:
-                    error_msg = f"Failed to download from Deezer Mirror (ISRC: {isrc})"
-                    if src_error:
-                        error_msg += f": {src_error}"
-                    raise ValueError(error_msg)
-
-                logger.info("[DEEZER_MIRROR] Successfully downloaded track via Deezer Mirror (ISRC: %s)", isrc)
-
-                # Detect format
-                with open(temp_source_path, 'rb') as tmp_file:
-                    audio_format = downloads.detect_audio_format(tmp_file.read(32))
-                if audio_format == 'unknown':
-                    audio_format = 'flac'
-                logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-                try:
-                    temp_size = os.path.getsize(temp_source_path)
-                    logger.info("[DOWNLOAD] Deezer Mirror temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
-                except OSError:
-                    logger.info("[DOWNLOAD] Deezer Mirror temp file: size unknown (%s)", temp_source_path)
-
-                # Validate duration
-                downloads.validate_audio_duration(temp_source_path, expected_duration)
-
+            isrc = track_data.get('isrc')
+            if handler is hifi.download_track_by_isrc:
+                result = handler(isrc, quality_choice, track_id=track_id)
             else:
-                # --- Tidal download path ---
-                logger.info("[DOWNLOAD] Downloading track data from trackManifests into temporary file: %s", temp_source_path)
-                _, tidal_target = downloads.download_track_manifest(
-                    track_id=track_id,
-                    output_path=temp_source_path,
-                    quality=quality_choice,
-                    url_list=downloads.get_squid_urls(),
-                    usage='DOWNLOAD',
-                    for_download=True,
-                )
-                download_mirror = tidal_target['url'].rstrip('/')
+                result = handler(isrc, quality_choice)
 
-                # Detect format
-                with open(temp_source_path, 'rb') as tmp_file:
-                    audio_format = downloads.detect_audio_format(tmp_file.read(32))
-                logger.info("[DOWNLOAD] Detected downloaded audio format: %s", audio_format)
-                if audio_format == 'unknown':
-                    logger.warning("[DOWNLOAD] Could not detect audio format, assuming FLAC")
-                    audio_format = 'flac'
-                try:
-                    temp_size = os.path.getsize(temp_source_path)
-                    logger.info("[DOWNLOAD] Tidal temp file: %d bytes, format=%s (%s)", temp_size, audio_format, temp_source_path)
-                except OSError:
-                    logger.info("[DOWNLOAD] Tidal temp file: size unknown (%s)", temp_source_path)
+            temp_source_path = result['file_path']
+            download_mirror = result['source']
 
-                # Validate duration
-                try:
-                    downloads.validate_audio_duration(temp_source_path, expected_duration)
-                except RuntimeError:
-                    raise
-
-            # Success — exit the source loop
+            expected_format = downloads.expected_download_format(current_source, quality_choice)
+            audio_format = _finalize_download(
+                temp_source_path,
+                current_source,
+                expected_duration,
+                expected_format,
+            )
             break
 
         except (ValueError, downloads.TransientDownloadError, RuntimeError, requests.exceptions.RequestException) as e:
             error_str = str(e)
             last_download_error = error_str
+            per_source_errors[current_source] = error_str
             download_mirror = None
             # If this source had eligible mirrors to try (even if they failed),
             # the failure might be transient — keep the door open for retry.
@@ -565,15 +478,15 @@ def process_download_job(job_id, payload):
             continue
 
     if download_mirror is None:
-        if any_source_had_mirrors:
-            # At least one source had eligible mirrors and could work on retry
-            raise downloads.TransientDownloadError(
-                f"All download sources failed: {last_download_error or 'unknown error'}"
+        if per_source_errors:
+            error_summary = '; '.join(
+                f"{src}: {err}" for src, err in per_source_errors.items()
             )
-        # No source had eligible mirrors — permanent configuration issue, don't retry
-        raise downloads.PermanentDownloadError(
-            f"All download sources failed: {last_download_error or 'unknown error'}"
-        )
+        else:
+            error_summary = last_download_error or 'unknown error'
+        if any_source_had_mirrors:
+            raise downloads.TransientDownloadError(f"All download sources failed: {error_summary}")
+        raise downloads.PermanentDownloadError(f"All download sources failed: {error_summary}")
 
     logger.info("[DOWNLOAD] Job %s starting for track %s", job_id, track_id)
 

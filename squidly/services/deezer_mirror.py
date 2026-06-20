@@ -130,3 +130,46 @@ def download_deezer_mirror_track(
         return None
 
     return {'file_path': output_path}
+
+
+def download_track_by_isrc(
+    isrc: str,
+    quality: str,
+    *,
+    track_id: str | None = None,
+) -> dict:
+    """Download a track from a Deezer mirror by ISRC. Returns {'file_path', 'source'}.
+
+    Iterates enabled Deezer mirrors until one succeeds. Raises on failure.
+    """
+    from squidly.infrastructure.downloads import (
+        load_enabled_mirror_urls,
+        make_temp_download_path,
+        cleanup_file,
+    )
+
+    deezer_mirrors = load_enabled_mirror_urls(mirror_type='deezer', for_download=True)
+    if not deezer_mirrors:
+        raise ValueError("No Deezer mirrors available (need enabled, online, premium)")
+
+    src_error = None
+    for mirror in deezer_mirrors:
+        base_url = mirror['url']
+        temp_path = make_temp_download_path(isrc, 'deezer_mirror', quality)
+        try:
+            result = download_deezer_mirror_track(
+                base_url=base_url,
+                isrc=isrc,
+                output_path=temp_path,
+            )
+            if result:
+                return {'file_path': temp_path, 'source': base_url}
+        except Exception as e:
+            logger.warning("[DEEZER_MIRROR] Mirror %s failed: %s", base_url, e)
+            src_error = e
+            cleanup_file(temp_path)
+            continue
+
+    if src_error:
+        raise ValueError(f"Failed to download from Deezer Mirror (ISRC: {isrc}): {src_error}")
+    raise ValueError(f"Failed to download from Deezer Mirror (ISRC: {isrc})")

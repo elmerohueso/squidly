@@ -1340,3 +1340,46 @@ def _normalize_hifi_playlist_items(items):
             seen_keys.add(key)
 
     return deduped_items
+
+
+def download_track_by_isrc(
+    isrc: str,
+    quality: str,
+    *,
+    track_id: str | None = None,
+) -> dict:
+    """Download a track from Tidal (via Hifi API) by ISRC or track_id. Returns {'file_path', 'source'}.
+
+    Uses track_id if provided; otherwise looks up via ISRC search. Raises on failure.
+    """
+    from squidly.infrastructure.downloads import (
+        download_track_manifest,
+        get_squid_urls,
+        make_temp_download_path,
+        cleanup_file,
+    )
+
+    if not track_id:
+        items = _fetch_hifi_search_results('i', isrc, limit=1)
+        if not items:
+            raise ValueError(f"Track not found on Tidal mirrors for ISRC {isrc}")
+        track_id = items[0].get('id')
+        if not track_id:
+            raise ValueError(f"Tidal ISRC search returned no track_id for {isrc}")
+        # TODO: verify result ISRC matches requested ISRC (deferred to follow-up)
+
+    temp_path = make_temp_download_path(str(track_id), 'tidal', quality)
+
+    try:
+        _, target = download_track_manifest(
+            track_id=str(track_id),
+            output_path=temp_path,
+            quality=quality,
+            url_list=get_squid_urls(),
+            usage='DOWNLOAD',
+            for_download=True,
+        )
+        return {'file_path': str(temp_path), 'source': target['url'].rstrip('/')}
+    except Exception:
+        cleanup_file(temp_path)
+        raise

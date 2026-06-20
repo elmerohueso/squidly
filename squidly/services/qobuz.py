@@ -269,6 +269,63 @@ def download_qobuz_track(
     }
 
 
+def download_track_by_isrc(
+    isrc: str,
+    quality: str,
+    *,
+    track_id: str | None = None,
+) -> dict:
+    """Download a track from Qobuz by ISRC. Returns {'file_path', 'source'}.
+
+    Iterates enabled Qobuz mirrors until one succeeds. Raises on failure.
+    """
+    from squidly.infrastructure.downloads import (
+        load_enabled_mirror_urls,
+        make_temp_download_path,
+        cleanup_file,
+    )
+
+    qobuz_mirrors = load_enabled_mirror_urls(mirror_type='qobuz', for_download=True)
+    if not qobuz_mirrors:
+        raise ValueError("No Qobuz mirrors available (need enabled, online, premium)")
+
+    qobuz_quality = quality
+    if qobuz_quality not in QOBUZ_SUPPORTED_QUALITIES:
+        logger.info("[QOBUZ] Qobuz does not support quality '%s', falling back to LOSSLESS", qobuz_quality)
+        qobuz_quality = 'LOSSLESS'
+
+    src_error = None
+    for mirror in qobuz_mirrors:
+        base_url = mirror['url']
+        temp_path = make_temp_download_path(isrc, 'qobuz', qobuz_quality)
+        try:
+            result = download_qobuz_track(
+                base_url=base_url,
+                isrc=isrc,
+                tidal_quality=qobuz_quality,
+                output_path=temp_path,
+            )
+            if result:
+                return {'file_path': temp_path, 'source': base_url}
+        except ValueError as e:
+            if 'not found in Qobuz catalog' in str(e):
+                cleanup_file(temp_path)
+                raise
+            logger.warning("[QOBUZ] Mirror %s failed: %s", base_url, e)
+            src_error = e
+            cleanup_file(temp_path)
+            continue
+        except Exception as e:
+            logger.warning("[QOBUZ] Mirror %s failed: %s", base_url, e)
+            src_error = e
+            cleanup_file(temp_path)
+            continue
+
+    if src_error:
+        raise ValueError(f"Failed to download from Qobuz (ISRC: {isrc}): {src_error}")
+    raise ValueError(f"Failed to download from Qobuz (ISRC: {isrc})")
+
+
 def validate_qobuz_endpoint(url: str, timeout: int = 5) -> dict:
     """Validate a Qobuz-DL mirror endpoint.
 

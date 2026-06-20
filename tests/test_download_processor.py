@@ -7,6 +7,7 @@ validates that extraction logic.
 """
 
 import os
+import tempfile
 from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
@@ -328,10 +329,15 @@ class TestDeezerMirrorSource:
     def test_download_attempted_when_isrc_available(self):
         """deezer_mirror downloads successfully when ISRC is present."""
         from squidly.jobs.processors.download import process_download_job
-        import squidly.jobs.processors.download as download_module
 
         track_with_isrc = self._make_track_with_isrc('USRC12345678')
         mirror_url = 'https://deezer-mirror.example.com'
+        temp_path = '/app/temp/temp_USRC12345678_deezer_mirror.flac'
+
+        mock_handler = MagicMock(return_value={
+            'file_path': temp_path,
+            'source': mirror_url,
+        })
 
         with patch.multiple(
             'squidly.jobs.processors.download',
@@ -351,66 +357,49 @@ class TestDeezerMirrorSource:
             with patch('squidly.jobs.processors.download.os.path.exists',
                        return_value=True):
                 with patch('squidly.jobs.processors.download.os.makedirs'):
-                    # Mock mirror loading at the source module
-                    with patch(
-                        'squidly.infrastructure.downloads.load_enabled_mirror_urls',
-                        return_value=[
-                            {'name': 'deezer-mirror-1', 'url': mirror_url},
-                        ],
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {'deezer_mirror': mock_handler},
                     ):
-                        # Mock the deezer_mirror download function at source
                         with patch(
-                            'squidly.services.deezer_mirror.download_deezer_mirror_track',
-                            return_value={
-                                'file_path': '/app/temp/temp_987654321_deezer_mirror.flac',
-                            },
-                        ) as mock_download:
-                            # Mock post-download infrastructure
+                            'squidly.infrastructure.downloads.detect_audio_format',
+                            return_value='flac',
+                        ):
                             with patch(
-                                'squidly.infrastructure.downloads.detect_audio_format',
-                                return_value='flac',
+                                'squidly.infrastructure.downloads.validate_audio_duration',
                             ):
                                 with patch(
-                                    'squidly.infrastructure.downloads.validate_audio_duration',
+                                    'squidly.infrastructure.downloads.add_id3_tags_to_file',
                                 ):
                                     with patch(
-                                        'squidly.infrastructure.downloads.add_id3_tags_to_file',
+                                        'squidly.jobs.processors.download.os.path.getsize',
+                                        return_value=2048,
                                     ):
                                         with patch(
-                                            'squidly.jobs.processors.download.os.path.getsize',
-                                            return_value=2048,
+                                            'squidly.jobs.processors.download.shutil.move',
                                         ):
                                             with patch(
-                                                'squidly.jobs.processors.download.shutil.move',
+                                                'squidly.jobs.processors.download.queue_pending_playlist_addition',
                                             ):
                                                 with patch(
-                                                    'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                                                    'builtins.open',
+                                                    mock_open(
+                                                        read_data=b'fLaC\x00\x00\x00\x00'
+                                                    ),
                                                 ):
-                                                    # Mock open() for the format-detection
-                                                    # block inside the deezer_mirror branch
-                                                    with patch(
-                                                        'builtins.open',
-                                                        mock_open(
-                                                            read_data=b'fLaC\x00\x00\x00\x00'
-                                                        ),
-                                                    ):
-                                                        result = process_download_job(
-                                                            'test-job-isrc',
-                                                            {
-                                                                'trackId': '987654321',
-                                                                'downloadQuality': 'LOSSLESS',
-                                                                'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
-                                                                'ignore_matches': False,
-                                                                'plex_playlist': 'Test Playlist',
-                                                            },
-                                                        )
+                                                    result = process_download_job(
+                                                        'test-job-isrc',
+                                                        {
+                                                            'trackId': '987654321',
+                                                            'downloadQuality': 'LOSSLESS',
+                                                            'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                                            'ignore_matches': False,
+                                                            'plex_playlist': 'Test Playlist',
+                                                        },
+                                                    )
 
-        # Verify the mirror download was called correctly
-        mock_download.assert_called_once()
-        call_kwargs = mock_download.call_args[1]
-        assert call_kwargs['isrc'] == 'USRC12345678'
-        assert call_kwargs['base_url'] == mirror_url
-        assert '/app/temp/' in call_kwargs['output_path']
+        # Verify the handler was called with ISRC and quality
+        mock_handler.assert_called_once_with('USRC12345678', 'LOSSLESS')
 
         # Verify overall success
         assert result['stages']['downloaded'] == 'done'
@@ -488,31 +477,252 @@ class TestDeezerMirrorSource:
             with patch('squidly.jobs.processors.download.os.path.exists',
                        return_value=True):
                 with patch('squidly.jobs.processors.download.os.makedirs'):
-                    # Return empty list for deezer mirrors, then set up tidal
+                    # Return empty list for deezer mirrors, then tidal fails too
                     with patch(
                         'squidly.infrastructure.downloads.load_enabled_mirror_urls',
                         return_value=[],
                     ):
                         with patch(
-                            'squidly.services.deezer_mirror.download_deezer_mirror_track',
+                            'squidly.infrastructure.downloads.download_track_manifest',
+                            side_effect=ValueError(
+                                "No configured mirror"
+                            ),
+                        ):
+                            from squidly.infrastructure.downloads import (
+                                PermanentDownloadError,
+                            )
+                            with pytest.raises(PermanentDownloadError):
+                                process_download_job(
+                                    'test-job-fallback',
+                                    {
+                                        'trackId': '987654321',
+                                        'downloadQuality': 'LOSSLESS',
+                                        'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                        'ignore_matches': False,
+                                        'plex_playlist': 'Test Playlist',
+                                    },
+                                )
+
+    def test_format_mismatch_triggers_fallback(self):
+        """If deezer_mirror returns MP3 instead of FLAC, the dispatch should
+        raise ValueError to trigger fallback to the next source (NOT silently
+        accept the MP3).
+
+        This is the primary bug fix test: the old code accepted any HTTP 200
+        regardless of actual audio format.
+        """
+        import os
+        import tempfile
+        from squidly.jobs.processors.download import process_download_job
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+
+        # Create temp files with real magic bytes
+        mp3_fd, mp3_path = tempfile.mkstemp(suffix='.flac')  # deezer_mirror writes .flac but content is MP3
+        flac_fd, flac_path = tempfile.mkstemp(suffix='.flac')
+        try:
+            # Write MP3 ID3 header to the "deezer_mirror" file
+            os.write(mp3_fd, b'ID3' + b'\x00' * 100)
+            # Write real FLAC header to the "tidal" file
+            os.write(flac_fd, b'fLaC' + b'\x00' * 100)
+        finally:
+            os.close(mp3_fd)
+            os.close(flac_fd)
+
+        # deezer_mirror handler returns the MP3 file
+        mock_deezer_handler = MagicMock(return_value={
+            'file_path': mp3_path,
+            'source': 'https://deezer-mirror.example.com',
+        })
+        # tidal handler returns the FLAC file
+        mock_tidal_handler = MagicMock(return_value={
+            'file_path': flac_path,
+            'source': 'https://tidal-mirror.example.com',
+        })
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'deezer_mirror,tidal',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {
+                            'deezer_mirror': mock_deezer_handler,
+                            'tidal': mock_tidal_handler,
+                        },
+                    ):
+                        with patch(
+                            'squidly.infrastructure.downloads.validate_audio_duration',
                         ):
                             with patch(
-                                'squidly.jobs.processors.download.downloads.download_track_manifest',
-                                side_effect=ValueError(
-                                    "No configured mirror"
-                                ),
+                                'squidly.infrastructure.downloads.add_id3_tags_to_file',
                             ):
-                                from squidly.infrastructure.downloads import (
-                                    PermanentDownloadError,
-                                )
-                                with pytest.raises(PermanentDownloadError):
-                                    process_download_job(
-                                        'test-job-fallback',
-                                        {
-                                            'trackId': '987654321',
-                                            'downloadQuality': 'LOSSLESS',
-                                            'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
-                                            'ignore_matches': False,
-                                            'plex_playlist': 'Test Playlist',
-                                        },
-                                    )
+                                with patch(
+                                    'squidly.jobs.processors.download.shutil.move',
+                                ):
+                                    with patch(
+                                        'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                                    ):
+                                        result = process_download_job(
+                                            'test-job-format-mismatch',
+                                            {
+                                                'trackId': '987654321',
+                                                'downloadQuality': 'LOSSLESS',
+                                                'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                                'ignore_matches': False,
+                                                'plex_playlist': 'Test Playlist',
+                                            },
+                                        )
+
+        # deezer_mirror was called first
+        mock_deezer_handler.assert_called_once()
+        # tidal was called as fallback after deezer_mirror format mismatch
+        mock_tidal_handler.assert_called_once()
+        # Overall success via tidal
+        assert result['stages']['downloaded'] == 'done'
+        assert result['mirror_type'] == 'tidal'
+
+
+# =============================================================================
+# Registry pattern tests
+# =============================================================================
+
+
+class TestDownloadSourceRegistry:
+    """Tests for the _DOWNLOAD_SOURCE_HANDLERS registry and dispatch."""
+
+    @staticmethod
+    def _make_track_with_isrc(isrc="USRC12345678"):
+        track = _make_mock_hifi_track_object()
+        track['track']['isrc'] = isrc
+        return track
+
+    def test_dispatch_calls_correct_handler(self):
+        """Verify each registered source calls its specific handler function."""
+        from squidly.jobs.processors.download import (
+            process_download_job,
+            _DOWNLOAD_SOURCE_HANDLERS,
+        )
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+        flac_fd, flac_path = tempfile.mkstemp(suffix='.flac')
+        try:
+            os.write(flac_fd, b'fLaC' + b'\x00' * 100)
+        finally:
+            os.close(flac_fd)
+
+        mock_handler = MagicMock(return_value={
+            'file_path': flac_path,
+            'source': 'https://example.com',
+        })
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'tidal',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {'tidal': mock_handler},
+                    ):
+                        with patch(
+                            'squidly.infrastructure.downloads.validate_audio_duration',
+                        ):
+                            with patch(
+                                'squidly.infrastructure.downloads.add_id3_tags_to_file',
+                            ):
+                                with patch(
+                                    'squidly.jobs.processors.download.shutil.move',
+                                ):
+                                    with patch(
+                                        'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                                    ):
+                                        process_download_job(
+                                            'test-job-dispatch',
+                                            {
+                                                'trackId': '987654321',
+                                                'downloadQuality': 'LOSSLESS',
+                                                'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                                'ignore_matches': False,
+                                                'plex_playlist': 'Test Playlist',
+                                            },
+                                        )
+
+        mock_handler.assert_called_once()
+
+    def test_unknown_source_logs_and_skips(self):
+        """A source not in the registry logs a warning and continues to next source."""
+        from squidly.jobs.processors.download import process_download_job
+        from squidly.infrastructure.downloads import PermanentDownloadError
+
+        track_with_isrc = self._make_track_with_isrc('USRC12345678')
+
+        # Patch the download_sources parsing to include an unknown source
+        # by using a download_source setting that passes the filter.
+        # The filter only allows ('tidal', 'qobuz', 'deezer', 'deezer_mirror'),
+        # so unknown sources are filtered out at the parsing stage.
+        # Instead, test that when registry is empty for a valid source, it skips.
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=[]),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'tidal',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    # Remove tidal from registry to simulate unknown source
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {},
+                        clear=True,
+                    ):
+                        with pytest.raises(PermanentDownloadError) as excinfo:
+                            process_download_job(
+                                'test-job-unknown',
+                                {
+                                    'trackId': '987654321',
+                                    'downloadQuality': 'LOSSLESS',
+                                    'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                    'ignore_matches': False,
+                                    'plex_playlist': 'Test Playlist',
+                                },
+                            )
+                        # Should fail because no handlers available
+                        assert 'failed' in str(excinfo.value).lower() or 'unknown' in str(excinfo.value).lower()

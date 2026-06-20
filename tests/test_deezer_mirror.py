@@ -41,11 +41,13 @@ class TestValidateDeezerMirrorEndpoint:
         assert result["responseTime"] >= 0
         assert result["lastChecked"] is not None
         assert result["lastChecked"].endswith("Z")
-        # Verify URL construction
-        mock_get.assert_called_once_with(
-            "https://deezer-mirror.example.com/health",
-            timeout=5,
-        )
+        # Verify URL construction and headers
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert call_args[0][0] == "https://deezer-mirror.example.com/health"
+        assert call_args[1]["timeout"] == 5
+        assert call_args[1]["headers"]["Origin"] == "https://monochrome.tf"
+        assert call_args[1]["headers"]["Referer"] == "https://monochrome.tf/"
 
     @patch("squidly.services.deezer_mirror.requests.get")
     def test_health_check_ignores_json_body(self, mock_get):
@@ -124,10 +126,10 @@ class TestValidateDeezerMirrorEndpoint:
 
         validate_deezer_mirror_endpoint("https://deezer-mirror.example.com/")
 
-        mock_get.assert_called_once_with(
-            "https://deezer-mirror.example.com/health",
-            timeout=5,
-        )
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert call_args[0][0] == "https://deezer-mirror.example.com/health"
+        assert call_args[1]["timeout"] == 5
 
     @patch("squidly.services.deezer_mirror.requests.get")
     def test_general_request_exception(self, mock_get):
@@ -201,8 +203,8 @@ class TestDownloadDeezerMirrorTrack:
                 )
 
         call_headers = mock_get.call_args[1]["headers"]
-        assert call_headers["Origin"] == "https://deezer.com"
-        assert call_headers["Referer"] == "https://deezer.com/"
+        assert call_headers["Origin"] == "https://monochrome.tf"
+        assert call_headers["Referer"] == "https://monochrome.tf/"
 
     @patch("squidly.services.deezer_mirror.requests.get")
     def test_custom_timeout_is_passed(self, mock_get):
