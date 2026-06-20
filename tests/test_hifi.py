@@ -16,6 +16,7 @@ os.environ.setdefault("SQUIDLY_LOG_DIR_OVERRIDE", "/tmp/squidly_test_logs")
 from squidly.services.hifi import (
     _build_hifi_album_object_from_artist_item,
     _get_hifi_album_dedupe_key,
+    _get_hifi_audio_quality_rank,
     get_hifi_artist_object,
 )
 
@@ -230,6 +231,143 @@ class TestGetHifiAlbumDedupeKey:
         key = _get_hifi_album_dedupe_key(album)
         assert key is not None
         assert key[-1] is None
+
+
+# ---------------------------------------------------------------------------
+# _get_hifi_audio_quality_rank
+# ---------------------------------------------------------------------------
+
+def test_audio_quality_rank_atmos_below_lossless():
+    """Atmos is an immersive derivative; must rank below LOSSLESS for dedup correctness.
+
+    Regression test: Tidal has multiple entries for the same album (e.g., a 1999
+    LOSSLESS stereo master and a 2024 Dolby Atmos reissue). They share the dedup
+    key in _get_hifi_album_dedupe_key, so the rank function must rank the Atmos
+    reissue below LOSSLESS to prevent picking the Atmos entry — which has ISRCs
+    the other download sources don't carry.
+    """
+    # --- ordering ---
+    assert _get_hifi_audio_quality_rank('DOLBY_ATMOS') < _get_hifi_audio_quality_rank('LOSSLESS')
+    assert _get_hifi_audio_quality_rank('LOSSLESS') < _get_hifi_audio_quality_rank('HI_RES_LOSSLESS')
+    assert _get_hifi_audio_quality_rank('HIGH') < _get_hifi_audio_quality_rank('LOSSLESS')
+    assert _get_hifi_audio_quality_rank('LOW') < _get_hifi_audio_quality_rank('HIGH')
+
+    # --- exact rank values ---
+    assert _get_hifi_audio_quality_rank('DOLBY_ATMOS') == 0
+    assert _get_hifi_audio_quality_rank('LOW') == 1
+    assert _get_hifi_audio_quality_rank('HIGH') == 2
+    assert _get_hifi_audio_quality_rank('LOSSLESS') == 3
+    assert _get_hifi_audio_quality_rank('HI_RES_LOSSLESS') == 4
+
+    # --- alias spellings must rank the same ---
+    assert _get_hifi_audio_quality_rank('HIRES_LOSSLESS') == _get_hifi_audio_quality_rank('HI_RES_LOSSLESS')
+    assert _get_hifi_audio_quality_rank('HIRES_LOSSLESS') == 4
+
+    # --- unknown / missing values default to 0 ---
+    assert _get_hifi_audio_quality_rank('UNKNOWN') == 0
+    assert _get_hifi_audio_quality_rank('') == 0
+    assert _get_hifi_audio_quality_rank(None) == 0
+
+    # --- case insensitivity (function calls .upper()) ---
+    assert _get_hifi_audio_quality_rank('dolby_atmos') == 0
+    assert _get_hifi_audio_quality_rank('lossless') == 3
+    assert _get_hifi_audio_quality_rank('hi_res_lossless') == 4
+    assert _get_hifi_audio_quality_rank('Lossless') == 3
+
+    # --- whitespace tolerance (function calls .strip()) ---
+    assert _get_hifi_audio_quality_rank('  LOSSLESS  ') == 3
+    assert _get_hifi_audio_quality_rank(' DOLBY_ATMOS ') == 0
+    assert _get_hifi_audio_quality_rank('\tHI_RES_LOSSLESS\n') == 4
+
+
+def test_album_dedup_prefers_lossless_over_atmos_reissue():
+    """Regression: a 2024 Atmos reissue must not replace the 1999 LOSSLESS original.
+
+    Both albums share the dedup key (title, version, releaseDate, numberOfTracks,
+    numberOfDiscs, artists, explicit, type). After the fix, the LOSSLESS one wins
+    because _get_hifi_audio_quality_rank('LOSSLESS') > _get_hifi_audio_quality_rank('DOLBY_ATMOS').
+    """
+    lossless_album = _make_album_item({
+        'id': 1001,
+        'title': 'Rage Against the Machine',
+        'releaseDate': '1992-11-03',
+        'numberOfTracks': 10,
+        'numberOfVolumes': 1,
+        'mediaMetadata': {'tags': ['LOSSLESS']},
+    })
+    atmos_reissue = _make_album_item({
+        'id': 9999,
+        'title': 'Rage Against the Machine',
+        'releaseDate': '1992-11-03',
+        'numberOfTracks': 10,
+        'numberOfVolumes': 1,
+        'mediaMetadata': {'tags': ['DOLBY_ATMOS']},
+    })
+
+    # Verify both produce the same dedup key
+    lossless_obj = _build_hifi_album_object_from_artist_item(lossless_album)
+    atmos_obj = _build_hifi_album_object_from_artist_item(atmos_reissue)
+    assert _get_hifi_album_dedupe_key(lossless_obj) == _get_hifi_album_dedupe_key(atmos_obj)
+
+    # Verify the quality extraction differs
+    assert lossless_obj['maxAudioQuality'] == 'LOSSLESS'
+    assert atmos_obj['maxAudioQuality'] == 'DOLBY_ATMOS'
+
+    # Run the dedup logic (mirrors get_hifi_artist_object lines 807-820)
+    album_objects = [lossless_obj, atmos_obj]
+    deduped_albums = {}
+    for album_object in album_objects:
+        key = _get_hifi_album_dedupe_key(album_object)
+        existing = deduped_albums.get(key)
+        if existing is None:
+            deduped_albums[key] = album_object
+            continue
+        current_rank = _get_hifi_audio_quality_rank(album_object.get('maxAudioQuality'))
+        existing_rank = _get_hifi_audio_quality_rank(existing.get('maxAudioQuality'))
+        if current_rank > existing_rank:
+            deduped_albums[key] = album_object
+
+    survivors = list(deduped_albums.values())
+    assert len(survivors) == 1
+    assert survivors[0]['id'] == 1001  # LOSSLESS original wins
+    assert survivors[0]['maxAudioQuality'] == 'LOSSLESS'
+
+
+def test_album_dedup_prefers_hires_over_lossless():
+    """HI_RES_LOSSLESS should beat LOSSLESS in dedup (both are preferred over Atmos)."""
+    hires_album = _make_album_item({
+        'id': 2001,
+        'title': 'Some Album',
+        'releaseDate': '2024-01-01',
+        'mediaMetadata': {'tags': ['HIRES_LOSSLESS']},
+    })
+    lossless_album = _make_album_item({
+        'id': 2002,
+        'title': 'Some Album',
+        'releaseDate': '2024-01-01',
+        'mediaMetadata': {'tags': ['LOSSLESS']},
+    })
+
+    hires_obj = _build_hifi_album_object_from_artist_item(hires_album)
+    lossless_obj = _build_hifi_album_object_from_artist_item(lossless_album)
+    assert _get_hifi_album_dedupe_key(hires_obj) == _get_hifi_album_dedupe_key(lossless_obj)
+
+    # Dedup: LOSSLESS first, then HI_RES — HI_RES should replace it
+    deduped = {}
+    for album_object in [lossless_obj, hires_obj]:
+        key = _get_hifi_album_dedupe_key(album_object)
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = album_object
+            continue
+        current_rank = _get_hifi_audio_quality_rank(album_object.get('maxAudioQuality'))
+        existing_rank = _get_hifi_audio_quality_rank(existing.get('maxAudioQuality'))
+        if current_rank > existing_rank:
+            deduped[key] = album_object
+
+    survivors = list(deduped.values())
+    assert len(survivors) == 1
+    assert survivors[0]['id'] == 2001  # HI_RES_LOSSLESS wins
 
 
 # ---------------------------------------------------------------------------

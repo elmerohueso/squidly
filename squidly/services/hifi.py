@@ -693,12 +693,20 @@ def _build_normalized_hifi_track_object(track_payload: Any) -> Dict[str, Any]:
 
 
 def _get_hifi_audio_quality_rank(quality: Any) -> int:
+    """Return a numeric preference rank for audio quality.
+
+    Higher rank = more-preferred format for deduplication and filtering.
+    DOLBY_ATMOS is ranked lowest because it is an immersive derivative
+    format, not a higher-fidelity tier; users asking for lossless stereo
+    should get LOSSLESS/HI_RES results instead.
+    """
     quality_rank = {
-        'DOLBY_ATMOS': 5,
         'HI_RES_LOSSLESS': 4,
+        'HIRES_LOSSLESS': 4,
         'LOSSLESS': 3,
         'HIGH': 2,
         'LOW': 1,
+        'DOLBY_ATMOS': 0,
     }
     return quality_rank.get(str(quality).strip().upper(), 0)
 

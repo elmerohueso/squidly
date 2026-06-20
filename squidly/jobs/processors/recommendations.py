@@ -263,6 +263,10 @@ def process_recommendation_job(job_id, payload):
     settings = get_download_settings()
 
     # Step 3: Quality filter
+    # NOTE: rank is now a format preference, not a minimum tier. The user's
+    # `quality` setting is restricted to LOSSLESS/HIGH/LOW (see settings.py),
+    # so DOLBY_ATMOS tracks (rank 0) are intentionally filtered out for every
+    # user — they should not appear in recommendations regardless of quality.
     min_quality = settings.get('quality', 'LOSSLESS')
     min_rank = _get_hifi_audio_quality_rank(min_quality)
     quality_filtered = []
