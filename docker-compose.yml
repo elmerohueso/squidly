@@ -17,11 +17,15 @@ services:
     container_name: squidly
     env_file:
       - .env
+    environment:
+      - TZ=UTC
     ports:
       - "5000:5000"
     volumes:
       # Mount downloads folder for track downloads
       - ./downloads:/downloads
+      # Mount logs folder for persistent logging
+      - ./logs:/logs
     depends_on:
       squidly-postgres:
         condition: service_healthy

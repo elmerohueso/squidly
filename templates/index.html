@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,234 +8,622 @@
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
+
 <body>
-    <div class="container">
-        <header>
-            <div class="header-content">
-                <div class="header-actions">
-                    <button id="settingsButton" class="settings-button" title="Settings">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="3"></circle>
-                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .7.4 1.32 1.02 1.6.31.14.64.22.98.22H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                        </svg>
-                        <span>Settings</span>
-                    </button>
-                    <button id="jobsButton" class="jobs-button" title="Jobs">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="4" y1="6" x2="20" y2="6"></line>
-                            <line x1="4" y1="12" x2="20" y2="12"></line>
-                            <line x1="4" y1="18" x2="20" y2="18"></line>
-                        </svg>
-                        <span>Jobs</span>
-                    </button>
-                    <button id="statusButton" class="status-button" title="View mirror status">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <line x1="2" y1="12" x2="22" y2="12"></line>
-                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                        </svg>
-                        <span class="status-count">0/0</span>
-                    </button>
+    <div id="plexLoginOnlyContainer" class="plex-login-only-container" style="display: none;">
+        <div class="plex-login-only-card">
+            <h2 style="margin-bottom: 0.75rem;">Connect to Plex</h2>
+
+            <button id="plexLoginOnlyButton" class="save-button">Login to Plex</button>
+
+            <div id="plexLoginOnlyPinContainer" style="display:none; margin-top: 1rem; width: 100%;">
+                <label class="settings-label">Plex PIN</label>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                    <span id="plexLoginOnlyPinDisplay"
+                        style="font-size: 1.25rem; font-weight: bold; letter-spacing: 0.15em;"></span>
                 </div>
-                <div>
-                    <h1 class="logo">Squidly</h1>
-                </div>
+                <p class="settings-hint" style="margin-top: 0.5rem;">Go to <a href="https://plex.tv/link"
+                        target="_blank" style="color: var(--accent-primary); text-decoration: none;">plex.tv/link</a>
+                    and enter the PIN above.</p>
+                <p class="settings-note" id="plexLoginOnlyPinStatus" style="margin-top: 0.5rem;"></p>
             </div>
-        </header>
-        
-        <main>
-            <div class="search-container">
-                <select id="searchType" class="search-type-select">
-                    <option value="s">Tracks</option>
-                    <option value="a">Artists</option>
-                    <option value="al">Albums</option>
-                    <option value="p">Playlists</option>
-                    <option value="trackid">Track ID</option>
-                    <option value="lastfm">Last.fm Playlist</option>
-                    <option value="youtube_music">YouTube Music Playlist</option>
-                    <option value="listenbrainz">ListenBrainz Playlists</option>
+
+            <div id="plexLoginOnlyLibraryContainer"
+                style="display:none; flex-direction: column; gap: 0.5rem; margin-top: 1rem; width: 100%;">
+                <label class="settings-label" for="plexLoginOnlyLibraryName">Music Library</label>
+                <select id="plexLoginOnlyLibraryName" class="settings-input" style="width: 100%;">
+                    <option value="">Select a library...</option>
                 </select>
-                <input 
-                    type="text" 
-                    id="searchInput" 
-                    class="search-bar" 
-                    placeholder="Search for tracks..."
-                    autocomplete="off"
-                />
-                <button id="searchButton" class="search-button">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <path d="m21 21-4.35-4.35"></path>
+                <button id="plexLoginOnlySaveButton" class="save-button"
+                    style="width: fit-content; margin: 0 auto; display: block;">Save Library</button>
+            </div>
+
+            <div id="plexLoginOnlyUserContainer"
+                style="display:none; flex-direction: column; gap: 0.5rem; margin-top: 1rem; width: 100%;">
+                <label class="settings-label" for="plexLoginOnlyUserList">Select Plex User</label>
+                <div id="plexLoginOnlyUserList" class="plex-login-only-user-list"
+                    style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+            </div>
+        </div>
+    </div>
+    <div id="globalToast" class="global-toast" style="display: none;"></div>
+    <div class="app-wrapper">
+        <!-- Left Sidebar -->
+        <aside class="sidebar" id="leftSidebar">
+            <div class="sidebar-header">
+                <a href="/" class="sidebar-logo">
+                    <img src="{{ url_for('static', filename='favicon.svg') }}" alt="Squidly">
+                    <span>Squidly</span>
+                </a>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <h3 class="nav-section-title">Browse</h3>
+                    <ul class="nav-items">
+                        <li><a href="#" class="nav-item active" data-page="explore">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="1"></circle>
+                                    <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0"></path>
+                                    <path d="M3.6 9h16.8M3.6 15h16.8"></path>
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                </svg>
+                                <span>Explore</span>
+                            </a></li>
+                        <li><a href="#" class="nav-item" data-page="library">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2"></path>
+                                </svg>
+                                <span>Library</span>
+                            </a></li>
+                    </ul>
+                </div>
+
+                <div class="nav-section">
+                    <h3 class="nav-section-title">Playlists</h3>
+                    <ul class="nav-items" id="playlistNavItems">
+                        <!-- Dynamically populated playlists -->
+                    </ul>
+                </div>
+
+                <div class="nav-section nav-section-bottom">
+                    <ul class="nav-items">
+                        <li><a href="#" class="nav-item" data-page="settings">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path
+                                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .7.4 1.32 1.02 1.6.31.14.64.22.98.22H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+                                    </path>
+                                </svg>
+                                <span>Settings</span>
+                            </a></li>
+                        <li><a href="#" class="nav-item" data-page="mirrors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                                    <path
+                                        d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                                    </path>
+                                </svg>
+                                <span>Source Mirrors</span>
+                            </a></li>
+                        <li><a href="#" class="nav-item" data-page="matches">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M9 11l3 3L22 4"></path>
+                                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                                </svg>
+                                <span>Match Review</span>
+                            </a></li>
+                        <li><a href="#" class="nav-item" data-page="history">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                                <span>Listen History</span>
+                            </a></li>
+                        <li><a href="#" class="nav-item" data-page="jobs">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <line x1="4" y1="6" x2="20" y2="6"></line>
+                                    <line x1="4" y1="12" x2="20" y2="12"></line>
+                                    <line x1="4" y1="18" x2="20" y2="18"></line>
+                                </svg>
+                                <span>Jobs</span>
+                            </a></li>
+                    </ul>
+                </div>
+            </nav>
+        </aside>
+        <div id="mobileMenuOverlay" class="mobile-menu-overlay"></div>
+
+        <!-- Main Content -->
+        <div class="main-wrapper">
+            <!-- Top Navigation Bar -->
+            <header class="top-bar">
+                <button id="mobileMenuToggle" class="mobile-menu-toggle" aria-label="Toggle navigation menu">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
                     </svg>
                 </button>
-            </div>
-            
-            <div class="plex-playlist-container" id="plexPlaylistContainer">
-                <div id="plexUserDropdownContainer" class="plex-user-row">
-                    <label class="plex-playlist-label">Plex User:</label>
-                    <select id="plexUserSelect" class="search-type-select" style="min-width: 12rem;"></select>
+                <div class="top-bar-left">
+                    <h2>Explore</h2>
                 </div>
-                <div id="plexPlaylistRow" class="plex-playlist-row">
-                    <label class="plex-playlist-label">Plex Playlist:</label>
-                    <select id="plexPlaylistOptions" class="search-type-select plex-playlist-select" title="No Playlist">
-                        <option value="">No Playlist</option>
-                    </select>
-                    <input type="text" id="plexPlaylistName" class="search-type-select plex-playlist-input" title="Enter a new playlist name" style="display: none;">
-                    <button type="button" id="plexPlaylistBack" class="plex-playlist-back" style="display: none;" title="Back to existing playlists" aria-label="Back to existing playlists">←</button>
-                </div>
-            </div>
-            
-            <div id="results" class="results-container"></div>
-        </main>
-        
-        <footer>
-        </footer>
-    </div>
-    
-    <!-- Status Flyout -->
-    <div id="statusFlyout" class="status-flyout">
-        <div class="flyout-header">
-            <h2>Mirror Status</h2>
-            <button id="closeFlyout" class="close-button">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
-        </div>
-        <div class="flyout-summary" id="flyoutSummary">
-            <div class="summary-stat">
-                <span class="stat-value" id="totalCount">-</span>
-                <span class="stat-label">Total</span>
-            </div>
-            <div class="summary-stat online">
-                <span class="stat-value" id="onlineCount">-</span>
-                <span class="stat-label">Online</span>
-            </div>
-            <div class="summary-stat offline">
-                <span class="stat-value" id="offlineCount">-</span>
-                <span class="stat-label">Offline</span>
-            </div>
-        </div>
-        <div class="flyout-content" id="flyoutContent">
-            <p class="loading-text">Loading status...</p>
-        </div>
-    </div>
-    <div id="flyoutOverlay" class="flyout-overlay"></div>
-
-    <!-- Jobs Flyout -->
-    <div id="jobsFlyout" class="jobs-flyout">
-        <div class="flyout-header">
-            <h2>Jobs</h2>
-            <button id="closeJobs" class="close-button">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
-        </div>
-        <div class="jobs-filter">
-            <label for="jobsFilter">Show</label>
-            <select id="jobsFilter" class="jobs-filter-select">
-                <option value="incomplete">Incomplete</option>
-                <option value="complete">Complete</option>
-                <option value="completed_with_errors">Completed with errors</option>
-                <option value="failed">Failed</option>
-            </select>
-        </div>
-        <div class="jobs-actions">
-            <button type="button" id="cancelPendingJobs" class="jobs-bulk-button">Cancel all incomplete</button>
-            <button type="button" id="retryAllJobs" class="jobs-bulk-button hidden">Retry all</button>
-        </div>
-        <div class="jobs-content" id="jobsContent">
-            <p class="loading-text">Loading jobs...</p>
-        </div>
-        <div class="jobs-pagination" id="jobsPagination"></div>
-    </div>
-    <div id="jobsOverlay" class="flyout-overlay"></div>
-
-    <!-- Settings Flyout -->
-    <div id="settingsFlyout" class="settings-flyout">
-        <div class="flyout-header">
-            <h2>Download Settings</h2>
-            <button id="closeSettings" class="close-button">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
-        </div>
-        <div class="settings-content">
-            <div class="settings-section">
-                <h3>Format</h3>
-                <div class="format-toggle" role="radiogroup" aria-label="Download format">
-                    <label class="toggle-option">
-                        <input type="radio" name="downloadFormat" value="original" id="formatOriginal">
-                        <span>FLAC</span>
-                    </label>
-                    <label class="toggle-option">
-                        <input type="radio" name="downloadFormat" value="mp3" id="formatMp3">
-                        <span>MP3</span>
-                    </label>
-                </div>
-            </div>
-            <div class="settings-section">                
-                <h3>File Naming</h3>
-                <label class="settings-label" for="fileNamingAlbum">File Naming</label>
-                <input type="text" id="fileNamingAlbum" class="settings-input" placeholder="{artist}/{album}/{track} - {title}.{ext}">
-                <p class="settings-hint">Folder: /downloads</p>
-                <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
-
-                <label class="settings-label" for="jobsRefreshIntervalSeconds" style="margin-top: 1rem;">Jobs Refresh Interval (seconds)</label>
-                <input type="number" id="jobsRefreshIntervalSeconds" class="settings-input" min="1" step="1" value="30" placeholder="30">
-                <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
-            </div>
-            <div class="settings-section">
-                <div class="settings-section-title">ListenBrainz</div>
-                <label class="settings-label" for="listenbrainzToken">User Token</label>
-                <input type="password" id="listenbrainzToken" class="settings-input" placeholder="Your ListenBrainz user token">
-                <p class="settings-hint">Get your token from your <a href="https://listenbrainz.org/profile/" target="_blank" style="color: var(--accent-primary); text-decoration: none;">ListenBrainz profile</a></p>
-                <button id="saveLbConfig" class="save-button" style="margin-top: 1rem;">Save ListenBrainz Config</button>
-                <p class="settings-note" id="lbConfigStatus"></p>
-            </div>
-            <div class="settings-section">
-                <div class="settings-section-title">Plex Integration</div>
-                <div id="plexConnectedStatus" style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;"></div>
-                <label class="settings-label" for="ignoreMatchesCheckbox" style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
-                    <input type="checkbox" id="ignoreMatchesCheckbox">
-                    <span>Always re-download track (ignore existing Plex matches)</span>
-                </label>
-                <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;">
-                    <button id="plexLoginButton" class="save-button">Login to Plex</button>
-                    <button id="plexClearCredentialsButton" class="save-button" style="background: #b00020; color: #fff; display: none;">Clear credentials</button>
-                </div>
-                <div id="plexPinContainer" style="display:none; margin-bottom: 1rem;">
-                    <label class="settings-label">Plex PIN</label>
-                    <div style="display: flex; align-items: center; gap: 1rem;">
-                        <span id="plexPinDisplay" style="font-size: 1.5rem; font-weight: bold; letter-spacing: 0.2em;"></span>
-                        <button id="plexPinCopy" type="button" class="save-button" style="padding: 0.2rem 0.7rem; font-size: 1rem;">Copy</button>
+                <div class="top-bar-right">
+                    <div class="search-container-compact">
+                        <select id="searchType" class="search-type-select-compact">
+                            <option value="s">Tracks</option>
+                            <option value="a">Artists</option>
+                            <option value="al">Albums</option>
+                        </select>
+                        <input type="text" id="searchInput" class="search-bar-compact" placeholder="Search..."
+                            name="search" autocomplete="search" />
+                        <button id="searchButton" class="search-button-compact">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                        </button>
                     </div>
-                    <p class="settings-hint">Go to <a href="https://plex.tv/link" target="_blank" style="color: var(--accent-primary); text-decoration: none;">plex.tv/link</a> and enter the PIN above.</p>
-                    <p class="settings-note" id="plexPinStatus"></p>
+
+                    <button id="userButton" class="user-selector-button" title="Select Plex User">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                        <span id="userButtonText">User</span>
+                    </button>
                 </div>
-                <div id="plexLibraryConfig" style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 1rem; margin-bottom: 0.75rem;">
-                    <label class="settings-label" for="plexLibraryName">Music Library</label>
-                    <select id="plexLibraryName" class="settings-input" style="width: 100%;">
-                        <option value="">Select a library...</option>
-                    </select>
-                    <button id="savePlexConfig" class="save-button" style="white-space: nowrap; width: fit-content;">Save</button>
+            </header>
+
+            <!-- User Selection Dropdown -->
+            <div id="userDropdownModal" class="user-dropdown-modal" style="display: none;">
+                <div class="user-dropdown-content">
+                    <ul class="user-dropdown-list" id="userDropdownList">
+                        <li class="user-dropdown-loading">Loading users...</li>
+                    </ul>
                 </div>
-                <label class="settings-label" for="plexSyncIntervalHours" style="margin-top: 1rem;">Library Sync Interval (hours)</label>
-                <input type="number" id="plexSyncIntervalHours" class="settings-input" min="1" step="1" value="24" placeholder="24">
-                <p class="settings-hint">Default: 24 hours</p>
-                <p class="settings-note" id="plexConfigStatus"></p>
-                <button id="startPlexSync" class="save-button" style="margin-top: 1rem;">Start Plex Library Sync Now</button>
-                <p class="settings-note" id="plexSyncStatus"></p>
             </div>
+            <div id="userDropdownOverlay" class="user-dropdown-overlay" style="display: none;"></div>
+
+            <!-- Page Container -->
+            <main class="main-content">
+                <!-- Explore Page -->
+                <div class="page active" id="explorePage" data-page="explore">
+                    <div id="exploreBreadcrumb" class="library-breadcrumb" style="display: none;"></div>
+                    <div id="results" class="results-container"></div>
+                </div>
+
+                <!-- Library Page -->
+                <div class="page" id="libraryPage" data-page="library">
+                    <div id="libraryBreadcrumb" class="library-breadcrumb" style="display: none;"></div>
+                    <div id="libraryResults" class="results-container">
+                        <div class="library-placeholder">
+                            <p>Loading Plex library...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div class="page" id="settingsPage" data-page="settings">
+                    <h2>Settings</h2>
+                    <div class="settings-content">
+                        <div class="settings-section" id="downloadsSettings">
+                            <h3>Downloads</h3>
+
+                            <div class="settings-section-title">Download Sources</div>
+                            <div class="settings-section-title">Source Priority</div>
+                            <div id="downloadSourceList" class="download-source-list">
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="tidal" id="downloadSourceTidal" checked>
+                                    <span>Tidal (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="tidal" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="tidal" title="Move down">↓</button>
+                                </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="qobuz" id="downloadSourceQobuz">
+                                    <span>Qobuz (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="qobuz" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="qobuz" title="Move down">↓</button>
+                                </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="deezer" id="downloadSourceDeezer">
+                                    <span>Deezer (Direct Download)</span>
+                                    <button type="button" class="source-move-up" data-source="deezer" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="deezer" title="Move down">↓</button>
+                                </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="deezer_mirror" id="downloadSourceDeezerMirror">
+                                    <span>Deezer (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="deezer_mirror" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="deezer_mirror" title="Move down">↓</button>
+                                </label>
+                            </div>
+
+                            <div class="settings-section-title">Deezer ARL</div>
+                            <label class="settings-label" for="deezerArl">ARL Cookie (for Direct Download)</label>
+                            <input type="password" id="deezerArl" class="settings-input"
+                                placeholder="Paste your Deezer arl cookie here" autocomplete="new-password">
+                            <p class="settings-hint">
+                                Log into <a href="https://www.deezer.com" target="_blank"
+                                    class="settings-link">Deezer</a>,
+                                open DevTools (F12) → Storage tab → Cookies, and copy the value of the <code>arl</code> cookie.
+                            </p>
+                            <p class="settings-note" id="deezerConfigStatus"></p>
+
+                            <div class="settings-section-title">Download Settings</div>
+                            <label class="settings-label" for="qualityLossless">Quality</label>
+                            <div class="format-toggle" role="radiogroup" aria-label="Download quality">
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadQuality" value="LOSSLESS" id="qualityLossless">
+                                    <span>LOSSLESS</span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadQuality" value="HIGH" id="qualityHigh">
+                                    <span>HIGH</span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="radio" name="downloadQuality" value="LOW" id="qualityLow">
+                                    <span>LOW</span>
+                                </label>
+                            </div>
+                            <label class="settings-label" for="fileNamingAlbum">File Naming</label>
+                            <input type="text" id="fileNamingAlbum" class="settings-input"
+                                placeholder="{artist}/{album}/{track} - {title}.{ext}">
+                            <p class="settings-hint">Folder: /downloads</p>
+                            <p class="settings-hint">Tokens: {artist}, {album}, {track}, {title}, {ext}</p>
+
+                            <div class="settings-section-title settings-collapsible" id="taggingToggle">
+                                <span class="collapse-arrow">▸</span>
+                                <span>Metadata Tagging</span>
+                            </div>
+                            <div id="taggingGroup" style="display: none;">
+                                <div class="tag-group" id="coreMetadataGroup">
+                                    <div class="tag-group-title">Core Metadata</div>
+                                </div>
+                                <div class="tag-group" id="trackInfoGroup">
+                                    <div class="tag-group-title">Track Information</div>
+                                </div>
+                                <div class="tag-group" id="identifiersGroup">
+                                    <div class="tag-group-title">Identifiers</div>
+                                </div>
+                                <div class="tag-group" id="additionalTagGroup">
+                                    <div class="tag-group-title">Additional</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section" id="libraryIntegrationSettings">
+                            <h3>Library Integration</h3>
+
+                            <div class="settings-section-title">Plex Server</div>
+                            <div id="plexConnectedStatus"
+                                style="display: none; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                            </div>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="plexSyncIntervalHours">Library Sync Interval (hours)</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="plexSyncIntervalDec" aria-label="Decrease sync interval" data-spinner-dec="plexSyncIntervalHours">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="plexSyncIntervalHours" class="retention-spinner-input" min="1" max="168" value="24" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="168" data-spinner-step="1">
+                                    <button type="button" class="retention-spinner-btn" id="plexSyncIntervalInc" aria-label="Increase sync interval" data-spinner-inc="plexSyncIntervalHours">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="settings-hint">Default: 24 hours</p>
+                            <button id="startPlexSync" class="save-button">Update &amp; Sync
+                                Library</button>
+                            <p class="settings-note" id="plexSyncStatus"></p>
+
+                            <div class="settings-section-title">Force Re-Download</div>
+                            <label class="settings-label settings-checkbox-label" for="ignoreMatchesCheckbox">
+                                <input type="checkbox" id="ignoreMatchesCheckbox">
+                                <span>Force re-download (ignore existing library matches)</span>
+                            </label>
+                        </div>
+
+                        <div class="settings-section" id="musicDiscoverySettings">
+                            <h3>Music &amp; Playlist Discovery</h3>
+
+                            <div class="settings-section-title">Fresh Finds</div>
+                            <p class="settings-hint">Fresh Finds playlists are generated nightly with recommendations based on your Plex listening history.</p>
+
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsHistoryDays">Listening history window</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="historyDaysDec" aria-label="Decrease history days" data-spinner-dec="freshFindsHistoryDays">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="freshFindsHistoryDays" class="retention-spinner-input" min="10" max="60" value="30" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="60" data-spinner-step="5">
+                                    <button type="button" class="retention-spinner-btn" id="historyDaysInc" aria-label="Increase history days" data-spinner-inc="freshFindsHistoryDays">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                                <span class="settings-unit-label">days</span>
+                            </div>
+
+                            <div class="settings-row">
+                                <label class="settings-label" for="freshFindsNewPct">Mix of tracks</label>
+                                <div class="settings-slider-row">
+                                    <span class="settings-slider-label">Already Owned</span>
+                                    <input type="range" id="freshFindsNewPct" class="settings-slider" min="0" max="100" step="5" value="50">
+                                    <span class="settings-slider-label">Fresh</span>
+                                </div>
+                                <div class="settings-slider-value">
+                                    <span id="freshFindsNewPctValue">50%</span> new tracks
+                                </div>
+                            </div>
+
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsTrackCount">Tracks per playlist</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="50" data-spinner-step="5">
+                                    <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count" data-spinner-inc="freshFindsTrackCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="freshFindsRetentionCount">Keep up to</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention" data-spinner-dec="freshFindsRetentionCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="freshFindsRetentionCount" class="retention-spinner-input" min="1" max="7" value="7" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="7" data-spinner-step="1">
+                                    <button type="button" class="retention-spinner-btn" id="retentionInc" aria-label="Increase retention" data-spinner-inc="freshFindsRetentionCount">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                                <span class="settings-unit-label">Fresh Finds playlists</span>
+                            </div>
+                            <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
+
+                            <div class="tag-toggle-row">
+                                <span class="tag-toggle-label">Auto-download Fresh Finds tracks to Plex</span>
+                                <label class="tag-switch">
+                                    <input type="checkbox" id="autoDownloadFreshFinds">
+                                    <span class="tag-switch-slider"></span>
+                                </label>
+                            </div>
+                            <p class="settings-hint">When enabled, tracks from the nightly Fresh Finds playlist are automatically queued for download to your Plex library.</p>
+
+                            <hr class="settings-divider">
+
+                            <div class="settings-section-title">ListenBrainz</div>
+                            <label class="settings-label" for="listenbrainzUsername">Username</label>
+                            <input type="text" id="listenbrainzUsername" class="settings-input"
+                                placeholder="Your ListenBrainz username" autocomplete="off">
+                            <label class="settings-label" for="listenbrainzToken">User
+                                Token</label>
+                            <input type="password" id="listenbrainzToken" class="settings-input"
+                                placeholder="Your ListenBrainz user token" autocomplete="new-password">
+                            <p class="settings-hint">Get your token from your <a
+                                    href="https://listenbrainz.org/profile/" target="_blank"
+                                    class="settings-link">ListenBrainz
+                                    profile</a></p>
+                            <p class="settings-note" id="lbConfigStatus"></p>
+
+                            <hr class="settings-divider">
+
+                            <div class="settings-section-title">YouTube Music</div>
+                            <label class="settings-label" for="ytmCookie">Browser Cookie</label>
+                            <input type="text" id="ytmCookie" class="settings-input"
+                                placeholder="Paste your YouTube Music cookie here">
+                            <p class="settings-hint">
+                                Go to <a href="https://music.youtube.com" target="_blank"
+                                    class="settings-link">music.youtube.com</a>,
+                                open DevTools (F12) → Network tab, filter for "browse", refresh, click a browse request, and copy the full Cookie header value.
+                            </p>
+                            <p class="settings-note" id="ytmConfigStatus"></p>
+
+                            <hr class="settings-divider">
+
+                            <div class="settings-section-title" id="penaltiesGroup">Playlist Matching Penalties</div>
+                            <div class="tag-group" id="penaltyTagGroup" style="margin-bottom: 0;"></div>
+                        </div>
+
+                        <div class="settings-section" id="systemSettings">
+                            <h3>System</h3>
+                            <label class="settings-label" for="themeSelect">Theme</label>
+                            <select id="themeSelect" class="settings-input">
+                                <option value="tidal">Squidly</option>
+                                <option value="github-dark">GitHub Dark</option>
+                            </select>
+                            <div class="settings-row">
+                                <label class="settings-label settings-inline-label" for="jobsRefreshIntervalSeconds">Jobs Refresh Interval (seconds)</label>
+                                <div class="retention-spinner">
+                                    <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalDec" aria-label="Decrease jobs refresh interval" data-spinner-dec="jobsRefreshIntervalSeconds">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                    <input type="number" id="jobsRefreshIntervalSeconds" class="retention-spinner-input" min="1" max="3600" value="30" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="3600" data-spinner-step="1">
+                                    <button type="button" class="retention-spinner-btn" id="jobsRefreshIntervalInc" aria-label="Increase jobs refresh interval" data-spinner-inc="jobsRefreshIntervalSeconds">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="settings-hint">How often the Jobs flyout auto-refreshes while open</p>
+                        </div>
+
+                        <div id="saveAllBar">
+                            <button id="saveAllSettings" class="save-button">Save All</button>
+                        </div>
+
+                        <div id="plexDangerZone" class="settings-section settings-danger-zone">
+                            <h3>Danger Zone</h3>
+                            <p class="settings-note">Disconnecting from Plex will clear all user data from Squidly.</p>
+                            <button id="plexClearCredentialsButton" class="save-button"
+                                style="background: var(--color-cancel-bg); color: var(--text-primary); width: 100%;">Disconnect From Plex and
+                                Logout</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Source Mirrors Page -->
+                <div class="page" id="mirrorsPage" data-page="mirrors">
+                    <h2>Source Mirrors</h2>
+                    <div class="mirrors-actions">
+                        <button type="button" id="validateAllPremiumButton" class="save-button">Validate All Premium</button>
+                        <button type="button" id="addMirrorButton" class="save-button">Add Mirror</button>
+                    </div>
+                    <div id="mirrorsContent" class="mirrors-content">
+                        <div class="mirror-stats-row">
+                            <div class="mirror-stats-card mirror-stats-tidal">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+                                    <span>Tidal</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="tidalOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="tidalPremiumCount">-</span>
+                                        <span class="mirror-stat-label">Premium</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="tidalOfflineCount">-</span>
+                                        <span class="mirror-stat-label">Offline</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mirror-stats-card mirror-stats-qobuz">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                                    <span>Qobuz</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="qobuzOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="qobuzPremiumCount">-</span>
+                                        <span class="mirror-stat-label">Premium</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="qobuzOfflineCount">-</span>
+                                        <span class="mirror-stat-label">Offline</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mirror-stats-card mirror-stats-deezer">
+                                <div class="mirror-stats-header">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12a4 4 0 1 0 8 0a4 4 0 0 0-8 0"/></svg>
+                                    <span>Deezer</span>
+                                </div>
+                                <div class="mirror-stats-values">
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerOnlineCount">-</span>
+                                        <span class="mirror-stat-label">Online</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerPremiumCount">-</span>
+                                        <span class="mirror-stat-label">Premium</span>
+                                    </div>
+                                    <div class="mirror-stat">
+                                        <span class="mirror-stat-value" id="deezerOfflineCount">-</span>
+                                        <span class="mirror-stat-label">Offline</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="flyoutContent" class="flyout-content">
+                            <p class="loading-text">Loading status...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="matchesPage" data-page="matches">
+                    <h2>Match Review</h2>
+                    <div class="matches-actions">
+                        <button type="button" id="startHifiMatchScan" class="save-button">Update &amp; Sync
+                            Library</button>
+                        <button type="button" id="refreshHifiMatchReview" class="jobs-bulk-button">Refresh
+                            Results</button>
+                    </div>
+                    <div class="matches-filters">
+                        <label for="matchReviewEntityFilter">Show</label>
+                        <select id="matchReviewEntityFilter" class="jobs-filter-select">
+                            <option value="all">Artists, albums, and tracks</option>
+                            <option value="artists">Artists only</option>
+                            <option value="albums">Albums only</option>
+                            <option value="tracks">Tracks only</option>
+                        </select>
+                        <label for="matchReviewMaxConfidence">Max confidence</label>
+                        <input type="number" id="matchReviewMaxConfidence"
+                            class="settings-input matches-confidence-input" min="0" max="1" step="0.01" value="0.94">
+                    </div>
+                    <p id="matchReviewStatus" class="settings-note"></p>
+                    <div id="matchReviewActivity" class="matches-activity">
+                        <p class="loading-text">Loading scan activity...</p>
+                    </div>
+                    <div id="matchReviewSummary" class="matches-summary"></div>
+                    <div id="matchReviewContent" class="matches-content">
+                        <p class="loading-text">Loading match review items...</p>
+                    </div>
+                </div>
+
+                <!-- Listen History Page -->
+                <div class="page" id="historyPage" data-page="history">
+                    <div class="history-header">
+                        <h2 style="margin: 0;">Listen History</h2>
+                    </div>
+                    <div id="historyTableContainer" class="history-table-container">
+                        <p class="loading-text">Loading listen history...</p>
+                    </div>
+                </div>
+
+                <!-- Jobs Page -->
+                <div class="page" id="jobsPage" data-page="jobs">
+                    <h2>Jobs</h2>
+                    <div class="jobs-filter">
+                        <label for="jobsFilter">Show</label>
+                        <select id="jobsFilter" class="jobs-filter-select">
+                            <option value="incomplete">Incomplete</option>
+                            <option value="complete">Complete</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                    </div>
+                    <div class="jobs-actions">
+                        <button type="button" id="cancelPendingJobs" class="jobs-bulk-button hidden">Cancel all</button>
+                        <button type="button" id="retryAllJobs" class="jobs-bulk-button hidden">Retry all</button>
+                    </div>
+                    <div class="jobs-content" id="jobsContent">
+                        <p class="loading-text">Loading jobs...</p>
+                    </div>
+                    <div class="jobs-pagination" id="jobsPagination"></div>
+                </div>
+            </main>
         </div>
     </div>
-    <div id="settingsOverlay" class="flyout-overlay"></div>
-    
+
+
     <script src="{{ url_for('static', filename='dist/bundle.js') }}"></script>
 </body>
+
 </html>

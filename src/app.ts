@@ -30,6 +30,7 @@ interface Track {
     album?: Album;
     quality?: string;
     audioQuality?: string;
+    maxAudioQuality?: string;
     cover?: string;
     trackNumber?: number;
     volumeNumber?: number;
@@ -52,19 +53,23 @@ interface Album {
 
 interface AlbumSearchItem {
     id: number;
+    type?: string;
     title: string;
     cover?: string;
     artists?: Artist[];
     artist?: Artist;
     releaseDate?: string;
     numberOfTracks?: number;
+    numberOfItems?: number;
     numberOfVolumes?: number;
     duration?: number;
     audioQuality?: string;
+    maxAudioQuality?: string;
     explicit?: boolean;
     mediaMetadata?: {
         tags?: string[];
     };
+    mediaTags?: string[];
 }
 
 interface ArtistSearchItem {
@@ -73,6 +78,155 @@ interface ArtistSearchItem {
     picture?: string;
     popularity?: number;
     artistTypes?: string[];
+}
+
+interface PlexLibraryArtist {
+    id: string;
+    name: string;
+    picture?: string;
+}
+
+interface PlexLibraryAlbum {
+    id: string;
+    title: string;
+    artist?: string;
+    year?: number;
+    track_count?: number;
+    cover?: string;
+}
+
+interface NormalizedAlbum {
+    id: string;
+    type?: string;
+    title: string;
+    artist: string;
+    artistId?: number;
+    year: number | null;
+    trackCount: number | null;
+    quality: string;
+    explicit: boolean;
+    cover?: string;
+}
+
+interface AlbumGridOptions {
+    viewMode: 'search-albums' | 'artist-albums' | 'similar-albums' | 'library-albums';
+    hideArtist?: boolean;
+    includeQuality?: boolean;
+    dataAttr?: string;
+    extraRowClass?: string;
+    actions?: 'full' | 'play-only';
+    rowDataAttrs?: (album: NormalizedAlbum) => Record<string, string>;
+    emptyMessage?: string;
+}
+
+interface NormalizedTrack {
+    id: string;
+    title: string;
+    version?: string;
+    artist: string;
+    artistId?: number;
+    album: string;
+    albumId?: number;
+    albumCover?: string;
+    trackNumber: number | null;
+    volumeNumber: number;
+    duration: number | null;
+    quality: string;
+    explicit: boolean;
+    qualityFormat?: string;
+    qualityBitrate?: string;
+}
+
+interface TrackGridOptions {
+    viewMode: 'single-album' | 'multi-album' | 'library-tracks';
+    showTrackNumber?: boolean;
+    showAlbumColumn?: boolean;
+    showArtwork?: boolean;
+    numberOfVolumes?: number;
+    dataAttr?: string;
+    extraRowClass?: string;
+    actions?: 'full' | 'play-only';
+    qualityStyle?: 'tier' | 'format-bitrate';
+    rowDataAttrs?: (track: NormalizedTrack) => Record<string, string>;
+    emptyMessage?: string;
+}
+
+interface PlaylistTrackInput {
+    name: string;
+    artist: string;
+}
+
+interface PlexLibraryTrack {
+    id: string;
+    title: string;
+    artist?: string;
+    artist_id?: string;
+    album?: string;
+    duration?: number;
+    track_number?: number;
+    disc_number?: number;
+    quality_format?: string;
+    quality_bitrate_kbps?: number;
+    cover?: string;
+}
+
+interface PlexLibraryArtistsResponse {
+    success?: boolean;
+    server_name?: string;
+    library_name?: string;
+    artists?: PlexLibraryArtist[];
+    total?: number;
+    offset?: number;
+    limit?: number;
+    error?: string;
+}
+
+interface PlexLibraryArtistAlbumsResponse {
+    success?: boolean;
+    artist?: {
+        id: string;
+        name: string;
+        picture?: string;
+    };
+    albums?: PlexLibraryAlbum[];
+    error?: string;
+}
+
+interface PlexLibraryAlbumTracksResponse {
+    success?: boolean;
+    album?: {
+        id: string;
+        title: string;
+        artist?: string;
+        year?: number;
+        track_count?: number;
+        cover?: string;
+    };
+    tracks?: PlexLibraryTrack[];
+    error?: string;
+}
+
+interface PlexPlaylist {
+    name: string;
+    ratingKey: string | null;
+}
+
+interface YtmPlaylist {
+    title: string;
+    playlistId: string;
+    count: number | string;
+}
+
+interface PlexPlaylistTracksResponse {
+    success?: boolean;
+    playlist?: {
+        id: string;
+        title: string;
+        track_count?: number;
+        cover?: string;
+    };
+    tracks?: PlexLibraryTrack[];
+    error?: string;
 }
 
 interface PlaylistSearchItem {
@@ -92,6 +246,7 @@ interface PlaylistSearchItem {
     mediaMetadata?: {
         tags?: string[];
     };
+    mediaTags?: string[];
     promotedArtists?: Array<{
         id?: number | string;
         name?: string;
@@ -107,6 +262,10 @@ interface AlbumInfo {
         id: number;
         title: string;
         cover?: string;
+        explicit?: boolean;
+        mediaMetadata?: {
+            tags?: string[];
+        };
         artist?: Artist;
         artists?: Artist[];
         releaseDate?: string;
@@ -121,12 +280,44 @@ interface AlbumInfo {
     error?: string;
 }
 
+interface AlbumObject extends AlbumSearchItem {
+    version?: string;
+    numberOfDiscs?: number;
+    duration?: number;
+    copyright?: string;
+    artists?: Artist[];
+    tracks?: Track[];
+}
+
+interface AlbumObjectResponse {
+    album?: AlbumObject;
+    proxied_via?: string;
+    error?: string;
+}
+
+interface ArtistObject {
+    artist?: {
+        id?: number;
+        name?: string;
+        picture?: string;
+        albums?: AlbumSearchItem[];
+        singles?: AlbumSearchItem[];
+        eps?: AlbumSearchItem[];
+        top_tracks?: Track[] | number[];
+    };
+    proxied_via?: string;
+    error?: string;
+}
+
 interface Endpoint {
     name: string;
     encodedUrl: string;
     online: boolean;
     responseTime: number | null;
     lastChecked: string | null;
+    enabled: boolean;
+    mirrorType: string;
+    isPremium: number | null;
 }
 
 interface MirrorRateLimitStatus {
@@ -149,11 +340,16 @@ interface EndpointStatus {
 
 interface JobStageMap {
     downloaded?: string;
-    id3_tagged?: string;
-    converted?: string;
+    tagged?: string;
     written?: string;
     playlist_added?: string;
     upgraded_existing?: string;
+}
+
+interface StageDef {
+    key: string;
+    label: string;
+    condition?: (job: JobItem) => boolean;
 }
 
 interface JobResult {
@@ -181,6 +377,110 @@ interface PlexSongVariant {
 interface PlexTrackMatch {
     exists: boolean;
     variants?: PlexSongVariant[];
+    confidence?: number | null;
+}
+
+interface HifiTrackLookupMatch extends PlexTrackMatch {
+    track_id: string;
+}
+
+interface HifiAlbumLookupMatch {
+    album_id: string;
+    exists: boolean;
+    complete: boolean;
+    confidence?: number | null;
+    matched_track_count?: number;
+    expected_track_count?: number;
+    variants?: PlexSongVariant[];
+}
+
+interface HifiArtistLookupMatch {
+    artist_id: string;
+    exists: boolean;
+    complete: boolean;
+    confidence?: number | null;
+    variants?: PlexSongVariant[];
+}
+
+interface HifiMatchLookupResponse {
+    success?: boolean;
+    tracks?: HifiTrackLookupMatch[];
+    albums?: HifiAlbumLookupMatch[];
+    artists?: HifiArtistLookupMatch[];
+    error?: string;
+}
+
+interface HifiReviewArtist {
+    artist_id: number;
+    name: string;
+    library_id?: string;
+    hifi_id?: string;
+    picture?: string;
+    confidence?: number;
+}
+
+interface HifiReviewAlbum {
+    album_id: number;
+    artist_id?: number;
+    title: string;
+    artist_name?: string;
+    library_id?: string;
+    hifi_id?: string;
+    cover?: string;
+    track_titles?: string[];
+    confidence?: number;
+    complete?: boolean;
+    matched_track_count?: number;
+    expected_track_count?: number;
+}
+
+interface HifiReviewTrack {
+    track_id: number;
+    album_id?: number;
+    artist_id?: number;
+    title: string;
+    artist_name?: string;
+    album_title?: string;
+    cover?: string;
+    album_library_id?: string;
+    artist_library_id?: string;
+    library_id?: string;
+    hifi_id?: string;
+    confidence?: number;
+    path?: string;
+    format?: string;
+    bitrate?: number;
+    disc_number?: number;
+    track_number?: number;
+}
+
+interface HifiMatchReviewResponse {
+    success?: boolean;
+    summary?: {
+        artists?: number;
+        albums?: number;
+        tracks?: number;
+    };
+    artists?: HifiReviewArtist[];
+    albums?: HifiReviewAlbum[];
+    tracks?: HifiReviewTrack[];
+    error?: string;
+}
+
+interface HifiMatchCandidate {
+    hifi_id: string;
+    title: string;
+    subtitle?: string;
+    confidence?: number;
+    image_url?: string;
+    explicit?: boolean;
+    track_titles?: string[];
+}
+
+interface HifiMatchCandidatesResponse {
+    success?: boolean;
+    candidates?: HifiMatchCandidate[];
+    error?: string;
 }
 
 interface JobItem {
@@ -195,17 +495,38 @@ interface JobItem {
 interface JobFilterTotals {
     incomplete: number;
     complete: number;
-    completed_with_errors: number;
     failed: number;
 }
 
-type DownloadFormat = 'original' | 'mp3';
+type DownloadQuality = 'LOSSLESS' | 'HIGH' | 'LOW';
 
 interface DownloadSettings {
-    format: DownloadFormat;
+    downloadSource: string;
+    quality: DownloadQuality;
     fileNamingAlbum: string;
     jobsRefreshIntervalSeconds: number;
     ignoreMatches: boolean;
+    tagTitle: boolean;
+    tagArtist: boolean;
+    tagAlbumArtist: boolean;
+    tagAlbum: boolean;
+    tagYear: boolean;
+    tagTrackNumber: boolean;
+    tagTrackTotal: boolean;
+    tagDiscNumber: boolean;
+    tagDiscTotal: boolean;
+    tagVersion: boolean;
+    tagTidalTrackId: boolean;
+    tagTidalAlbumId: boolean;
+    tagIsrc: boolean;
+    tagCopyright: boolean;
+    tagCoverArt: boolean;
+    tagExplicit: boolean;
+    tagExplicitSuffix: boolean;
+    penaltyCompilation: boolean;
+    penaltyKaraoke: boolean;
+    penaltyLive: boolean;
+    deezerArl: string;
 }
 
 interface AppRouteState {
@@ -216,26 +537,151 @@ interface AppRouteState {
     albumId?: number;
     trackId?: number;
     playlistId?: string;
+    playlistTitle?: string;
     username?: string;
-    playlistUrl?: string;
+    playlistType?: string;
+    freshFindsPlaylistId?: number;
+}
+
+type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
+
+interface ListenHistoryEntry {
+    id: number;
+    plex_account_id: number;
+    plex_username: string;
+    track_library_id: string | null;
+    hifi_id: string | null;
+    title: string;
+    artist: string | null;
+    album: string | null;
+    duration: number | null;
+    played_at: string;
+    view_offset: number | null;
+    view_count: number | null;
+    synced_at: string;
+}
+
+interface LibraryRouteState {
+    view: 'artists' | 'artist_albums' | 'album_tracks' | 'playlist_tracks';
+    offset?: number;
+    artistId?: string;
+    artistName?: string;
+    albumId?: string;
+    albumTitle?: string;
+    albumArtist?: string;
+    playlistRatingKey?: string;
+    playlistName?: string;
 }
 
 interface AppHistoryState {
     app: 'squidly';
+    tab: AppPage;
     route: AppRouteState;
+    libraryRoute: LibraryRouteState;
+}
+
+interface HeroCardAction {
+    id?: string;
+    className?: string;
+    title: string;
+    ariaLabel?: string;
+    svgContent: string;
+    disabled?: boolean;
+    dataAttrs?: Record<string, string>;
+}
+
+interface HeroCardConfig {
+    type: 'artist' | 'album';
+    coverUrl?: string;
+    coverAlt: string;
+    title: string;
+    titleBadge?: string;
+    subtitle?: {
+        text: string;
+        artistId?: number;
+        title?: string;
+    };
+    metadataItems?: string[];
+    proxyInfo?: string;
+    actions: HeroCardAction[];
 }
 
 class App {
     private static readonly NEW_PLEX_PLAYLIST_OPTION = '__new_playlist__';
+    private static readonly TAG_CHECKBOX_IDS = [
+        'tagTitle', 'tagArtist', 'tagAlbumArtist', 'tagAlbum', 'tagYear',
+        'tagTrackNumber', 'tagTrackTotal', 'tagDiscNumber', 'tagDiscTotal',
+        'tagVersion', 'tagTidalTrackId', 'tagTidalAlbumId', 'tagIsrc',
+        'tagCopyright', 'tagCoverArt', 'tagExplicit', 'tagExplicitSuffix',
+        'penaltyCompilation', 'penaltyKaraoke', 'penaltyLive'
+    ] as const;
+    private static readonly TAG_TOGGLE_CONFIG = [
+        {
+            containerId: 'penaltyTagGroup',
+            title: 'Playlist Matching Penalties',
+            hint: 'Apply score penalties to deprioritize these matches when better options exist',
+            items: [
+                { id: 'penaltyCompilation', label: 'Compilations (Various Artists)' },
+                { id: 'penaltyKaraoke', label: 'Karaoke / Instrumental tracks' },
+                { id: 'penaltyLive', label: 'Live tracks' },
+            ]
+        },
+        {
+            containerId: 'coreMetadataGroup',
+            title: 'Core Metadata',
+            items: [
+                { id: 'tagTitle', label: 'Title' },
+                { id: 'tagArtist', label: 'Artist' },
+                { id: 'tagAlbumArtist', label: 'Album Artist' },
+                { id: 'tagAlbum', label: 'Album' },
+                { id: 'tagYear', label: 'Year' },
+            ]
+        },
+        {
+            containerId: 'trackInfoGroup',
+            title: 'Track Information',
+            items: [
+                { id: 'tagTrackNumber', label: 'Track Number' },
+                { id: 'tagTrackTotal', label: 'Track Total' },
+                { id: 'tagDiscNumber', label: 'Disc Number' },
+                { id: 'tagDiscTotal', label: 'Disc Total' },
+                { id: 'tagVersion', label: 'Version' },
+            ]
+        },
+        {
+            containerId: 'identifiersGroup',
+            title: 'Identifiers',
+            items: [
+                { id: 'tagTidalTrackId', label: 'Tidal Track ID' },
+                { id: 'tagTidalAlbumId', label: 'Tidal Album ID' },
+                { id: 'tagIsrc', label: 'ISRC' },
+            ]
+        },
+        {
+            containerId: 'additionalTagGroup',
+            title: 'Additional',
+            items: [
+                { id: 'tagCopyright', label: 'Copyright' },
+                { id: 'tagCoverArt', label: 'Cover Art' },
+                { id: 'tagExplicit', label: 'Explicit Tag' },
+                { id: 'tagExplicitSuffix', label: 'Append [Explicit] suffix to titles' },
+            ]
+        },
+    ] as const;
     private searchInput: HTMLInputElement;
     private searchTypeSelect: HTMLSelectElement;
     private searchButton: HTMLButtonElement;
+    private exploreBreadcrumbContainer: HTMLElement | null;
+    private libraryBreadcrumbContainer: HTMLElement | null;
     private resultsContainer: HTMLElement;
+    private libraryResultsContainer: HTMLElement;
     private statusButton: HTMLButtonElement;
     private statusFlyout: HTMLElement;
     private flyoutOverlay: HTMLElement;
     private closeFlyoutButton: HTMLButtonElement;
     private flyoutContent: HTMLElement;
+    private addMirrorButton: HTMLButtonElement;
+    private validateAllPremiumButton: HTMLButtonElement;
     private jobsButton: HTMLButtonElement;
     private jobsFlyout: HTMLElement;
     private jobsOverlay: HTMLElement;
@@ -245,50 +691,83 @@ class App {
     private retryAllJobsButton: HTMLButtonElement;
     private jobsContent: HTMLElement;
     private jobsPagination: HTMLElement;
+    private matchReviewRunScanButton: HTMLButtonElement;
+    private matchReviewRefreshButton: HTMLButtonElement;
+    private matchReviewEntityFilter: HTMLSelectElement;
+    private matchReviewMaxConfidenceInput: HTMLInputElement;
+    private matchReviewStatusEl: HTMLElement;
+    private matchReviewActivity: HTMLElement;
+    private matchReviewSummary: HTMLElement;
+    private matchReviewContent: HTMLElement;
     private settingsButton: HTMLButtonElement;
     private settingsFlyout: HTMLElement;
     private settingsOverlay: HTMLElement;
     private closeSettingsButton: HTMLButtonElement;
-    private formatOriginalInput: HTMLInputElement;
-    private formatMp3Input: HTMLInputElement;
+    private qualityLosslessInput: HTMLInputElement;
+    private qualityHighInput: HTMLInputElement;
+    private qualityLowInput: HTMLInputElement;
+    private downloadSourceList: HTMLElement;
     private fileNamingAlbumInput: HTMLInputElement;
     private jobsRefreshIntervalSecondsInput: HTMLInputElement;
     private listenbrainzTokenInput: HTMLInputElement;
-    private saveLbConfigButton: HTMLButtonElement;
+    private listenbrainzUsernameInput: HTMLInputElement;
     private lbConfigStatusEl: HTMLElement;
+    private ytmCookieInput: HTMLInputElement;
+    private ytmConfigStatusEl: HTMLElement;
+    private deezerArlInput: HTMLInputElement;
+    private deezerConfigStatusEl: HTMLElement;
+    private autoDownloadFreshFindsCheckbox: HTMLInputElement;
+    private freshFindsRetentionInput: HTMLInputElement;
+    private freshFindsNewPctSlider: HTMLInputElement;
+    private freshFindsNewPctValueEl: HTMLElement;
+    private freshFindsTrackCountInput: HTMLInputElement;
+    private freshFindsHistoryDaysInput: HTMLInputElement;
     private plexLoginButton: HTMLButtonElement;
+    private globalToastEl: HTMLElement;
     private plexPinContainer: HTMLElement;
     private plexPinDisplay: HTMLElement;
     private plexPinCopyButton: HTMLButtonElement;
     private plexPinStatus: HTMLElement;
-    private plexLibraryConfigContainer: HTMLElement;
-    private plexLibraryNameSelect: HTMLSelectElement;
-    private plexPlaylistContainer: HTMLElement;
-    private plexPlaylistContainerHomeParent: HTMLElement;
-    private plexPlaylistContainerHomeNextSibling: ChildNode | null;
-    private plexPlaylistNameInput: HTMLInputElement;
-    private plexPlaylistOptions: HTMLSelectElement;
-    private plexPlaylistBackButton: HTMLButtonElement;
-    private savePlexConfigButton: HTMLButtonElement;
+    private plexLoginOnlyContainer: HTMLElement;
+    private plexLoginOnlyButton: HTMLButtonElement;
+    private plexLoginOnlyPinContainer: HTMLElement;
+    private plexLoginOnlyPinDisplay: HTMLElement;
+    private plexLoginOnlyPinStatus: HTMLElement;
+    private plexLoginOnlyLibraryContainer: HTMLElement;
+    private plexLoginOnlyLibraryNameSelect: HTMLSelectElement;
+    private plexLoginOnlySaveButton: HTMLButtonElement;
+    private plexLoginOnlyUserContainer: HTMLElement;
+    private plexLoginOnlyUserList: HTMLElement;
+    private appWrapper: HTMLElement;
+    private plexPlaylistNameInput: HTMLInputElement | null;
+    private plexPlaylistOptions: HTMLSelectElement | null;
+    private plexPlaylistBackButton: HTMLButtonElement | null;
     private plexSyncIntervalHoursInput: HTMLInputElement;
     private startPlexSyncButton: HTMLButtonElement;
     private plexSyncStatusEl: HTMLElement;
-    private plexConfigStatusEl: HTMLElement;
     private plexConnectedStatusEl: HTMLElement;
     private plexClearCredentialsButton: HTMLButtonElement;
     private plexUserDropdownContainer: HTMLElement;
-    private plexUserSelect: HTMLSelectElement;
     private ignoreMatchesCheckbox: HTMLInputElement;
+    private tagCheckboxes: Record<string, HTMLInputElement> = {};
+    private userButton: HTMLButtonElement;
+    private userDropdownModal: HTMLElement;
+    private userDropdownOverlay: HTMLElement;
+    private userDropdownList: HTMLElement;
+    private userButtonText: HTMLElement;
+    private mobileMenuToggle: HTMLButtonElement | null;
+    private mobileMenuOverlay: HTMLElement | null;
     private downloadSettings: DownloadSettings;
-    private settingsSaveTimer: number | null = null;
-    private readonly settingsSaveDelayMs = 500;
+    private debounceTimers: Map<string, number> = new Map();
+    private readonly debounceDelayMs = 500;
     private statusUpdateInterval: number | null = null;
+    private premiumPollingInterval: number | null = null;
     private jobStatusInterval: number | null = null;
     private jobStatusPolling = false;
     private activeJobMap = new Map<number, {
         trackCard: HTMLElement;
         downloadBtn: HTMLButtonElement;
-        statusEl: HTMLElement;
+        statusEl: HTMLButtonElement;
     }>();
     private jobsUpdateInterval: number | null = null;
     private currentJobsPage: number = 1;
@@ -300,7 +779,8 @@ class App {
     private currentDownloadController: AbortController | null = null;
     private downloadAllScope: 'album' | 'loose' = 'loose';
     private currentAudio: HTMLAudioElement | null = null;
-    private currentPlayingTrackId: number | null = null;
+    private isPlexSelectedUserOwner: boolean = false;
+    private currentPlayingTrackId: string | null = null;
     private currentPlayButton: HTMLButtonElement | null = null;
     private currentAudioCleanup: {
         audio: HTMLAudioElement;
@@ -310,17 +790,188 @@ class App {
     private lastRetryFunction: (() => Promise<void>) | null = null;
     private isPlexConfigured: boolean = false;
     private isHandlingPopState: boolean = false;
+    private currentPage: AppPage = 'explore';
+    private pendingRequestController: AbortController | null = null;
+    private readonly libraryArtistsPageSize: number = 50;
+    private libraryArtistsOffset: number = 0;
+    private libraryArtistsTotal: number = 0;
+    private libraryCurrentArtist: { id: string; name: string } | null = null;
+    private libraryCurrentAlbum: { id: string; title: string; artist?: string } | null = null;
+    private libraryCurrentPlaylist: string | null = null;
+    private libraryLoadedOnce: boolean = false;
+    private matchReviewPollingInterval: number | null = null;
+    private lastMatchActivityJobId: number | null = null;
+    private lastMatchActivityStatus: string | null = null;
+    private activeMatchActivityJobId: number | null = null;
+    private matchCandidateCache = new Map<string, HifiMatchCandidate[]>();
+    private matchCandidateSearchTerms = new Map<string, string>();
+    private matchCandidateRequestsInFlight = new Set<string>();
+    private currentExploreRoute: AppRouteState = { view: 'home' };
+    private exploreBreadcrumbRoutes: AppRouteState[] = [];
+    private exploreSearchRoute: AppRouteState | null = null;
+    private exploreParentRoute: AppRouteState | null = null;
+    private exploreArtistName: string | null = null;
+    private exploreAlbumTitle: string | null = null;
+    private explorePlaylistTitle: string | null = null;
+    private listenbrainzCurrentUsername: string | null = null;
+    private listenbrainzCurrentPlaylist: { id: string; title: string } | null = null;
+    private freshFindsPlaylistName: string | null = null;
+    private freshFindsPolling: boolean = false;
+    private plexUserNameById: Record<string, string> = {};
+
+    private historyTableContainer: HTMLElement;
+    private historyEntries: ListenHistoryEntry[] = [];
+    private historyLoading: boolean = false;
+
+    private timezone: string = 'UTC';
+    private readonly THEME_STORAGE_KEY = 'squidly-theme';
+    private themeSelect: HTMLSelectElement;
+
+    private getSearchTypeName(searchType?: string): string {
+        const normalized = (searchType || 's').toLowerCase();
+        const labels: Record<string, string> = {
+            s: 'Tracks',
+            a: 'Artists',
+            al: 'Albums',
+            p: 'Playlists',
+            trackid: 'Track ID',
+            listenbrainz: 'ListenBrainz'
+        };
+        return labels[normalized] || 'Results';
+    }
+
+    private renderExploreTopBarBreadcrumb(route: AppRouteState = this.currentExploreRoute): void {
+        if (!this.exploreBreadcrumbContainer) {
+            return;
+        }
+
+        const crumbs: Array<{ label: string; route?: AppRouteState }> = [];
+        const username = route.username || this.listenbrainzCurrentUsername || '';
+        const playlistTitle = this.listenbrainzCurrentPlaylist?.title || this.explorePlaylistTitle || '';
+
+        if (route.view === 'home') {
+            crumbs.push({ label: 'Explore' });
+        } else if (route.view === 'search') {
+            const query = route.query || this.searchInput?.value?.trim() || '';
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: query ? `${this.getSearchTypeName(route.searchType)} - "${query}"` : this.getSearchTypeName(route.searchType) });
+        } else if (route.view === 'artist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (this.exploreSearchRoute?.view === 'search') {
+                const query = this.exploreSearchRoute.query || '';
+                const label = query ? `${this.getSearchTypeName(this.exploreSearchRoute.searchType)} - "${query}"` : this.getSearchTypeName(this.exploreSearchRoute.searchType);
+                crumbs.push({ label, route: { ...this.exploreSearchRoute } });
+            }
+            crumbs.push({ label: this.exploreArtistName || 'Artist' });
+        } else if (route.view === 'album') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (this.exploreSearchRoute?.view === 'search') {
+                const query = this.exploreSearchRoute.query || '';
+                const label = query ? `${this.getSearchTypeName(this.exploreSearchRoute.searchType)} - "${query}"` : this.getSearchTypeName(this.exploreSearchRoute.searchType);
+                crumbs.push({ label, route: { ...this.exploreSearchRoute } });
+            }
+            if (this.exploreParentRoute?.view === 'artist') {
+                crumbs.push({ label: this.exploreArtistName || 'Artist', route: { ...this.exploreParentRoute } });
+            }
+            crumbs.push({ label: this.exploreAlbumTitle || 'Album' });
+        } else if (route.view === 'playlist') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: this.explorePlaylistTitle || 'Playlist' });
+        } else if (route.view === 'listenbrainz_playlists') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'ListenBrainz' });
+            if (username) {
+                crumbs.push({ label: username });
+            }
+        } else if (route.view === 'listenbrainz_playlist_tracks') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            if (username) {
+                crumbs.push({ label: 'ListenBrainz', route: { view: 'listenbrainz_playlists', username } });
+                crumbs.push({ label: username, route: { view: 'listenbrainz_playlists', username } });
+            } else {
+                crumbs.push({ label: 'ListenBrainz' });
+            }
+            crumbs.push({ label: playlistTitle || 'Playlist' });
+        } else if (route.view === 'similar_tracks') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Tracks' });
+        } else if (route.view === 'similar_albums') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Albums' });
+        } else if (route.view === 'similar_artists') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Similar Artists' });
+        } else if (route.view === 'fresh_finds') {
+            crumbs.push({ label: 'Explore', route: { view: 'home' } });
+            crumbs.push({ label: 'Squidly' });
+            crumbs.push({ label: this.freshFindsPlaylistName || 'Fresh Finds' });
+        } else {
+            crumbs.push({ label: 'Explore' });
+        }
+
+        this.exploreBreadcrumbRoutes = [];
+        const parts: string[] = [];
+
+        for (let index = 0; index < crumbs.length; index += 1) {
+            const crumb = crumbs[index];
+            const isLast = index === crumbs.length - 1;
+            const safeLabel = this.escapeHtml(crumb.label);
+
+            if (isLast || !crumb.route) {
+                parts.push(`<span class="library-crumb-current">${safeLabel}</span>`);
+            } else {
+                const routeIndex = this.exploreBreadcrumbRoutes.push({ ...crumb.route }) - 1;
+                parts.push(`<button class="library-crumb-btn" data-explore-route-index="${routeIndex}">${safeLabel}</button>`);
+            }
+
+            if (!isLast) {
+                parts.push('<span class="library-crumb-separator">&gt;</span>');
+            }
+        }
+
+        this.exploreBreadcrumbContainer.innerHTML = parts.join('');
+        this.exploreBreadcrumbContainer.style.display = parts.length > 0 ? 'flex' : 'none';
+    }
+
+    private renderTopBarTitle(title: string): void {
+        const topBarLeft = document.querySelector('.top-bar-left');
+        if (!topBarLeft) {
+            return;
+        }
+
+        topBarLeft.innerHTML = `<h2>${this.escapeHtml(title)}</h2>`;
+    }
 
     constructor() {
+        // New page navigation elements
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.addEventListener('click', (e: Event) => {
+                e.preventDefault();
+                const page = (item as HTMLElement).getAttribute('data-page');
+                if (page) {
+                    this.switchPage(page);
+                    this.closeMobileMenu();
+                }
+            });
+        });
+
         this.searchInput = document.getElementById('searchInput') as HTMLInputElement;
         this.searchTypeSelect = document.getElementById('searchType') as HTMLSelectElement;
         this.searchButton = document.getElementById('searchButton') as HTMLButtonElement;
+        this.exploreBreadcrumbContainer = document.getElementById('exploreBreadcrumb');
+        this.libraryBreadcrumbContainer = document.getElementById('libraryBreadcrumb');
         this.resultsContainer = document.getElementById('results') as HTMLElement;
+        this.libraryResultsContainer = document.getElementById('libraryResults') as HTMLElement;
+
+        // Old flyout elements (may not exist in new layout)
         this.statusButton = document.getElementById('statusButton') as HTMLButtonElement;
         this.statusFlyout = document.getElementById('statusFlyout') as HTMLElement;
         this.flyoutOverlay = document.getElementById('flyoutOverlay') as HTMLElement;
         this.closeFlyoutButton = document.getElementById('closeFlyout') as HTMLButtonElement;
         this.flyoutContent = document.getElementById('flyoutContent') as HTMLElement;
+        this.addMirrorButton = document.getElementById('addMirrorButton') as HTMLButtonElement;
+        this.validateAllPremiumButton = document.getElementById('validateAllPremiumButton') as HTMLButtonElement;
         this.jobsButton = document.getElementById('jobsButton') as HTMLButtonElement;
         this.jobsFlyout = document.getElementById('jobsFlyout') as HTMLElement;
         this.jobsOverlay = document.getElementById('jobsOverlay') as HTMLElement;
@@ -330,106 +981,483 @@ class App {
         this.retryAllJobsButton = document.getElementById('retryAllJobs') as HTMLButtonElement;
         this.jobsContent = document.getElementById('jobsContent') as HTMLElement;
         this.jobsPagination = document.getElementById('jobsPagination') as HTMLElement;
+        this.matchReviewRunScanButton = document.getElementById('startHifiMatchScan') as HTMLButtonElement;
+        this.matchReviewRefreshButton = document.getElementById('refreshHifiMatchReview') as HTMLButtonElement;
+        this.matchReviewEntityFilter = document.getElementById('matchReviewEntityFilter') as HTMLSelectElement;
+        this.matchReviewMaxConfidenceInput = document.getElementById('matchReviewMaxConfidence') as HTMLInputElement;
+        this.matchReviewStatusEl = document.getElementById('matchReviewStatus') as HTMLElement;
+        this.matchReviewActivity = document.getElementById('matchReviewActivity') as HTMLElement;
+        this.matchReviewSummary = document.getElementById('matchReviewSummary') as HTMLElement;
+        this.matchReviewContent = document.getElementById('matchReviewContent') as HTMLElement;
+        this.historyTableContainer = document.getElementById('historyTableContainer') as HTMLElement;
+        this.themeSelect = document.getElementById('themeSelect') as HTMLSelectElement;
         this.settingsButton = document.getElementById('settingsButton') as HTMLButtonElement;
         this.settingsFlyout = document.getElementById('settingsFlyout') as HTMLElement;
         this.settingsOverlay = document.getElementById('settingsOverlay') as HTMLElement;
         this.closeSettingsButton = document.getElementById('closeSettings') as HTMLButtonElement;
-        this.formatOriginalInput = document.getElementById('formatOriginal') as HTMLInputElement;
-        this.formatMp3Input = document.getElementById('formatMp3') as HTMLInputElement;
+        this.qualityLosslessInput = document.getElementById('qualityLossless') as HTMLInputElement;
+        this.qualityHighInput = document.getElementById('qualityHigh') as HTMLInputElement;
+        this.qualityLowInput = document.getElementById('qualityLow') as HTMLInputElement;
+        this.downloadSourceList = document.getElementById('downloadSourceList') as HTMLElement;
         this.fileNamingAlbumInput = document.getElementById('fileNamingAlbum') as HTMLInputElement;
         this.jobsRefreshIntervalSecondsInput = document.getElementById('jobsRefreshIntervalSeconds') as HTMLInputElement;
         this.listenbrainzTokenInput = document.getElementById('listenbrainzToken') as HTMLInputElement;
-        this.saveLbConfigButton = document.getElementById('saveLbConfig') as HTMLButtonElement;
+        this.listenbrainzUsernameInput = document.getElementById('listenbrainzUsername') as HTMLInputElement;
         this.lbConfigStatusEl = document.getElementById('lbConfigStatus') as HTMLElement;
+        this.ytmCookieInput = document.getElementById('ytmCookie') as HTMLInputElement;
+        this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
+        this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
+        this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
+        this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
+        this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
+        this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
+        this.freshFindsNewPctValueEl = document.getElementById('freshFindsNewPctValue') as HTMLElement;
+        this.freshFindsTrackCountInput = document.getElementById('freshFindsTrackCount') as HTMLInputElement;
+        this.freshFindsHistoryDaysInput = document.getElementById('freshFindsHistoryDays') as HTMLInputElement;
+        this.globalToastEl = document.getElementById('globalToast') as HTMLElement;
         this.plexLoginButton = document.getElementById('plexLoginButton') as HTMLButtonElement;
         this.plexPinContainer = document.getElementById('plexPinContainer') as HTMLElement;
         this.plexPinDisplay = document.getElementById('plexPinDisplay') as HTMLElement;
         this.plexPinCopyButton = document.getElementById('plexPinCopy') as HTMLButtonElement;
         this.plexPinStatus = document.getElementById('plexPinStatus') as HTMLElement;
-        this.plexLibraryConfigContainer = document.getElementById('plexLibraryConfig') as HTMLElement;
-        this.plexLibraryNameSelect = document.getElementById('plexLibraryName') as HTMLSelectElement;
-        this.plexPlaylistContainer = document.getElementById('plexPlaylistContainer') as HTMLElement;
-        this.plexPlaylistContainerHomeParent = this.plexPlaylistContainer.parentElement as HTMLElement;
-        this.plexPlaylistContainerHomeNextSibling = this.plexPlaylistContainer.nextSibling;
-        this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement;
-        this.plexPlaylistOptions = document.getElementById('plexPlaylistOptions') as HTMLSelectElement;
-        this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement;
-        this.savePlexConfigButton = document.getElementById('savePlexConfig') as HTMLButtonElement;
+        this.plexLoginOnlyContainer = document.getElementById('plexLoginOnlyContainer') as HTMLElement;
+        this.plexLoginOnlyButton = document.getElementById('plexLoginOnlyButton') as HTMLButtonElement;
+        this.plexLoginOnlyPinContainer = document.getElementById('plexLoginOnlyPinContainer') as HTMLElement;
+        this.plexLoginOnlyPinDisplay = document.getElementById('plexLoginOnlyPinDisplay') as HTMLElement;
+        this.plexLoginOnlyPinStatus = document.getElementById('plexLoginOnlyPinStatus') as HTMLElement;
+        this.plexLoginOnlyLibraryContainer = document.getElementById('plexLoginOnlyLibraryContainer') as HTMLElement;
+        this.plexLoginOnlyLibraryNameSelect = document.getElementById('plexLoginOnlyLibraryName') as HTMLSelectElement;
+        this.plexLoginOnlySaveButton = document.getElementById('plexLoginOnlySaveButton') as HTMLButtonElement;
+        this.plexLoginOnlyUserContainer = document.getElementById('plexLoginOnlyUserContainer') as HTMLElement;
+        this.plexLoginOnlyUserList = document.getElementById('plexLoginOnlyUserList') as HTMLElement;
+        this.appWrapper = document.querySelector('.app-wrapper') as HTMLElement;
+        this.plexPlaylistNameInput = document.getElementById('plexPlaylistName') as HTMLInputElement | null;
+        this.plexPlaylistOptions = document.getElementById('plexPlaylistOptions') as HTMLSelectElement | null;
+        this.plexPlaylistBackButton = document.getElementById('plexPlaylistBack') as HTMLButtonElement | null;
         this.plexSyncIntervalHoursInput = document.getElementById('plexSyncIntervalHours') as HTMLInputElement;
         this.startPlexSyncButton = document.getElementById('startPlexSync') as HTMLButtonElement;
         this.plexSyncStatusEl = document.getElementById('plexSyncStatus') as HTMLElement;
-        this.plexConfigStatusEl = document.getElementById('plexConfigStatus') as HTMLElement;
         this.plexConnectedStatusEl = document.getElementById('plexConnectedStatus') as HTMLElement;
         this.plexClearCredentialsButton = document.getElementById('plexClearCredentialsButton') as HTMLButtonElement;
         this.plexUserDropdownContainer = document.getElementById('plexUserDropdownContainer') as HTMLElement;
-        this.plexUserSelect = document.getElementById('plexUserSelect') as HTMLSelectElement;
         this.ignoreMatchesCheckbox = document.getElementById('ignoreMatchesCheckbox') as HTMLInputElement;
-        
+        this.renderTagToggleGroups();
+        for (const id of App.TAG_CHECKBOX_IDS) {
+            this.tagCheckboxes[id] = document.getElementById(id) as HTMLInputElement;
+        }
+
+        // User dropdown for top bar
+        this.userButton = document.getElementById('userButton') as HTMLButtonElement;
+        this.userDropdownModal = document.getElementById('userDropdownModal') as HTMLElement;
+        this.userDropdownOverlay = document.getElementById('userDropdownOverlay') as HTMLElement;
+        this.userDropdownList = document.getElementById('userDropdownList') as HTMLElement;
+        this.userButtonText = document.getElementById('userButtonText') as HTMLElement;
+
+        // Mobile menu
+        this.mobileMenuToggle = document.getElementById('mobileMenuToggle') as HTMLButtonElement | null;
+        this.mobileMenuOverlay = document.getElementById('mobileMenuOverlay') as HTMLElement | null;
+
         this.initializeEventListeners();
+        this.initializeSpinners();
         this.downloadSettings = this.defaultDownloadSettings();
         this.applySettingsToForm(this.downloadSettings);
+
+        // Initialize page navigation (start with Explore page)
+        this.switchPage('explore', false);
+
         this.initializeHistoryNavigation();
+        this.initializeHistoryControls();
+        void this.fetchAppConfig();
         void this.fetchDownloadSettingsFromServer();
+        void this.loadDeezerConfig();
         void this.loadListenbrainzConfig();
+        void this.loadYtmConfig();
+        void this.loadFreshFindsConfig();
         void this.loadPlexConfig();
         void this.updatePlexClearCredentialsButton();
+
+        // Initialize user button and sidebar playlists
+        void this.initializeUserButton();
+
+        this.initializeTheme();
+
         this.updateEndpointStatus(); // Initial load
-        
+
         // Update status every 30 seconds
         this.statusUpdateInterval = window.setInterval(() => {
             this.updateEndpointStatus();
         }, 30000);
     }
 
+    private initializeTheme(): void {
+        const savedTheme = window.localStorage.getItem(this.THEME_STORAGE_KEY) || 'tidal';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        if (this.themeSelect) {
+            this.themeSelect.value = savedTheme;
+        }
+    }
+
+    private handleThemeChange(e: Event): void {
+        const select = e.target as HTMLSelectElement;
+        const theme = select.value;
+        document.documentElement.setAttribute('data-theme', theme);
+        window.localStorage.setItem(this.THEME_STORAGE_KEY, theme);
+    }
+
     private initializeEventListeners(): void {
-        this.searchButton.addEventListener('click', () => this.handleSearch());
-        this.searchInput.addEventListener('keypress', (e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
-                this.handleSearch();
+        if (this.searchButton) {
+            this.searchButton.addEventListener('click', () => this.handleSearch());
+        }
+        if (this.searchInput) {
+            this.searchInput.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    this.handleSearch();
+                }
+            });
+        }
+
+        if (this.exploreBreadcrumbContainer) {
+            this.exploreBreadcrumbContainer.addEventListener('click', (e: Event) => {
+                const target = e.target as HTMLElement;
+                const button = target.closest('[data-explore-route-index]') as HTMLElement | null;
+                if (button) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const routeIndex = Number(button.getAttribute('data-explore-route-index') || '-1');
+                    if (Number.isInteger(routeIndex) && routeIndex >= 0 && routeIndex < this.exploreBreadcrumbRoutes.length) {
+                        void this.navigateToRoute({ ...this.exploreBreadcrumbRoutes[routeIndex] }, true);
+                    }
+                }
+            });
+        }
+
+        if (this.libraryBreadcrumbContainer) {
+            this.libraryBreadcrumbContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+                const breadcrumbButton = target.closest('[data-library-crumb]') as HTMLButtonElement | null;
+                if (!breadcrumbButton) {
+                    return;
+                }
+
+                e.preventDefault();
+                const crumb = breadcrumbButton.getAttribute('data-library-crumb');
+                if (crumb === 'library') {
+                    void this.loadLibraryArtists(0);
+                    return;
+                }
+                if (crumb === 'artist' && this.libraryCurrentArtist) {
+                    void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
+                }
+            });
+        }
+
+        // User dropdown listeners
+        if (this.userButton) {
+            console.log('[DEBUG] Attaching user button listener');
+            this.userButton.addEventListener('click', () => {
+                console.log('[DEBUG] User button clicked');
+                this.openUserDropdown();
+            });
+        } else {
+            console.error('[DEBUG] userButton element not found');
+        }
+        if (this.userDropdownOverlay) {
+            this.userDropdownOverlay.addEventListener('click', () => this.closeUserDropdown());
+        }
+        const userDropdownClose = document.getElementById('userDropdownClose');
+        if (userDropdownClose) {
+            userDropdownClose.addEventListener('click', () => this.closeUserDropdown());
+        }
+
+        // Mobile menu listeners
+        if (this.mobileMenuToggle) {
+            this.mobileMenuToggle.addEventListener('click', () => this.toggleMobileMenu());
+        }
+        if (this.mobileMenuOverlay) {
+            this.mobileMenuOverlay.addEventListener('click', () => this.closeMobileMenu());
+        }
+
+        // Old flyout listeners (safe if elements don't exist)
+        if (this.statusButton) {
+            this.statusButton.addEventListener('click', () => this.openFlyout());
+        }
+        if (this.closeFlyoutButton) {
+            this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
+        }
+        if (this.flyoutOverlay) {
+            this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+        }
+        if (this.flyoutContent) {
+            this.flyoutContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleFlyoutContentClick(e);
+            });
+        }
+
+        if (this.addMirrorButton) {
+            this.addMirrorButton.addEventListener('click', () => this.openAddMirrorModal());
+        }
+
+        if (this.validateAllPremiumButton) {
+            this.validateAllPremiumButton.addEventListener('click', async () => {
+                this.validateAllPremiumButton.disabled = true;
+                this.validateAllPremiumButton.textContent = 'Validating...';
+                try {
+                    const resp = await fetch('/api/endpoints/validate-all-premium', { method: 'POST' });
+                    if (!resp.ok) throw new Error('Failed to start validation');
+                    this.startPremiumPolling();
+                } catch (err) {
+                    this.validateAllPremiumButton.disabled = false;
+                    this.validateAllPremiumButton.textContent = 'Validate All Premium';
+                    alert(err instanceof Error ? err.message : 'Failed to start validation');
+                }
+            });
+        }
+
+        if (this.jobsButton) {
+            this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
+        }
+        if (this.closeJobsButton) {
+            this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
+        }
+        if (this.jobsOverlay) {
+            this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
+        }
+        if (this.jobsFilterSelect) {
+            this.jobsFilterSelect.addEventListener('change', () => {
+                this.currentJobsPage = 1;
+                this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
+                void this.loadJobs();
+            });
+        }
+        if (this.cancelPendingJobsButton) {
+            this.cancelPendingJobsButton.addEventListener('click', () => {
+                void this.cancelAllJobs();
+            });
+        }
+        if (this.retryAllJobsButton) {
+            this.retryAllJobsButton.addEventListener('click', () => {
+                void this.retryAllFilteredJobs();
+            });
+        }
+        if (this.jobsContent) {
+            this.jobsContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleJobsContentClick(e);
+            });
+        }
+        if (this.matchReviewRunScanButton) {
+            this.matchReviewRunScanButton.addEventListener('click', () => {
+                if (this.activeMatchActivityJobId) {
+                    void this.cancelLibraryUpdate(this.activeMatchActivityJobId);
+                    return;
+                }
+
+                void this.startLibraryUpdate();
+            });
+        }
+        if (this.matchReviewRefreshButton) {
+            this.matchReviewRefreshButton.addEventListener('click', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewEntityFilter) {
+            this.matchReviewEntityFilter.addEventListener('change', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewMaxConfidenceInput) {
+            this.matchReviewMaxConfidenceInput.addEventListener('change', () => {
+                this.matchCandidateCache.clear();
+                void this.loadMatchReview();
+            });
+        }
+        if (this.matchReviewContent) {
+            this.matchReviewContent.addEventListener('click', (e: MouseEvent) => {
+                void this.handleMatchReviewClick(e);
+            });
+            this.matchReviewContent.addEventListener('keydown', (e: KeyboardEvent) => {
+                void this.handleMatchReviewKeydown(e);
+            });
+        }
+
+        if (this.settingsButton) {
+            this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
+        }
+        if (this.closeSettingsButton) {
+            this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
+        }
+        if (this.settingsOverlay) {
+            this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+        }
+
+        if (this.themeSelect) {
+            this.themeSelect.addEventListener('change', (e) => this.handleThemeChange(e));
+        }
+
+        if (this.qualityLosslessInput) {
+            this.qualityLosslessInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.qualityHighInput) {
+            this.qualityHighInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.qualityLowInput) {
+            this.qualityLowInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        // Download source checkboxes + reorder buttons
+        if (this.downloadSourceList) {
+            this.downloadSourceList.addEventListener('change', (e) => {
+                const target = e.target as HTMLInputElement;
+                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer' || target.value === 'deezer_mirror')) {
+                    // Ensure at least one source is checked
+                    const checkedBoxes = this.downloadSourceList.querySelectorAll('input[type="checkbox"]:checked');
+                    if (checkedBoxes.length === 0) {
+                        target.checked = true;
+                        return;
+                    }
+                    this.updateSettingsFromForm();
+                }
+            });
+            this.downloadSourceList.addEventListener('click', (e) => {
+                const btn = (e.target as HTMLElement).closest('.source-move-up, .source-move-down');
+                if (!btn) return;
+                e.preventDefault();
+                const item = (btn as HTMLElement).closest('.download-source-item');
+                if (!item) return;
+                const list = item.parentElement;
+                if (!list) return;
+                const items = Array.from(list.querySelectorAll('.download-source-item'));
+                const idx = items.indexOf(item);
+                if (btn.classList.contains('source-move-up') && idx > 0) {
+                    list.insertBefore(item, items[idx - 1]);
+                } else if (btn.classList.contains('source-move-down') && idx < items.length - 1) {
+                    list.insertBefore(item, items[idx + 1].nextSibling);
+                }
+                this.updateSettingsFromForm();
+            });
+        }
+        if (this.fileNamingAlbumInput) {
+            this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
+        }
+        if (this.jobsRefreshIntervalSecondsInput) {
+            this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        if (this.ignoreMatchesCheckbox) {
+            this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        for (const id of App.TAG_CHECKBOX_IDS) {
+            this.tagCheckboxes[id]?.addEventListener('change', () => this.updateSettingsFromForm());
+        }
+        // ENTER key auto-save for integration inputs
+        const lbUsername = document.getElementById('listenbrainzUsername');
+        if (lbUsername) {
+            lbUsername.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveListenbrainzConfig();
+                }
+            });
+        }
+        const lbToken = document.getElementById('listenbrainzToken');
+        if (lbToken) {
+            lbToken.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveListenbrainzConfig();
+                }
+            });
+        }
+        const ytmInput = document.getElementById('ytmCookie');
+        if (ytmInput) {
+            ytmInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveYtmConfig();
+                }
+            });
+        }
+        const deezerInput = document.getElementById('deezerArl');
+        if (deezerInput) {
+            deezerInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.saveDeezerConfig();
+                }
+            });
+        }
+        if (this.autoDownloadFreshFindsCheckbox) {
+            this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.queueFreshFindsSave('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
+        }
+        if (this.freshFindsRetentionInput) {
+            this.freshFindsRetentionInput.addEventListener('change', () => this.queueFreshFindsSave('retention', parseInt(this.freshFindsRetentionInput.value, 10)));
+        }
+        if (this.freshFindsNewPctSlider) {
+            this.freshFindsNewPctSlider.addEventListener('change', () => this.queueFreshFindsSave('new_track_pct', parseInt(this.freshFindsNewPctSlider.value, 10)));
+            if (this.freshFindsNewPctValueEl) {
+                this.freshFindsNewPctSlider.addEventListener('input', () => {
+                    this.freshFindsNewPctValueEl!.textContent = this.freshFindsNewPctSlider.value + '%';
+                });
             }
-        });
+        }
+        if (this.freshFindsTrackCountInput) {
+            this.freshFindsTrackCountInput.addEventListener('change', () => this.queueFreshFindsSave('track_count', parseInt(this.freshFindsTrackCountInput.value, 10)));
+        }
+        if (this.freshFindsHistoryDaysInput) {
+            this.freshFindsHistoryDaysInput.addEventListener('change', () => this.queueFreshFindsSave('history_days', parseInt(this.freshFindsHistoryDaysInput.value, 10)));
+        }
 
-        this.statusButton.addEventListener('click', () => this.openFlyout());
-        this.closeFlyoutButton.addEventListener('click', () => this.closeFlyout());
-        this.flyoutOverlay.addEventListener('click', () => this.closeFlyout());
+        // Collapsible sections for settings
+        const taggingToggle = document.getElementById('taggingToggle');
+        const taggingGroup = document.getElementById('taggingGroup');
+        if (taggingToggle && taggingGroup) {
+            taggingToggle.addEventListener('click', () => {
+                const isHidden = taggingGroup.style.display === 'none';
+                taggingGroup.style.display = isHidden ? '' : 'none';
+                const arrow = taggingToggle.querySelector('.collapse-arrow');
+                if (arrow) {
+                    arrow.textContent = isHidden ? '▾' : '▸';
+                }
+                taggingToggle.classList.toggle('collapsed', !isHidden);
+            });
+        }
+        // Playlist Matching Penalties: no longer collapsible, sub-gated in updateUserTypeAccess
 
-        this.jobsButton.addEventListener('click', () => this.openJobsFlyout());
-        this.closeJobsButton.addEventListener('click', () => this.closeJobsFlyout());
-        this.jobsOverlay.addEventListener('click', () => this.closeJobsFlyout());
-        this.jobsFilterSelect.addEventListener('change', () => {
-            this.currentJobsPage = 1;
-            this.updateJobsActionButtons(0, this.jobsFilterSelect.value, 0);
-            void this.loadJobs();
-        });
-        this.cancelPendingJobsButton.addEventListener('click', () => {
-            void this.cancelAllPendingJobs();
-        });
-        this.retryAllJobsButton.addEventListener('click', () => {
-            void this.retryAllFilteredJobs();
-        });
-        this.jobsContent.addEventListener('click', (e: MouseEvent) => {
-            void this.handleJobsContentClick(e);
-        });
+        // Save All button
+        const saveAllSettingsButton = document.getElementById('saveAllSettings');
+        if (saveAllSettingsButton) {
+            saveAllSettingsButton.addEventListener('click', () => this.saveAllSettings());
+        }
 
-        this.settingsButton.addEventListener('click', () => this.openSettingsFlyout());
-        this.closeSettingsButton.addEventListener('click', () => this.closeSettingsFlyout());
-        this.settingsOverlay.addEventListener('click', () => this.closeSettingsFlyout());
+        // Plex sync interval — auto-save (debounced) on change
+        if (this.plexSyncIntervalHoursInput) {
+            this.plexSyncIntervalHoursInput.addEventListener('change', () => {
+                this.queuePlexSyncSave();
+            });
+        }
 
-        this.formatOriginalInput.addEventListener('change', () => this.updateSettingsFromForm());
-        this.formatMp3Input.addEventListener('change', () => this.updateSettingsFromForm());
-        this.fileNamingAlbumInput.addEventListener('input', () => this.updateSettingsFromForm());
-        this.jobsRefreshIntervalSecondsInput.addEventListener('change', () => this.updateSettingsFromForm());
-        this.ignoreMatchesCheckbox.addEventListener('change', () => this.updateSettingsFromForm());
-        this.saveLbConfigButton.addEventListener('click', () => this.saveListenbrainzConfig());
-        this.savePlexConfigButton.addEventListener('click', () => {
-            void this.savePlexConfig();
-        });
         // Remove save/test config listeners, add PIN login logic
-        this.plexLoginButton.addEventListener('click', async () => {
-            await this.startPlexPinLogin();
-            void this.updatePlexClearCredentialsButton();
-            void this.loadPlexLibraries();
-        });
+        if (this.plexLoginButton) {
+            this.plexLoginButton.addEventListener('click', async () => {
+                await this.startPlexPinLogin();
+                void this.updatePlexClearCredentialsButton();
+                void this.loadPlexLibraries();
+            });
+        }
+
+        if (this.plexLoginOnlyButton) {
+            this.plexLoginOnlyButton.addEventListener('click', async () => {
+                this.plexLoginOnlyButton.style.display = 'none';
+                await this.startPlexPinLogin();
+                void this.updatePlexClearCredentialsButton();
+                void this.loadPlexLibraries();
+            });
+        }
+
+        if (this.plexLoginOnlySaveButton) {
+            this.plexLoginOnlySaveButton.addEventListener('click', async () => {
+                await this.savePlexConfigFromLoginOnly();
+            });
+        }
 
         if (this.plexClearCredentialsButton) {
             this.plexClearCredentialsButton.addEventListener('click', async () => {
@@ -452,178 +1480,1760 @@ class App {
                         this.plexLoginButton.style.display = '';
                         this.plexLoginButton.disabled = false;
                     }
+                    if (this.userButtonText) {
+                        this.userButtonText.textContent = 'User';
+                    }
 
                     window.localStorage.removeItem('plexSelectedUserId');
+                    window.localStorage.removeItem('plexSelectedUserName');
+                    window.localStorage.removeItem('plexSelectedUserIsOwner');
+                    this.isPlexSelectedUserOwner = false;
                     await this.loadPlexConfig();
                     void this.updatePlexClearCredentialsButton();
                 }
             });
         }
 
-        if (this.plexUserSelect) {
-            this.plexUserSelect.addEventListener('change', async () => {
-                window.localStorage.setItem('plexSelectedUserId', this.plexUserSelect.value);
-                await this.loadPlexPlaylists();
+        // User selection is handled via buttons rendered in the Plex login-only overlay.
+
+        const copyPlexPin = (): void => {
+            const pin = this.plexPinDisplay?.textContent || this.plexLoginOnlyPinDisplay?.textContent || '';
+            if (pin) {
+                navigator.clipboard.writeText(pin);
+                const statusEl = this.plexPinStatus || this.plexLoginOnlyPinStatus;
+                if (statusEl) {
+                    statusEl.textContent = 'PIN copied!';
+                    setTimeout(() => {
+                        if (statusEl) {
+                            statusEl.textContent = '';
+                        }
+                    }, 1500);
+                }
+            }
+        };
+
+        if (this.plexPinCopyButton) {
+            this.plexPinCopyButton.addEventListener('click', copyPlexPin);
+        }
+        if (this.startPlexSyncButton) {
+            this.startPlexSyncButton.addEventListener('click', () => this.startPlexSync());
+        }
+        if (this.plexPlaylistOptions) {
+            const playlistOptions = this.plexPlaylistOptions;
+            this.plexPlaylistOptions.addEventListener('change', () => {
+                const selectedName = playlistOptions.value.trim();
+                if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
+                    this.setPlexPlaylistMode('new');
+                    if (this.plexPlaylistNameInput) {
+                        this.plexPlaylistNameInput.value = '';
+                        this.plexPlaylistNameInput.focus();
+                    }
+                    return;
+                }
+
+                if (selectedName && this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = selectedName;
+                } else if (this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = '';
+                }
+
+                this.setPlexPlaylistMode('existing');
+            });
+        }
+        if (this.plexPlaylistBackButton) {
+            this.plexPlaylistBackButton.addEventListener('click', () => {
+                this.setPlexPlaylistMode('existing');
+                if (this.plexPlaylistOptions) {
+                    this.plexPlaylistOptions.value = '';
+                }
+                if (this.plexPlaylistNameInput) {
+                    this.plexPlaylistNameInput.value = '';
+                }
             });
         }
 
-        this.plexPinCopyButton.addEventListener('click', () => {
-            const pin = this.plexPinDisplay.textContent || '';
-            if (pin) {
-                navigator.clipboard.writeText(pin);
-                this.plexPinStatus.textContent = 'PIN copied!';
-                setTimeout(() => { this.plexPinStatus.textContent = ''; }, 1500);
-            }
-        });
-        this.startPlexSyncButton.addEventListener('click', () => this.startPlexSync());
-        this.plexPlaylistOptions.addEventListener('change', () => {
-            const selectedName = this.plexPlaylistOptions.value.trim();
-            if (selectedName === App.NEW_PLEX_PLAYLIST_OPTION) {
-                this.setPlexPlaylistMode('new');
-                this.plexPlaylistNameInput.value = '';
-                this.plexPlaylistNameInput.focus();
-                return;
-            }
-
-            if (selectedName) {
-                this.plexPlaylistNameInput.value = selectedName;
-            } else {
-                this.plexPlaylistNameInput.value = '';
-            }
-
-            this.setPlexPlaylistMode('existing');
-        });
-        this.plexPlaylistBackButton.addEventListener('click', () => {
-            this.setPlexPlaylistMode('existing');
-            this.plexPlaylistOptions.value = '';
-            this.plexPlaylistNameInput.value = '';
-        });
-
         // Update placeholder text based on search type
-        this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
+        if (this.searchTypeSelect) {
+            this.searchTypeSelect.addEventListener('change', () => this.updateSearchPlaceholder());
+        }
 
         // Download button and album card click delegation
-        this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
+        if (this.resultsContainer) {
+            this.resultsContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
 
-            // Check for play button clicks first
-            const playBtn = target.closest('.track-play-btn') as HTMLButtonElement | null;
-            if (playBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const trackCard = playBtn.closest('.track-card') as HTMLElement;
-                const trackId = trackCard?.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
-                }
-                return;
-            }
-            
-            // Check for download button clicks first
-            const downloadBtn = target.closest('.track-download-btn');
-            if (downloadBtn) {
-                const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
-                const trackId = trackCard?.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
-                }
-                return; // Stop here if it was a download button
-            }
+                // Check for grid play button clicks
+                const gridPlayBtn = target.closest('.grid-play-btn') as HTMLButtonElement | null;
+                if (gridPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackRow = gridPlayBtn.closest('.tracks-grid-row') as HTMLElement;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handlePlayToggle(parseInt(trackId, 10), trackRow, gridPlayBtn);
+                            return;
+                        }
+                    }
 
-            // Check for "More Like This" actions before generic card click handlers
-            const moreLikeBtn = target.closest('.track-more-btn') as HTMLButtonElement | null;
-            if (moreLikeBtn) {
-                e.preventDefault();
-                e.stopPropagation();
-                const card = moreLikeBtn.closest('.track-card') as HTMLElement | null;
-                if (!card) {
+                    // Check for album grid play button
+                    const albumRow = gridPlayBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handlePlayAlbum(parseInt(albumId, 10), gridPlayBtn);
+                            return;
+                        }
+                    }
                     return;
                 }
 
-                const trackId = card.getAttribute('data-track-id');
-                if (trackId) {
-                    void this.fetchSimilarTracks(parseInt(trackId, 10));
-                    return;
-                }
-
-                if (card.classList.contains('album-card')) {
-                    const albumId = card.getAttribute('data-album-id');
+                // Check for album row clicks (anywhere except actions column)
+                const albumRow = target.closest('.albums-grid-row') as HTMLElement | null;
+                if (albumRow && !target.closest('.grid-cell.grid-col-actions')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const albumId = albumRow.getAttribute('data-album-id');
                     if (albumId) {
-                        void this.fetchSimilarAlbums(parseInt(albumId, 10));
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
                     }
                     return;
                 }
 
-                if (card.classList.contains('artist-card')) {
-                    const artistId = card.getAttribute('data-artist-id');
+                // Check for grid add to playlist button clicks
+                const gridAddPlaylistBtn = target.closest('.grid-add-playlist-btn');
+                if (gridAddPlaylistBtn) {
+                    const trackRow = gridAddPlaylistBtn.closest('.tracks-grid-row') as HTMLElement;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleAddToPlaylist(parseInt(trackId, 10), trackRow, 'loose');
+                            return;
+                        }
+                    }
+
+                    // Check for album grid
+                    const albumRow = gridAddPlaylistBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleAddAlbumToPlaylist(parseInt(albumId, 10), albumRow);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                // Check for Plex existing chip clicks (re-download prompt)
+                const plexChip = target.closest('.plex-existing-chip');
+                if (plexChip) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    // Artist hero chips are informational only — no action on click
+                    if (plexChip.closest('.artist-actions')) {
+                        return;
+                    }
+
+                    const chipEl = plexChip as HTMLElement;
+
+                    // Try dataset-based IDs first (set by createPlexMatchChip)
+                    if (chipEl.dataset.trackId) {
+                        void this.handleRedownloadTrack(parseInt(chipEl.dataset.trackId, 10), chipEl, chipEl);
+                        return;
+                    }
+
+                    if (chipEl.dataset.albumId) {
+                        void this.handleRedownloadAlbum(parseInt(chipEl.dataset.albumId, 10), chipEl, chipEl);
+                        return;
+                    }
+
+                    // Fall back to parent traversal for chips without dataset IDs
+                    const trackRow = plexChip.closest('.tracks-grid-row') as HTMLElement;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleRedownloadTrack(parseInt(trackId, 10), trackRow, chipEl);
+                        }
+                        return;
+                    }
+
+                    const albumRow = plexChip.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleRedownloadAlbum(parseInt(albumId, 10), albumRow, chipEl);
+                        }
+                        return;
+                    }
+
+                    // Bulk chip without specific ID — re-download all visible tracks
+                    if (chipEl.classList.contains('plex-existing-chip--bulk')) {
+                        void this.handleRedownloadAll(chipEl);
+                        return;
+                    }
+                }
+
+                // Check for grid add to library button clicks
+                const gridAddLibraryBtn = target.closest('.grid-add-library-btn');
+                if (gridAddLibraryBtn) {
+                    const trackRow = gridAddLibraryBtn.closest('.tracks-grid-row') as HTMLElement;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.handleDownload(parseInt(trackId, 10), trackRow, 'loose');
+                            return;
+                        }
+                    }
+
+                    // Check for album grid
+                    const albumRow = gridAddLibraryBtn.closest('.albums-grid-row') as HTMLElement;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.handleDownloadAlbum(parseInt(albumId, 10), albumRow);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                // Check for grid "More Like This" button clicks
+                const gridMoreBtn = target.closest('.grid-more-btn') as HTMLButtonElement | null;
+                if (gridMoreBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackRow = gridMoreBtn.closest('.tracks-grid-row') as HTMLElement | null;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-track-id');
+                        if (trackId) {
+                            void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                            return;
+                        }
+                    }
+
+                    // Check for album grid
+                    const albumRow = gridMoreBtn.closest('.albums-grid-row') as HTMLElement | null;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                            return;
+                        }
+                    }
+                }
+
+                // Check for play button clicks first
+                const playBtn = target.closest('.track-play-btn') as HTMLButtonElement | null;
+                if (playBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const trackCard = playBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handlePlayToggle(parseInt(trackId, 10), trackCard, playBtn);
+                    }
+                    return;
+                }
+
+                // Check for add to playlist button clicks
+                const addPlaylistBtn = target.closest('.track-add-playlist-btn');
+                if (addPlaylistBtn) {
+                    const trackCard = addPlaylistBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleAddToPlaylist(parseInt(trackId, 10), trackCard, 'loose');
+                    }
+                    return;
+                }
+
+                // Check for download button clicks
+                const downloadBtn = target.closest('.track-download-btn');
+                if (downloadBtn) {
+                    const trackCard = downloadBtn.closest('.track-card') as HTMLElement;
+                    const trackId = trackCard?.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.handleDownload(parseInt(trackId, 10), trackCard, 'loose');
+                    }
+                    return; // Stop here if it was a download button
+                }
+
+                // Check for "More Like This" actions before generic card click handlers
+                const moreLikeBtn = target.closest('.track-more-btn') as HTMLButtonElement | null;
+                if (moreLikeBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const card = moreLikeBtn.closest('.track-card') as HTMLElement | null;
+                    if (!card) {
+                        return;
+                    }
+
+                    const trackId = card.getAttribute('data-track-id');
+                    if (trackId) {
+                        void this.navigateToRoute({ view: 'similar_tracks', trackId: parseInt(trackId, 10) }, true);
+                        return;
+                    }
+
+                    if (card.classList.contains('album-card')) {
+                        const albumId = card.getAttribute('data-album-id');
+                        if (albumId) {
+                            void this.navigateToRoute({ view: 'similar_albums', albumId: parseInt(albumId, 10) }, true);
+                        }
+                        return;
+                    }
+
+                    if (card.classList.contains('artist-card')) {
+                        const artistId = card.getAttribute('data-artist-id');
+                        if (artistId) {
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        }
+                        return;
+                    }
+                }
+
+                // Check for artist card compact button clicks (Find Similar)
+                const artistCardBtn = target.closest('.artist-card-btn') as HTMLButtonElement | null;
+                if (artistCardBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistCard = artistCardBtn.closest('.artist-card-compact') as HTMLElement | null;
+                    if (artistCard) {
+                        const artistId = artistCard.getAttribute('data-artist-id');
+                        if (artistId) {
+                            void this.navigateToRoute({ view: 'similar_artists', artistId: parseInt(artistId, 10) }, true);
+                        }
+                    }
+                    return;
+                }
+
+                // Check for artist card compact clicks (view artist albums)
+                const artistCardCompact = target.closest('.artist-card-compact.clickable') as HTMLElement | null;
+                if (artistCardCompact && !target.closest('.artist-card-btn')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistId = artistCardCompact.getAttribute('data-artist-id');
                     if (artistId) {
-                        void this.fetchSimilarArtists(parseInt(artistId, 10));
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
                     }
                     return;
                 }
-            }
-            
-            // Check for artist name clicks within track cards
-            const artistName = target.closest('.track-artist-name');
-            if (artistName) {
-                const trackCard = artistName.closest('.track-card');
-                const artistId = trackCard?.getAttribute('data-artist-id');
-                if (artistId) {
+
+                // Check for artist name clicks within grid rows
+                const gridArtistName = target.closest('.tracks-grid-row .track-artist-name');
+                if (gridArtistName) {
+                    const trackRow = gridArtistName.closest('.tracks-grid-row');
+                    const artistId = trackRow?.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for artist name clicks within album hero header
+                const heroArtistName = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
+                if (heroArtistName) {
+                    const artistId = heroArtistName.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for album name clicks within grid rows
+                const gridAlbumName = target.closest('.tracks-grid-row .track-album-name');
+                if (gridAlbumName) {
+                    const trackRow = gridAlbumName.closest('.tracks-grid-row');
+                    const albumId = trackRow?.getAttribute('data-album-id');
+                    if (albumId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for artist name clicks within album grid rows
+                const gridAlbumArtistName = target.closest('.albums-grid-row .album-artist-name');
+                if (gridAlbumArtistName) {
+                    const albumRow = gridAlbumArtistName.closest('.albums-grid-row');
+                    const artistId = albumRow?.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for artist name clicks within track cards
+                const artistName = target.closest('.track-card .track-artist-name');
+                if (artistName) {
+                    const trackCard = artistName.closest('.track-card');
+                    const artistId = trackCard?.getAttribute('data-artist-id');
+                    if (artistId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for album name clicks within track cards
+                const albumName = target.closest('.track-card .track-album-name');
+                if (albumName) {
+                    const trackCard = albumName.closest('.track-card');
+                    const albumId = trackCard?.getAttribute('data-album-id');
+                    if (albumId) {
+                        e.stopPropagation();
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                        return;
+                    }
+                }
+
+                // Check for playlist card clicks
+                const playlistCard = target.closest('.playlist-card');
+                if (playlistCard) {
+                    const playlistId = playlistCard.getAttribute('data-playlist-id');
+                    if (playlistId) {
+                        void this.navigateToRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined }, true);
+                        return;
+                    }
+                }
+
+                // Check for search playlist card clicks
+                const searchPlaylistCard = target.closest('.playlist-search-card') as HTMLElement | null;
+                if (searchPlaylistCard) {
+                    const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
+                    if (playlistId) {
+                        void this.navigateToRoute({ view: 'playlist', playlistId }, true);
+                        return;
+                    }
+                }
+
+                // Check for album card clicks (albums have both track-card and album-card classes)
+                const clickedCard = target.closest('.track-card') as HTMLElement;
+                if (clickedCard && clickedCard.classList.contains('album-card')) {
+                    const albumId = clickedCard.getAttribute('data-album-id');
+                    if (albumId) {
+                        void this.navigateToRoute({ view: 'album', albumId: parseInt(albumId, 10) }, true);
+                    }
+                }
+
+                // Check for artist card clicks
+                if (clickedCard && clickedCard.classList.contains('artist-card')) {
+                    const artistId = clickedCard.getAttribute('data-artist-id');
+                    if (artistId) {
+                        void this.navigateToRoute({ view: 'artist', artistId: parseInt(artistId, 10) }, true);
+                    }
+                }
+            });
+        }
+
+        if (this.libraryResultsContainer) {
+            this.libraryResultsContainer.addEventListener('click', (e: MouseEvent) => {
+                const target = e.target as HTMLElement;
+
+                const artistHeroPlayBtn = target.closest('.library-artist-hero-play-btn') as HTMLButtonElement | null;
+                if (artistHeroPlayBtn) {
+                    e.preventDefault();
                     e.stopPropagation();
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
+                    const artistId = artistHeroPlayBtn.getAttribute('data-library-artist-id') || this.libraryCurrentArtist?.id || '';
+                    if (artistId) {
+                        void this.handlePlayLibraryArtist(artistId, artistHeroPlayBtn);
+                    }
                     return;
                 }
-            }
-            
-            // Check for album name clicks within track cards
-            const albumName = target.closest('.track-album-name');
-            if (albumName) {
-                const trackCard = albumName.closest('.track-card');
-                const albumId = trackCard?.getAttribute('data-album-id');
-                if (albumId) {
+
+                const albumHeroPlayBtn = target.closest('.library-album-hero-play-btn') as HTMLButtonElement | null;
+                if (albumHeroPlayBtn) {
+                    e.preventDefault();
                     e.stopPropagation();
-                    void this.fetchAlbumTracks(parseInt(albumId, 10));
+                    const albumId = albumHeroPlayBtn.getAttribute('data-library-album-id') || this.libraryCurrentAlbum?.id || '';
+                    if (albumId) {
+                        void this.handlePlayLibraryAlbum(albumId, albumHeroPlayBtn);
+                    }
                     return;
                 }
-            }
-            
-            // Check for playlist card clicks
-            const playlistCard = target.closest('.playlist-card');
-            if (playlistCard) {
-                const playlistId = playlistCard.getAttribute('data-playlist-id');
-                if (playlistId) {
-                    void this.fetchListenbrainzPlaylistTracks(playlistId);
+
+                const gridPlayBtn = target.closest('.grid-play-btn') as HTMLButtonElement | null;
+                if (gridPlayBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const trackRow = gridPlayBtn.closest('[data-library-track-id]') as HTMLElement | null;
+                    if (trackRow) {
+                        const trackId = trackRow.getAttribute('data-library-track-id') || '';
+                        if (trackId) {
+                            void this.handlePlayLibraryToggle(trackId, gridPlayBtn);
+                        }
+                        return;
+                    }
+
+                    const albumRow = gridPlayBtn.closest('[data-library-album-id]') as HTMLElement | null;
+                    if (albumRow) {
+                        const albumId = albumRow.getAttribute('data-library-album-id') || '';
+                        if (albumId) {
+                            void this.handlePlayLibraryAlbum(albumId, gridPlayBtn);
+                        }
+                        return;
+                    }
+                }
+
+                const paginationButton = target.closest('[data-library-offset]') as HTMLButtonElement | null;
+                if (paginationButton) {
+                    e.preventDefault();
+                    if (paginationButton.disabled) {
+                        return;
+                    }
+                    const offset = Number(paginationButton.getAttribute('data-library-offset') || '0');
+                    if (Number.isFinite(offset) && offset >= 0) {
+                        void this.loadLibraryArtists(offset);
+                    }
                     return;
                 }
+
+                const artistCard = target.closest('[data-library-artist-id]') as HTMLElement | null;
+                if (artistCard) {
+                    e.preventDefault();
+                    const artistId = artistCard.getAttribute('data-library-artist-id') || '';
+                    const artistName = artistCard.getAttribute('data-library-artist-name') || 'Artist';
+                    if (artistId) {
+                        void this.loadLibraryArtistAlbums(artistId, artistName);
+                    }
+                    return;
+                }
+
+                const trackArtistName = target.closest('.tracks-grid-row .library-track-artist-name') as HTMLElement | null;
+                if (trackArtistName) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const artistId = trackArtistName.getAttribute('data-library-artist-id') || this.libraryCurrentArtist?.id || '';
+                    const artistName = trackArtistName.getAttribute('data-library-artist-name') || this.libraryCurrentArtist?.name || 'Artist';
+                    if (artistId) {
+                        void this.loadLibraryArtistAlbums(artistId, artistName);
+                    }
+                    return;
+                }
+
+                const albumRow = target.closest('[data-library-album-id]') as HTMLElement | null;
+                if (albumRow && !target.closest('.grid-cell.grid-col-actions')) {
+                    e.preventDefault();
+                    const albumId = albumRow.getAttribute('data-library-album-id') || '';
+                    const albumTitle = albumRow.getAttribute('data-library-album-title') || 'Album';
+                    const artistName = albumRow.getAttribute('data-library-artist-name') || this.libraryCurrentArtist?.name || '';
+                    if (albumId) {
+                        void this.loadLibraryAlbumTracks(albumId, albumTitle, artistName || undefined);
+                    }
+                    return;
+                }
+
+                const albumHeroArtist = target.closest('.album-hero-content .track-artist-name') as HTMLElement | null;
+                if (albumHeroArtist && this.libraryCurrentArtist) {
+                    e.preventDefault();
+                    void this.loadLibraryArtistAlbums(this.libraryCurrentArtist.id, this.libraryCurrentArtist.name);
+                }
+            });
+        }
+    }
+
+    private initializeSpinners(): void {
+        const inputs = document.querySelectorAll<HTMLInputElement>('[data-spinner-input]');
+        inputs.forEach((input) => {
+            const inputId = input.id;
+            const min = parseInt(input.dataset.spinnerMin || '0', 10);
+            const max = parseInt(input.dataset.spinnerMax || '999', 10);
+            const step = parseInt(input.dataset.spinnerStep || '1', 10);
+
+            const decBtn = (document.getElementById(`${inputId}Dec`) ||
+                document.querySelector(`[data-spinner-dec="${inputId}"]`)) as HTMLButtonElement | null;
+            const incBtn = (document.getElementById(`${inputId}Inc`) ||
+                document.querySelector(`[data-spinner-inc="${inputId}"]`)) as HTMLButtonElement | null;
+
+            const updateButtons = (): void => {
+                const v = parseInt(input.value, 10);
+                if (decBtn) decBtn.disabled = v <= min;
+                if (incBtn) incBtn.disabled = v >= max;
+            };
+
+            if (decBtn) {
+                decBtn.addEventListener('click', () => {
+                    const v = parseInt(input.value, 10);
+                    if (v > min) {
+                        input.value = String(Math.max(min, v - step));
+                        input.dispatchEvent(new Event('change'));
+                    }
+                    updateButtons();
+                });
             }
 
-            // Check for search playlist card clicks
-            const searchPlaylistCard = target.closest('.playlist-search-card') as HTMLElement | null;
-            if (searchPlaylistCard) {
-                const playlistId = searchPlaylistCard.getAttribute('data-playlist-id');
-                if (playlistId) {
-                    void this.fetchPlaylistTracks(playlistId);
-                    return;
-                }
+            if (incBtn) {
+                incBtn.addEventListener('click', () => {
+                    const v = parseInt(input.value, 10);
+                    if (v < max) {
+                        input.value = String(Math.min(max, v + step));
+                        input.dispatchEvent(new Event('change'));
+                    }
+                    updateButtons();
+                });
             }
-            
-            // Check for album card clicks (albums have both track-card and album-card classes)
-            const clickedCard = target.closest('.track-card') as HTMLElement;
-            if (clickedCard && clickedCard.classList.contains('album-card')) {
-                const albumId = clickedCard.getAttribute('data-album-id');
-                if (albumId) {
-                    void this.fetchAlbumTracks(parseInt(albumId, 10));
-                }
-            }
-            
-            // Check for artist card clicks
-            if (clickedCard && clickedCard.classList.contains('artist-card')) {
-                const artistId = clickedCard.getAttribute('data-artist-id');
-                if (artistId) {
-                    void this.fetchArtistAlbums(parseInt(artistId, 10));
-                }
+
+            input.addEventListener('change', updateButtons);
+            updateButtons();
+        });
+    }
+
+    private switchPage(pageName: string, updateHistory: boolean = true): void {
+        const normalizedPage = this.normalizePage(pageName);
+        const previousPage = this.currentPage;
+
+        // Cancel any pending requests when switching pages
+        if (this.pendingRequestController) {
+            this.pendingRequestController.abort();
+            this.pendingRequestController = null;
+        }
+
+        // Hide all pages
+        const allPages = document.querySelectorAll('.page');
+        allPages.forEach(page => {
+            page.classList.remove('active');
+        });
+
+        // Show the selected page
+        const selectedPage = document.getElementById(`${normalizedPage}Page`);
+        if (selectedPage) {
+            selectedPage.classList.add('active');
+        }
+
+        // Update active nav item
+        const navItems = document.querySelectorAll('.nav-item');
+        navItems.forEach(item => {
+            item.classList.remove('active');
+            if ((item as HTMLElement).getAttribute('data-page') === normalizedPage) {
+                item.classList.add('active');
             }
         });
+
+        // Update current page
+        this.currentPage = normalizedPage;
+
+        // Update top bar title based on page
+        const pageNames: Record<string, string> = {
+            explore: 'Explore',
+            library: 'Library',
+            settings: 'Settings',
+            mirrors: 'Hi-Fi Mirrors',
+            matches: 'Match Review',
+            jobs: 'Jobs',
+            history: 'Listen History'
+        };
+        if (normalizedPage === 'explore') {
+            this.renderTopBarTitle('Explore');
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+            this.hideLibraryBreadcrumb();
+        } else if (normalizedPage === 'library') {
+            this.renderTopBarTitle('Library');
+            if (this.exploreBreadcrumbContainer) {
+                this.exploreBreadcrumbContainer.style.display = 'none';
+                this.exploreBreadcrumbContainer.innerHTML = '';
+            }
+            this.renderLibraryBreadcrumb();
+        } else {
+            this.renderTopBarTitle(pageNames[normalizedPage] || 'Squidly');
+            if (this.exploreBreadcrumbContainer) {
+                this.exploreBreadcrumbContainer.style.display = 'none';
+                this.exploreBreadcrumbContainer.innerHTML = '';
+            }
+            this.hideLibraryBreadcrumb();
+        }
+
+        // Refresh mirrors data when switching to mirrors page
+        if (normalizedPage === 'mirrors') {
+            void this.updateEndpointStatus();
+        }
+
+        // Load jobs when switching to jobs page
+        if (normalizedPage === 'jobs') {
+            this.currentJobsPage = 1;
+            void this.loadJobs();
+        }
+
+        if (normalizedPage === 'matches') {
+            void this.loadMatchActivity().then(() => {
+                if (this.currentPage !== 'matches') {
+                    return;
+                }
+                if (!this.isMatchScanActive()) {
+                    void this.loadMatchReview();
+                }
+            });
+        } else {
+            this.stopMatchReviewPollingInterval();
+        }
+
+        if (normalizedPage === 'library' && !this.libraryLoadedOnce && updateHistory) {
+            void this.loadLibraryArtists(0, false);
+        }
+
+        if (normalizedPage === 'history') {
+            void this.loadListenHistory();
+        }
+
+        if (updateHistory && !this.isHandlingPopState && previousPage !== normalizedPage) {
+            this.pushHistoryTab(normalizedPage);
+        }
+    }
+
+    private setLibraryMessage(message: string): void {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.renderLibraryBreadcrumb();
+
+        this.libraryResultsContainer.innerHTML = `
+            <div class="library-placeholder">
+                <p>${this.escapeHtml(message)}</p>
+            </div>
+        `;
+    }
+
+    private formatLibraryBreadcrumb(): string {
+        const artist = this.libraryCurrentArtist;
+        const album = this.libraryCurrentAlbum;
+        const playlistTitle = this.libraryCurrentPlaylist;
+
+        let trail = '<button class="library-crumb-btn" data-library-crumb="library">Library</button>';
+
+        if (playlistTitle) {
+            trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(playlistTitle)}</span>`;
+        } else if (artist) {
+            if (album) {
+                trail += `<span class="library-crumb-separator">&gt;</span><button class="library-crumb-btn" data-library-crumb="artist">${this.escapeHtml(artist.name)}</button>`;
+            } else {
+                trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(artist.name)}</span>`;
+            }
+        }
+
+        if (album) {
+            trail += `<span class="library-crumb-separator">&gt;</span><span class="library-crumb-current">${this.escapeHtml(album.title)}</span>`;
+        }
+
+        return trail;
+    }
+
+    private renderLibraryBreadcrumb(): void {
+        if (!this.libraryBreadcrumbContainer) {
+            return;
+        }
+
+        const trail = this.formatLibraryBreadcrumb();
+        this.libraryBreadcrumbContainer.innerHTML = trail;
+        this.libraryBreadcrumbContainer.style.display = trail ? 'flex' : 'none';
+    }
+
+    private hideLibraryBreadcrumb(): void {
+        if (!this.libraryBreadcrumbContainer) {
+            return;
+        }
+
+        this.libraryBreadcrumbContainer.innerHTML = '';
+        this.libraryBreadcrumbContainer.style.display = 'none';
+    }
+
+    private formatLibraryArtistCard(artist: PlexLibraryArtist): string {
+        const artistName = this.escapeHtml(artist.name || 'Unknown Artist');
+        return `
+            <div class="artist-card-compact clickable" data-library-artist-id="${this.escapeHtml(artist.id)}" data-library-artist-name="${artistName}" title="View albums by ${artistName}">
+                <div class="artist-card-name">${artistName}</div>
+                <div class="artist-card-image">
+                    ${artist.picture
+                ? `<img src="${artist.picture}" alt="${artistName}" loading="lazy">`
+                : `<div class="artist-card-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="8" r="4"></circle>
+                                <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
+                            </svg>
+                           </div>`
+            }
+                </div>
+            </div>
+        `;
+    }
+
+    private getLibraryArtistPageWindow(currentPage: number, totalPages: number): number[] {
+        if (totalPages <= 1) {
+            return [1];
+        }
+
+        const pages = new Set<number>([1, totalPages]);
+        const windowRadius = 2;
+
+        for (let page = currentPage - windowRadius; page <= currentPage + windowRadius; page += 1) {
+            if (page >= 1 && page <= totalPages) {
+                pages.add(page);
+            }
+        }
+
+        return Array.from(pages).sort((a, b) => a - b);
+    }
+
+    private formatLibraryArtistPageButtons(currentPage: number, totalPages: number): string {
+        const pages = this.getLibraryArtistPageWindow(currentPage, totalPages);
+        const parts: string[] = [];
+
+        for (let idx = 0; idx < pages.length; idx += 1) {
+            const page = pages[idx];
+            const prev = idx > 0 ? pages[idx - 1] : null;
+
+            if (prev !== null && page - prev > 1) {
+                parts.push('<span class="library-page-gap" aria-hidden="true">...</span>');
+            }
+
+            const offset = (page - 1) * this.libraryArtistsPageSize;
+            const isCurrent = page === currentPage;
+            parts.push(`
+                <button
+                    class="library-page-btn library-page-number${isCurrent ? ' is-active' : ''}"
+                    data-library-offset="${offset}"
+                    ${isCurrent ? 'disabled aria-current="page"' : ''}
+                >${page}</button>
+            `);
+        }
+
+        return parts.join('');
+    }
+
+    private renderLibraryArtists(artists: PlexLibraryArtist[]): void {
+        this.libraryLoadedOnce = true;
+        this.renderLibraryBreadcrumb();
+        const currentPage = Math.floor(this.libraryArtistsOffset / this.libraryArtistsPageSize) + 1;
+        const totalPages = Math.max(1, Math.ceil(this.libraryArtistsTotal / this.libraryArtistsPageSize));
+        const firstOffset = 0;
+        const lastOffset = Math.max(0, (totalPages - 1) * this.libraryArtistsPageSize);
+        const prevOffset = Math.max(0, this.libraryArtistsOffset - this.libraryArtistsPageSize);
+        const nextOffset = this.libraryArtistsOffset + this.libraryArtistsPageSize;
+        const hasPrev = this.libraryArtistsOffset > 0;
+        const hasNext = nextOffset < this.libraryArtistsTotal;
+
+        this.libraryResultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Artists</h2>
+                </div>
+            </div>
+            <div class="results-list artist-results">
+                ${artists.length > 0
+                ? artists.map((artist) => this.formatLibraryArtistCard(artist)).join('')
+                : '<div class="library-placeholder"><p>No artists found in Plex library.</p></div>'}
+            </div>
+            <div class="library-pagination">
+                <button class="library-page-btn" data-library-offset="${firstOffset}" ${hasPrev ? '' : 'disabled'}>First</button>
+                <button class="library-page-btn" data-library-offset="${prevOffset}" ${hasPrev ? '' : 'disabled'}>Previous</button>
+                <span class="library-page-text">Page ${currentPage} of ${totalPages}</span>
+                <div class="library-page-numbers" aria-label="Library artist page navigation">
+                    ${this.formatLibraryArtistPageButtons(currentPage, totalPages)}
+                </div>
+                <button class="library-page-btn" data-library-offset="${nextOffset}" ${hasNext ? '' : 'disabled'}>Next</button>
+                <button class="library-page-btn" data-library-offset="${lastOffset}" ${hasNext ? '' : 'disabled'}>Last</button>
+            </div>
+        `;
+    }
+
+    private renderLibraryArtistAlbums(artistName: string, albums: PlexLibraryAlbum[], artistPicture?: string): void {
+        this.libraryLoadedOnce = true;
+        this.renderLibraryBreadcrumb();
+        const heroHtml = this.renderHeroCard({
+            type: 'artist',
+            coverUrl: artistPicture || undefined,
+            coverAlt: artistName,
+            title: artistName,
+            actions: [
+                {
+                    className: 'primary library-artist-hero-play-btn',
+                    title: 'Play artist',
+                    ariaLabel: 'Play artist',
+                    svgContent: this.getPlayIconSvg(),
+                    disabled: albums.length === 0,
+                    dataAttrs: { 'data-library-artist-id': this.libraryCurrentArtist?.id || '' },
+                },
+            ],
+        });
+
+        this.libraryResultsContainer.innerHTML = `
+            ${heroHtml}
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Albums</h2>
+                </div>
+            </div>
+            ${this.renderAlbumGrid(albums, {
+                viewMode: 'library-albums',
+                includeQuality: false,
+                dataAttr: 'data-library-album-id',
+                extraRowClass: 'library-clickable-row',
+                actions: 'play-only',
+                emptyMessage: '<div class="library-placeholder"><p>No albums found for this artist.</p></div>',
+                rowDataAttrs: (album) => ({
+                    'data-library-album-title': album.title,
+                    'data-library-artist-name': album.artist,
+                }),
+            })}
+        `;
+    }
+
+    private renderLibraryAlbumTracks(
+        albumTitle: string,
+        tracks: PlexLibraryTrack[],
+        albumArtist?: string,
+        albumYear?: number,
+        albumCover?: string
+    ): void {
+        this.libraryLoadedOnce = true;
+        const maxDisc = tracks.reduce((maxValue, track) => {
+            const disc = typeof track.disc_number === 'number' ? track.disc_number : 1;
+            return Math.max(maxValue, disc);
+        }, 1);
+
+        const totalDurationSeconds = tracks.reduce((sum, track) => {
+            const millis = typeof track.duration === 'number' ? track.duration : 0;
+            return sum + Math.max(0, Math.round(millis / 1000));
+        }, 0);
+        const totalDurationMinutes = Math.floor(totalDurationSeconds / 60);
+        const totalDurationHours = Math.floor(totalDurationMinutes / 60);
+        const remainingMinutes = totalDurationMinutes % 60;
+        const durationStr = totalDurationHours > 0
+            ? `${totalDurationHours}h ${remainingMinutes}m`
+            : `${totalDurationMinutes}m`;
+
+        this.renderLibraryBreadcrumb();
+
+        const heroHtml = this.renderHeroCard({
+            type: 'album',
+            coverUrl: albumCover || undefined,
+            coverAlt: albumTitle,
+            title: albumTitle,
+            subtitle: {
+                text: albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+                title: `View albums by ${albumArtist || this.libraryCurrentArtist?.name || 'Unknown Artist'}`,
+            },
+            metadataItems: [
+                albumYear ? String(albumYear) : '',
+                `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`,
+                durationStr,
+            ].filter(Boolean),
+            actions: [
+                {
+                    className: 'primary library-album-hero-play-btn',
+                    title: 'Play album',
+                    ariaLabel: 'Play album',
+                    svgContent: this.getPlayIconSvg(),
+                    disabled: tracks.length === 0,
+                    dataAttrs: { 'data-library-album-id': this.libraryCurrentAlbum?.id || '' },
+                },
+            ],
+        });
+
+        this.libraryResultsContainer.innerHTML = `
+            ${heroHtml}
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Tracks</h2>
+                </div>
+            </div>
+            ${this.renderTrackGrid(tracks, {
+                viewMode: 'library-tracks',
+                showTrackNumber: true,
+                numberOfVolumes: maxDisc > 1 ? maxDisc : undefined,
+                showAlbumColumn: false,
+                showArtwork: false,
+                dataAttr: 'data-library-track-id',
+                actions: 'play-only',
+                qualityStyle: 'format-bitrate',
+                rowDataAttrs: (track) => ({
+                    'data-plex-library-row': 'true',
+                    'data-library-artist-id': String(track.artistId || ''),
+                    'data-library-artist-name': track.artist,
+                }),
+                emptyMessage: '<div class="library-placeholder"><p>No tracks found for this album.</p></div>',
+            })}
+        `;
+    }
+
+    private async loadLibraryArtists(offset: number = 0, updateHistory: boolean = true): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.stopPlayback();
+        this.updatePlexPlaylistContainerVisibility(false);
+        this.libraryCurrentArtist = null;
+        this.libraryCurrentAlbum = null;
+        this.libraryCurrentPlaylist = null;
+        this.libraryArtistsOffset = Math.max(0, offset);
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'artists',
+                offset: this.libraryArtistsOffset
+            });
+        }
+
+        this.setLibraryMessage('Loading Plex artists...');
+
+        try {
+            const params = new URLSearchParams();
+            params.set('offset', String(this.libraryArtistsOffset));
+            params.set('limit', String(this.libraryArtistsPageSize));
+
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistsResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load Plex artists.');
+                return;
+            }
+
+            this.libraryArtistsTotal = typeof data.total === 'number' ? data.total : 0;
+            this.libraryArtistsOffset = typeof data.offset === 'number' ? data.offset : this.libraryArtistsOffset;
+            this.renderLibraryArtists(Array.isArray(data.artists) ? data.artists : []);
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load artists:', error);
+            this.setLibraryMessage('Failed to load Plex artists.');
+        }
+    }
+
+    private async loadLibraryArtistAlbums(artistId: string, artistName: string, updateHistory: boolean = true): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentArtist = { id: artistId, name: artistName };
+        this.libraryCurrentAlbum = null;
+        this.libraryCurrentPlaylist = null;
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'artist_albums',
+                artistId,
+                artistName
+            });
+        }
+
+        this.setLibraryMessage(`Loading albums for ${artistName}...`);
+
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists/${encodeURIComponent(artistId)}/albums?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistAlbumsResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load artist albums.');
+                return;
+            }
+
+            const resolvedArtistName = data.artist?.name || artistName;
+            this.libraryCurrentArtist = { id: artistId, name: resolvedArtistName };
+            this.renderLibraryArtistAlbums(
+                resolvedArtistName,
+                Array.isArray(data.albums) ? data.albums : [],
+                data.artist?.picture
+            );
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load artist albums:', error);
+            this.setLibraryMessage('Failed to load artist albums.');
+        }
+    }
+
+    private async loadLibraryAlbumTracks(albumId: string, albumTitle: string, artistName?: string, updateHistory: boolean = true): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentAlbum = { id: albumId, title: albumTitle, artist: artistName };
+        this.libraryCurrentPlaylist = null;
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'album_tracks',
+                albumId,
+                albumTitle,
+                albumArtist: artistName,
+                artistId: this.libraryCurrentArtist?.id,
+                artistName: this.libraryCurrentArtist?.name
+            });
+        }
+
+        this.setLibraryMessage(`Loading tracks for ${albumTitle}...`);
+
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/albums/${encodeURIComponent(albumId)}/tracks?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data = await response.json().catch(() => ({} as PlexLibraryAlbumTracksResponse));
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load album tracks.');
+                return;
+            }
+
+            const resolvedArtist = data.album?.artist || artistName || this.libraryCurrentArtist?.name || '';
+            if (this.libraryCurrentArtist && resolvedArtist) {
+                this.libraryCurrentArtist = {
+                    ...this.libraryCurrentArtist,
+                    name: resolvedArtist
+                };
+            }
+            const resolvedAlbumTitle = data.album?.title || albumTitle;
+            this.libraryCurrentAlbum = { id: albumId, title: resolvedAlbumTitle, artist: resolvedArtist };
+            this.renderLibraryAlbumTracks(
+                resolvedAlbumTitle,
+                Array.isArray(data.tracks) ? data.tracks : [],
+                resolvedArtist,
+                data.album?.year,
+                data.album?.cover
+            );
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load album tracks:', error);
+            this.setLibraryMessage('Failed to load album tracks.');
+        }
+    }
+
+    private async navigateToLibraryPlaylistTracks(playlistRatingKey: string, playlistName: string): Promise<void> {
+        this.switchPage('library', false);
+        await this.fetchPlexPlaylistTracks(playlistRatingKey, playlistName, true);
+    }
+
+    private async fetchPlexPlaylistTracks(playlistRatingKey: string, playlistTitle: string, updateHistory: boolean = true): Promise<void> {
+        if (!this.libraryResultsContainer) {
+            return;
+        }
+
+        this.libraryCurrentAlbum = null;
+        this.libraryCurrentArtist = null;
+
+        if (updateHistory) {
+            this.pushHistoryLibraryRoute({
+                view: 'playlist_tracks',
+                playlistRatingKey,
+                playlistName: playlistTitle
+            });
+        }
+
+        this.setLibraryMessage(`Loading tracks for ${playlistTitle}...`);
+
+        try {
+            const params = new URLSearchParams();
+            params.set('rating_key', playlistRatingKey);
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/playlist/tracks?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController?.signal
+            });
+
+            const data: PlexPlaylistTracksResponse = await response.json().catch(() => ({}) as PlexPlaylistTracksResponse);
+            if (!response.ok) {
+                this.setLibraryMessage(data.error || 'Failed to load playlist tracks.');
+                return;
+            }
+
+            const resolvedTitle = data.playlist?.title || playlistTitle;
+            this.libraryCurrentPlaylist = resolvedTitle;
+            this.libraryLoadedOnce = true;
+            this.renderLibraryBreadcrumb();
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+            const normalized = tracks.map(t => this.normalizeTrack(t));
+            const durationStr = this.formatTotalDuration(normalized);
+            const subtitleHtml = tracks.length > 0
+                ? `<div class="playlist-subtitle">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'} • ${durationStr}</div>`
+                : '';
+            this.libraryResultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(resolvedTitle)}</h2>
+                    </div>
+                    ${subtitleHtml}
+                </div>
+                ${this.renderTrackGrid(tracks, {
+                    viewMode: 'multi-album',
+                    showTrackNumber: false,
+                    showAlbumColumn: true,
+                    showArtwork: true,
+                    dataAttr: 'data-library-track-id',
+                    actions: 'play-only',
+                    qualityStyle: 'format-bitrate',
+                    rowDataAttrs: (track) => ({
+                        'data-plex-library-row': 'true',
+                        'data-library-artist-id': String(track.artistId || ''),
+                        'data-library-artist-name': track.artist,
+                    }),
+                    emptyMessage: '<div class="library-placeholder"><p>No tracks found in this playlist.</p></div>',
+                })}
+            `;
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            console.error('[LIBRARY] Failed to load playlist tracks:', error);
+            this.setLibraryMessage('Failed to load playlist tracks.');
+        }
+    }
+
+    private async openUserDropdown(): Promise<void> {
+        if (!this.userDropdownModal || !this.userDropdownOverlay) {
+            console.error('User dropdown elements not found');
+            return;
+        }
+
+        // Show the dropdown
+        this.userDropdownModal.style.display = 'block';
+        this.userDropdownOverlay.style.display = 'block';
+
+        // Load users
+        await this.loadPlexUsersForDropdown();
+    }
+
+    private closeUserDropdown(): void {
+        if (!this.userDropdownModal || !this.userDropdownOverlay) {
+            return;
+        }
+
+        this.userDropdownModal.style.display = 'none';
+        this.userDropdownOverlay.style.display = 'none';
+    }
+
+    private toggleMobileMenu(): void {
+        const sidebar = document.getElementById('leftSidebar');
+        if (!sidebar) {
+            return;
+        }
+
+        const isOpen = sidebar.classList.contains('mobile-menu-open');
+        if (isOpen) {
+            this.closeMobileMenu();
+        } else {
+            sidebar.classList.add('mobile-menu-open');
+            if (this.mobileMenuOverlay) {
+                this.mobileMenuOverlay.classList.add('active');
+            }
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    private closeMobileMenu(): void {
+        const sidebar = document.getElementById('leftSidebar');
+        if (sidebar) {
+            sidebar.classList.remove('mobile-menu-open');
+        }
+        if (this.mobileMenuOverlay) {
+            this.mobileMenuOverlay.classList.remove('active');
+        }
+        document.body.style.overflow = '';
+    }
+
+    private logoutPlexUser(): void {
+        window.localStorage.removeItem('plexSelectedUserId');
+        window.localStorage.removeItem('plexSelectedUserName');
+        window.localStorage.removeItem('plexSelectedUserIsOwner');
+        this.isPlexSelectedUserOwner = false;
+
+        if (this.userButtonText) {
+            this.userButtonText.textContent = 'User';
+        }
+
+        this.closeUserDropdown();
+        void this.updateSidebarPlaylists();
+        void this.updatePlexLoginOnlyState();
+        this.updateUserTypeAccess();
+
+        if (this.currentPage === 'history') {
+            void this.loadListenHistory();
+        }
+    }
+
+    private async loadPlexUsersForDropdown(): Promise<void> {
+        if (!this.userDropdownList) {
+            return;
+        }
+
+        this.userDropdownList.innerHTML = '';
+
+        const li = document.createElement('li');
+        li.className = 'user-dropdown-item logout-item';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'save-button user-dropdown-logout-button';
+        button.textContent = 'Logout';
+        button.style.width = '100%';
+        button.style.margin = '0';
+        button.addEventListener('click', () => this.logoutPlexUser());
+
+        li.appendChild(button);
+        this.userDropdownList.appendChild(li);
+    }
+
+    private selectPlexUser(userId: string, userName: string): void {
+        // Save user selection (both ID and name for better restoration)
+        window.localStorage.setItem('plexSelectedUserId', userId);
+        window.localStorage.setItem('plexSelectedUserName', userName);
+
+        // Update button text
+        if (this.userButtonText) {
+            this.userButtonText.textContent = userName;
+        }
+
+        // Close dropdown
+        this.closeUserDropdown();
+
+        // Update sidebar playlists
+        void this.updateSidebarPlaylists();
+
+        if (this.currentPage === 'library') {
+            void this.loadLibraryArtists(0, false);
+        }
+
+        if (this.currentPage === 'history') {
+            void this.loadListenHistory();
+        }
+
+        void this.loadFreshFindsConfig();
+    }
+
+    private async updateSidebarPlaylists(): Promise<void> {
+        let plexPlaylists: PlexPlaylist[] = [];
+        const userId = window.localStorage.getItem('plexSelectedUserId') || '';
+
+        try {
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/plex/playlists${query}`, { cache: 'no-store' });
+            if (response.ok) {
+                const data = await response.json();
+                plexPlaylists = Array.isArray(data.playlists) ? data.playlists : [];
+            }
+        } catch (error) {
+            console.warn('Failed to load Plex playlists:', error);
+        }
+
+        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: null, ytm: null });
+
+        if (!userId) return;
+
+        // Fetch LB playlists
+        let lbData: any = null;
+        try {
+            let username = this.listenbrainzUsernameInput.value.trim();
+            if (!username) {
+                const configResp = await fetch(`/api/listenbrainz/config?user_id=${encodeURIComponent(userId)}`);
+                if (configResp.ok) {
+                    const configData = await configResp.json();
+                    if (configData.username) username = configData.username;
+                }
+            }
+
+            if (username) {
+                lbData = { username, user: [], collaborator: [], createdfor: [] };
+                const types = ['user', 'collaborator', 'createdfor'];
+
+                await Promise.all(types.map(async (type) => {
+                    try {
+                        const query = `?username=${encodeURIComponent(username)}&user_id=${encodeURIComponent(userId)}&type=${type}`;
+                        const response = await fetch(`/api/listenbrainz/playlists${query}`);
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.playlists) {
+                                lbData[type] = data.playlists.map((item: any) => item.playlist).filter(Boolean);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to fetch LB playlist type ${type}`, e);
+                    }
+                }));
+
+                const createdForIds = new Set(lbData.createdfor.map((p: any) => p.identifier));
+                lbData.collaborator = lbData.collaborator.filter((p: any) => !createdForIds.has(p.identifier));
+            }
+        } catch (error) {
+            console.warn('Failed to load ListenBrainz sidebar playlists', error);
+        }
+
+        // Fetch YTM playlists
+        let ytmPlaylists: YtmPlaylist[] | null = null;
+        try {
+            const configResp = await fetch(`/api/youtube_music/config?user_id=${encodeURIComponent(userId)}`);
+            if (configResp.ok) {
+                const configData = await configResp.json();
+                if (configData.has_headers) {
+                    const plResp = await fetch(`/api/youtube_music/playlists?user_id=${encodeURIComponent(userId)}`);
+                    if (plResp.ok) {
+                        const plData = await plResp.json();
+                        ytmPlaylists = Array.isArray(plData.playlists) ? plData.playlists : [];
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load YouTube Music sidebar playlists', error);
+        }
+
+        this.populateSidebarPlaylists({ plex: plexPlaylists, listenbrainz: lbData, ytm: ytmPlaylists });
+    }
+
+    private async initializeUserButton(): Promise<void> {
+        // Load users to get the selected user's name
+        try {
+            console.log('[USER_INIT] Starting user button initialization');
+            const savedId = window.localStorage.getItem('plexSelectedUserId') || '';
+            const savedName = window.localStorage.getItem('plexSelectedUserName') || '';
+            console.log('[USER_INIT] Saved user:', { savedId, savedName });
+
+            const response = await fetch('/api/plex/users', { cache: 'no-store' });
+            if (response.ok) {
+                const data = await response.json();
+                const users = Array.isArray(data.users) ? data.users : [];
+                console.log('[USER_INIT] Fetched users:', users.length, users);
+
+                // Try to find the currently selected user by ID
+                let selectedUser = users.find((u: any) => {
+                    const id = String(u.client_id ?? u.id ?? u.username ?? u.title ?? '');
+                    console.log('[USER_INIT] Checking user ID:', id, 'against saved:', savedId);
+                    return id === savedId;
+                });
+
+                // If not found by ID, try matching by name as fallback
+                if (!selectedUser && savedName) {
+                    console.log('[USER_INIT] ID match failed, trying name match for:', savedName);
+                    selectedUser = users.find((u: any) => {
+                        const name = String(u.username || u.title || '');
+                        return name === savedName;
+                    });
+                }
+
+                if (selectedUser) {
+                    const userName = String(selectedUser.username || selectedUser.title || 'User');
+                    const isOwner = Boolean(selectedUser.is_owner);
+                    this.isPlexSelectedUserOwner = isOwner;
+                    window.localStorage.setItem('plexSelectedUserIsOwner', String(isOwner));
+                    console.log('[USER_INIT] Found selected user:', userName, { isOwner });
+                    if (this.userButtonText) {
+                        this.userButtonText.textContent = userName;
+                        console.log('[USER_INIT] Updated button text to:', userName);
+                    } else {
+                        console.error('[USER_INIT] userButtonText element not found!');
+                    }
+                    // Update saved name in case it was looked up by ID
+                    window.localStorage.setItem('plexSelectedUserName', userName);
+                    // Load playlists for this user
+                    console.log('[USER_INIT] Loading playlists for user');
+                    await this.updateSidebarPlaylists();
+                    this.updateUserTypeAccess();
+                    await this.updatePlexLoginOnlyState();
+                } else {
+                    console.log('[USER_INIT] No selected user found, checking for owner');
+                    if (users.length > 0) {
+                        // Use the owner if no user is saved
+                        const owner = users.find((u: any) => u.is_owner);
+                        const ownerName = String(owner?.username || owner?.title || 'User');
+                        const ownerId = String(owner?.id ?? owner?.username ?? '');
+                        console.log('[USER_INIT] Using owner:', { ownerId, ownerName });
+                        if (ownerId && this.userButtonText) {
+                            this.userButtonText.textContent = ownerName;
+                            window.localStorage.setItem('plexSelectedUserId', ownerId);
+                            window.localStorage.setItem('plexSelectedUserName', ownerName);
+                            window.localStorage.setItem('plexSelectedUserIsOwner', 'true');
+                            this.isPlexSelectedUserOwner = true;
+                            await this.updateSidebarPlaylists();
+                            this.updateUserTypeAccess();
+                            await this.updatePlexLoginOnlyState();
+                        }
+                    }
+                }
+            } else {
+                console.error('[USER_INIT] Failed to fetch users:', response.status);
+            }
+        } catch (error) {
+            console.error('[USER_INIT] Error during initialization:', error);
+        }
+    }
+
+    private populateSidebarPlaylists(data: { plex: PlexPlaylist[], listenbrainz: any | null, ytm: YtmPlaylist[] | null }): void {
+        const playlistNavItems = document.getElementById('playlistNavItems');
+        if (!playlistNavItems) {
+            return;
+        }
+
+        playlistNavItems.innerHTML = '';
+
+        const getCollapsedState = (key: string): boolean => {
+            const stored = localStorage.getItem(key);
+            return stored !== null ? stored === 'true' : true;
+        };
+
+        const createSection = (title: string, storageKey: string): { header: HTMLLIElement, container: HTMLUListElement, toggle: () => void } => {
+            const isCollapsed = getCollapsedState(storageKey);
+
+            const header = document.createElement('li');
+            header.className = 'nav-section-header collapsible';
+            header.style.fontSize = '0.5rem';
+
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'nav-section-title';
+            titleSpan.textContent = title;
+
+            const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            chevron.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            chevron.setAttribute('width', '16');
+            chevron.setAttribute('height', '16');
+            chevron.setAttribute('viewBox', '0 0 24 24');
+            chevron.setAttribute('fill', 'none');
+            chevron.setAttribute('stroke', 'currentColor');
+            chevron.setAttribute('stroke-width', '2');
+            chevron.setAttribute('stroke-linecap', 'round');
+            chevron.setAttribute('stroke-linejoin', 'round');
+            chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+            chevron.setAttribute('class', 'section-chevron' + (isCollapsed ? ' collapsed' : ''));
+
+            header.appendChild(titleSpan);
+            header.appendChild(chevron);
+
+            const container = document.createElement('ul');
+            container.className = 'section-items' + (isCollapsed ? ' collapsed' : '');
+
+            const toggle = () => {
+                const newState = !container.classList.contains('collapsed');
+                container.classList.toggle('collapsed');
+                chevron.classList.toggle('collapsed');
+                localStorage.setItem(storageKey, String(newState));
+            };
+
+            header.addEventListener('click', toggle);
+
+            return { header, container, toggle };
+        };
+
+        // --- SQUIDLY Playlists (first) ---
+        const squidlySection = createSection('SQUIDLY', 'sidebar_section_squidly');
+        playlistNavItems.appendChild(squidlySection.header);
+        playlistNavItems.appendChild(squidlySection.container);
+
+        // --- Plex Playlists ---
+        const plexSection = createSection('Plex', 'sidebar_section_plex');
+        playlistNavItems.appendChild(plexSection.header);
+
+        if (data.plex.length === 0) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.875rem';
+            li.textContent = 'No playlists';
+            plexSection.container.appendChild(li);
+        } else {
+            data.plex.forEach((playlist: PlexPlaylist) => {
+                const li = this.createSidebarPlaylistItem(playlist.name, () => {
+                    if (playlist.ratingKey) {
+                        this.closeMobileMenu();
+                        void this.navigateToLibraryPlaylistTracks(playlist.ratingKey, playlist.name);
+                    }
+                });
+                plexSection.container.appendChild(li);
+            });
+        }
+        playlistNavItems.appendChild(plexSection.container);
+
+        // --- ListenBrainz Playlists ---
+        const lbSection = createSection('ListenBrainz', 'sidebar_section_listenbrainz');
+        playlistNavItems.appendChild(lbSection.header);
+
+        if (!data.listenbrainz) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Loading or not configured...';
+            lbSection.container.appendChild(li);
+        } else {
+            const renderLbSection = (title: string, items: any[], username: string) => {
+                if (!items || items.length === 0) return;
+                const subHeader = document.createElement('li');
+                subHeader.className = 'nav-section-title';
+                subHeader.style.fontSize = '0.5rem';
+                subHeader.style.color = 'var(--text-muted)';
+                subHeader.style.paddingLeft = '1.5rem';
+                subHeader.textContent = title;
+                lbSection.container.appendChild(subHeader);
+
+                items.forEach((playlist: any) => {
+                    const li = this.createSidebarPlaylistItem(playlist.title || 'Unknown', () => {
+                        if (playlist.identifier) {
+                            this.closeMobileMenu();
+                            this.switchPage('explore');
+                            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId: playlist.identifier, username });
+                            void this.fetchListenbrainzPlaylistTracks(playlist.identifier, false, username);
+                        }
+                    }, { paddingLeft: '2.25rem' });
+                    lbSection.container.appendChild(li);
+                });
+            };
+
+            renderLbSection('User Playlists', data.listenbrainz.user, data.listenbrainz.username);
+            renderLbSection('Collaborator Playlists', data.listenbrainz.collaborator, data.listenbrainz.username);
+            renderLbSection('Recommendation Playlists', data.listenbrainz.createdfor, data.listenbrainz.username);
+
+            const lbTotal = (data.listenbrainz.user?.length || 0) + (data.listenbrainz.collaborator?.length || 0) + (data.listenbrainz.createdfor?.length || 0);
+            if (lbTotal === 0) {
+                const li = document.createElement('li');
+                li.style.padding = '0.5rem 0.75rem';
+                li.style.color = 'var(--text-muted)';
+                li.style.fontSize = '0.875rem';
+                li.textContent = 'No playlists found';
+                lbSection.container.appendChild(li);
+            }
+        }
+        playlistNavItems.appendChild(lbSection.container);
+
+        // --- YouTube Music Playlists ---
+        const ytmSection = createSection('YTM', 'sidebar_section_ytm');
+        playlistNavItems.appendChild(ytmSection.header);
+
+        if (data.ytm === null) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.75rem';
+            li.textContent = 'Loading or not configured...';
+            ytmSection.container.appendChild(li);
+        } else if (data.ytm.length === 0) {
+            const li = document.createElement('li');
+            li.style.padding = '0.5rem 0.75rem';
+            li.style.color = 'var(--text-muted)';
+            li.style.fontSize = '0.875rem';
+            li.textContent = 'No playlists';
+            ytmSection.container.appendChild(li);
+        } else {
+            data.ytm.forEach((playlist: YtmPlaylist) => {
+                const li = this.createSidebarPlaylistItem(playlist.title, () => {
+                    this.closeMobileMenu();
+                    this.switchPage('explore');
+                    void this.fetchYtmPlaylistTracks(playlist.playlistId, playlist.title);
+                });
+                ytmSection.container.appendChild(li);
+            });
+        }
+        playlistNavItems.appendChild(ytmSection.container);
+
+        void this.loadSquidlySection(squidlySection.container);
+    }
+
+    private createSidebarPlaylistItem(
+        name: string,
+        onClick: (e: Event) => void,
+        extraStyles?: Record<string, string>
+    ): HTMLLIElement {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = '#';
+        a.className = 'nav-item';
+        a.textContent = name;
+        a.style.fontSize = '0.875rem';
+        a.style.paddingTop = '0.25rem';
+        a.style.paddingBottom = '0.25rem';
+        if (extraStyles) {
+            for (const [prop, value] of Object.entries(extraStyles)) {
+                (a.style as any)[prop] = value;
+            }
+        }
+        a.addEventListener('click', (e: Event) => {
+            e.preventDefault();
+            onClick(e);
+        });
+        li.appendChild(a);
+        return li;
+    }
+
+    private async loadSquidlySection(container: HTMLUListElement): Promise<void> {
+        const userId = this.getSelectedPlexUserId();
+
+        try {
+            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/recommendations/playlists${query}`);
+            if (!response.ok) {
+                throw new Error('Failed to load recommendations');
+            }
+            const data = await response.json();
+            const hasHistory = data.has_history as boolean;
+            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
+            const today = data.today as { name: string; exists: boolean };
+
+            // Always show today's Fresh Finds entry
+            const todayLi = this.createSidebarPlaylistItem(today.name, () => {
+                this.closeMobileMenu();
+                this.switchPage('explore');
+                if (today.exists) {
+                    const todayPlaylist = playlists.find((p: any) => p.name === today.name);
+                    void this.fetchFreshFindsPlaylist(false, todayPlaylist?.id);
+                } else {
+                    void this.fetchFreshFindsPlaylist();
+                }
+            });
+            container.appendChild(todayLi);
+
+            // Show older playlists (excluding today's if already shown)
+            if (hasHistory) {
+                for (const playlist of playlists) {
+                    if (playlist.name === today.name) continue;
+                    const li = this.createSidebarPlaylistItem(playlist.name || 'Fresh Finds', () => {
+                        this.closeMobileMenu();
+                        this.switchPage('explore');
+                        void this.fetchFreshFindsPlaylist(false, playlist.id);
+                    });
+                    container.appendChild(li);
+                }
+            }
+        } catch {
+            const li = this.createSidebarPlaylistItem('Fresh Finds', () => {
+                this.closeMobileMenu();
+                this.switchPage('explore');
+                void this.fetchFreshFindsPlaylist();
+            });
+            container.appendChild(li);
+        }
+    }
+
+    private initializeHistoryControls(): void {
     }
 
     private initializeHistoryNavigation(): void {
@@ -631,26 +3241,65 @@ class App {
             void this.handlePopState(event);
         });
 
-        const historyRoute = this.parseHistoryState(window.history.state);
-        const initialRoute = historyRoute || this.parseRouteFromUrl() || { view: 'home' };
-        this.replaceHistoryRoute(initialRoute);
-
-        if (initialRoute.view !== 'home') {
-            void this.navigateToRoute(initialRoute, false);
-        }
+        const historyState = this.parseHistoryState(window.history.state);
+        const initialState = historyState || this.parseStateFromUrl() || this.buildCurrentHistoryState('explore');
+        this.replaceHistoryState(initialState);
+        void this.applyHistoryState(initialState);
     }
 
     private async handlePopState(event: PopStateEvent): Promise<void> {
-        const route = this.parseHistoryState(event.state) || this.parseRouteFromUrl() || { view: 'home' };
+        const state = this.parseHistoryState(event.state) || this.parseStateFromUrl() || this.buildCurrentHistoryState(this.currentPage);
         this.isHandlingPopState = true;
         try {
-            await this.navigateToRoute(route, false);
+            await this.applyHistoryState(state);
         } finally {
             this.isHandlingPopState = false;
         }
     }
 
-    private parseHistoryState(rawState: unknown): AppRouteState | null {
+    private normalizePage(page: string | null | undefined): AppPage {
+        if (page === 'library' || page === 'settings' || page === 'mirrors' || page === 'matches' || page === 'jobs' || page === 'history') {
+            return page;
+        }
+        return 'explore';
+    }
+
+    private getCurrentLibraryRoute(): LibraryRouteState {
+        if (this.libraryCurrentAlbum) {
+            return {
+                view: 'album_tracks',
+                albumId: this.libraryCurrentAlbum.id,
+                albumTitle: this.libraryCurrentAlbum.title,
+                albumArtist: this.libraryCurrentAlbum.artist,
+                artistId: this.libraryCurrentArtist?.id,
+                artistName: this.libraryCurrentArtist?.name
+            };
+        }
+
+        if (this.libraryCurrentArtist) {
+            return {
+                view: 'artist_albums',
+                artistId: this.libraryCurrentArtist.id,
+                artistName: this.libraryCurrentArtist.name
+            };
+        }
+
+        return {
+            view: 'artists',
+            offset: this.libraryArtistsOffset
+        };
+    }
+
+    private buildCurrentHistoryState(tab: AppPage): AppHistoryState {
+        return {
+            app: 'squidly',
+            tab,
+            route: { ...this.currentExploreRoute },
+            libraryRoute: { ...this.getCurrentLibraryRoute() }
+        };
+    }
+
+    private parseHistoryState(rawState: unknown): AppHistoryState | null {
         if (!rawState || typeof rawState !== 'object') {
             return null;
         }
@@ -661,11 +3310,32 @@ class App {
         }
 
         const route = state.route as AppRouteState;
-        return route.view ? route : null;
+        if (!route.view) {
+            return null;
+        }
+
+        const libraryRouteRaw = state.libraryRoute as Partial<LibraryRouteState> | undefined;
+        const libraryRoute: LibraryRouteState = libraryRouteRaw && typeof libraryRouteRaw === 'object' && libraryRouteRaw.view
+            ? {
+                view: libraryRouteRaw.view,
+                offset: libraryRouteRaw.offset,
+                artistId: libraryRouteRaw.artistId,
+                artistName: libraryRouteRaw.artistName,
+                albumId: libraryRouteRaw.albumId,
+                albumTitle: libraryRouteRaw.albumTitle,
+                albumArtist: libraryRouteRaw.albumArtist
+            }
+            : this.getCurrentLibraryRoute();
+
+        return {
+            app: 'squidly',
+            tab: this.normalizePage(state.tab),
+            route,
+            libraryRoute
+        };
     }
 
-    private parseRouteFromUrl(): AppRouteState | null {
-        const params = new URLSearchParams(window.location.search);
+    private parseRouteFromUrl(params: URLSearchParams): AppRouteState | null {
         const view = params.get('view');
         if (!view) {
             return null;
@@ -699,12 +3369,8 @@ class App {
 
         if (view === 'listenbrainz_playlist_tracks') {
             const playlistId = params.get('id') || '';
-            return playlistId ? { view, playlistId } : null;
-        }
-
-        if (view === 'lastfm_playlist' || view === 'youtube_music_playlist') {
-            const playlistUrl = params.get('url') || '';
-            return playlistUrl ? { view, playlistUrl } : null;
+            const username = params.get('username') || undefined;
+            return playlistId ? { view, playlistId, username } : null;
         }
 
         if (view === 'similar_tracks') {
@@ -722,53 +3388,162 @@ class App {
             return Number.isFinite(artistId) && artistId > 0 ? { view, artistId } : null;
         }
 
+        if (view === 'fresh_finds') {
+            const playlistIdParam = params.get('playlist_id');
+            const playlistId = playlistIdParam ? Number(playlistIdParam) : undefined;
+            return playlistId && Number.isFinite(playlistId) && playlistId > 0
+                ? { view: 'fresh_finds', freshFindsPlaylistId: playlistId }
+                : { view: 'fresh_finds' };
+        }
+
         return view === 'home' ? { view: 'home' } : null;
     }
 
-    private buildRouteUrl(route: AppRouteState): string {
-        if (route.view === 'home') {
-            return window.location.pathname;
+    private parseLibraryRouteFromUrl(params: URLSearchParams): LibraryRouteState | null {
+        const view = params.get('lib_view');
+        if (!view) {
+            return null;
         }
 
-        const params = new URLSearchParams();
-        params.set('view', route.view);
+        if (view === 'artists') {
+            const offset = Number(params.get('lib_offset') || '0');
+            return {
+                view,
+                offset: Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : 0
+            };
+        }
 
-        if (route.view === 'search') {
-            params.set('type', route.searchType || 's');
-            if (route.query) {
-                params.set('q', route.query);
+        if (view === 'artist_albums') {
+            const artistId = params.get('lib_artist_id') || '';
+            if (!artistId) {
+                return null;
+            }
+            return {
+                view,
+                artistId,
+                artistName: params.get('lib_artist_name') || 'Artist'
+            };
+        }
+
+        if (view === 'album_tracks') {
+            const albumId = params.get('lib_album_id') || '';
+            if (!albumId) {
+                return null;
+            }
+            const artistId = params.get('lib_artist_id') || undefined;
+            const artistName = params.get('lib_artist_name') || undefined;
+            return {
+                view,
+                albumId,
+                albumTitle: params.get('lib_album_title') || 'Album',
+                albumArtist: params.get('lib_album_artist') || undefined,
+                artistId,
+                artistName
+            };
+        }
+
+        return null;
+    }
+
+    private parseStateFromUrl(): AppHistoryState | null {
+        const params = new URLSearchParams(window.location.search);
+        const exploreRoute = this.parseRouteFromUrl(params) || { view: 'home' };
+        const libraryRoute = this.parseLibraryRouteFromUrl(params) || this.getCurrentLibraryRoute();
+        const tab = this.normalizePage(params.get('tab') || 'explore');
+
+        const hasTab = params.has('tab');
+        const hasExplore = params.has('view');
+        const hasLibrary = params.has('lib_view');
+        if (!hasTab && !hasExplore && !hasLibrary) {
+            return null;
+        }
+
+        return {
+            app: 'squidly',
+            tab,
+            route: exploreRoute,
+            libraryRoute
+        };
+    }
+
+    private buildHistoryUrl(state: AppHistoryState): string {
+        const tab = this.normalizePage(state.tab);
+        const route = state.route;
+        const libraryRoute = state.libraryRoute;
+        const params = new URLSearchParams();
+
+        if (tab === 'explore') {
+            if (route.view !== 'home') {
+                params.set('view', route.view);
+            }
+
+            if (route.view === 'search') {
+                params.set('type', route.searchType || 's');
+                if (route.query) {
+                    params.set('q', route.query);
+                }
+            }
+
+            if (route.view === 'artist' && route.artistId) {
+                params.set('id', String(route.artistId));
+            }
+
+            if ((route.view === 'album' || route.view === 'similar_albums') && route.albumId) {
+                params.set('id', String(route.albumId));
+            }
+
+            if (route.view === 'similar_tracks' && route.trackId) {
+                params.set('id', String(route.trackId));
+            }
+
+            if ((route.view === 'playlist' || route.view === 'listenbrainz_playlist_tracks') && route.playlistId) {
+                params.set('id', route.playlistId);
+            }
+
+            if (route.view === 'listenbrainz_playlists' && route.username) {
+                params.set('username', route.username);
+            }
+
+            if (route.view === 'listenbrainz_playlist_tracks' && route.username) {
+                params.set('username', route.username);
+            }
+
+            if (route.view === 'similar_artists' && route.artistId) {
+                params.set('id', String(route.artistId));
+            }
+
+            if (route.view === 'fresh_finds' && route.freshFindsPlaylistId) {
+                params.set('playlist_id', String(route.freshFindsPlaylistId));
+            }
+        } else {
+            params.set('tab', tab);
+            if (tab === 'library') {
+                params.set('lib_view', libraryRoute.view);
+
+                if (libraryRoute.view === 'artists') {
+                    params.set('lib_offset', String(Math.max(0, Math.floor(libraryRoute.offset || 0))));
+                }
+
+                if (libraryRoute.artistId) {
+                    params.set('lib_artist_id', libraryRoute.artistId);
+                }
+                if (libraryRoute.artistName) {
+                    params.set('lib_artist_name', libraryRoute.artistName);
+                }
+                if (libraryRoute.albumId) {
+                    params.set('lib_album_id', libraryRoute.albumId);
+                }
+                if (libraryRoute.albumTitle) {
+                    params.set('lib_album_title', libraryRoute.albumTitle);
+                }
+                if (libraryRoute.albumArtist) {
+                    params.set('lib_album_artist', libraryRoute.albumArtist);
+                }
             }
         }
 
-        if (route.view === 'artist' && route.artistId) {
-            params.set('id', String(route.artistId));
-        }
-
-        if ((route.view === 'album' || route.view === 'similar_albums') && route.albumId) {
-            params.set('id', String(route.albumId));
-        }
-
-        if (route.view === 'similar_tracks' && route.trackId) {
-            params.set('id', String(route.trackId));
-        }
-
-        if ((route.view === 'playlist' || route.view === 'listenbrainz_playlist_tracks') && route.playlistId) {
-            params.set('id', route.playlistId);
-        }
-
-        if (route.view === 'listenbrainz_playlists' && route.username) {
-            params.set('username', route.username);
-        }
-
-        if ((route.view === 'lastfm_playlist' || route.view === 'youtube_music_playlist') && route.playlistUrl) {
-            params.set('url', route.playlistUrl);
-        }
-
-        if (route.view === 'similar_artists' && route.artistId) {
-            params.set('id', String(route.artistId));
-        }
-
-        return `${window.location.pathname}?${params.toString()}`;
+        const query = params.toString();
+        return query ? `${window.location.pathname}?${query}` : window.location.pathname;
     }
 
     private pushHistoryRoute(route: AppRouteState): void {
@@ -776,16 +3551,131 @@ class App {
             return;
         }
 
-        const state: AppHistoryState = { app: 'squidly', route };
-        window.history.pushState(state, '', this.buildRouteUrl(route));
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('explore'),
+            route: { ...route },
+            tab: 'explore'
+        };
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
     }
 
-    private replaceHistoryRoute(route: AppRouteState): void {
-        const state: AppHistoryState = { app: 'squidly', route };
-        window.history.replaceState(state, '', this.buildRouteUrl(route));
+    private pushHistoryLibraryRoute(route: LibraryRouteState): void {
+        if (this.isHandlingPopState) {
+            return;
+        }
+
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('library'),
+            libraryRoute: { ...route },
+            tab: 'library'
+        };
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private pushHistoryTab(tab: AppPage): void {
+        if (this.isHandlingPopState) {
+            return;
+        }
+
+        const state = this.buildCurrentHistoryState(tab);
+        window.history.pushState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private buildExploreHref(route: AppRouteState): string {
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('explore'),
+            route: { ...route },
+            tab: 'explore'
+        };
+        return this.buildHistoryUrl(state);
+    }
+
+    private buildLibraryHref(route: LibraryRouteState): string {
+        const state: AppHistoryState = {
+            ...this.buildCurrentHistoryState('library'),
+            libraryRoute: { ...route },
+            tab: 'library'
+        };
+        return this.buildHistoryUrl(state);
+    }
+
+    private replaceHistoryState(state: AppHistoryState): void {
+        window.history.replaceState(state, '', this.buildHistoryUrl(state));
+    }
+
+    private async applyHistoryState(state: AppHistoryState): Promise<void> {
+        const tab = this.normalizePage(state.tab);
+        const exploreRoute = state.route?.view ? state.route : { view: 'home' };
+        const libraryRoute = state.libraryRoute?.view ? state.libraryRoute : this.getCurrentLibraryRoute();
+
+        this.currentExploreRoute = { ...exploreRoute };
+        if (tab !== this.currentPage) {
+            this.switchPage(tab, false);
+        }
+
+        if (tab === 'explore') {
+            await this.navigateToRoute(exploreRoute, false);
+            return;
+        }
+
+        if (tab === 'library') {
+            await this.navigateLibraryToRoute(libraryRoute, false);
+        }
+    }
+
+    private async navigateLibraryToRoute(route: LibraryRouteState, updateHistory: boolean): Promise<void> {
+        if (route.view === 'artist_albums' && route.artistId) {
+            await this.loadLibraryArtistAlbums(route.artistId, route.artistName || 'Artist', updateHistory);
+            return;
+        }
+
+        if (route.view === 'album_tracks' && route.albumId) {
+            await this.loadLibraryAlbumTracks(
+                route.albumId,
+                route.albumTitle || 'Album',
+                route.albumArtist,
+                updateHistory
+            );
+            return;
+        }
+
+        if (route.view === 'playlist_tracks' && route.playlistRatingKey) {
+            await this.fetchPlexPlaylistTracks(
+                route.playlistRatingKey,
+                route.playlistName || 'Playlist',
+                updateHistory
+            );
+            return;
+        }
+
+        await this.loadLibraryArtists(route.offset || 0, updateHistory);
     }
 
     private async navigateToRoute(route: AppRouteState, updateHistory: boolean): Promise<void> {
+        // Abort all pending requests from the previous route
+        if (this.pendingRequestController) {
+            this.pendingRequestController.abort();
+        }
+
+        const previousExploreRoute = { ...this.currentExploreRoute };
+        if (route.view === 'album' && previousExploreRoute.view === 'artist' && previousExploreRoute.artistId) {
+            this.exploreParentRoute = { ...previousExploreRoute };
+        } else if (route.view !== 'album') {
+            this.exploreParentRoute = null;
+        } else {
+            this.exploreParentRoute = null;
+        }
+
+        this.currentExploreRoute = { ...route };
+        if (route.view === 'search') {
+            this.exploreSearchRoute = { ...route };
+        }
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+
+        // Create a new controller for this route's requests
+        this.pendingRequestController = new AbortController();
+        const signal = this.pendingRequestController.signal;
+
         if (route.view === 'home') {
             this.stopPlayback();
             this.updatePlexPlaylistContainerVisibility(false);
@@ -823,28 +3713,12 @@ class App {
             this.searchTypeSelect.value = 'listenbrainz';
             this.searchInput.value = route.username;
             this.updateSearchPlaceholder();
-            await this.handleListenbrainzPlaylists(route.username, updateHistory);
+            await this.handleListenbrainzPlaylists(route.username, updateHistory, route.playlistType);
             return;
         }
 
         if (route.view === 'listenbrainz_playlist_tracks' && route.playlistId) {
-            await this.fetchListenbrainzPlaylistTracks(route.playlistId, updateHistory);
-            return;
-        }
-
-        if (route.view === 'lastfm_playlist' && route.playlistUrl) {
-            this.searchTypeSelect.value = 'lastfm';
-            this.searchInput.value = route.playlistUrl;
-            this.updateSearchPlaceholder();
-            await this.handleLastfmPlaylist(route.playlistUrl, updateHistory);
-            return;
-        }
-
-        if (route.view === 'youtube_music_playlist' && route.playlistUrl) {
-            this.searchTypeSelect.value = 'youtube_music';
-            this.searchInput.value = route.playlistUrl;
-            this.updateSearchPlaceholder();
-            await this.handleYoutubeMusicPlaylist(route.playlistUrl, updateHistory);
+            await this.fetchListenbrainzPlaylistTracks(route.playlistId, updateHistory, route.username);
             return;
         }
 
@@ -862,6 +3736,11 @@ class App {
             await this.fetchSimilarArtists(route.artistId, updateHistory);
             return;
         }
+
+        if (route.view === 'fresh_finds') {
+            await this.fetchFreshFindsPlaylist(updateHistory, route.freshFindsPlaylistId);
+            return;
+        }
     }
 
     private openFlyout(): void {
@@ -875,6 +3754,26 @@ class App {
         this.statusFlyout.classList.remove('active');
         this.flyoutOverlay.classList.remove('active');
         document.body.style.overflow = '';
+        this.stopPremiumPolling();
+    }
+
+    private startPremiumPolling(): void {
+        this.stopPremiumPolling();
+        let elapsed = 0;
+        this.premiumPollingInterval = window.setInterval(async () => {
+            elapsed += 5;
+            await this.updateEndpointStatus();
+            if (elapsed >= 60) {
+                this.stopPremiumPolling();
+            }
+        }, 5000);
+    }
+
+    private stopPremiumPolling(): void {
+        if (this.premiumPollingInterval !== null) {
+            window.clearInterval(this.premiumPollingInterval);
+            this.premiumPollingInterval = null;
+        }
     }
 
     private openJobsFlyout(): void {
@@ -904,8 +3803,7 @@ class App {
 
         try {
             const params = new URLSearchParams({
-                jobs_filter: filter,
-                exclude_plex_playlist_add: '1'
+                jobs_filter: filter
             });
             const response = await fetch(`/api/jobs?${params.toString()}`);
             if (!response.ok) {
@@ -918,7 +3816,7 @@ class App {
             const totalCount = typeof data.total_count === 'number' && Number.isFinite(data.total_count)
                 ? Math.max(0, Math.floor(data.total_count))
                 : jobs.length;
-            const retryableCount = (filter === 'completed_with_errors' || filter === 'failed')
+            const retryableCount = (filter === 'failed')
                 ? jobs.length
                 : 0;
             this.jobsListCache = jobs;
@@ -937,75 +3835,140 @@ class App {
     }
 
     private updateJobsActionButtons(incompleteCount: number, filter: string, retryableCount: number): void {
-        const showCancelIncomplete = filter === 'incomplete';
-        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancelIncomplete);
-
-        if (!showCancelIncomplete) {
-            this.cancelPendingJobsButton.disabled = true;
-            this.cancelPendingJobsButton.textContent = 'Cancel all incomplete';
-        } else {
-            this.cancelPendingJobsButton.disabled = incompleteCount === 0;
-            this.cancelPendingJobsButton.textContent = incompleteCount > 0
-                ? `Cancel all incomplete (${incompleteCount})`
-                : 'Cancel all incomplete';
+        let cancelCount = 0;
+        if (filter === 'incomplete') {
+            cancelCount = incompleteCount;
+        } else if (filter === 'failed') {
+            cancelCount = this.jobsListCache.length;
         }
 
-        const showRetryAll = filter === 'completed_with_errors' || filter === 'failed';
-        this.retryAllJobsButton.classList.toggle('hidden', !showRetryAll);
+        const showCancel = cancelCount > 0;
+        const showRetry = retryableCount > 0;
 
-        if (!showRetryAll) {
+        // Cancel all button
+        this.cancelPendingJobsButton.classList.toggle('hidden', !showCancel);
+        if (showCancel) {
+            this.cancelPendingJobsButton.disabled = cancelCount === 0;
+            this.cancelPendingJobsButton.textContent = cancelCount > 0
+                ? `Cancel all (${cancelCount})`
+                : 'Cancel all';
+        } else {
+            this.cancelPendingJobsButton.disabled = true;
+            this.cancelPendingJobsButton.textContent = 'Cancel all';
+        }
+
+        // Retry all button
+        this.retryAllJobsButton.classList.toggle('hidden', !showRetry);
+        if (showRetry) {
+            this.retryAllJobsButton.disabled = retryableCount === 0;
+            this.retryAllJobsButton.textContent = retryableCount > 0
+                ? `Retry all (${retryableCount})`
+                : 'Retry all';
+        } else {
             this.retryAllJobsButton.disabled = true;
             this.retryAllJobsButton.textContent = 'Retry all';
-            return;
         }
-
-        this.retryAllJobsButton.disabled = retryableCount === 0;
-        this.retryAllJobsButton.textContent = retryableCount > 0
-            ? `Retry all (${retryableCount})`
-            : 'Retry all';
     }
 
-    private async cancelAllPendingJobs(): Promise<void> {
-        const pendingCountLabel = this.cancelPendingJobsButton.textContent || 'Cancel all incomplete';
+    private async withButtonState(
+        button: HTMLButtonElement,
+        workingText: string,
+        action: () => Promise<void>
+    ): Promise<void> {
+        const originalText = button.textContent || '';
+        button.disabled = true;
+        button.textContent = workingText;
+        try {
+            await action();
+        } catch (error) {
+            button.disabled = false;
+            button.textContent = originalText;
+            throw error;
+        }
+    }
+
+    private async cancelAllJobs(): Promise<void> {
         if (this.cancelPendingJobsButton.disabled) {
             return;
         }
 
+        const selectedFilter = this.jobsFilterSelect.value;
+
+        if (selectedFilter === 'incomplete') {
+            await this.cancelIncompleteJobs();
+        } else if (selectedFilter === 'failed') {
+            await this.cancelFailedJobs();
+        }
+    }
+
+    private async cancelIncompleteJobs(): Promise<void> {
         const shouldProceed = window.confirm('Cancel and remove all incomplete jobs from the queue?');
         if (!shouldProceed) {
             return;
         }
 
-        this.cancelPendingJobsButton.disabled = true;
-        this.cancelPendingJobsButton.textContent = 'Cancelling...';
-
         try {
-            const response = await fetch('/api/jobs/cancel-incomplete', { method: 'POST' });
-            if (!response.ok) {
-                let message = 'Failed to cancel incomplete jobs';
-                try {
-                    const data = await response.json() as { error?: string };
-                    if (data?.error) {
-                        message = data.error;
+            await this.withButtonState(this.cancelPendingJobsButton, 'Cancelling...', async () => {
+                const response = await fetch('/api/jobs/cancel-pending', { method: 'POST' });
+                if (!response.ok) {
+                    let message = 'Failed to cancel incomplete jobs';
+                    try {
+                        const data = await response.json() as { error?: string };
+                        if (data?.error) {
+                            message = data.error;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
                     }
-                } catch {
-                    // Ignore parse errors and keep fallback message
+                    throw new Error(message);
                 }
-                throw new Error(message);
-            }
 
-            await this.loadJobs();
+                await this.loadJobs();
+            });
         } catch (error) {
             console.error('Cancel incomplete jobs failed:', error);
             window.alert((error as Error).message || 'Failed to cancel incomplete jobs');
-            this.cancelPendingJobsButton.disabled = false;
-            this.cancelPendingJobsButton.textContent = pendingCountLabel;
+        }
+    }
+
+    private async cancelFailedJobs(): Promise<void> {
+        const shouldProceed = window.confirm('Cancel all failed jobs? They will be superseded by retried downloads or nightly runs.');
+        if (!shouldProceed) {
+            return;
+        }
+
+        try {
+            await this.withButtonState(this.cancelPendingJobsButton, 'Cancelling...', async () => {
+                const response = await fetch('/api/jobs/cancel-failed', { method: 'POST' });
+                if (!response.ok) {
+                    let message = 'Failed to cancel jobs';
+                    try {
+                        const data = await response.json() as { error?: string };
+                        if (data?.error) {
+                            message = data.error;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
+                    }
+                    throw new Error(message);
+                }
+
+                const data = await response.json() as { cancelled_count?: number };
+                const cancelledCount = data?.cancelled_count ?? 0;
+                if (cancelledCount > 0) {
+                    window.alert(`Cancelled ${cancelledCount} job${cancelledCount === 1 ? '' : 's'}.`);
+                }
+                await this.loadJobs();
+            });
+        } catch (error) {
+            console.error('Cancel failed jobs failed:', error);
+            window.alert((error as Error).message || 'Failed to cancel jobs');
         }
     }
 
     private async retryAllFilteredJobs(): Promise<void> {
         const selectedFilter = this.jobsFilterSelect.value;
-        if (selectedFilter !== 'completed_with_errors' && selectedFilter !== 'failed') {
+        if (selectedFilter !== 'failed') {
             return;
         }
 
@@ -1021,49 +3984,55 @@ class App {
         }
 
         const originalText = this.retryAllJobsButton.textContent || 'Retry all';
-        this.retryAllJobsButton.disabled = true;
-        this.retryAllJobsButton.textContent = 'Retrying...';
 
-        const failures: string[] = [];
-        let skippedExistingCount = 0;
+        await this.withButtonState(this.retryAllJobsButton, 'Retrying...', async () => {
+            const failures: string[] = [];
+            let skippedExistingCount = 0;
 
-        for (const job of retryableJobs) {
-            try {
-                const response = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
-                if (!response.ok) {
-                    let message = `Job ${job.id}`;
-                    try {
-                        const data = await response.json() as { error?: string; status?: string };
-                        if (response.status === 409 && data?.status === 'already_exists_in_plex') {
-                            skippedExistingCount += 1;
-                            continue;
+            for (const job of retryableJobs) {
+                try {
+                    const response = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
+                    if (!response.ok) {
+                        let message = `Job ${job.id}`;
+                        try {
+                            const data = await response.json() as { error?: string; status?: string };
+                            if (response.status === 409 && data?.status === 'already_exists_in_plex') {
+                                skippedExistingCount += 1;
+                                continue;
+                            }
+                            if (data?.error) {
+                                message = `Job ${job.id}: ${data.error}`;
+                            }
+                        } catch {
+                            // Ignore parse errors and keep fallback message
                         }
-                        if (data?.error) {
-                            message = `Job ${job.id}: ${data.error}`;
-                        }
-                    } catch {
-                        // Ignore parse errors and keep fallback message
+                        failures.push(message);
                     }
-                    failures.push(message);
+                } catch {
+                    failures.push(`Job ${job.id}: request failed`);
                 }
-            } catch {
-                failures.push(`Job ${job.id}: request failed`);
             }
-        }
 
-        await this.loadJobs();
+            await this.loadJobs();
 
-        if (failures.length > 0 || skippedExistingCount > 0) {
             const retriedCount = retryableJobs.length - failures.length - skippedExistingCount;
-            const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
-            const skipLine = skippedExistingCount > 0
-                ? `\nSkipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`
-                : '';
-            const failureLine = failures.length > 0 ? `\n${summary}` : '';
-            window.alert(`Retried ${retriedCount} of ${retryableJobs.length} jobs.${skipLine}${failureLine}`);
-            this.retryAllJobsButton.disabled = false;
-            this.retryAllJobsButton.textContent = originalText;
-        }
+            const parts: string[] = [`Retried ${retriedCount} of ${retryableJobs.length} jobs.`];
+
+            if (skippedExistingCount > 0) {
+                parts.push(`Skipped ${skippedExistingCount} job${skippedExistingCount === 1 ? '' : 's'} (already exists in Plex).`);
+            }
+
+            if (failures.length > 0) {
+                const summary = failures.length <= 3 ? failures.join('\n') : `${failures.slice(0, 3).join('\n')}\n...`;
+                parts.push(summary);
+            }
+
+            if (parts.length > 1 || failures.length > 0 || skippedExistingCount > 0) {
+                window.alert(parts.join('\n'));
+                this.retryAllJobsButton.disabled = false;
+                this.retryAllJobsButton.textContent = originalText;
+            }
+        });
     }
 
     private getEffectiveJobStatus(job: JobItem): string {
@@ -1076,24 +4045,12 @@ class App {
             return 'failed';
         }
 
-        if (stages?.playlist_added === 'failed') {
-            return 'completed_with_errors';
-        }
-
-        if (job.status === 'succeeded' && stages?.playlist_added === 'queued') {
-            return 'in_progress';
-        }
-
         return job.status;
     }
 
     private filterJobsByStatus(jobs: JobItem[], filter: string): JobItem[] {
         if (filter === 'failed') {
             return jobs.filter(job => this.getEffectiveJobStatus(job) === 'failed');
-        }
-
-        if (filter === 'completed_with_errors') {
-            return jobs.filter(job => this.getEffectiveJobStatus(job) === 'completed_with_errors');
         }
 
         if (filter === 'complete') {
@@ -1162,6 +4119,1127 @@ class App {
         this.jobsPagination.innerHTML = '';
     }
 
+    private setMatchReviewStatus(message: string, isError: boolean = false): void {
+        if (!this.matchReviewStatusEl) {
+            return;
+        }
+
+        this.matchReviewStatusEl.textContent = message;
+        this.matchReviewStatusEl.style.color = isError ? '#ff9ab0' : 'var(--text-secondary)';
+    }
+
+    private updateMatchReviewRunScanButton(isActive: boolean): void {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        this.matchReviewRunScanButton.disabled = false;
+        this.matchReviewRunScanButton.classList.toggle('is-cancel', isActive);
+        this.matchReviewRunScanButton.textContent = isActive
+            ? 'Cancel Update & Sync'
+            : 'Update & Sync Library';
+    }
+
+    private startMatchReviewPollingInterval(): void {
+        if (this.matchReviewPollingInterval) {
+            return;
+        }
+
+        this.matchReviewPollingInterval = window.setInterval(() => {
+            if (this.currentPage !== 'matches') {
+                this.stopMatchReviewPollingInterval();
+                return;
+            }
+
+            void this.loadMatchActivity();
+        }, 5000);
+    }
+
+    private stopMatchReviewPollingInterval(): void {
+        if (this.matchReviewPollingInterval) {
+            window.clearInterval(this.matchReviewPollingInterval);
+            this.matchReviewPollingInterval = null;
+        }
+    }
+
+    private isMatchScanActive(): boolean {
+        return Boolean(
+            this.activeMatchActivityJobId
+            || this.lastMatchActivityStatus === 'queued'
+            || this.lastMatchActivityStatus === 'in_progress'
+        );
+    }
+
+    private renderMatchReviewBlockedByActiveScan(): void {
+        if (!this.matchReviewContent || !this.matchReviewSummary) {
+            return;
+        }
+
+        this.matchReviewSummary.innerHTML = '';
+        this.matchReviewContent.innerHTML = `
+            <div class="match-review-empty">Library update is currently running. Review cards will load after it completes.</div>
+        `;
+    }
+
+    private getMatchCoverageFromProgress(progress: Record<string, unknown>, entity: 'artists' | 'albums' | 'tracks'): { total: number; missing: number; matched: number } {
+        const total = Number(progress[`${entity}_total`] || 0);
+        const missing = Number(progress[`${entity}_missing_current`] || progress[`${entity}_processed`] || 0);
+        const matchedCurrent = Number(progress[`${entity}_matched_current_job`] || progress[`${entity}_matched`] || 0);
+        return {
+            total: Number.isFinite(total) ? total : 0,
+            missing: Number.isFinite(missing) ? missing : 0,
+            matched: Number.isFinite(matchedCurrent) ? matchedCurrent : 0,
+        };
+    }
+
+    private renderMatchActivityCard(job: JobItem): string {
+        const effectiveStatus = this.getEffectiveJobStatus(job);
+        const statusLabel = this.formatJobStatus(effectiveStatus);
+        const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
+        const stages = (job.result?.stages || {}) as Record<string, string>;
+        const progress = (job.result?.progress || {}) as Record<string, unknown>;
+        const hasResult = job.result !== null && job.result !== undefined;
+        const stageRows = [
+            { key: 'plex_library_update', label: 'Plex Library Update' },
+            { key: 'plex_sync', label: 'Plex Sync' },
+            { key: 'tag_analysis', label: 'Tag Analysis' },
+            { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
+        ];
+
+        const jobTypeLabel = this.formatJobTypeLabel(job.job_type);
+
+        if (!hasResult) {
+            return `
+                <div class="match-activity-card">
+                    <div class="match-activity-header">
+                        <div>
+                            <h3 class="match-activity-title">Latest Match Scan</h3>
+                        </div>
+                        <span class="match-review-status ${statusClass}">${statusLabel}</span>
+                    </div>
+                    <div class="match-activity-meta">
+                        <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                        <span class="match-activity-meta-item">Waiting to start...</span>
+                    </div>
+                    <div class="match-activity-stages">
+                        ${stageRows.map(stage => `
+                            <div class="job-stage">
+                                <span>${stage.label}</span>
+                                <span class="job-stage-status status-pending">Pending</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        const plexSyncTracks = typeof progress.plex_sync_tracks === 'number' ? progress.plex_sync_tracks : 0;
+        const tagScanned = typeof progress.tag_scanned === 'number' ? progress.tag_scanned : 0;
+        const tagFilled = typeof progress.tag_filled === 'number' ? progress.tag_filled : 0;
+        const hifiTracks = typeof progress.hifi_tracks_matched === 'number' ? progress.hifi_tracks_matched : 0;
+        const hifiAlbums = typeof progress.hifi_albums_matched === 'number' ? progress.hifi_albums_matched : 0;
+        const hifiArtists = typeof progress.hifi_artists_matched === 'number' ? progress.hifi_artists_matched : 0;
+
+        return `
+            <div class="match-activity-card">
+                <div class="match-activity-header">
+                    <div>
+                        <h3 class="match-activity-title">Latest Match Scan</h3>
+                    </div>
+                    <span class="match-review-status ${statusClass}">${statusLabel}</span>
+                </div>
+                <div class="match-activity-meta">
+                    <span class="match-activity-meta-item">${jobTypeLabel} #${job.id}</span>
+                    <span class="match-activity-meta-item">Plex: ${plexSyncTracks} tracks synced</span>
+                    <span class="match-activity-meta-item">Tags: ${tagScanned} scanned • ${tagFilled} filled</span>
+                    <span class="match-activity-meta-item">HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched</span>
+                </div>
+                <div class="match-activity-stages">
+                    ${stageRows.map(stage => {
+            const stageStatus = this.resolveStageStatus(job, stage.key, stages);
+            return `
+                            <div class="job-stage">
+                                <span>${stage.label}</span>
+                                <span class="job-stage-status status-${stageStatus}">${this.formatStageStatus(stageStatus)}</span>
+                            </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    private formatJobTypeLabel(jobType: string): string {
+        switch (jobType) {
+            case 'automatic_matching':
+                return 'Automatic Matching';
+            case 'hifi_match':
+                return 'HiFi Match (Legacy)';
+            case 'plex_library_sync':
+                return 'Plex Sync';
+            case 'plex_library_update':
+                return 'Plex Update';
+            case 'plex_listen_history_sync':
+                return 'Listen History Sync';
+            case 'generate_recommendations':
+                return 'Fresh Finds';
+            case 'bulk_playlist_add':
+                return 'Playlist Update';
+            case 'download_track':
+                return 'Download';
+            default:
+                return jobType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+    }
+
+    private async loadMatchActivity(): Promise<void> {
+        if (!this.matchReviewActivity || !this.matchReviewRunScanButton) {
+            return;
+        }
+
+        try {
+            const params = new URLSearchParams({
+                job_type: 'automatic_matching',
+                limit: '1'
+            });
+            const response = await fetch(`/api/jobs?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to load library update activity');
+            }
+
+            const data = await response.json() as { jobs?: JobItem[] };
+            const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+            const latestJob = jobs[0] || null;
+
+            if (!latestJob) {
+                this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">No library updates have been run yet.</div>';
+                this.activeMatchActivityJobId = null;
+                this.updateMatchReviewRunScanButton(false);
+                this.lastMatchActivityJobId = null;
+                this.lastMatchActivityStatus = null;
+                this.stopMatchReviewPollingInterval();
+                return;
+            }
+
+            const previousJobId = this.lastMatchActivityJobId;
+            const previousStatus = this.lastMatchActivityStatus;
+            const currentStatus = this.getEffectiveJobStatus(latestJob);
+            const isActive = currentStatus === 'queued' || currentStatus === 'in_progress';
+
+            this.matchReviewActivity.innerHTML = this.renderMatchActivityCard(latestJob);
+            this.activeMatchActivityJobId = isActive ? latestJob.id : null;
+            this.updateMatchReviewRunScanButton(isActive);
+            if (isActive) {
+                this.startMatchReviewPollingInterval();
+                this.setMatchReviewStatus(`Library update ${currentStatus === 'queued' ? 'queued' : 'running'}...`);
+                if (this.currentPage === 'matches') {
+                    this.renderMatchReviewBlockedByActiveScan();
+                }
+            } else {
+                this.stopMatchReviewPollingInterval();
+            }
+
+            this.lastMatchActivityJobId = latestJob.id;
+            this.lastMatchActivityStatus = currentStatus;
+
+            const completedNow = previousJobId === latestJob.id
+                && (previousStatus === 'queued' || previousStatus === 'in_progress')
+                && currentStatus !== 'queued'
+                && currentStatus !== 'in_progress';
+
+            if (completedNow) {
+                if (currentStatus === 'succeeded') {
+                    this.setMatchReviewStatus(`Library update completed for job ${latestJob.id}. Review results updated.`);
+                } else {
+                    this.setMatchReviewStatus(`Library update finished with status ${currentStatus}.`, currentStatus === 'failed');
+                }
+                await this.loadMatchReview();
+            }
+        } catch (error) {
+            console.error('Failed to load match activity:', error);
+            this.matchReviewActivity.innerHTML = '<div class="match-activity-empty">Failed to load library update activity.</div>';
+            this.stopMatchReviewPollingInterval();
+        }
+    }
+
+    private formatMatchConfidence(confidence?: number | null): string {
+        if (typeof confidence !== 'number' || !Number.isFinite(confidence)) {
+            return '—';
+        }
+        return `${Math.round(confidence * 100)}%`;
+    }
+
+    private formatMatchStatusLabel(confidence?: number | null): string {
+        const c = typeof confidence === 'number' ? confidence : 0;
+        if (c >= 0.95) {
+            return 'Matched';
+        }
+        if (c > 0) {
+            return 'Needs Review';
+        }
+        return 'Unmatched';
+    }
+
+    private renderMatchSummaryCard(label: string, value: number): string {
+        return `
+            <div class="matches-summary-card">
+                <span class="matches-summary-value">${value}</span>
+                <span class="matches-summary-label">${this.escapeHtml(label)}</span>
+            </div>
+        `;
+    }
+
+    private escapeAttribute(text: string): string {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\n/g, '&#10;');
+    }
+
+    private renderMatchTrackList(trackTitles?: string[], emptyLabel: string = 'Track list unavailable.'): string {
+        const normalizedTitles = (trackTitles || [])
+            .map(title => String(title || '').trim())
+            .filter(Boolean);
+
+        if (normalizedTitles.length === 0) {
+            return `<div class="match-review-track-list is-empty">${this.escapeHtml(emptyLabel)}</div>`;
+        }
+
+        return `
+            <div class="match-review-track-list">
+                <div class="match-review-track-list-label">Track List</div>
+                <ol class="match-review-track-list-items">
+                    ${normalizedTitles.map(title => `<li>${this.escapeHtml(title)}</li>`).join('')}
+                </ol>
+            </div>
+        `;
+    }
+
+    private renderMatchReviewArtwork(imageUrl: string | undefined, altText: string, kind: 'artist' | 'album' | 'track' = 'album'): string {
+        if (imageUrl) {
+            return `
+                <div class="match-review-artwork match-review-artwork--${kind}">
+                    <img src="${this.escapeAttribute(imageUrl)}" alt="${this.escapeAttribute(altText)}" loading="lazy" width="350" height="350">
+                </div>
+            `;
+        }
+
+        const placeholderSvg = kind === 'artist'
+            ? `
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="8" r="4"></circle>
+                    <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
+                </svg>
+            `
+            : `
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+            `;
+
+        return `
+            <div class="match-review-artwork match-review-artwork--${kind} is-placeholder" aria-hidden="true">
+                ${placeholderSvg}
+            </div>
+        `;
+    }
+
+    private renderMatchReviewTitle(title: string, options: { explicit?: boolean; className?: string; href?: string | null } = {}): string {
+        const className = options.className || 'match-review-pane-title';
+        const titleContent = options.href
+            ? `<a class="match-review-title-link" href="${this.escapeAttribute(options.href)}">${this.escapeHtml(title)}</a>`
+            : `<span class="match-review-title-text">${this.escapeHtml(title)}</span>`;
+
+        return `
+            <div class="${className}">
+                ${titleContent}
+                ${options.explicit ? '<span class="explicit-badge" title="Explicit content">E</span>' : ''}
+            </div>
+        `;
+    }
+
+    private getMatchCandidateSearchPlaceholder(entityType: 'artist' | 'album' | 'track'): string {
+        if (entityType === 'artist') {
+            return 'Search artists in Explore';
+        }
+        if (entityType === 'album') {
+            return 'Search albums in Explore';
+        }
+        return 'Search tracks in Explore';
+    }
+
+    private renderMatchCandidateSearchControls(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        const cacheKey = `${entityType}:${reviewId}`;
+        const previousSearch = this.matchCandidateSearchTerms.get(cacheKey) || '';
+
+        return `
+            <div class="match-review-candidate-search">
+                <label class="match-review-candidate-search-label" for="matchCandidateSearch-${entityType}-${reviewId}">Search candidates</label>
+                <div class="match-review-candidate-search-controls">
+                    <input
+                        id="matchCandidateSearch-${entityType}-${reviewId}"
+                        type="text"
+                        class="settings-input match-review-candidate-search-input"
+                        data-match-search-input="${entityType}:${reviewId}"
+                        placeholder="${this.escapeAttribute(this.getMatchCandidateSearchPlaceholder(entityType))}"
+                        value="${this.escapeAttribute(previousSearch)}"
+                        spellcheck="false"
+                    >
+                    <button
+                        type="button"
+                        class="match-review-button"
+                        data-match-action="search-candidates"
+                        data-entity-type="${entityType}"
+                        data-review-id="${reviewId}"
+                    >Search</button>
+                </div>
+            </div>
+        `;
+    }
+
+    private renderMatchCandidateList(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        const cacheKey = `${entityType}:${reviewId}`;
+        const candidates = this.matchCandidateCache.get(cacheKey);
+        if (!candidates) {
+            return '<div class="match-review-inline-status">Candidates load automatically when you open this card.</div>';
+        }
+
+        if (candidates.length === 0) {
+            return '<div class="match-review-empty">No candidates found for this item.</div>';
+        }
+
+        return `
+            <div class="match-review-candidate-list">
+                ${candidates.map(candidate => `
+                    <div class="match-review-candidate">
+                        <div class="match-review-candidate-meta">
+                            <span class="match-review-confidence">${this.formatMatchConfidence(candidate.confidence)}</span>
+                            <button
+                                type="button"
+                                class="match-review-button primary"
+                                data-match-action="confirm-candidate"
+                                data-entity-type="${entityType}"
+                                data-review-id="${reviewId}"
+                                data-hifi-id="${this.escapeHtml(candidate.hifi_id)}"
+                            >Use This Match</button>
+                        </div>
+                        <div class="match-review-candidate-main">
+                            ${entityType === 'album'
+                ? `
+                                    <div class="match-review-album-header">
+                                        ${this.renderMatchReviewTitle(candidate.title, {
+                    explicit: candidate.explicit,
+                    className: 'match-review-candidate-title',
+                    href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                })}
+                                        <div class="match-review-album-artist">${this.escapeHtml(candidate.subtitle || 'Unknown Artist')}</div>
+                                    </div>
+                                    <div class="match-review-album-body">
+                                        ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, 'album')}
+                                        ${this.renderMatchTrackList(candidate.track_titles, 'Track list unavailable for this candidate.')}
+                                    </div>
+                                `
+                : `
+                                    ${this.renderMatchReviewArtwork(candidate.image_url, candidate.title, entityType === 'artist' ? 'artist' : 'album')}
+                                    <div class="match-review-candidate-copy">
+                                        ${this.renderMatchReviewTitle(candidate.title, {
+                    explicit: candidate.explicit,
+                    className: 'match-review-candidate-title',
+                    href: this.getMatchExploreHref(entityType, candidate.hifi_id)
+                })}
+                                        ${candidate.subtitle ? `<div class="match-review-candidate-subtitle">${this.escapeHtml(candidate.subtitle)}</div>` : ''}
+                                    </div>
+                                `}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    private renderMatchWorkflowCard(
+        entityType: 'artist' | 'album' | 'track',
+        reviewId: number,
+        entityLabel: string,
+        title: string,
+        subtitle: string,
+        confidence: number | undefined,
+        summaryHtml: string,
+        sourcePaneHtml: string,
+        candidatePaneHtml: string,
+        actionsHtml: string,
+    ): string {
+        const statusLabel = this.formatMatchStatusLabel(confidence);
+        const normalizedStatus = confidence && confidence >= 0.95 ? 'confirmed' : confidence && confidence > 0 ? 'proposed' : 'unmatched';
+
+        return `
+            <div class="match-review-card" data-entity-type="${entityType}" data-review-id="${reviewId}">
+                <div class="match-review-card-header">
+                    <div class="match-review-card-summary">
+                        <div class="match-review-title-wrap">
+                            <span class="match-review-entity">${this.escapeHtml(entityLabel)}</span>
+                            <h4 class="match-review-title">${this.escapeHtml(title)}</h4>
+                            <div class="match-review-subtitle">${this.escapeHtml(subtitle)}</div>
+                        </div>
+                        <div class="match-review-meta">${summaryHtml}</div>
+                    </div>
+                    <div class="match-review-card-controls">
+                        <span class="match-review-status status-${this.escapeHtml(normalizedStatus)}">${this.escapeHtml(statusLabel)}</span>
+                        <button
+                            type="button"
+                            class="match-review-toggle"
+                            data-match-toggle="true"
+                            aria-expanded="false"
+                        >Review</button>
+                    </div>
+                </div>
+                <div class="match-review-card-body">
+                    <div class="match-review-workflow">
+                        ${sourcePaneHtml}
+                        ${candidatePaneHtml}
+                    </div>
+                    <div class="match-review-actions">
+                        ${actionsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    private getMatchSourceHref(item: HifiReviewArtist | HifiReviewAlbum | HifiReviewTrack, entityType: 'artist' | 'album' | 'track'): string | null {
+        if (entityType === 'artist') {
+            const artist = item as HifiReviewArtist;
+            if (!artist.library_id) {
+                return null;
+            }
+            return this.buildLibraryHref({
+                view: 'artist_albums',
+                artistId: artist.library_id,
+                artistName: artist.name || 'Artist'
+            });
+        }
+
+        if (entityType === 'album') {
+            const album = item as HifiReviewAlbum;
+            if (!album.library_id) {
+                return null;
+            }
+            return this.buildLibraryHref({
+                view: 'album_tracks',
+                albumId: album.library_id,
+                albumTitle: album.title || 'Album',
+                albumArtist: album.artist_name || 'Artist'
+            });
+        }
+
+        const track = item as HifiReviewTrack;
+        if (track.album_library_id) {
+            return this.buildLibraryHref({
+                view: 'album_tracks',
+                albumId: track.album_library_id,
+                albumTitle: track.album_title || 'Album',
+                albumArtist: track.artist_name || 'Artist'
+            });
+        }
+
+        if (track.artist_library_id) {
+            return this.buildLibraryHref({
+                view: 'artist_albums',
+                artistId: track.artist_library_id,
+                artistName: track.artist_name || 'Artist'
+            });
+        }
+
+        return null;
+    }
+
+    private getMatchExploreHref(entityType: 'artist' | 'album' | 'track', hifiId?: string): string | null {
+        const normalizedHifiId = String(hifiId || '').trim();
+        if (!normalizedHifiId) {
+            return null;
+        }
+
+        if (entityType === 'track') {
+            return this.buildExploreHref({
+                view: 'search',
+                searchType: 'trackid',
+                query: normalizedHifiId
+            });
+        }
+
+        const parsedId = Number.parseInt(normalizedHifiId, 10);
+        if (!Number.isFinite(parsedId) || parsedId <= 0) {
+            return null;
+        }
+
+        return this.buildExploreHref({
+            view: entityType,
+            ...(entityType === 'artist' ? { artistId: parsedId } : { albumId: parsedId })
+        });
+    }
+
+    private getManualMatchIdHint(entityType: 'artist' | 'album' | 'track'): string {
+        if (entityType === 'artist') {
+            return 'Paste the Explore artist ID if search found nothing useful.';
+        }
+        if (entityType === 'album') {
+            return 'Paste the Explore album ID to confirm this library album manually.';
+        }
+        return 'Paste the Explore track ID to confirm this library track manually.';
+    }
+
+    private renderManualMatchEntry(entityType: 'artist' | 'album' | 'track', reviewId: number): string {
+        return `
+            <div class="match-review-manual-entry">
+                <label class="match-review-manual-label" for="manualMatchId-${entityType}-${reviewId}">Manual HiFi ID</label>
+                <div class="match-review-manual-controls">
+                    <input
+                        id="manualMatchId-${entityType}-${reviewId}"
+                        type="text"
+                        class="settings-input match-review-manual-input"
+                        data-match-manual-id="${entityType}:${reviewId}"
+                        placeholder="Enter ${entityType} ID"
+                        spellcheck="false"
+                    >
+                    <button
+                        type="button"
+                        class="match-review-button"
+                        data-match-action="confirm-manual"
+                        data-entity-type="${entityType}"
+                        data-review-id="${reviewId}"
+                    >Use ID</button>
+                </div>
+                <div class="match-review-manual-hint">${this.escapeHtml(this.getManualMatchIdHint(entityType))}</div>
+            </div>
+        `;
+    }
+
+    private renderMatchCurrentCandidate(entityType: 'artist' | 'album' | 'track', hifiId?: string, extraLabel?: string): string {
+        if (!this.getMatchExploreHref(entityType, hifiId)) {
+            return '';
+        }
+
+        return `
+            <div class="match-review-current">
+                <span>Current candidate selected${extraLabel ? ` • ${this.escapeHtml(extraLabel)}` : ''}</span>
+            </div>
+        `;
+    }
+
+    private renderArtistReviewCard(item: HifiReviewArtist): string {
+        const reviewId = item.artist_id;
+        const currentMatch = this.renderMatchCurrentCandidate('artist', item.hifi_id);
+        const sourceHref = this.getMatchSourceHref(item, 'artist');
+
+        return this.renderMatchWorkflowCard(
+            'artist',
+            reviewId,
+            'Artist',
+            item.name || 'Unknown Artist',
+            'Compare the Plex library artist against Explore artist candidates.',
+            item.confidence,
+            `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-header">
+                        ${this.renderMatchReviewArtwork(item.picture, item.name || 'Unknown Artist', 'artist')}
+                        <div class="match-review-pane-stack">
+                            ${this.renderMatchReviewTitle(item.name || 'Unknown Artist', { href: sourceHref })}
+                            <div class="match-review-pane-copy">This is the artist currently indexed from your Plex library.</div>
+                        </div>
+                    </div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('artist', reviewId)}
+                    <div class="match-review-candidates" data-match-candidates-key="artist:${reviewId}">
+                        ${this.renderMatchCandidateList('artist', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('artist', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="artist" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="artist" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderAlbumReviewCard(item: HifiReviewAlbum): string {
+        const reviewId = item.album_id;
+        const currentMatch = this.renderMatchCurrentCandidate('album', item.hifi_id, item.complete ? 'complete in library' : undefined);
+        const sourceHref = this.getMatchSourceHref(item, 'album');
+
+        return this.renderMatchWorkflowCard(
+            'album',
+            reviewId,
+            'Album',
+            item.title || 'Unknown Album',
+            `${item.artist_name || 'Unknown Artist'} • Review the library album against Explore releases.`,
+            item.confidence,
+            [
+                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+                `<span class="match-review-meta-item">Tracks ${item.matched_track_count || 0}/${item.expected_track_count || 0}</span>`
+            ].join(''),
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-header">
+                        <div class="match-review-album-header">
+                            ${this.renderMatchReviewTitle(item.title || 'Unknown Album', { href: sourceHref })}
+                            <div class="match-review-album-artist">${this.escapeHtml(item.artist_name || 'Unknown Artist')}</div>
+                        </div>
+                        <div class="match-review-album-body">
+                            ${this.renderMatchReviewArtwork(item.cover, item.title || 'Unknown Album', 'album')}
+                            ${this.renderMatchTrackList(item.track_titles, 'Track list unavailable for this library album.')}
+                        </div>
+                    </div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('album', reviewId)}
+                    <div class="match-review-candidates" data-match-candidates-key="album:${reviewId}">
+                        ${this.renderMatchCandidateList('album', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('album', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="album" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="album" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderTrackReviewCard(item: HifiReviewTrack): string {
+        const reviewId = item.track_id;
+        const subtitleParts = [item.artist_name, item.album_title].filter(Boolean);
+        const currentMatch = this.renderMatchCurrentCandidate('track', item.hifi_id);
+        const sourceHref = this.getMatchSourceHref(item, 'track');
+
+        return this.renderMatchWorkflowCard(
+            'track',
+            reviewId,
+            'Track',
+            item.title || 'Unknown Track',
+            `${subtitleParts.join(' • ') || 'Unknown'} • Compare the library file against Explore tracks.`,
+            item.confidence,
+            [
+                `<span class="match-review-meta-item">Confidence ${this.formatMatchConfidence(item.confidence)}</span>`,
+                `<span class="match-review-meta-item">Format ${this.escapeHtml((item.format || '—').toUpperCase())}</span>`,
+                `<span class="match-review-meta-item">Bitrate ${typeof item.bitrate === 'number' ? `${item.bitrate} kbps` : '—'}</span>`
+            ].join(''),
+            `
+                <section class="match-review-pane source-pane">
+                    <div class="match-review-pane-label">Library Source</div>
+                    <div class="match-review-pane-header">
+                        ${this.renderMatchReviewArtwork(item.cover, item.album_title || item.title || 'Unknown Track', 'album')}
+                        <div class="match-review-pane-stack">
+                            ${this.renderMatchReviewTitle(item.title || 'Unknown Track', { href: sourceHref })}
+                            <div class="match-review-pane-copy">${this.escapeHtml(subtitleParts.join(' • ') || 'Unknown')}</div>
+                            <div class="match-review-pane-copy">Path: ${this.escapeHtml(item.path || '—')}</div>
+                        </div>
+                    </div>
+                </section>
+            `,
+            `
+                <section class="match-review-pane candidate-pane">
+                    <div class="match-review-pane-label">Explore Candidates</div>
+                    ${currentMatch}
+                    ${this.renderMatchCandidateSearchControls('track', reviewId)}
+                    <div class="match-review-candidates" data-match-candidates-key="track:${reviewId}">
+                        ${this.renderMatchCandidateList('track', reviewId)}
+                    </div>
+                    ${this.renderManualMatchEntry('track', reviewId)}
+                </section>
+            `,
+            [
+                item.hifi_id ? `<button type="button" class="match-review-button primary" data-match-action="confirm-current" data-entity-type="track" data-review-id="${reviewId}">Confirm Current</button>` : '',
+                `<button type="button" class="match-review-button danger" data-match-action="reject" data-entity-type="track" data-review-id="${reviewId}">Reject</button>`
+            ].filter(Boolean).join('')
+        );
+    }
+
+    private renderMatchReviewSection(title: string, count: number, itemsHtml: string): string {
+        if (count === 0) {
+            return '';
+        }
+
+        return `
+            <section class="match-review-section">
+                <div class="match-review-section-header">
+                    <h3>${this.escapeHtml(title)}</h3>
+                    <span class="match-review-count">${count} item${count === 1 ? '' : 's'}</span>
+                </div>
+                <div class="match-review-list">${itemsHtml}</div>
+            </section>
+        `;
+    }
+
+    private async loadMatchReview(): Promise<void> {
+        if (!this.matchReviewContent || !this.matchReviewSummary) {
+            return;
+        }
+
+        if (this.isMatchScanActive()) {
+            this.renderMatchReviewBlockedByActiveScan();
+            return;
+        }
+
+        const entityType = this.matchReviewEntityFilter?.value || 'all';
+        const maxConfidence = this.matchReviewMaxConfidenceInput?.value || '0.94';
+        const loadingMessage = 'Loading match review items...';
+        this.matchReviewContent.innerHTML = `<p class="loading-text">${this.escapeHtml(loadingMessage)}</p>`;
+        this.matchReviewSummary.innerHTML = '';
+        this.setMatchReviewStatus('');
+
+        try {
+            const params = new URLSearchParams({
+                entity_type: entityType,
+                max_confidence: maxConfidence,
+                limit: '100'
+            });
+            const response = await fetch(`/api/hifi/matches/review?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch match review items');
+            }
+
+            const data = await response.json() as HifiMatchReviewResponse;
+            const artists = Array.isArray(data.artists) ? data.artists : [];
+            const albums = Array.isArray(data.albums) ? data.albums : [];
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+            const artistTotal = typeof data.summary?.artists === 'number' ? data.summary.artists : artists.length;
+            const albumTotal = typeof data.summary?.albums === 'number' ? data.summary.albums : albums.length;
+            const trackTotal = typeof data.summary?.tracks === 'number' ? data.summary.tracks : tracks.length;
+
+            this.matchReviewSummary.innerHTML = [
+                this.renderMatchSummaryCard('Artists to review', artistTotal),
+                this.renderMatchSummaryCard('Albums to review', albumTotal),
+                this.renderMatchSummaryCard('Tracks to review', trackTotal)
+            ].join('');
+
+            const content = [
+                this.renderMatchReviewSection('Artists', artists.length, artists.map(item => this.renderArtistReviewCard(item)).join('')),
+                this.renderMatchReviewSection('Albums', albums.length, albums.map(item => this.renderAlbumReviewCard(item)).join('')),
+                this.renderMatchReviewSection('Tracks', tracks.length, tracks.map(item => this.renderTrackReviewCard(item)).join(''))
+            ].filter(Boolean).join('');
+
+            this.matchReviewContent.innerHTML = content || '<div class="match-review-empty">No review items found for the current filters.</div>';
+            this.openInitialMatchReviewCards();
+        } catch (error) {
+            console.error('Failed to load match review items:', error);
+            this.matchReviewContent.innerHTML = '<div class="match-review-empty">Failed to load match review items.</div>';
+            this.setMatchReviewStatus((error as Error).message || 'Failed to load match review items', true);
+        }
+    }
+
+    private async startLibraryUpdate(): Promise<void> {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        const originalText = this.matchReviewRunScanButton.textContent || 'Update & Sync Library';
+        this.setMatchReviewStatus('');
+        let queuedJobIsActive = false;
+
+        try {
+            await this.withButtonState(this.matchReviewRunScanButton, 'Queueing...', async () => {
+                const response = await fetch('/api/plex/sync', { method: 'POST' });
+                const data = await response.json().catch(() => ({} as { error?: string; job_id?: number | string; status?: string }));
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to queue library update');
+                }
+
+                const queuedJobId = Number(data.job_id);
+                const queuedStatus = String(data.status || '').trim().toLowerCase();
+                queuedJobIsActive = !queuedStatus || queuedStatus === 'queued' || queuedStatus === 'in_progress';
+                if (queuedJobIsActive && Number.isFinite(queuedJobId) && queuedJobId > 0) {
+                    this.activeMatchActivityJobId = queuedJobId;
+                    this.updateMatchReviewRunScanButton(true);
+                }
+
+                this.setMatchReviewStatus(`Library update queued as job ${data.job_id || 'unknown'}. Sync and matching will follow automatically.`);
+                await this.loadMatchActivity();
+                await this.loadJobs();
+            });
+        } catch (error) {
+            console.error('Failed to queue library update:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to queue library update', true);
+        } finally {
+            if (queuedJobIsActive || this.activeMatchActivityJobId) {
+                this.updateMatchReviewRunScanButton(true);
+            } else {
+                this.matchReviewRunScanButton.disabled = false;
+                this.matchReviewRunScanButton.textContent = originalText;
+            }
+        }
+    }
+
+    private async cancelLibraryUpdate(jobId: number): Promise<void> {
+        if (!this.matchReviewRunScanButton) {
+            return;
+        }
+
+        try {
+            await this.withButtonState(this.matchReviewRunScanButton, 'Cancelling...', async () => {
+                const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+                if (!response.ok) {
+                    let message = 'Failed to cancel library update';
+                    try {
+                        const data = await response.json() as { error?: string };
+                        if (data?.error) {
+                            message = data.error;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
+                    }
+                    throw new Error(message);
+                }
+
+                this.activeMatchActivityJobId = null;
+                this.updateMatchReviewRunScanButton(false);
+                this.setMatchReviewStatus(`Library update cancelled for job ${jobId}.`);
+                await this.loadMatchActivity();
+                await this.loadJobs();
+            });
+        } catch (error) {
+            console.error('Failed to cancel library update:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to cancel library update', true);
+        }
+    }
+
+    private async loadMatchCandidates(entityType: 'artist' | 'album' | 'track', reviewId: number, container: HTMLElement, queryOverride?: string): Promise<void> {
+        const cacheKey = `${entityType}:${reviewId}`;
+        const normalizedQuery = String(queryOverride || '').trim();
+        const isManualSearch = normalizedQuery.length > 0;
+
+        if (!isManualSearch && this.matchCandidateCache.has(cacheKey)) {
+            container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
+            return;
+        }
+
+        if (!isManualSearch && this.matchCandidateRequestsInFlight.has(cacheKey)) {
+            return;
+        }
+
+        this.matchCandidateRequestsInFlight.add(cacheKey);
+        container.innerHTML = isManualSearch
+            ? `<div class="match-review-inline-status">Searching for "${this.escapeHtml(normalizedQuery)}"...</div>`
+            : '<div class="match-review-inline-status">Searching candidates...</div>';
+
+        try {
+            const params = new URLSearchParams({
+                entity_type: entityType,
+                id: String(reviewId),
+                limit: '3'
+            });
+            if (normalizedQuery) {
+                params.set('query', normalizedQuery);
+            }
+            const response = await fetch(`/api/hifi/matches/candidates?${params.toString()}`);
+            const data = await response.json() as HifiMatchCandidatesResponse;
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to search candidates');
+            }
+
+            if (isManualSearch) {
+                this.matchCandidateSearchTerms.set(cacheKey, normalizedQuery);
+            }
+            this.matchCandidateCache.set(cacheKey, Array.isArray(data.candidates) ? data.candidates : []);
+            container.innerHTML = this.renderMatchCandidateList(entityType, reviewId);
+        } catch (error) {
+            console.error('Failed to load match candidates:', error);
+            container.innerHTML = `<div class="match-review-empty">${this.escapeHtml((error as Error).message || 'Failed to search candidates')}</div>`;
+        } finally {
+            this.matchCandidateRequestsInFlight.delete(cacheKey);
+        }
+    }
+
+    private async toggleMatchReviewCard(card: HTMLElement, forceOpen?: boolean): Promise<void> {
+        const isOpen = card.classList.contains('is-open');
+        const nextOpen = typeof forceOpen === 'boolean' ? forceOpen : !isOpen;
+        const toggleButton = card.querySelector('[data-match-toggle]') as HTMLButtonElement | null;
+        const entityType = String(card.getAttribute('data-entity-type') || '').trim() as 'artist' | 'album' | 'track';
+        const reviewId = Number(card.getAttribute('data-review-id') || '0');
+        const candidatesContainer = card.querySelector(`[data-match-candidates-key="${entityType}:${reviewId}"]`) as HTMLElement | null;
+
+        card.classList.toggle('is-open', nextOpen);
+        if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', String(nextOpen));
+            toggleButton.textContent = nextOpen ? 'Hide' : 'Review';
+        }
+
+        if (nextOpen && candidatesContainer && entityType && Number.isFinite(reviewId) && reviewId > 0) {
+            await this.loadMatchCandidates(entityType, reviewId, candidatesContainer);
+        }
+    }
+
+    private openInitialMatchReviewCards(): void {
+        if (!this.matchReviewContent) {
+            return;
+        }
+
+        const firstCards = Array.from(this.matchReviewContent.querySelectorAll('.match-review-section .match-review-card:first-child')) as HTMLElement[];
+        firstCards.slice(0, 3).forEach(card => {
+            void this.toggleMatchReviewCard(card, true);
+        });
+    }
+
+    private async submitMatchReviewAction(entityType: 'artist' | 'album' | 'track', reviewId: number, action: 'confirm' | 'reject', hifiId?: string): Promise<void> {
+        const response = await fetch('/api/hifi/matches/review', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                entity_type: entityType,
+                id: reviewId,
+                action,
+                hifi_id: hifiId
+            })
+        });
+
+        const data = await response.json().catch(() => ({} as { error?: string }));
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update review item');
+        }
+    }
+
+    private async reloadMatchReviewPreserveScroll(): Promise<void> {
+        const previousScrollY = window.scrollY;
+        await this.loadMatchReview();
+        window.scrollTo({ top: previousScrollY, behavior: 'auto' });
+    }
+
+    private async handleMatchReviewClick(e: MouseEvent): Promise<void> {
+        const target = e.target as HTMLElement;
+        const toggleButton = target.closest('[data-match-toggle]') as HTMLButtonElement | null;
+        if (toggleButton) {
+            const card = toggleButton.closest('.match-review-card') as HTMLElement | null;
+            if (card) {
+                await this.toggleMatchReviewCard(card);
+            }
+            return;
+        }
+
+        const actionButton = target.closest('[data-match-action]') as HTMLButtonElement | null;
+        if (!actionButton) {
+            return;
+        }
+
+        const action = String(actionButton.getAttribute('data-match-action') || '').trim();
+        const entityType = String(actionButton.getAttribute('data-entity-type') || '').trim() as 'artist' | 'album' | 'track';
+        const reviewId = Number(actionButton.getAttribute('data-review-id') || '0');
+        const hifiId = String(actionButton.getAttribute('data-hifi-id') || '').trim() || undefined;
+        if (!entityType || !Number.isFinite(reviewId) || reviewId <= 0) {
+            return;
+        }
+
+        const card = actionButton.closest('.match-review-card') as HTMLElement | null;
+        const candidatesContainer = card?.querySelector(`[data-match-candidates-key="${entityType}:${reviewId}"]`) as HTMLElement | null;
+        const manualIdInput = card?.querySelector(`[data-match-manual-id="${entityType}:${reviewId}"]`) as HTMLInputElement | null;
+        const candidateSearchInput = card?.querySelector(`[data-match-search-input="${entityType}:${reviewId}"]`) as HTMLInputElement | null;
+
+        if (action === 'search-candidates') {
+            if (!candidatesContainer) {
+                return;
+            }
+
+            const query = String(candidateSearchInput?.value || '').trim();
+            if (!query) {
+                this.setMatchReviewStatus('Enter a search query to find candidates.', true);
+                return;
+            }
+
+            try {
+                actionButton.disabled = true;
+                await this.loadMatchCandidates(entityType, reviewId, candidatesContainer, query);
+                this.setMatchReviewStatus('Search complete. Showing up to 3 candidates.');
+            } catch (error) {
+                console.error('Failed to search match candidates:', error);
+                this.setMatchReviewStatus((error as Error).message || 'Failed to search candidates', true);
+            } finally {
+                actionButton.disabled = false;
+            }
+            return;
+        }
+
+        try {
+            actionButton.disabled = true;
+
+            if (action === 'reject') {
+                const confirmed = window.confirm('Reject this match candidate?');
+                if (!confirmed) {
+                    actionButton.disabled = false;
+                    return;
+                }
+                await this.submitMatchReviewAction(entityType, reviewId, 'reject');
+                this.setMatchReviewStatus('Match rejected.');
+            } else if (action === 'confirm-current') {
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm');
+                this.setMatchReviewStatus('Match confirmed.');
+            } else if (action === 'confirm-manual') {
+                const manualId = String(manualIdInput?.value || '').trim();
+                if (!manualId) {
+                    throw new Error('Enter a HiFi ID before confirming manually.');
+                }
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm', manualId);
+                this.setMatchReviewStatus(`Manual ${entityType} ID confirmed.`);
+            } else if (action === 'confirm-candidate') {
+                await this.submitMatchReviewAction(entityType, reviewId, 'confirm', hifiId);
+                this.setMatchReviewStatus('Candidate selected and confirmed.');
+            }
+
+            this.matchCandidateCache.delete(`${entityType}:${reviewId}`);
+            await this.reloadMatchReviewPreserveScroll();
+        } catch (error) {
+            console.error('Failed to update match review item:', error);
+            this.setMatchReviewStatus((error as Error).message || 'Failed to update match review item', true);
+            actionButton.disabled = false;
+        }
+    }
+
+    private async handleMatchReviewKeydown(e: KeyboardEvent): Promise<void> {
+        if (e.key !== 'Enter') {
+            return;
+        }
+
+        const target = e.target as HTMLElement;
+        const input = target.closest('[data-match-search-input]') as HTMLInputElement | null;
+        if (!input) {
+            return;
+        }
+
+        const key = String(input.getAttribute('data-match-search-input') || '').trim();
+        const [entityTypeRaw, reviewIdRaw] = key.split(':');
+        const entityType = entityTypeRaw as 'artist' | 'album' | 'track';
+        const reviewId = Number(reviewIdRaw || '0');
+        if (!entityType || !Number.isFinite(reviewId) || reviewId <= 0) {
+            return;
+        }
+
+        const card = input.closest('.match-review-card') as HTMLElement | null;
+        const searchButton = card?.querySelector(`[data-match-action="search-candidates"][data-entity-type="${entityType}"][data-review-id="${reviewId}"]`) as HTMLButtonElement | null;
+        if (!searchButton) {
+            return;
+        }
+
+        e.preventDefault();
+        searchButton.click();
+    }
+
     private async handleJobsContentClick(e: MouseEvent): Promise<void> {
         const target = e.target as HTMLElement;
         const cancelButton = target.closest('.job-cancel-button') as HTMLButtonElement | null;
@@ -1189,66 +5267,106 @@ class App {
     }
 
     private async cancelJob(jobId: number, button: HTMLButtonElement): Promise<void> {
-        const originalText = button.textContent || 'Cancel';
-        button.disabled = true;
-        button.textContent = 'Cancelling...';
-
         try {
-            const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
-            if (!response.ok) {
-                let message = 'Failed to cancel job';
-                try {
-                    const data = await response.json() as { error?: string };
-                    if (data?.error) {
-                        message = data.error;
+            await this.withButtonState(button, 'Cancelling...', async () => {
+                const response = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+                if (!response.ok) {
+                    let message = 'Failed to cancel job';
+                    try {
+                        const data = await response.json() as { error?: string };
+                        if (data?.error) {
+                            message = data.error;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
                     }
-                } catch {
-                    // Ignore parse errors and keep fallback message
+                    throw new Error(message);
                 }
-                throw new Error(message);
-            }
 
-            await this.loadJobs();
+                await this.loadJobs();
+            });
         } catch (error) {
             console.error('Cancel job failed:', error);
             window.alert((error as Error).message || 'Failed to cancel job');
-            button.disabled = false;
-            button.textContent = originalText;
         }
     }
 
     private async retryJob(jobId: number, button: HTMLButtonElement): Promise<void> {
-        const originalText = button.textContent || 'Retry';
-        button.disabled = true;
-        button.textContent = 'Retrying...';
-
         try {
-            const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
-            if (!response.ok) {
-                let message = 'Failed to retry job';
-                try {
-                    const data = await response.json() as { error?: string; status?: string };
-                    if (response.status === 409 && data?.status === 'already_exists_in_plex') {
-                        window.alert('Retry skipped: track already exists in Plex for the selected format.');
-                        await this.loadJobs();
-                        return;
+            await this.withButtonState(button, 'Retrying...', async () => {
+                const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+                if (!response.ok) {
+                    let message = 'Failed to retry job';
+                    try {
+                        const data = await response.json() as { error?: string; status?: string };
+                        if (response.status === 409 && data?.status === 'already_exists_in_plex') {
+                            window.alert('Retry skipped: track already exists in Plex for the selected format.');
+                            await this.loadJobs();
+                            return;
+                        }
+                        if (data?.error) {
+                            message = data.error;
+                        }
+                    } catch {
+                        // Ignore parse errors and keep fallback message
                     }
-                    if (data?.error) {
-                        message = data.error;
-                    }
-                } catch {
-                    // Ignore parse errors and keep fallback message
+                    throw new Error(message);
                 }
-                throw new Error(message);
-            }
 
-            await this.loadJobs();
+                await this.loadJobs();
+            });
         } catch (error) {
             console.error('Retry job failed:', error);
             window.alert((error as Error).message || 'Failed to retry job');
-            button.disabled = false;
-            button.textContent = originalText;
         }
+    }
+
+    /** Shared: render stage pills from stage definitions */
+    private renderStageHtml(stageDefs: StageDef[], job: JobItem, stages: Record<string, string>): string {
+        return stageDefs.map(stage => {
+            if (stage.condition && !stage.condition(job)) {
+                return '';
+            }
+            const status = this.resolveStageStatus(job, stage.key, stages);
+            const stageLabel = this.formatStageStatus(status);
+            return `
+                <div class="job-stage">
+                    <span>${this.escapeHtml(stage.label)}</span>
+                    <span class="job-stage-status status-${status}">${stageLabel}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /** Shared: build card shell with standardized #N badge */
+    private renderCardShell(
+        title: string,
+        jobId: number,
+        actionsClass: string,
+        statusLabel: string,
+        statusClass: string,
+        showCancelButton: boolean,
+        showRetryButton: boolean,
+        bodyHtml: string,
+        stageHtml: string,
+    ): string {
+        return `
+            <div class="job-item">
+                <div class="job-main">
+                    <div class="job-title-row">
+                        <span class="job-title">${this.escapeHtml(title)}</span>
+                        <span class="job-id-badge">#${jobId}</span>
+                    </div>
+                    <div class="${actionsClass}">
+                        <div class="job-status ${statusClass}">${statusLabel}</div>
+                        ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${jobId}">Cancel</button>` : ''}
+                        ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${jobId}">Retry</button>` : ''}
+                    </div>
+                </div>
+                ${bodyHtml}
+                <div class="job-stages">${stageHtml}</div>
+            </div>
+        `;
     }
 
     private renderJobItem(job: JobItem): string {
@@ -1257,147 +5375,153 @@ class App {
         const statusLabel = this.formatJobStatus(effectiveStatus);
         const statusClass = `status-${effectiveStatus.replace(/_/g, '-')}`;
         const showCancelButton = effectiveStatus === 'queued' || effectiveStatus === 'in_progress';
-        const showRetryButton = job.job_type === 'download_track' && (effectiveStatus === 'failed' || effectiveStatus === 'completed_with_errors');
+        const showRetryButton = job.job_type === 'download_track' && effectiveStatus === 'failed';
         const actionsClass = `job-main-actions${showCancelButton ? ' cancel-on-hover' : ''}`;
-        const stages = job.result?.stages || {};
+        const stages = (job.result?.stages || {}) as Record<string, string>;
         const playlistName = job.result?.playlist_name || job.payload?.plex_playlist || null;
         const skippedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_skipped_existing);
         const upgradedExisting = job.job_type === 'download_track' && Boolean(job.result && (job.result as Record<string, unknown>).download_upgraded_existing);
         const upgradedFromBitrate = upgradedExisting ? ((job.result as Record<string, unknown>)?.upgraded_from_bitrate as number | null ?? null) : null;
+        const downloadMirror = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.download_mirror as string | null ?? null) : null;
+        const mirrorType = job.job_type === 'download_track' ? ((job.result as Record<string, unknown>)?.mirror_type as string | null ?? null) : null;
+
+        const resolvedPlexUserName = job.payload?.plex_user_id
+            ? this.resolvePlexUserName(String(job.payload.plex_user_id))
+            : null;
+
+        // Build stage definitions and body sections per job type
+        let stageDefs: StageDef[];
+        let bodyHtml = '';
 
         if (job.job_type === 'plex_library_sync') {
-            const stageRows = [
+            stageDefs = [
                 { key: 'reading_plex_library', label: 'Reading Plex Library' },
-                { key: 'updating_local_index', label: 'Updating Local Index' }
+                { key: 'updating_local_index', label: 'Updating Local Index' },
+                { key: 'labeling_explicit_albums', label: 'Labeling Explicit Albums' },
+                { key: 'backfilling_track_ids_from_tags', label: 'Backfilling Track IDs from Tags' }
             ];
-
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexSyncStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = job.result?.progress || {};
-            const processed = Number(progress.processed_tracks || 0);
-            const total = Number(progress.total_tracks || 0);
-            const upserted = Number(progress.upserted_songs || 0);
-            const deleted = Number(progress.deleted_songs || 0);
-            const progressText = total > 0
-                ? `${processed}/${total} tracks processed • ${upserted} songs upserted • ${deleted} removed`
-                : `${upserted} songs upserted • ${deleted} removed`;
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
-        }
-
-        if (job.job_type === 'plex_library_update') {
-            const stageRows = [
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const processed = Number(p.processed_tracks || 0);
+            const total = Number(p.total_tracks || 0);
+            const upserted = Number(p.upserted_songs || 0);
+            const deleted = Number(p.deleted_songs || 0);
+            const tagsRead = Number(p.tags_read || 0);
+            const tagsUpdated = Number(p.tags_updated || 0);
+            const syncText = total > 0
+                ? `${processed}/${total} tracks processed • ${upserted} upserted • ${deleted} removed`
+                : `${upserted} upserted • ${deleted} removed`;
+            const tagText = `${tagsRead} tags read • ${tagsUpdated} updated`;
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(syncText)}</div>\n<div class="job-sync-progress">${this.escapeHtml(tagText)}</div>`;
+        } else if (job.job_type === 'plex_library_update') {
+            stageDefs = [
                 { key: 'scanning_plex_library', label: 'Scanning Plex Library' }
             ];
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const scanCompleted = p.scan_completed === true;
+            const progressText = scanCompleted ? 'Library scan completed' : '';
+            if (progressText) {
+                bodyHtml = `<div class="job-sync-progress success">${this.escapeHtml(progressText)}</div>`;
+            }
+        } else if (job.job_type === 'automatic_matching') {
+            stageDefs = [
+                { key: 'plex_library_update', label: 'Plex Library Update' },
+                { key: 'plex_sync', label: 'Plex Sync' },
+                { key: 'tag_analysis', label: 'Tag Analysis' },
+                { key: 'hifi_gap_fill', label: 'HiFi Gap Fill' }
+            ];
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const plexSyncTracks = typeof p.plex_sync_tracks === 'number' ? p.plex_sync_tracks : 0;
+            const tagScanned = typeof p.tag_scanned === 'number' ? p.tag_scanned : 0;
+            const tagFilled = typeof p.tag_filled === 'number' ? p.tag_filled : 0;
+            const hifiTracks = typeof p.hifi_tracks_matched === 'number' ? p.hifi_tracks_matched : 0;
+            const hifiAlbums = typeof p.hifi_albums_matched === 'number' ? p.hifi_albums_matched : 0;
+            const hifiArtists = typeof p.hifi_artists_matched === 'number' ? p.hifi_artists_matched : 0;
+            const progressText = `Plex: ${plexSyncTracks} tracks synced • Tags: ${tagScanned} scanned • ${tagFilled} filled • HiFi: ${hifiTracks} tracks • ${hifiAlbums} albums • ${hifiArtists} artists matched`;
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'plex_listen_history_sync') {
+            stageDefs = [
+                { key: 'resolving_accounts', label: 'Resolving Accounts' },
+                { key: 'fetching_history', label: 'Fetching History' },
+                { key: 'storing_entries', label: 'Storing Entries' }
+            ];
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const usersProcessed = Number(p.users_processed || 0);
+            const totalUsers = Number(p.total_users || 0);
+            const entriesFetched = Number(p.entries_fetched || 0);
+            const entriesStored = Number(p.entries_stored || 0);
+            const resultData = (job.result || {}) as Record<string, unknown>;
+            const totalFetched = Number(resultData.total_entries_fetched || 0);
+            const totalStored = Number(resultData.total_entries_stored || 0);
+            const progressText = totalFetched > 0
+                ? `${usersProcessed}/${totalUsers} users • ${totalFetched} entries fetched • ${totalStored} stored`
+                : `${usersProcessed}/${totalUsers} users processed`;
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'generate_recommendations') {
+            stageDefs = [
+                { key: 'syncing_listen_history', label: 'Syncing Listen History' },
+                { key: 'gathering_seeds', label: 'Gathering Seeds' },
+                { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
+                { key: 'processing_tracks', label: 'Processing Tracks' },
+                { key: 'saving_playlist', label: 'Saving Playlist' }
+            ];
+            const p = (job.result?.progress || {}) as Record<string, unknown>;
+            const seedsFound = Number(p.seeds_found || 0);
+            const recsFetched = Number(p.recommendations_fetched || 0);
+            const afterFilter = Number(p.tracks_after_filter || 0);
+            const saved = Number(p.tracks_saved || 0);
+            const progressText = seedsFound > 0
+                ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter • ${saved} tracks saved`
+                : 'Waiting to start...';
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else if (job.job_type === 'bulk_playlist_add') {
+            stageDefs = [
+                { key: 'resolving_tracks', label: 'Resolving Tracks' },
+                { key: 'adding_to_playlists', label: 'Adding to Playlists' }
+            ];
+            const p = (job.result || {}) as Record<string, unknown>;
+            const total = Number(p.total_tracks || 0);
+            const processed = Number(p.tracks_processed || 0);
+            const added = Number(p.tracks_added || 0);
+            const skipped = Number(p.tracks_skipped || 0);
+            const failed = Number(p.tracks_failed || 0);
+            const progressText = total > 0
+                ? `Processing ${processed}/${total} tracks • ${added} added • ${skipped} skipped • ${failed} failed`
+                : 'Waiting to start...';
+            bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
+        } else {
+            // download_track (fallthrough)
+            stageDefs = [
+                { key: 'downloaded', label: 'Downloaded' },
+                { key: 'tagged', label: 'Tagged' },
+                { key: 'written', label: 'Written to Disk' },
+                ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
+                ...(playlistName ? [{
+                    key: 'playlist_added',
+                    label: `Staged for Playlist "${this.escapeHtml(String(playlistName))}"${resolvedPlexUserName ? ` for ${this.escapeHtml(resolvedPlexUserName)}` : ''}`
+                }] : []),
+            ];
 
-            const stageHtml = stageRows.map(stage => {
-                const status = this.resolvePlexLibraryUpdateStageStatus(job, stage.key, stages as Record<string, string>);
-                const stageLabel = this.formatStageStatus(status);
-                return `
-                    <div class="job-stage">
-                        <span>${stage.label}</span>
-                        <span class="job-stage-status status-${status}">${stageLabel}</span>
-                    </div>
-                `;
-            }).join('');
-
-            const progress = (job.result?.progress || {}) as Record<string, unknown>;
-            const scanCompleted = progress.scan_completed === true;
-            const syncQueueStatus = String(progress.sync_queue_status || 'pending');
-            const syncJobId = Number(progress.sync_job_id || 0);
-
-            const progressText = scanCompleted ? 'Library scan completed' : 'Scan in progress...';
-
-
-            return `
-                <div class="job-item">
-                    <div class="job-main">
-                        <div class="job-title">${this.escapeHtml(title)}</div>
-                        <div class="${actionsClass}">
-                            <div class="job-status ${statusClass}">${statusLabel}</div>
-                            ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                            ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                        </div>
-                    </div>
-                    <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
-                    <div class="job-stages">
-                        ${stageHtml}
-                    </div>
-                </div>
-            `;
+            const sections: string[] = [];
+            if (skippedExisting) {
+                sections.push('<div class="job-sync-progress">Used existing file (download skipped)</div>');
+            }
+            if (upgradedExisting) {
+                sections.push(`<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>`);
+            }
+            if (downloadMirror) {
+                const mirrorLabel = mirrorType === 'deezer_mirror' || mirrorType === 'deezer' ? 'Deezer' : mirrorType || '';
+                const badge = mirrorLabel ? `<span class="mirror-type-badge mirror-type-${this.escapeHtml(mirrorType || '')}">${this.escapeHtml(mirrorLabel)}</span> ` : '';
+                sections.push(`<div class="job-sync-progress">${badge}Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
+            }
+            if (effectiveStatus === 'failed' && job.error_message) {
+                sections.push(`<div class="job-error">${this.escapeHtml(job.error_message)}</div>`);
+            }
+            bodyHtml = sections.join('\n');
         }
 
-        const stageRows = [
-            { key: 'downloaded', label: 'Downloaded' },
-            { key: 'id3_tagged', label: 'ID3 Tag Created' },
-            { key: 'converted', label: 'Converted to MP3' },
-            { key: 'written', label: 'Written to Disk' },
-            ...(upgradedExisting ? [{ key: 'upgraded_existing', label: 'Upgraded Existing File' }] : []),
-            {
-                key: 'playlist_added',
-                label: playlistName ? `Added to Playlist "${this.escapeHtml(String(playlistName))}"` : 'Added to Playlist'
-            }
-        ];
-
-        const stageHtml = stageRows.map(stage => {
-            const status = this.resolveStageStatus(job, stage.key as keyof JobStageMap, stages);
-            const stageLabel = this.formatStageStatus(status);
-            let stageDisplayLabel = stage.label;
-            if (stage.key === 'converted' && status === 'skipped') {
-                stageDisplayLabel = 'Conversion not required';
-            }
-            if (stage.key === 'playlist_added' && status === 'skipped') {
-                stageDisplayLabel = 'Playlist add not requested';
-            }
-            return `
-                <div class="job-stage">
-                    <span>${stageDisplayLabel}</span>
-                    <span class="job-stage-status status-${status}">${stageLabel}</span>
-                </div>
-            `;
-        }).join('');
-
-        return `
-            <div class="job-item">
-                <div class="job-main">
-                    <div class="job-title">${this.escapeHtml(title)}</div>
-                    <div class="${actionsClass}">
-                        <div class="job-status ${statusClass}">${statusLabel}</div>
-                        ${showCancelButton ? `<button type="button" class="job-cancel-button" data-job-id="${job.id}">Cancel</button>` : ''}
-                        ${showRetryButton ? `<button type="button" class="job-retry-button" data-job-id="${job.id}">Retry</button>` : ''}
-                    </div>
-                </div>
-                ${skippedExisting ? '<div class="job-sync-progress">Used existing file (download skipped)</div>' : ''}
-                ${upgradedExisting ? `<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>` : ''}
-                <div class="job-stages">
-                    ${stageHtml}
-                </div>
-            </div>
-        `;
+        const stageHtml = this.renderStageHtml(stageDefs, job, stages);
+        return this.renderCardShell(title, job.id, actionsClass, statusLabel, statusClass,
+            showCancelButton, showRetryButton, bodyHtml, stageHtml);
     }
 
     private getJobDisplayTitle(job: JobItem): string {
@@ -1423,8 +5547,50 @@ class App {
             return 'Plex Library Sync';
         }
 
-        const artist = job.result?.artist;
-        const title = job.result?.title;
+        if (job.job_type === 'hifi_match') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'manual') {
+                return 'HiFi Match (Legacy, Manual)';
+            }
+            return 'HiFi Match (Legacy)';
+        }
+
+        if (job.job_type === 'automatic_matching') {
+            const trigger = String(job.payload?.trigger || '').trim();
+            if (trigger === 'manual') {
+                return 'Automatic Matching (Manual)';
+            }
+            return 'Automatic Matching';
+        }
+
+        if (job.job_type === 'plex_listen_history_sync') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'post_library_sync') {
+                return 'Listen History Sync (Auto)';
+            }
+            if (trigger === 'manual') {
+                return 'Listen History Sync (Manual)';
+            }
+            return 'Listen History Sync';
+        }
+
+        if (job.job_type === 'generate_recommendations') {
+            const username = job.payload?.plex_username || 'Unknown';
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled)`;
+            if (trigger === 'manual') return `Fresh Finds - ${username} (Manual)`;
+            return `Fresh Finds - ${username}`;
+        }
+
+        if (job.job_type === 'bulk_playlist_add') {
+            const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
+            if (trigger === 'post_library_sync') return 'Playlist Update (Auto)';
+            if (trigger === 'manual') return 'Playlist Update (Manual)';
+            return 'Playlist Update';
+        }
+
+        const artist = job.result?.artist || job.payload?.artist;
+        const title = job.result?.title || job.payload?.title;
 
         if (artist && title) {
             return `${artist} - ${title}`;
@@ -1442,24 +5608,17 @@ class App {
         if (status === 'in_progress') {
             return 'In-Progress';
         }
-        if (status === 'completed_with_errors') {
-            return 'Completed with errors';
-        }
         return status.charAt(0).toUpperCase() + status.slice(1);
     }
 
-    private resolveStageStatus(job: JobItem, key: keyof JobStageMap, stages: JobStageMap): string {
+    private resolveStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
         const value = stages[key];
         if (value) {
             return value;
         }
 
         if (job.status === 'succeeded') {
-            if (key === 'converted') {
-                const requestedFormat = String(job.result?.format || job.payload?.format || 'original').toLowerCase();
-                return requestedFormat === 'mp3' ? 'done' : 'skipped';
-            }
-            return key === 'playlist_added' ? 'skipped' : 'done';
+            return 'done';
         }
 
         if (job.status === 'cancelled') {
@@ -1477,40 +5636,6 @@ class App {
         return status.replace('_', ' ').replace(/\b\w/g, char => char.toUpperCase());
     }
 
-    private resolvePlexSyncStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
-        const value = stages[key];
-        if (value) {
-            return value;
-        }
-
-        if (job.status === 'succeeded') {
-            return 'done';
-        }
-
-        if (job.status === 'cancelled') {
-            return 'skipped';
-        }
-
-        return 'pending';
-    }
-
-    private resolvePlexLibraryUpdateStageStatus(job: JobItem, key: string, stages: Record<string, string>): string {
-        const value = stages[key];
-        if (value) {
-            return value;
-        }
-
-        if (job.status === 'succeeded') {
-            return 'done';
-        }
-
-        if (job.status === 'cancelled') {
-            return 'skipped';
-        }
-
-        return 'pending';
-    }
-
     private openSettingsFlyout(): void {
         this.settingsFlyout.classList.add('active');
         this.settingsOverlay.classList.add('active');
@@ -1523,16 +5648,62 @@ class App {
         document.body.style.overflow = '';
     }
 
+    private renderTagToggleGroups(): void {
+        for (const group of App.TAG_TOGGLE_CONFIG) {
+            const container = document.getElementById(group.containerId);
+            if (!container) continue;
+
+            const parts: string[] = [];
+            if ('hint' in group && group.hint) {
+                parts.push(`<p class="settings-hint" style="margin-top: 0; margin-bottom: 0.75rem;">${this.escapeHtml(group.hint)}</p>`);
+            }
+            for (const item of group.items) {
+                parts.push(
+                    `<div class="tag-toggle-row">` +
+                    `<span class="tag-toggle-label">${this.escapeHtml(item.label)}</span>` +
+                    `<label class="tag-switch">` +
+                    `<input type="checkbox" id="${item.id}">` +
+                    `<span class="tag-switch-slider"></span>` +
+                    `</label>` +
+                    `</div>`
+                );
+            }
+            container.innerHTML = parts.join('');
+        }
+    }
+
     private defaultDownloadSettings(): DownloadSettings {
         return {
-            format: 'original',
+            downloadSource: 'tidal',
+            quality: 'LOSSLESS',
             fileNamingAlbum: '{artist}/{album}/{track} - {title}.{ext}',
             jobsRefreshIntervalSeconds: 30,
-            ignoreMatches: false
+            ignoreMatches: false,
+            tagTitle: true,
+            tagArtist: true,
+            tagAlbumArtist: true,
+            tagAlbum: true,
+            tagYear: true,
+            tagTrackNumber: true,
+            tagTrackTotal: true,
+            tagDiscNumber: true,
+            tagDiscTotal: true,
+            tagVersion: true,
+            tagTidalTrackId: true,
+            tagTidalAlbumId: true,
+            tagIsrc: true,
+            tagCopyright: true,
+            tagCoverArt: true,
+            tagExplicit: true,
+            tagExplicitSuffix: true,
+            penaltyCompilation: true,
+            penaltyKaraoke: true,
+            penaltyLive: true,
+            deezerArl: '',
         };
     }
 
-    private normalizeSettings(raw: Partial<DownloadSettings>): DownloadSettings {
+    private normalizeSettings(raw: Partial<DownloadSettings> & { quality?: string }): DownloadSettings {
         const fallback = this.defaultDownloadSettings();
         const fileNaming = (raw as { file_naming?: string }).file_naming;
         const fileNamingAlbum = (raw as { file_naming_album?: string }).file_naming_album;
@@ -1543,8 +5714,19 @@ class App {
             ?? jobsRefreshIntervalSecondsRaw
         );
 
+        let quality: DownloadQuality = fallback.quality;
+        const rawQuality = String(raw.quality || '').trim().toUpperCase();
+        if (['LOSSLESS', 'HIGH', 'LOW'].includes(rawQuality)) {
+            quality = rawQuality as DownloadQuality;
+        }
+
         return {
-            format: raw.format === 'mp3' ? 'mp3' : 'original',
+            downloadSource: typeof (raw as DownloadSettings).downloadSource === 'string'
+                ? (raw as DownloadSettings).downloadSource
+                : typeof (raw as { download_source?: string }).download_source === 'string'
+                    ? (raw as { download_source?: string }).download_source!
+                    : fallback.downloadSource,
+            quality,
             fileNamingAlbum: typeof (raw as DownloadSettings).fileNamingAlbum === 'string'
                 ? (raw as DownloadSettings).fileNamingAlbum
                 : typeof fileNamingAlbum === 'string'
@@ -1557,8 +5739,37 @@ class App {
             jobsRefreshIntervalSeconds: jobsRefreshIntervalSeconds ?? fallback.jobsRefreshIntervalSeconds,
             ignoreMatches: typeof (raw as DownloadSettings).ignoreMatches === 'boolean'
                 ? (raw as DownloadSettings).ignoreMatches
-                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches)
-        };
+                : Boolean((raw as { ignore_matches?: boolean | string }).ignore_matches),
+            ...(() => {
+                const result: Record<string, boolean> = {};
+                const rawSettings = raw as unknown as Record<string, unknown>;
+                for (const id of App.TAG_CHECKBOX_IDS) {
+                    result[id] = typeof rawSettings[id] === 'boolean' ? rawSettings[id] as boolean : fallback[id as keyof DownloadSettings] as boolean;
+                }
+                return result;
+            })(),
+            deezerArl: typeof (raw as DownloadSettings).deezerArl === 'string'
+                ? (raw as DownloadSettings).deezerArl
+                : typeof (raw as { deezer_arl?: string }).deezer_arl === 'string'
+                    ? (raw as { deezer_arl?: string }).deezer_arl!
+                    : fallback.deezerArl,
+        } as DownloadSettings;
+    }
+
+    private async fetchAppConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/settings');
+            if (!response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            if (data.timezone) {
+                this.timezone = data.timezone;
+            }
+        } catch (error) {
+            console.warn('Failed to load app config.', error);
+        }
     }
 
     private async fetchDownloadSettingsFromServer(): Promise<void> {
@@ -1577,33 +5788,57 @@ class App {
     }
 
     private applySettingsToForm(settings: DownloadSettings): void {
-        this.formatOriginalInput.checked = settings.format === 'original';
-        this.formatMp3Input.checked = settings.format === 'mp3';
+        this.qualityLosslessInput.checked = settings.quality === 'LOSSLESS';
+        this.qualityHighInput.checked = settings.quality === 'HIGH';
+        this.qualityLowInput.checked = settings.quality === 'LOW';
+        this.applyDownloadSourceToForm(settings.downloadSource);
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
-        this.syncFormatToggleStyles();
+        for (const id of App.TAG_CHECKBOX_IDS) {
+            const s = settings as unknown as Record<string, boolean>;
+            if (this.tagCheckboxes[id] && s[id] !== undefined) {
+                this.tagCheckboxes[id].checked = s[id];
+            }
+        }
+        this.syncQualityToggleStyles();
     }
 
     private readSettingsFromForm(): DownloadSettings {
         const fallbackIntervalSeconds = this.downloadSettings?.jobsRefreshIntervalSeconds ?? this.defaultDownloadSettings().jobsRefreshIntervalSeconds;
         const parsedJobsRefreshIntervalSeconds = this.normalizeJobsRefreshIntervalSeconds(this.jobsRefreshIntervalSecondsInput.value);
 
+        let quality: DownloadQuality = 'LOSSLESS';
+        if (this.qualityHighInput.checked) {
+            quality = 'HIGH';
+        } else if (this.qualityLowInput.checked) {
+            quality = 'LOW';
+        }
+
         return {
-            format: this.formatMp3Input.checked ? 'mp3' : 'original',
+            downloadSource: this.readDownloadSourceFromForm(),
+            quality,
             fileNamingAlbum: this.fileNamingAlbumInput.value.trim(),
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
-            ignoreMatches: this.ignoreMatchesCheckbox.checked
-        };
+            ignoreMatches: this.ignoreMatchesCheckbox.checked,
+            deezerArl: this.deezerArlInput.value.trim() || '',
+            ...(() => {
+                const result: Record<string, boolean> = {};
+                for (const id of App.TAG_CHECKBOX_IDS) {
+                    result[id] = this.tagCheckboxes[id]?.checked ?? false;
+                }
+                return result;
+            })(),
+        } as DownloadSettings;
     }
 
     private updateSettingsFromForm(): void {
         this.downloadSettings = this.readSettingsFromForm();
         this.jobsRefreshIntervalSecondsInput.value = String(this.downloadSettings.jobsRefreshIntervalSeconds);
         this.queueSettingsSave();
-        this.syncFormatToggleStyles();
+        this.syncQualityToggleStyles();
 
-        if (this.jobsFlyout.classList.contains('active')) {
+        if (this.jobsFlyout?.classList.contains('active')) {
             this.startJobsPollingInterval();
         }
     }
@@ -1638,7 +5873,6 @@ class App {
         const fallback: JobFilterTotals = {
             incomplete: this.filterJobsByStatus(fallbackJobs, 'incomplete').length,
             complete: this.filterJobsByStatus(fallbackJobs, 'complete').length,
-            completed_with_errors: this.filterJobsByStatus(fallbackJobs, 'completed_with_errors').length,
             failed: this.filterJobsByStatus(fallbackJobs, 'failed').length
         };
 
@@ -1657,7 +5891,6 @@ class App {
         return {
             incomplete: parseCount(raw.incomplete, fallback.incomplete),
             complete: parseCount(raw.complete, fallback.complete),
-            completed_with_errors: parseCount(raw.completed_with_errors, fallback.completed_with_errors),
             failed: parseCount(raw.failed, fallback.failed)
         };
     }
@@ -1665,7 +5898,6 @@ class App {
     private updateJobsFilterCounts(totals: JobFilterTotals): void {
         const incompleteCount = totals.incomplete;
         const completeCount = totals.complete;
-        const completedWithErrorsCount = totals.completed_with_errors;
         const failedCount = totals.failed;
 
         const incompleteOption = this.jobsFilterSelect.querySelector('option[value="incomplete"]');
@@ -1676,11 +5908,6 @@ class App {
         const completeOption = this.jobsFilterSelect.querySelector('option[value="complete"]');
         if (completeOption) {
             completeOption.textContent = `Complete (${completeCount})`;
-        }
-
-        const completedWithErrorsOption = this.jobsFilterSelect.querySelector('option[value="completed_with_errors"]');
-        if (completedWithErrorsOption) {
-            completedWithErrorsOption.textContent = `Completed with errors (${completedWithErrorsCount})`;
         }
 
         const failedOption = this.jobsFilterSelect.querySelector('option[value="failed"]');
@@ -1694,92 +5921,519 @@ class App {
         return match ? decodeURIComponent(match[1]) : null;
     }
 
-    private queueSettingsSave(): void {
-        if (this.settingsSaveTimer) {
-            window.clearTimeout(this.settingsSaveTimer);
+    private debounce(key: string, fn: () => void): void {
+        const existing = this.debounceTimers.get(key);
+        if (existing !== undefined) {
+            window.clearTimeout(existing);
         }
-
-        this.settingsSaveTimer = window.setTimeout(() => {
-            void this.saveSettingsToServer(this.downloadSettings);
-        }, this.settingsSaveDelayMs);
+        const timer = window.setTimeout(() => {
+            this.debounceTimers.delete(key);
+            fn();
+        }, this.debounceDelayMs);
+        this.debounceTimers.set(key, timer);
     }
 
-    private async saveSettingsToServer(settings: DownloadSettings): Promise<void> {
+    private queueSettingsSave(): void {
+        this.debounce('settings', () => {
+            void this.saveSettingsToServer(this.downloadSettings);
+        });
+    }
+
+    private async saveSettingsToServer(settings: DownloadSettings, silent: boolean = false): Promise<void> {
         try {
-            await fetch('/api/settings', {
+            const response = await fetch('/api/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify(settings)
             });
+            if (response.ok) {
+                if (!silent) this.showToast('✓ Saved');
+            } else {
+                this.showToast('✗ Failed to save', true);
+            }
         } catch (error) {
             console.warn('Failed to save download settings.', error);
+            this.showToast('✗ Failed to save', true);
         }
     }
 
-    private syncFormatToggleStyles(): void {
-        const originalLabel = this.formatOriginalInput.closest('label');
-        const mp3Label = this.formatMp3Input.closest('label');
+    private async saveAllSettings(): Promise<void> {
+        await this.saveSettingsToServer(this.readSettingsFromForm(), true);
+        await this.savePlexSyncInterval(true);
+        this.showToast('✓ All changes saved');
+    }
 
-        if (originalLabel) {
-            originalLabel.classList.toggle('active', this.formatOriginalInput.checked);
+    private syncQualityToggleStyles(): void {
+        const losslessLabel = this.qualityLosslessInput.closest('label');
+        const highLabel = this.qualityHighInput.closest('label');
+        const lowLabel = this.qualityLowInput.closest('label');
+
+        const isQobuz = this.isDownloadSourceChecked('qobuz');
+        const isDeezer = this.isDownloadSourceChecked('deezer') || this.isDownloadSourceChecked('deezer_mirror');
+
+        if (losslessLabel) {
+            losslessLabel.classList.toggle('active', this.qualityLosslessInput.checked);
+        }
+        if (highLabel) {
+            const highInput = this.qualityHighInput;
+            if (isDeezer) {
+                highInput.disabled = true;
+                highInput.title = 'Deezer does not support HIGH quality';
+                highLabel.title = 'Deezer does not support HIGH quality';
+                highLabel.classList.add('disabled');
+                if (highInput.checked) {
+                    this.qualityLosslessInput.checked = true;
+                    highInput.checked = false;
+                    if (losslessLabel) losslessLabel.classList.add('active');
+                    highLabel.classList.remove('active');
+                }
+            } else {
+                highInput.disabled = false;
+                highInput.title = '';
+                highLabel.title = '';
+                highLabel.classList.remove('disabled');
+            }
+            highLabel.classList.toggle('active', this.qualityHighInput.checked);
+        }
+        if (lowLabel) {
+            const lowInput = this.qualityLowInput;
+            if (isQobuz || isDeezer) {
+                let msg: string;
+                if (isQobuz && isDeezer) {
+                    msg = 'Qobuz and Deezer do not support LOW quality';
+                } else if (isQobuz) {
+                    msg = 'Qobuz does not support LOW quality';
+                } else {
+                    msg = 'Deezer does not support LOW quality';
+                }
+                lowInput.disabled = true;
+                lowInput.title = msg;
+                lowLabel.title = msg;
+                lowLabel.classList.add('disabled');
+                if (lowInput.checked) {
+                    this.qualityLosslessInput.checked = true;
+                    lowInput.checked = false;
+                    if (losslessLabel) losslessLabel.classList.add('active');
+                    lowLabel.classList.remove('active');
+                }
+            } else {
+                lowInput.disabled = false;
+                lowInput.title = '';
+                lowLabel.title = '';
+                lowLabel.classList.remove('disabled');
+            }
+            lowLabel.classList.toggle('active', this.qualityLowInput.checked);
         }
 
-        if (mp3Label) {
-            mp3Label.classList.toggle('active', this.formatMp3Input.checked);
+        this.syncDownloadSourceItemStyles();
+    }
+
+    // --- Download source helpers ---
+
+    private isDownloadSourceChecked(source: string): boolean {
+        if (!this.downloadSourceList) return false;
+        const cb = this.downloadSourceList.querySelector(`input[type="checkbox"][value="${source}"]`) as HTMLInputElement | null;
+        return cb?.checked ?? false;
+    }
+
+    private applyDownloadSourceToForm(value: string): void {
+        if (!this.downloadSourceList) return;
+        const sources = value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+        const items = Array.from(this.downloadSourceList.querySelectorAll('.download-source-item')) as HTMLElement[];
+
+        // Check the right boxes
+        items.forEach(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            if (cb) {
+                cb.checked = sources.includes(cb.value.toLowerCase());
+            }
+        });
+
+        // Reorder DOM to match priority: checked items first in order, then unchecked
+        const checkedItems = items.filter(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            return cb?.checked;
+        });
+        const uncheckedItems = items.filter(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+            return !cb?.checked;
+        });
+
+        // Sort checked items by their priority order in the sources string
+        checkedItems.sort((a, b) => {
+            const va = (a.querySelector('input[type="checkbox"]') as HTMLInputElement)?.value.toLowerCase() || '';
+            const vb = (b.querySelector('input[type="checkbox"]') as HTMLInputElement)?.value.toLowerCase() || '';
+            return sources.indexOf(va) - sources.indexOf(vb);
+        });
+
+        // Re-append in order
+        items.forEach(item => item.remove());
+        checkedItems.forEach(item => this.downloadSourceList!.appendChild(item));
+        uncheckedItems.forEach(item => this.downloadSourceList!.appendChild(item));
+
+        this.syncDownloadSourceItemStyles();
+    }
+
+    private readDownloadSourceFromForm(): string {
+        if (!this.downloadSourceList) return 'tidal';
+        const items = Array.from(this.downloadSourceList.querySelectorAll('.download-source-item'));
+        const checked = items
+            .map(item => item.querySelector('input[type="checkbox"]') as HTMLInputElement | null)
+            .filter((cb): cb is HTMLInputElement => cb !== null && cb.checked)
+            .map(cb => cb.value.toLowerCase());
+        return checked.length > 0 ? checked.join(',') : 'tidal';
+    }
+
+    private syncDownloadSourceItemStyles(): void {
+        if (!this.downloadSourceList) return;
+        const items = this.downloadSourceList.querySelectorAll('.download-source-item');
+        items.forEach(item => {
+            const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+            if (cb) {
+                item.classList.toggle('active', cb.checked);
+            }
+        });
+    }
+
+    private syncSourceAvailability(source: string, enabled: boolean, tooltip?: string): void {
+        if (!this.downloadSourceList) return;
+        const item = this.downloadSourceList.querySelector(`.download-source-item input[value="${source}"]`)?.closest('.download-source-item');
+        if (!item) return;
+        const cb = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        const label = item as HTMLElement;
+
+        cb.disabled = !enabled;
+        cb.title = tooltip || '';
+        label.title = tooltip || '';
+        label.classList.toggle('disabled', !enabled);
+
+        if (!enabled && cb.checked) {
+            cb.checked = false;
+            this.updateSettingsFromForm();
         }
     }
 
     private async loadListenbrainzConfig(): Promise<void> {
         try {
-            const response = await fetch('/api/listenbrainz/config');
+            const userId = this.getSelectedPlexUserId();
+            const response = await fetch(`/api/listenbrainz/config${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
             if (response.ok) {
                 const data = await response.json();
                 this.lbConfigStatusEl.textContent = data.has_token ? '✓ Token configured' : '';
                 this.lbConfigStatusEl.style.color = data.has_token ? 'var(--accent-primary)' : '';
+                if (data.username) {
+                    this.listenbrainzUsernameInput.value = data.username;
+                } else {
+                    this.listenbrainzUsernameInput.value = '';
+                }
             }
         } catch (error) {
             console.warn('Failed to load ListenBrainz config.', error);
         }
     }
 
+    private showStatusMessage(
+        statusEl: HTMLElement | null,
+        message: string,
+        isError: boolean = false,
+        durationMs: number = 3000
+    ): void {
+        if (!statusEl) return;
+        statusEl.textContent = message;
+        statusEl.style.color = isError ? 'var(--text-secondary)' : 'var(--accent-primary)';
+        if (!isError && durationMs > 0) {
+            setTimeout(() => { if (statusEl.textContent === message) statusEl.textContent = ''; }, durationMs);
+        }
+    }
+
+    private toastTimer: number | null = null;
+    private showToast(message: string, isError: boolean = false): void {
+        if (!this.globalToastEl) return;
+        if (this.toastTimer !== null) {
+            window.clearTimeout(this.toastTimer);
+        }
+        this.globalToastEl.textContent = message;
+        this.globalToastEl.style.display = 'block';
+        this.globalToastEl.classList.toggle('error', isError);
+        // Force reflow so transition runs
+        void this.globalToastEl.offsetWidth;
+        this.globalToastEl.classList.add('visible');
+        this.toastTimer = window.setTimeout(() => {
+            this.globalToastEl.classList.remove('visible');
+            this.toastTimer = window.setTimeout(() => {
+                this.globalToastEl.style.display = 'none';
+            }, 250);
+        }, 2000);
+    }
+
     private async saveListenbrainzConfig(): Promise<void> {
         const userToken = this.listenbrainzTokenInput.value.trim();
+        const username = this.listenbrainzUsernameInput.value.trim();
 
         if (!userToken) {
-            this.lbConfigStatusEl.textContent = '⚠ User token is required';
-            this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+            this.showStatusMessage(this.lbConfigStatusEl, '⚠ User token is required', true, 0);
             return;
         }
 
         try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.showStatusMessage(this.lbConfigStatusEl, '⚠ Select a Plex user before saving ListenBrainz settings', true, 0);
+                return;
+            }
+
             const response = await fetch('/api/listenbrainz/config', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    user_token: userToken
+                    user_token: userToken,
+                    username: username,
+                    user_id: userId
                 })
             });
 
             if (response.ok) {
-                this.lbConfigStatusEl.textContent = '✓ Configuration saved';
-                this.lbConfigStatusEl.style.color = 'var(--accent-primary)';
-                this.listenbrainzTokenInput.value = '';
-                // Clear status message after 3 seconds
-                setTimeout(() => {
-                    this.lbConfigStatusEl.textContent = '';
-                }, 3000);
+                this.showStatusMessage(this.lbConfigStatusEl, '✓ Configuration saved');
+                void this.updateSidebarPlaylists();
             } else {
-                this.lbConfigStatusEl.textContent = '✗ Failed to save configuration';
-                this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+                this.showStatusMessage(this.lbConfigStatusEl, '✗ Failed to save configuration', true, 0);
             }
         } catch (error) {
             console.error('Error saving ListenBrainz config:', error);
-            this.lbConfigStatusEl.textContent = '✗ Error saving configuration';
-            this.lbConfigStatusEl.style.color = 'var(--text-secondary)';
+            this.showStatusMessage(this.lbConfigStatusEl, '✗ Error saving configuration', true, 0);
+        }
+    }
+
+    private async loadFreshFindsConfig(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.autoDownloadFreshFindsCheckbox.checked = false;
+                if (this.freshFindsRetentionInput) this.freshFindsRetentionInput.value = '7';
+                if (this.freshFindsNewPctSlider) this.freshFindsNewPctSlider.value = '50';
+                if (this.freshFindsNewPctValueEl) this.freshFindsNewPctValueEl.textContent = '50%';
+                if (this.freshFindsTrackCountInput) this.freshFindsTrackCountInput.value = '25';
+                if (this.freshFindsHistoryDaysInput) this.freshFindsHistoryDaysInput.value = '30';
+                return;
+            }
+            const response = await fetch(`/api/fresh-finds/config?user_id=${encodeURIComponent(userId)}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.autoDownloadFreshFindsCheckbox.checked = data.auto_download ?? false;
+                if (this.freshFindsRetentionInput && data.retention) {
+                    this.freshFindsRetentionInput.value = String(data.retention);
+                    this.freshFindsRetentionInput.dispatchEvent(new Event('change'));
+                }
+                if (this.freshFindsNewPctSlider && data.new_track_pct !== undefined) {
+                    this.freshFindsNewPctSlider.value = String(data.new_track_pct);
+                }
+                if (this.freshFindsNewPctValueEl && data.new_track_pct !== undefined) {
+                    this.freshFindsNewPctValueEl.textContent = data.new_track_pct + '%';
+                }
+                if (this.freshFindsTrackCountInput && data.track_count) {
+                    this.freshFindsTrackCountInput.value = String(data.track_count);
+                    this.freshFindsTrackCountInput.dispatchEvent(new Event('change'));
+                }
+                if (this.freshFindsHistoryDaysInput && data.history_days) {
+                    this.freshFindsHistoryDaysInput.value = String(data.history_days);
+                    this.freshFindsHistoryDaysInput.dispatchEvent(new Event('change'));
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Fresh Finds config.', error);
+        }
+    }
+
+    private pendingFreshFindsSave: { field: string, value: any } | null = null;
+    private queueFreshFindsSave(field: string, value: any): void {
+        this.pendingFreshFindsSave = { field, value };
+        this.debounce('fresh-finds', () => {
+            const pending = this.pendingFreshFindsSave;
+            this.pendingFreshFindsSave = null;
+            if (pending) {
+                void this.saveFreshFindsConfig(pending.field, pending.value);
+            }
+        });
+    }
+
+    private async saveFreshFindsConfig(field: string, value: any): Promise<void> {
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            this.showToast('Select a Plex user first', true);
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/fresh-finds/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, [field]: value })
+            });
+
+            if (response.ok) {
+                this.showToast('✓ Saved');
+            } else {
+                this.showToast('✗ Failed to save', true);
+            }
+        } catch (error) {
+            console.error(`Error saving Fresh Finds ${field}:`, error);
+            this.showToast('✗ Failed to save', true);
+        }
+    }
+
+    private async loadYtmConfig(): Promise<void> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const response = await fetch(`/api/youtube_music/config${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.ytmConfigStatusEl.textContent = data.has_headers ? '✓ Cookie configured' : '';
+                this.ytmConfigStatusEl.style.color = data.has_headers ? 'var(--accent-primary)' : '';
+            }
+        } catch (error) {
+            console.warn('Failed to load YouTube Music config.', error);
+        }
+    }
+
+    private async saveYtmConfig(): Promise<void> {
+        const cookie = this.ytmCookieInput.value.trim();
+
+        if (!cookie) {
+            this.showStatusMessage(this.ytmConfigStatusEl, '⚠ Cookie is required', true, 0);
+            return;
+        }
+
+        try {
+            const userId = this.getSelectedPlexUserId();
+            if (!userId) {
+                this.showStatusMessage(this.ytmConfigStatusEl, '⚠ Select a Plex user before saving YouTube Music settings', true, 0);
+                return;
+            }
+
+            const response = await fetch('/api/youtube_music/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cookie, user_id: userId })
+            });
+
+            if (response.ok) {
+                this.showStatusMessage(this.ytmConfigStatusEl, '✓ Configuration saved');
+                void this.updateSidebarPlaylists();
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                this.showStatusMessage(this.ytmConfigStatusEl, `✗ ${errorData.error || 'Failed to save'}`, true, 0);
+            }
+        } catch (error) {
+            console.error('Error saving YouTube Music config:', error);
+            this.showStatusMessage(this.ytmConfigStatusEl, '✗ Error saving configuration', true, 0);
+        }
+    }
+
+    private async loadDeezerConfig(): Promise<void> {
+        try {
+            const response = await fetch('/api/deezer/status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.has_arl) {
+                    // ARL exists — validate to get offer name
+                    const arl = this.downloadSettings?.deezerArl || '';
+                    if (arl) {
+                        const resp = await fetch('/api/deezer/validate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ arl })
+                        });
+                        if (resp.ok) {
+                            const v = await resp.json();
+                            if (v.valid && v.lossless) {
+                                this.deezerConfigStatusEl.textContent = `✓ Connected — ${v.offer_name || 'Premium'} (FLAC)`;
+                                this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                                this.syncSourceAvailability('deezer', true, `Deezer — ${v.offer_name}`);
+                            } else if (v.valid) {
+                                this.deezerConfigStatusEl.textContent = `⚠ ARL valid but not Premium (${v.offer_name || 'Unknown'})`;
+                                this.deezerConfigStatusEl.style.color = 'var(--warning-color, #f59e0b)';
+                                this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                            } else {
+                                this.deezerConfigStatusEl.textContent = '✗ ARL invalid or expired';
+                                this.deezerConfigStatusEl.style.color = '';
+                                this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                            }
+                        } else {
+                            this.deezerConfigStatusEl.textContent = '✓ ARL configured';
+                            this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                        }
+                    } else {
+                        this.deezerConfigStatusEl.textContent = '✓ ARL configured';
+                        this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                    }
+                } else {
+                    this.deezerConfigStatusEl.textContent = '';
+                    this.deezerConfigStatusEl.style.color = '';
+                    this.syncSourceAvailability('deezer', false, 'Deezer ARL not configured or not Premium');
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load Deezer config.', error);
+        }
+    }
+
+    private async saveDeezerConfig(): Promise<void> {
+        const value = this.deezerArlInput.value.trim();
+
+        if (!value) {
+            this.showStatusMessage(this.deezerConfigStatusEl, '⚠ ARL cookie is required', true, 0);
+            return;
+        }
+
+        // Step 1: Validate ARL
+        this.showStatusMessage(this.deezerConfigStatusEl, 'Validating ARL...');
+        try {
+            const validateResp = await fetch('/api/deezer/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ arl: value })
+            });
+
+            if (!validateResp.ok) {
+                const errData = await validateResp.json().catch(() => ({}));
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errData.error || 'Validation failed'}`, true, 0);
+                return;
+            }
+
+            const validateData = await validateResp.json();
+            if (!validateData.valid) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ Invalid ARL: ${validateData.error || 'Could not authenticate'}`, true, 0);
+                return;
+            }
+
+            if (!validateData.lossless) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ARL valid but not Premium (no FLAC). Detected: ${validateData.offer_name || 'Unknown'}`, true, 0);
+                return;
+            }
+
+            // Step 2: Save
+            const saveResp = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deezerArl: value })
+            });
+
+            if (saveResp.ok) {
+                this.showStatusMessage(this.deezerConfigStatusEl, `✓ Connected — ${validateData.offer_name || 'Premium'} (FLAC)`);
+                this.deezerConfigStatusEl.style.color = 'var(--accent-primary)';
+                this.syncSourceAvailability('deezer', true, `Deezer — ${validateData.offer_name}`);
+                void this.loadDeezerConfig();
+            } else {
+                const errorData = await saveResp.json().catch(() => ({}));
+                this.showStatusMessage(this.deezerConfigStatusEl, `✗ ${errorData.error || 'Failed to save'}`, true, 0);
+            }
+        } catch (error) {
+            console.error('Error saving Deezer config:', error);
+            this.showStatusMessage(this.deezerConfigStatusEl, '✗ Error validating configuration', true, 0);
         }
     }
 
@@ -1788,31 +6442,44 @@ class App {
             const response = await fetch('/api/plex/config');
             if (response.ok) {
                 const data = await response.json();
-                // Populate library dropdown with saved library
-                this.plexLibraryNameSelect.innerHTML = '';
-                const defaultOption = document.createElement('option');
-                defaultOption.value = '';
-                defaultOption.textContent = 'Select a library...';
-                this.plexLibraryNameSelect.appendChild(defaultOption);
-                if (data.library_name) {
-                    const option = document.createElement('option');
-                    option.value = data.library_name;
-                    option.textContent = data.library_name;
-                    this.plexLibraryNameSelect.appendChild(option);
-                    this.plexLibraryNameSelect.value = data.library_name;
+                // Populate the login-only library dropdown with saved library
+                if (this.plexLoginOnlyLibraryNameSelect) {
+                    this.plexLoginOnlyLibraryNameSelect.innerHTML = '';
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = '';
+                    defaultOption.textContent = 'Select a library...';
+                    this.plexLoginOnlyLibraryNameSelect.appendChild(defaultOption);
+                    if (data.library_name) {
+                        const option = document.createElement('option');
+                        option.value = data.library_name;
+                        option.textContent = data.library_name;
+                        this.plexLoginOnlyLibraryNameSelect.appendChild(option);
+                        this.plexLoginOnlyLibraryNameSelect.value = data.library_name;
+                    }
                 }
                 const intervalHours = Number(data.sync_interval_hours);
                 this.plexSyncIntervalHoursInput.value = Number.isFinite(intervalHours) && intervalHours > 0
                     ? String(intervalHours)
                     : '24';
                 this.isPlexConfigured = data.has_config ? true : false;
-                this.updatePlexConfigStatus(data.has_config ? '✓ Configured' : '');
 
-                // Show library selector only when Plex is configured (server+token exist) and a library hasn't been saved yet.
-                const shouldShowLibraryConfig = Boolean(data.has_config) && !Boolean(data.library_name);
-                if (this.plexLibraryConfigContainer) {
-                    this.plexLibraryConfigContainer.style.display = shouldShowLibraryConfig ? '' : 'none';
+                const configuredLibraryName = String(data.library_name || '').trim();
+                const savedUserId = window.localStorage.getItem('plexSelectedUserId') || '';
+                const libraryConfigured = Boolean(configuredLibraryName);
+                const shouldShowPlexLoginOnly = !data.has_config || !libraryConfigured || !savedUserId;
+
+                if (this.plexLoginOnlyContainer) {
+                    this.plexLoginOnlyContainer.style.display = shouldShowPlexLoginOnly ? 'flex' : 'none';
                 }
+                if (this.appWrapper) {
+                    this.appWrapper.style.display = shouldShowPlexLoginOnly ? 'none' : '';
+                }
+
+                if (this.plexLoginOnlyLibraryNameSelect) {
+                    this.plexLoginOnlyLibraryNameSelect.value = configuredLibraryName;
+                }
+
+                this.updatePlexLoginOnlyState();
 
                 this.updatePlexPlaylistContainerVisibility(false);
                 if (this.isPlexConfigured) {
@@ -1826,6 +6493,45 @@ class App {
         }
     }
 
+    private async updatePlexLoginOnlyState(): Promise<void> {
+        if (!this.plexLoginOnlyContainer || !this.appWrapper) {
+            return;
+        }
+
+        const savedUserId = window.localStorage.getItem('plexSelectedUserId') || '';
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
+        const libraryConfigured = Boolean(libraryName);
+        const needsLogin = !this.isPlexConfigured;
+        const needsLibrary = this.isPlexConfigured && !libraryConfigured;
+        const needsUser = this.isPlexConfigured && libraryConfigured && !savedUserId;
+        const shouldShowOverlay = needsLogin || needsLibrary || needsUser;
+
+        this.plexLoginOnlyContainer.style.display = shouldShowOverlay ? 'flex' : 'none';
+        this.appWrapper.style.display = shouldShowOverlay ? 'none' : '';
+
+        if (this.plexLoginOnlyButton) {
+            this.plexLoginOnlyButton.style.display = needsLogin ? '' : 'none';
+            this.plexLoginOnlyButton.disabled = needsLogin ? false : true;
+        }
+
+        if (this.plexLoginOnlyLibraryContainer) {
+            this.plexLoginOnlyLibraryContainer.style.display = needsLibrary ? 'flex' : 'none';
+        }
+
+        if (this.plexLoginOnlyUserContainer) {
+            this.plexLoginOnlyUserContainer.style.display = needsUser ? 'flex' : 'none';
+        }
+
+
+        if (needsLibrary && this.plexLoginOnlyLibraryNameSelect) {
+            await this.loadPlexLibraries();
+        }
+
+        if (needsUser) {
+            await this.loadPlexUsers(false, true);
+        }
+    }
+
     private async loadPlexLibraries(): Promise<void> {
         try {
             const response = await fetch('/api/plex/libraries');
@@ -1834,23 +6540,30 @@ class App {
             }
             const data = await response.json();
             const libraries = Array.isArray(data.libraries) ? data.libraries : [];
-            const current = this.plexLibraryNameSelect.value || '';
+            const current = this.plexLoginOnlyLibraryNameSelect?.value || '';
 
-            this.plexLibraryNameSelect.innerHTML = '';
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'Select a library...';
-            this.plexLibraryNameSelect.appendChild(defaultOption);
+            if (this.plexLoginOnlyLibraryNameSelect) {
+                this.plexLoginOnlyLibraryNameSelect.innerHTML = '';
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select a library...';
+                this.plexLoginOnlyLibraryNameSelect.appendChild(defaultOption);
+            }
 
             libraries.forEach((library: string) => {
                 const option = document.createElement('option');
                 option.value = library;
                 option.textContent = library;
-                this.plexLibraryNameSelect.appendChild(option);
+                if (this.plexLoginOnlyLibraryNameSelect) {
+                    const cloneOption = document.createElement('option');
+                    cloneOption.value = library;
+                    cloneOption.textContent = library;
+                    this.plexLoginOnlyLibraryNameSelect.appendChild(cloneOption);
+                }
             });
 
-            if (current) {
-                this.plexLibraryNameSelect.value = current;
+            if (current && this.plexLoginOnlyLibraryNameSelect) {
+                this.plexLoginOnlyLibraryNameSelect.value = current;
             }
         } catch (error) {
             console.warn('Failed to load Plex libraries.', error);
@@ -1858,7 +6571,7 @@ class App {
     }
 
     private async savePlexConfig(): Promise<void> {
-        const libraryName = this.plexLibraryNameSelect.value.trim();
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
         if (!libraryName) {
             window.alert('Please select a library before saving.');
             return;
@@ -1886,16 +6599,13 @@ class App {
             void this.updatePlexClearCredentialsButton();
 
             // Show saved state and hide config controls
-            const library = this.plexLibraryNameSelect.value.trim();
+            const library = this.plexLoginOnlyLibraryNameSelect?.value.trim() || '';
             if (this.plexConnectedStatusEl) {
                 const serverLabel = this.plexConnectedStatusEl.textContent?.replace(/^Connected to\s*/, '') || '';
                 const serverName = serverLabel || '';
                 const libraryText = library ? ` (library: ${library})` : '';
                 this.plexConnectedStatusEl.textContent = `Connected to ${serverName}${libraryText}`.trim();
                 this.plexConnectedStatusEl.style.display = 'block';
-            }
-            if (this.plexLibraryConfigContainer) {
-                this.plexLibraryConfigContainer.style.display = 'none';
             }
 
             window.alert('Plex configuration saved.');
@@ -1905,40 +6615,130 @@ class App {
         }
     }
 
+    private queuePlexSyncSave(): void {
+        this.debounce('plex-sync', () => {
+            void this.savePlexSyncInterval();
+        });
+    }
+
+    private async savePlexSyncInterval(silent: boolean = false): Promise<void> {
+        if (!this.plexSyncIntervalHoursInput) return;
+        const hours = parseInt(this.plexSyncIntervalHoursInput.value, 10);
+        if (!Number.isFinite(hours) || hours < 1) {
+            this.showToast('✗ Invalid sync interval', true);
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/plex/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sync_interval_hours: hours })
+            });
+
+            if (response.ok) {
+                if (!silent) this.showToast('✓ Saved');
+            } else {
+                const data = await response.json().catch(() => ({}));
+                this.showToast(`✗ ${data.error || 'Failed to save'}`, true);
+            }
+        } catch (error) {
+            console.error('Failed to save Plex sync interval:', error);
+            this.showToast('✗ Failed to save', true);
+        }
+    }
 
 
+
+
+    private async savePlexConfigFromLoginOnly(): Promise<void> {
+        const libraryName = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
+        if (!libraryName) {
+            window.alert('Please select a library before saving.');
+            return;
+        }
+
+        try {
+            const payload = {
+                library_name: libraryName
+            };
+
+            const response = await fetch('/api/plex/config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || 'Failed to save Plex configuration');
+            }
+
+            await this.loadPlexConfig();
+            void this.updatePlexClearCredentialsButton();
+            await this.updatePlexLoginOnlyState();
+
+            window.alert('Plex configuration saved.');
+        } catch (error) {
+            console.error('Failed to save Plex config (overlay):', error);
+            window.alert((error as Error).message || 'Failed to save Plex configuration');
+        }
+    }
 
     // --- PIN OAuth logic ---
     private async startPlexPinLogin(): Promise<void> {
         console.debug('[PLEX_UI] startPlexPinLogin called');
+        if (this.plexLoginOnlyContainer) {
+            this.plexLoginOnlyContainer.style.display = 'flex';
+        }
+        if (this.appWrapper) {
+            this.appWrapper.style.display = 'none';
+        }
+
         // Prepare UI for PIN-based login flow
         if (this.plexLoginButton) {
             this.plexLoginButton.disabled = true;
             this.plexLoginButton.style.display = 'none';
         }
-        if (this.plexLibraryConfigContainer) {
-            this.plexLibraryConfigContainer.style.display = 'none';
+        if (this.plexLoginOnlyLibraryContainer) {
+            this.plexLoginOnlyLibraryContainer.style.display = 'none';
         }
         if (this.plexConnectedStatusEl) {
             this.plexConnectedStatusEl.style.display = 'none';
         }
 
-        this.plexPinStatus.textContent = '';
-        this.plexPinDisplay.textContent = '';
-        this.plexPinContainer.style.display = 'block';
-        this.plexPinStatus.textContent = 'Requesting PIN...';
+        if (this.plexLoginOnlyPinContainer) {
+            this.plexLoginOnlyPinContainer.style.display = 'block';
+        }
+        if (this.plexLoginOnlyPinStatus) {
+            this.plexLoginOnlyPinStatus.textContent = 'Requesting PIN...';
+        }
+        if (this.plexLoginOnlyPinDisplay) {
+            this.plexLoginOnlyPinDisplay.textContent = '';
+        }
         try {
             const resp = await fetch('/api/plex/pin/start', { method: 'POST' });
             console.debug('[PLEX_UI] /api/plex/pin/start response', resp.status);
             const data = await resp.json();
             console.debug('[PLEX_UI] /api/plex/pin/start data', data);
             if (!data.ok) throw new Error(data.error || 'Failed to start PIN login');
-            this.plexPinDisplay.textContent = data.pin;
-            this.plexPinStatus.textContent = '';
+            if (this.plexLoginOnlyPinDisplay) {
+                this.plexLoginOnlyPinDisplay.textContent = data.pin;
+            }
+            if (this.plexLoginOnlyPinStatus) {
+                this.plexLoginOnlyPinStatus.textContent = '';
+            }
             await this.pollPlexPinStatus(data.client_id, data.pin, 300);
         } catch (e) {
             console.debug('[PLEX_UI] startPlexPinLogin error', e);
-            this.plexPinStatus.textContent = 'Failed to start PIN login.';
+            if (this.plexLoginOnlyPinStatus) {
+                this.plexLoginOnlyPinStatus.textContent = 'Failed to start PIN login.';
+            }
+            if (this.plexLoginOnlyButton) {
+                this.plexLoginOnlyButton.style.display = '';
+            }
             // Restore login button so user can retry
             if (this.plexLoginButton) {
                 this.plexLoginButton.disabled = false;
@@ -1964,19 +6764,31 @@ class App {
                 const data = await resp.json();
                 console.debug('[PLEX_UI] /api/plex/pin/status data', data);
                 if (data.ok && data.token && data.baseurl) {
-                    this.plexPinStatus.textContent = '✓ Plex login successful!';
-                    this.plexPinDisplay.textContent = '';
-                    this.plexPinContainer.style.display = 'none';
+                    if (this.plexLoginOnlyPinStatus) {
+                        this.plexLoginOnlyPinStatus.textContent = '✓ Plex login successful!';
+                    }
+                    if (this.plexLoginOnlyPinDisplay) {
+                        this.plexLoginOnlyPinDisplay.textContent = '';
+                    }
+                    if (this.plexLoginOnlyPinContainer) {
+                        this.plexLoginOnlyPinContainer.style.display = 'none';
+                    }
                     this.isPlexConfigured = true;
-                    this.updatePlexConfigStatus('✓ Configured');
                     await this.loadPlexConfig();
+                    await this.loadPlexLibraries();
+                    await this.loadPlexUsers(false, true);
+                    await this.updatePlexLoginOnlyState();
 
                     // Refresh cached health status so the UI can update properly
                     await fetch('/api/plex/healthcheck', { cache: 'no-store' }).catch(() => null);
                     return;
                 } else if (data.expired) {
-                    this.plexPinStatus.textContent = 'PIN expired. Please try again.';
-                    this.plexPinDisplay.textContent = '';
+                    if (this.plexLoginOnlyPinStatus) {
+                        this.plexLoginOnlyPinStatus.textContent = 'PIN expired. Please try again.';
+                    }
+                    if (this.plexLoginOnlyPinDisplay) {
+                        this.plexLoginOnlyPinDisplay.textContent = '';
+                    }
                     if (this.plexLoginButton) {
                         this.plexLoginButton.disabled = false;
                         this.plexLoginButton.style.display = '';
@@ -1985,7 +6797,15 @@ class App {
                 }
             } catch (e) {
                 console.debug('[PLEX_UI] pollPlexPinStatus error', e);
-                this.plexPinStatus.textContent = 'Error polling PIN status.';
+                if (this.plexLoginOnlyPinStatus) {
+                    this.plexLoginOnlyPinStatus.textContent = 'Error polling PIN status.';
+                }
+                if (this.plexLoginOnlyPinDisplay) {
+                    this.plexLoginOnlyPinDisplay.textContent = '';
+                }
+                if (this.plexLoginOnlyButton) {
+                    this.plexLoginOnlyButton.style.display = '';
+                }
                 if (this.plexLoginButton) {
                     this.plexLoginButton.disabled = false;
                     this.plexLoginButton.style.display = '';
@@ -1994,8 +6814,15 @@ class App {
             }
         }
         console.debug('[PLEX_UI] pollPlexPinStatus timed out');
-        this.plexPinStatus.textContent = 'Login timed out. Please try again.';
-        this.plexPinDisplay.textContent = '';
+        if (this.plexLoginOnlyPinStatus) {
+            this.plexLoginOnlyPinStatus.textContent = 'Login timed out. Please try again.';
+        }
+        if (this.plexLoginOnlyPinDisplay) {
+            this.plexLoginOnlyPinDisplay.textContent = '';
+        }
+        if (this.plexLoginOnlyButton) {
+            this.plexLoginOnlyButton.style.display = '';
+        }
         if (this.plexLoginButton) {
             this.plexLoginButton.disabled = false;
             this.plexLoginButton.style.display = '';
@@ -2003,57 +6830,31 @@ class App {
     }
 
     private async startPlexSync(): Promise<void> {
-        this.plexSyncStatusEl.textContent = 'Starting library update...';
-        this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+        this.showStatusMessage(this.plexSyncStatusEl, 'Starting library update...', true, 0);
         this.startPlexSyncButton.disabled = true;
 
         try {
-            // First, trigger the library update
-            const libUpdateResponse = await fetch('/api/plex/library-update', {
+            const libUpdateResponse = await fetch('/api/plex/sync', {
                 method: 'POST'
             });
 
             if (libUpdateResponse.status !== 202) {
                 const data = await libUpdateResponse.json().catch(() => ({}));
-                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start library update'}`;
-                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+                this.showStatusMessage(this.plexSyncStatusEl, `✗ ${data.error || 'Failed to start library update'}`, true, 0);
                 return;
             }
 
-            // Then, trigger the sync
-            this.plexSyncStatusEl.textContent = 'Starting Plex sync...';
+            this.showStatusMessage(this.plexSyncStatusEl, '✓ Plex library update queued; sync will follow automatically', false, 0);
 
-            const syncResponse = await fetch('/api/plex/sync', {
-                method: 'POST'
-            });
-
-            if (syncResponse.status === 202) {
-                this.plexSyncStatusEl.textContent = '✓ Plex library update and sync jobs queued';
-                this.plexSyncStatusEl.style.color = 'var(--accent-primary)';
-                if (this.jobsFlyout.classList.contains('active')) {
-                    await this.loadJobs();
-                }
-            } else {
-                const data = await syncResponse.json().catch(() => ({}));
-                this.plexSyncStatusEl.textContent = `✗ ${data.error || 'Failed to start sync'}`;
-                this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+            if (this.jobsFlyout && this.jobsFlyout.classList.contains('active')) {
+                await this.loadJobs();
             }
         } catch (error) {
             console.error('Error starting Plex sync:', error);
-            this.plexSyncStatusEl.textContent = '✗ Error starting update/sync';
-            this.plexSyncStatusEl.style.color = 'var(--text-secondary)';
+            this.showStatusMessage(this.plexSyncStatusEl, '✗ Error starting library update', true, 0);
         } finally {
             this.startPlexSyncButton.disabled = false;
         }
-    }
-
-    private updatePlexConfigStatus(message: string): void {
-        if (!this.plexConfigStatusEl) {
-            console.debug('[PLEX_UI] updatePlexConfigStatus: plexConfigStatusEl not found');
-            return;
-        }
-        this.plexConfigStatusEl.textContent = message;
-        this.plexConfigStatusEl.style.color = message.includes('✓') ? 'var(--accent-primary)' : 'var(--text-secondary)';
     }
 
     private async updatePlexClearCredentialsButton(): Promise<void> {
@@ -2093,7 +6894,7 @@ class App {
 
             if (this.plexConnectedStatusEl) {
                 if (healthOk && typeof healthData.server_name === 'string' && healthData.server_name.trim()) {
-                    const library = this.plexLibraryNameSelect?.value?.trim() || '';
+                    const library = this.plexLoginOnlyLibraryNameSelect?.value?.trim() || '';
                     const libraryText = library ? ` (library: ${library})` : '';
                     this.plexConnectedStatusEl.textContent = `Connected to ${healthData.server_name}${libraryText}`;
                     this.plexConnectedStatusEl.style.display = 'block';
@@ -2117,13 +6918,14 @@ class App {
         }
     }
 
-    private async loadPlexUsers(): Promise<void> {
-        if (!this.plexUserSelect) {
+    private async loadPlexUsers(defaultToOwner: boolean = true, syncRemote: boolean = false): Promise<void> {
+        if (!this.plexLoginOnlyUserList) {
             return;
         }
 
         try {
-            const response = await fetch('/api/plex/users', { cache: 'no-store' });
+            const url = syncRemote ? '/api/plex/users?sync=true' : '/api/plex/users';
+            const response = await fetch(url, { cache: 'no-store' });
             if (!response.ok) {
                 throw new Error('Failed to fetch Plex users');
             }
@@ -2131,38 +6933,70 @@ class App {
             const data = await response.json();
             const users = Array.isArray(data.users) ? data.users : [];
 
-            this.plexUserSelect.innerHTML = '';
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = users.length ? 'Select a user...' : '(no users found)';
-            placeholder.disabled = users.length === 0;
-            this.plexUserSelect.appendChild(placeholder);
+            this.plexUserNameById = {};
+            for (const user of users) {
+                const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
+                const name = String(user.username || user.title || id);
+                if (id) this.plexUserNameById[id] = name;
+            }
+
+            this.plexLoginOnlyUserList.innerHTML = '';
+            if (users.length === 0) {
+                const emptyMessage = document.createElement('div');
+                emptyMessage.textContent = '(no users found)';
+                emptyMessage.className = 'settings-note';
+                this.plexLoginOnlyUserList.appendChild(emptyMessage);
+                return;
+            }
 
             const savedId = window.localStorage.getItem('plexSelectedUserId') || '';
-            let selectedSet = false;
 
             users.forEach((user: any) => {
                 const id = String(user.client_id ?? user.id ?? user.username ?? user.title ?? '');
                 const label = String(user.username || user.title || id);
-                const option = document.createElement('option');
-                option.value = id;
-                option.textContent = label;
-                this.plexUserSelect.appendChild(option);
+                const isOwner = Boolean(user.is_owner);
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'save-button plex-login-only-user-button';
+                button.style.width = '100%';
+                button.style.textAlign = 'left';
+                button.textContent = label;
+                button.dataset.userId = id;
+                button.dataset.userIsOwner = String(isOwner);
 
-                if (!selectedSet && savedId && id === savedId) {
-                    option.selected = true;
-                    selectedSet = true;
+                if (savedId && id === savedId) {
+                    button.classList.add('active');
                 }
+
+                button.addEventListener('click', async () => {
+                    window.localStorage.setItem('plexSelectedUserId', id);
+                    window.localStorage.setItem('plexSelectedUserName', label);
+                    window.localStorage.setItem('plexSelectedUserIsOwner', String(isOwner));
+                    this.isPlexSelectedUserOwner = isOwner;
+                    if (this.userButtonText) {
+                        this.userButtonText.textContent = label;
+                    }
+                    await this.updateSidebarPlaylists();
+                    await this.loadPlexPlaylists();
+                    this.updateUserTypeAccess();
+                    await this.updatePlexLoginOnlyState();
+                    void this.loadFreshFindsConfig();
+                });
+                this.plexLoginOnlyUserList.appendChild(button);
             });
 
-            if (!selectedSet && users.length > 0) {
+            if (!savedId && defaultToOwner && users.length > 0) {
                 const owner = users.find((u: any) => u.is_owner);
-                const ownerId = owner ? String(owner.id ?? owner.username ?? '') : '';
-                if (ownerId) {
-                    const ownerOption = Array.from(this.plexUserSelect.options).find((opt) => opt.value === ownerId);
-                    if (ownerOption) {
-                        ownerOption.selected = true;
+                if (owner) {
+                    const ownerId = String(owner.client_id ?? owner.id ?? owner.username ?? owner.title ?? '');
+                    const ownerName = String(owner.username || owner.title || ownerId);
+                    if (ownerId) {
                         window.localStorage.setItem('plexSelectedUserId', ownerId);
+                        window.localStorage.setItem('plexSelectedUserName', ownerName);
+                        window.localStorage.setItem('plexSelectedUserIsOwner', 'true');
+                        this.isPlexSelectedUserOwner = true;
+                        this.updateUserTypeAccess();
+                        await this.updatePlexLoginOnlyState();
                     }
                 }
             }
@@ -2172,96 +7006,106 @@ class App {
     }
 
     private updatePlexPlaylistContainerVisibility(show: boolean): void {
-        if (this.isPlexConfigured && show) {
-            this.restorePlexPlaylistContainerToHome();
-            this.plexPlaylistContainer.style.display = 'flex';
-            void this.loadPlexPlaylists();
-        } else {
-            this.restorePlexPlaylistContainerToHome();
-            this.plexPlaylistContainer.style.display = 'none';
+        // Plex playlist container has been removed; no-op.
+    }
+
+    private updateUserTypeAccess(): void {
+        const isOwner = this.isPlexSelectedUserOwner || window.localStorage.getItem('plexSelectedUserIsOwner') === 'true';
+        this.isPlexSelectedUserOwner = isOwner;
+
+        const hidePages = ['mirrors', 'matches', 'jobs'];
+        hidePages.forEach(page => {
+            const navItem = document.querySelector(`.nav-item[data-page="${page}"]`) as HTMLElement | null;
+            if (navItem) {
+                navItem.style.display = isOwner ? '' : 'none';
+            }
+        });
+
+        const settingsSections = document.querySelectorAll('#settingsPage .settings-section');
+        settingsSections.forEach(section => {
+            const sectionEl = section as HTMLElement;
+            if (sectionEl.id === 'musicDiscoverySettings') {
+                // Always show music discovery section — it contains per-user integration groups
+                sectionEl.style.display = '';
+            } else {
+                sectionEl.style.display = isOwner ? '' : 'none';
+            }
+        });
+
+        // Sub-gate: hide Playlist Matching Penalties from non-owners
+        const penaltiesGroup = document.getElementById('penaltiesGroup');
+        if (penaltiesGroup) {
+            penaltiesGroup.style.display = isOwner ? '' : 'none';
+        }
+
+        if (!isOwner && hidePages.includes(this.currentPage)) {
+            this.switchPage('explore', false);
         }
     }
 
     private movePlexPlaylistContainerBeneathDownloadAll(): void {
-        const downloadAllBtn = this.resultsContainer.querySelector('#downloadAllBtn') as HTMLElement | null;
-        if (!downloadAllBtn || !downloadAllBtn.parentElement) {
-            return;
-        }
-
-        const headerTop = downloadAllBtn.parentElement;
-        const header = headerTop.parentElement;
-        if (header) {
-            header.insertBefore(this.plexPlaylistContainer, headerTop.nextSibling);
-        } else {
-            headerTop.insertBefore(this.plexPlaylistContainer, downloadAllBtn.nextSibling);
-        }
-        this.plexPlaylistContainer.style.padding = '0';
-        this.plexPlaylistContainer.style.marginTop = '0.75rem';
+        // Plex playlist container has been removed; no-op.
     }
 
     private restorePlexPlaylistContainerToHome(): void {
-        if (this.plexPlaylistContainer.parentElement !== this.plexPlaylistContainerHomeParent) {
-            if (
-                this.plexPlaylistContainerHomeNextSibling &&
-                this.plexPlaylistContainerHomeNextSibling.parentNode === this.plexPlaylistContainerHomeParent
-            ) {
-                this.plexPlaylistContainerHomeParent.insertBefore(
-                    this.plexPlaylistContainer,
-                    this.plexPlaylistContainerHomeNextSibling
-                );
-            } else {
-                this.plexPlaylistContainerHomeParent.appendChild(this.plexPlaylistContainer);
-            }
-        }
-
-        this.plexPlaylistContainer.style.padding = '1rem';
-        this.plexPlaylistContainer.style.marginTop = '0';
+        // Plex playlist container has been removed; no-op.
     }
 
-    private populatePlexPlaylistOptions(playlists: string[], showEmptyPlaceholder: boolean = true): void {
-        const currentInputValue = this.plexPlaylistNameInput.value;
-        const currentMode = this.plexPlaylistNameInput.style.display === 'none' ? 'existing' : 'new';
-        this.plexPlaylistOptions.innerHTML = '';
+    private populatePlexPlaylistOptions(playlists: (string | { name: string, ratingKey?: string })[], showEmptyPlaceholder: boolean = true): void {
+        const playlistNameInput = this.plexPlaylistNameInput;
+        const playlistOptions = this.plexPlaylistOptions;
+        if (!playlistNameInput || !playlistOptions) {
+            return;
+        }
+
+        const currentInputValue = playlistNameInput.value;
+        const currentMode = playlistNameInput.style.display === 'none' ? 'existing' : 'new';
+        playlistOptions.innerHTML = '';
 
         const defaultOption = document.createElement('option');
         defaultOption.value = '';
         defaultOption.textContent = 'No Playlist';
-        this.plexPlaylistOptions.appendChild(defaultOption);
+        playlistOptions.appendChild(defaultOption);
 
         if (playlists.length === 0 && showEmptyPlaceholder) {
             const emptyOption = document.createElement('option');
             emptyOption.value = '';
             emptyOption.textContent = '(no existing playlists found)';
             emptyOption.disabled = true;
-            this.plexPlaylistOptions.appendChild(emptyOption);
+            playlistOptions.appendChild(emptyOption);
         }
 
-        playlists.forEach((playlistName) => {
+        playlists.forEach((playlist) => {
+            const playlistName = typeof playlist === 'string' ? playlist : playlist.name;
             const option = document.createElement('option');
             option.value = playlistName;
             option.textContent = playlistName;
-            this.plexPlaylistOptions.appendChild(option);
+            playlistOptions.appendChild(option);
         });
 
         const newOption = document.createElement('option');
         newOption.value = App.NEW_PLEX_PLAYLIST_OPTION;
         newOption.textContent = 'New playlist...';
-        this.plexPlaylistOptions.appendChild(newOption);
+        playlistOptions.appendChild(newOption);
 
-        this.plexPlaylistNameInput.value = currentInputValue;
+        playlistNameInput.value = currentInputValue;
 
         if (currentMode === 'new') {
             this.setPlexPlaylistMode('new');
-            this.plexPlaylistOptions.value = App.NEW_PLEX_PLAYLIST_OPTION;
+            playlistOptions.value = App.NEW_PLEX_PLAYLIST_OPTION;
             return;
         }
 
         const hasMatchingExisting = playlists.includes(currentInputValue);
-        this.plexPlaylistOptions.value = hasMatchingExisting ? currentInputValue : '';
+        playlistOptions.value = hasMatchingExisting ? currentInputValue : '';
         this.setPlexPlaylistMode('existing');
     }
 
     private setPlexPlaylistMode(mode: 'existing' | 'new'): void {
+        if (!this.plexPlaylistOptions || !this.plexPlaylistNameInput || !this.plexPlaylistBackButton) {
+            return;
+        }
+
         if (mode === 'new') {
             this.plexPlaylistOptions.style.display = 'none';
             this.plexPlaylistNameInput.style.display = 'block';
@@ -2278,6 +7122,16 @@ class App {
         const stored = window.localStorage.getItem('plexSelectedUserId');
         if (stored && stored.trim()) {
             return stored.trim();
+        }
+        return null;
+    }
+
+    private resolvePlexUserName(userId: string): string | null {
+        if (this.plexUserNameById[userId]) {
+            return this.plexUserNameById[userId];
+        }
+        if (userId === window.localStorage.getItem('plexSelectedUserId')) {
+            return window.localStorage.getItem('plexSelectedUserName');
         }
         return null;
     }
@@ -2316,19 +7170,55 @@ class App {
 
             const data: EndpointStatus = await response.json();
             this.displayEndpointStatus(data);
+
+            const hasQobuzMirrors = data.endpoints.some(e => e.mirrorType === 'qobuz');
+            this.syncSourceAvailability('qobuz', hasQobuzMirrors, hasQobuzMirrors ? '' : 'No online Qobuz mirrors found');
+            const hasDeezerMirrors = data.endpoints.some(e => e.mirrorType === 'deezer');
+            this.syncSourceAvailability('deezer_mirror', hasDeezerMirrors, hasDeezerMirrors ? '' : 'No online Deezer mirrors found');
         } catch (error) {
             console.error('Error fetching endpoint status:', error);
         }
     }
 
     private displayEndpointStatus(data: EndpointStatus): void {
-        // Update button
-        const statusCount = document.querySelector('.status-count');
-        if (statusCount) {
-            statusCount.textContent = `${data.summary.online}/${data.summary.total}`;
-        }
+        // Split endpoints by type
+        const tidalEndpoints = data.endpoints.filter(e => e.mirrorType === 'tidal' || e.mirrorType === '');
+        const qobuzEndpoints = data.endpoints.filter(e => e.mirrorType === 'qobuz');
+        const deezerEndpoints = data.endpoints.filter(e => e.mirrorType === 'deezer');
 
-        // Update summary
+        // Compute separate stats
+        const tidalOnline = tidalEndpoints.filter(e => e.online).length;
+        const tidalPremium = tidalEndpoints.filter(e => e.isPremium === 1).length;
+        const tidalOffline = tidalEndpoints.filter(e => !e.online).length;
+        const qobuzOnline = qobuzEndpoints.filter(e => e.online).length;
+        const qobuzPremium = qobuzEndpoints.filter(e => e.isPremium === 1).length;
+        const qobuzOffline = qobuzEndpoints.filter(e => !e.online).length;
+        const deezerOnline = deezerEndpoints.filter(e => e.online).length;
+        const deezerPremium = deezerEndpoints.filter(e => e.isPremium === 1).length;
+        const deezerOffline = deezerEndpoints.filter(e => !e.online).length;
+
+        // Update per-type stat elements
+        const tidalOnlineCount = document.getElementById('tidalOnlineCount');
+        const tidalPremiumCount = document.getElementById('tidalPremiumCount');
+        const tidalOfflineCount = document.getElementById('tidalOfflineCount');
+        const qobuzOnlineCount = document.getElementById('qobuzOnlineCount');
+        const qobuzPremiumCount = document.getElementById('qobuzPremiumCount');
+        const qobuzOfflineCount = document.getElementById('qobuzOfflineCount');
+        const deezerOnlineCount = document.getElementById('deezerOnlineCount');
+        const deezerPremiumCount = document.getElementById('deezerPremiumCount');
+        const deezerOfflineCount = document.getElementById('deezerOfflineCount');
+
+        if (tidalOnlineCount) tidalOnlineCount.textContent = tidalOnline.toString();
+        if (tidalPremiumCount) tidalPremiumCount.textContent = tidalPremium.toString();
+        if (tidalOfflineCount) tidalOfflineCount.textContent = tidalOffline.toString();
+        if (qobuzOnlineCount) qobuzOnlineCount.textContent = qobuzOnline.toString();
+        if (qobuzPremiumCount) qobuzPremiumCount.textContent = qobuzPremium.toString();
+        if (qobuzOfflineCount) qobuzOfflineCount.textContent = qobuzOffline.toString();
+        if (deezerOnlineCount) deezerOnlineCount.textContent = deezerOnline.toString();
+        if (deezerPremiumCount) deezerPremiumCount.textContent = deezerPremium.toString();
+        if (deezerOfflineCount) deezerOfflineCount.textContent = deezerOffline.toString();
+
+        // Legacy: update old stat elements if they still exist
         const totalCount = document.getElementById('totalCount');
         const onlineCount = document.getElementById('onlineCount');
         const offlineCount = document.getElementById('offlineCount');
@@ -2341,29 +7231,105 @@ class App {
         const safeRateLabel = rateLimit
             ? `${rateLimit.safe_rpm.toFixed(2)} RPM (${rateLimit.safe_rps.toFixed(2)} RPS)`
             : 'Unknown';
+        const rateLimitState = !rateLimit
+            ? 'Unknown'
+            : rateLimit.safe_interval >= 30 || rateLimit.error_rate_429 > 0.05
+                ? 'Backoff active'
+                : rateLimit.safe_interval > 0.5 || rateLimit.error_rate_429 > 0
+                    ? 'Recovering'
+                    : 'Normal';
+        const rateLimit429Percent = rateLimit
+            ? `${(rateLimit.error_rate_429 * 100).toFixed(2)}%`
+            : 'Unknown';
+        const currentIntervalLabel = rateLimit
+            ? `${rateLimit.safe_interval.toFixed(2)}s`
+            : 'Unknown';
 
         // Update endpoint list
-        this.flyoutContent.innerHTML = data.endpoints.map(endpoint => {
+        if (!this.flyoutContent) {
+            console.warn('Flyout content element not found');
+            return;
+        }
+
+        const rateLimitSummary = rateLimit
+            ? `
+                <div class="endpoint-item">
+                    <div class="endpoint-header">
+                        <span class="endpoint-name">Mirror Rate Limiter</span>
+                        <div class="endpoint-status ${rateLimitState === 'Normal' ? 'online' : 'offline'}">
+                            <span class="status-indicator ${rateLimitState === 'Normal' ? 'online' : 'offline'}"></span>
+                            ${rateLimitState}
+                        </div>
+                    </div>
+                    <div class="endpoint-details">
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Current Interval</span>
+                            <span class="detail-value">${currentIntervalLabel}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Current Safe Rate</span>
+                            <span class="detail-value">${safeRateLabel}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">429 Rate</span>
+                            <span class="detail-value">${rateLimit429Percent}</span>
+                        </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Sample Size</span>
+                            <span class="detail-value">${rateLimit.sample_size}</span>
+                        </div>
+                    </div>
+                </div>
+            `
+            : '';
+
+        const renderEndpointItem = (endpoint: Endpoint): string => {
             const url = atob(endpoint.encodedUrl);
             const statusClass = endpoint.online ? 'online' : 'offline';
             const statusText = endpoint.online ? 'Online' : 'Offline';
-            const responseTime = endpoint.responseTime 
-                ? `${endpoint.responseTime.toFixed(0)}ms` 
+            const responseTime = endpoint.responseTime
+                ? `${endpoint.responseTime.toFixed(0)}ms`
                 : 'N/A';
-            const lastChecked = endpoint.lastChecked 
-                ? new Date(endpoint.lastChecked).toLocaleTimeString()
+            const lastChecked = endpoint.lastChecked
+                ? new Date(endpoint.lastChecked).toLocaleTimeString(undefined, { timeZone: this.timezone })
                 : 'Never';
+            const disabledClass = endpoint.enabled ? '' : ' disabled';
+
+            const premiumLabel = endpoint.isPremium === null
+                ? '\u2014 Not Checked'
+                : endpoint.isPremium === 1
+                    ? '\u2713 Verified'
+                    : '\u2715 Preview Only';
+
+            const premiumClass = endpoint.isPremium === null
+                ? 'premium-stat-unchecked'
+                : endpoint.isPremium === 1
+                    ? 'premium-stat-verified'
+                    : 'premium-stat-preview';
 
             return `
-                <div class="endpoint-item">
+                <div class="endpoint-item${disabledClass}">
                     <div class="endpoint-header">
-                        <span class="endpoint-name">${endpoint.name}</span>
-                        <div class="endpoint-status ${statusClass}">
-                            <span class="status-indicator ${statusClass}"></span>
-                            ${statusText}
+                        <span class="endpoint-name">${this.escapeHtml(endpoint.name)}</span>
+                        <div class="endpoint-controls">
+                            <div class="endpoint-status ${statusClass}">
+                                <span class="status-indicator ${statusClass}"></span>
+                                ${statusText}
+                            </div>
+                            <button type="button" class="endpoint-remove-btn" data-endpoint-name="${this.escapeHtml(endpoint.name)}" title="Remove mirror">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
                         </div>
                     </div>
-                    <div class="endpoint-url">${url}</div>
+                    <div class="endpoint-url">${this.escapeHtml(url)}</div>
+                    <div class="endpoint-toggles">
+                        <label class="endpoint-toggle-row" title="${endpoint.enabled ? 'Disable mirror' : 'Enable mirror'}">
+                            <span class="endpoint-toggle-label">Enabled</span>
+                            <input type="checkbox" data-endpoint-toggle="${this.escapeHtml(endpoint.name)}" ${endpoint.enabled ? 'checked' : ''}>
+                            <span class="endpoint-toggle-slider"></span>
+                        </label>
+
+                    </div>
                     <div class="endpoint-details">
                         <div class="endpoint-detail">
                             <span class="detail-label">Response Time</span>
@@ -2377,10 +7343,264 @@ class App {
                             <span class="detail-label">Safe Rate</span>
                             <span class="detail-value">${safeRateLabel}</span>
                         </div>
+                        <div class="endpoint-detail">
+                            <span class="detail-label">Premium</span>
+                            <span class="endpoint-stat-value ${premiumClass}" data-validate-premium="${this.escapeHtml(endpoint.name)}" style="cursor:pointer; text-decoration:underline;">${premiumLabel}</span>
+                        </div>
                     </div>
                 </div>
             `;
-        }).join('');
+        };
+
+        const renderMirrorGroup = (label: string, endpoints: Endpoint[], emptyMessage: string): string => {
+            if (endpoints.length === 0) {
+                return `
+                    <div class="mirror-group">
+                        <div class="mirror-group-header">${this.escapeHtml(label)}</div>
+                        <div class="mirror-group-empty">${this.escapeHtml(emptyMessage)}</div>
+                    </div>
+                `;
+            }
+            const items = endpoints.map(renderEndpointItem).join('');
+            return `
+                <div class="mirror-group">
+                    <div class="mirror-group-header">${this.escapeHtml(label)}</div>
+                    <div class="mirror-group-list">${items}</div>
+                </div>
+            `;
+        };
+
+        const tidalGroup = renderMirrorGroup('Tidal Mirrors', tidalEndpoints, 'No Tidal mirrors configured');
+        const qobuzGroup = renderMirrorGroup('Qobuz Mirrors', qobuzEndpoints, 'No Qobuz mirrors configured');
+        const deezerGroup = renderMirrorGroup('Deezer Mirrors', deezerEndpoints, 'No Deezer mirrors configured');
+
+        this.flyoutContent.innerHTML = `${rateLimitSummary}${tidalGroup}${qobuzGroup}${deezerGroup}`;
+    }
+
+    private openAddMirrorModal(): void {
+        const overlay = document.createElement('div');
+        overlay.className = 'playlist-modal-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'playlist-modal';
+
+        const header = document.createElement('div');
+        header.className = 'playlist-modal-header';
+
+        const title = document.createElement('h3');
+        title.textContent = 'Add Mirror';
+        header.appendChild(title);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'playlist-modal-close';
+        closeBtn.innerHTML = '&times;';
+        closeBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+        header.appendChild(closeBtn);
+
+        const content = document.createElement('div');
+        content.className = 'playlist-modal-content';
+
+        const mirrorTypeGroup = document.createElement('div');
+        mirrorTypeGroup.className = 'settings-group';
+        const mirrorTypeLabel = document.createElement('label');
+        mirrorTypeLabel.className = 'settings-label';
+        mirrorTypeLabel.textContent = 'Mirror Type';
+        const mirrorTypeToggle = document.createElement('div');
+        mirrorTypeToggle.className = 'format-toggle';
+        mirrorTypeToggle.setAttribute('role', 'radiogroup');
+        mirrorTypeToggle.setAttribute('aria-label', 'Mirror type');
+
+        const tidalLabel = document.createElement('label');
+        tidalLabel.className = 'toggle-option';
+        const tidalRadio = document.createElement('input');
+        tidalRadio.type = 'radio';
+        tidalRadio.name = 'mirrorType';
+        tidalRadio.value = 'tidal';
+        tidalRadio.id = 'mirrorTypeTidal';
+        tidalRadio.checked = true;
+        const tidalSpan = document.createElement('span');
+        tidalSpan.textContent = 'Tidal';
+        tidalLabel.appendChild(tidalRadio);
+        tidalLabel.appendChild(tidalSpan);
+
+        const qobuzLabel = document.createElement('label');
+        qobuzLabel.className = 'toggle-option';
+        const qobuzRadio = document.createElement('input');
+        qobuzRadio.type = 'radio';
+        qobuzRadio.name = 'mirrorType';
+        qobuzRadio.value = 'qobuz';
+        qobuzRadio.id = 'mirrorTypeQobuz';
+        const qobuzSpan = document.createElement('span');
+        qobuzSpan.textContent = 'Qobuz';
+        qobuzLabel.appendChild(qobuzRadio);
+        qobuzLabel.appendChild(qobuzSpan);
+
+        const deezerLabel = document.createElement('label');
+        deezerLabel.className = 'toggle-option';
+        const deezerRadio = document.createElement('input');
+        deezerRadio.type = 'radio';
+        deezerRadio.name = 'mirrorType';
+        deezerRadio.value = 'deezer';
+        deezerRadio.id = 'mirrorTypeDeezer';
+        const deezerSpan = document.createElement('span');
+        deezerSpan.textContent = 'Deezer';
+        deezerLabel.appendChild(deezerRadio);
+        deezerLabel.appendChild(deezerSpan);
+
+        mirrorTypeToggle.appendChild(tidalLabel);
+        mirrorTypeToggle.appendChild(qobuzLabel);
+        mirrorTypeToggle.appendChild(deezerLabel);
+        mirrorTypeGroup.appendChild(mirrorTypeLabel);
+        mirrorTypeGroup.appendChild(mirrorTypeToggle);
+
+        const urlGroup = document.createElement('div');
+        urlGroup.className = 'settings-group';
+        const urlLabel = document.createElement('label');
+        urlLabel.className = 'settings-label';
+        urlLabel.textContent = 'Mirror URL';
+        const urlInput = document.createElement('input');
+        urlInput.type = 'text';
+        urlInput.className = 'settings-input';
+        urlInput.placeholder = 'http://mirror.example.com:8000';
+        urlGroup.appendChild(urlLabel);
+        urlGroup.appendChild(urlInput);
+
+        content.appendChild(mirrorTypeGroup);
+        content.appendChild(urlGroup);
+
+        const footer = document.createElement('div');
+        footer.className = 'playlist-modal-footer';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'playlist-modal-cancel';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'save-button';
+        submitBtn.textContent = 'Add';
+        submitBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                return;
+            }
+            const mirrorType = tidalRadio.checked ? 'tidal' : deezerRadio.checked ? 'deezer' : 'qobuz';
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Adding...';
+            try {
+                const resp = await fetch('/api/endpoints', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, mirrorType }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to add mirror');
+                }
+                document.body.removeChild(overlay);
+                void this.updateEndpointStatus();
+            } catch (e) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Add';
+                alert(e instanceof Error ? e.message : 'Failed to add mirror');
+            }
+        });
+
+        footer.appendChild(cancelBtn);
+        footer.appendChild(submitBtn);
+
+        modal.appendChild(header);
+        modal.appendChild(content);
+        modal.appendChild(footer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
+            }
+        });
+
+        urlInput.focus();
+    }
+
+    private async handleFlyoutContentClick(e: MouseEvent): Promise<void> {
+        const target = e.target as HTMLElement;
+
+        const toggleInput = target.closest('[data-endpoint-toggle]') as HTMLInputElement | null;
+        if (toggleInput) {
+            const name = toggleInput.getAttribute('data-endpoint-toggle');
+            if (!name) {
+                return;
+            }
+            const prevState = toggleInput.checked;
+            toggleInput.disabled = true;
+            try {
+                const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}/toggle`, {
+                    method: 'POST',
+                });
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.error || 'Failed to toggle mirror');
+                }
+                void this.updateEndpointStatus();
+            } catch (err) {
+                toggleInput.checked = prevState;
+                toggleInput.disabled = false;
+                alert(err instanceof Error ? err.message : 'Failed to toggle mirror');
+            }
+            return;
+        }
+
+        const validateSpan = target.closest('[data-validate-premium]') as HTMLElement | null;
+        if (validateSpan) {
+            const mirrorName = validateSpan.getAttribute('data-validate-premium');
+            if (!mirrorName) return;
+            const originalText = validateSpan.textContent || '';
+            validateSpan.textContent = 'Checking...';
+            try {
+                const resp = await fetch(`/api/endpoints/${encodeURIComponent(mirrorName)}/validate-premium`, { method: 'POST' });
+                if (!resp.ok) throw new Error('Failed to start validation');
+                setTimeout(() => this.updateEndpointStatus(), 5000);
+            } catch (err) {
+                validateSpan.textContent = originalText;
+                alert(err instanceof Error ? err.message : 'Failed to start validation');
+            }
+            return;
+        }
+
+        const removeBtn = target.closest('.endpoint-remove-btn') as HTMLButtonElement | null;
+        if (!removeBtn) {
+            return;
+        }
+
+        const name = removeBtn.getAttribute('data-endpoint-name');
+        if (!name) {
+            return;
+        }
+
+        if (!window.confirm(`Remove mirror "${name}"?`)) {
+            return;
+        }
+
+        removeBtn.disabled = true;
+        try {
+            const resp = await fetch(`/api/endpoints/${encodeURIComponent(name)}`, {
+                method: 'DELETE',
+            });
+            if (!resp.ok) {
+                const err = await resp.json();
+                throw new Error(err.error || 'Failed to remove mirror');
+            }
+            void this.updateEndpointStatus();
+        } catch (err) {
+            removeBtn.disabled = false;
+            alert(err instanceof Error ? err.message : 'Failed to remove mirror');
+        }
     }
 
     private updateSearchPlaceholder(): void {
@@ -2407,7 +7627,9 @@ class App {
     private async handleSearch(updateHistory: boolean = true): Promise<void> {
         const searchType = this.searchTypeSelect.value;
         const query = this.searchInput.value.trim();
-        
+
+        this.switchPage('explore', false);
+
         if (searchType === 'listenbrainz') {
             // Handle ListenBrainz playlists without requiring query
             await this.handleListenbrainzPlaylists(undefined, updateHistory);
@@ -2424,18 +7646,6 @@ class App {
             return;
         }
 
-        if (searchType === 'lastfm') {
-            // Handle Last.fm playlist with progressive search
-            await this.handleLastfmPlaylist(query, updateHistory);
-            return;
-        }
-
-        if (searchType === 'youtube_music') {
-            // Handle YouTube Music playlist with progressive search
-            await this.handleYoutubeMusicPlaylist(query, updateHistory);
-            return;
-        }
-
         if (updateHistory) {
             this.pushHistoryRoute({
                 view: 'search',
@@ -2444,10 +7654,14 @@ class App {
             });
         }
 
+        this.currentExploreRoute = { view: 'search', searchType, query };
+        this.exploreSearchRoute = { ...this.currentExploreRoute };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+
         this.displayMessage('Searching...');
 
         try {
-            const response = await this.fetchWithRetry(`/search/?${searchType}=${encodeURIComponent(query)}`);
+            const response = await this.fetchWithRetry(`/api/hifi/search?${searchType}=${encodeURIComponent(query)}`);
 
             if (!response.ok) {
                 throw new Error('Search failed');
@@ -2461,288 +7675,50 @@ class App {
         }
     }
 
-    private async handleLastfmPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
-        this.downloadAllScope = 'loose';
-        if (updateHistory) {
-            this.pushHistoryRoute({ view: 'lastfm_playlist', playlistUrl });
-        }
-        this.displayMessage('Scraping Last.fm playlist...');
+    private async handleListenbrainzPlaylists(usernameOverride?: string, updateHistory: boolean = true, type?: string): Promise<void> {
+        let username = (usernameOverride ?? this.searchInput.value).trim();
 
-        try {
-            // First, scrape the playlist to get track list
-            const scrapeResponse = await fetch('/api/lastfm/playlist', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ playlistUrl })
-            });
-
-            if (!scrapeResponse.ok) {
-                const errorData = await scrapeResponse.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Failed to scrape playlist');
-            }
-
-            const scrapeData = await scrapeResponse.json();
-            const playlistName = scrapeData.playlistName || 'Last.fm Playlist';
-            const tracks = scrapeData.tracks || [];
-            const totalTracks = tracks.length;
-
-            if (totalTracks === 0) {
-                this.displayMessage('No tracks found in playlist');
-                return;
-            }
-
-            this.updatePlexPlaylistContainerVisibility(true);
-
-            // Set up progress display
-            this.resultsContainer.innerHTML = `
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>Last.fm Playlist - "${this.escapeHtml(playlistName)}"</h2>
-                    </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
-                    </div>
-                </div>
-                <div class="results-list" id="lastfmResultsList"></div>
-            `;
-
-            const resultsList = document.getElementById('lastfmResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
-            let foundCount = 0;
-            const matchedTracks: Track[] = [];
-            const notFoundTracks: Array<{ artist: string; name: string }> = [];
-
-            // Search for each track progressively
-            for (let i = 0; i < tracks.length; i++) {
-                const track = tracks[i];
-                const searchQuery = `${track.name} ${track.artist}`;
-
-                try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
-                    
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
-                        
-                        if (items.length > 0) {
-                            // Add the first match to results
-                            const trackCard = this.formatTrackCard(items[0]);
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
-                            }
-                            matchedTracks.push(items[0] as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: track.artist,
-                                name: track.name
-                            });
-                        }
-                    } else {
-                        notFoundTracks.push({
-                            artist: track.artist,
-                            name: track.name
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
-                    notFoundTracks.push({
-                        artist: track.artist,
-                        name: track.name
-                    });
-                }
-
-                // Update progress
-                const progress = ((i + 1) / totalTracks) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
-            }
-
-            // Update final message
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
-            }
-
-            // Create and add Download All button after searching is complete
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
-
-            if (matchedTracks.length > 0) {
-                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
-            }
-
-        } catch (error) {
-            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process Last.fm playlist'}`);
-            console.error('Last.fm playlist error:', error);
-        }
-    }
-
-    private async handleYoutubeMusicPlaylist(playlistUrl: string, updateHistory: boolean = true): Promise<void> {
-        this.downloadAllScope = 'loose';
-        if (updateHistory) {
-            this.pushHistoryRoute({ view: 'youtube_music_playlist', playlistUrl });
-        }
-        this.displayMessage('Loading YouTube Music playlist...');
-
-        try {
-            const scrapeResponse = await fetch('/api/youtube_music/playlist', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ playlistUrl })
-            });
-
-            if (!scrapeResponse.ok) {
-                const errorData = await scrapeResponse.json().catch(() => ({}));
-                throw new Error(errorData.error || 'Failed to load playlist');
-            }
-
-            const scrapeData = await scrapeResponse.json();
-            const playlistName = scrapeData.playlistName || 'YouTube Music Playlist';
-            const tracks = scrapeData.tracks || [];
-            const totalTracks = tracks.length;
-
-            if (totalTracks === 0) {
-                this.displayMessage('No tracks found in playlist');
-                return;
-            }
-
-            this.updatePlexPlaylistContainerVisibility(true);
-
-            this.resultsContainer.innerHTML = `
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>YouTube Music Playlist - "${this.escapeHtml(playlistName)}"</h2>
-                    </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${totalTracks}</p>
-                    </div>
-                </div>
-                <div class="results-list" id="lastfmResultsList"></div>
-            `;
-
-            const resultsList = document.getElementById('lastfmResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
-            let foundCount = 0;
-            const matchedTracks: Track[] = [];
-            const notFoundTracks: Array<{ artist: string; name: string }> = [];
-
-            for (let i = 0; i < tracks.length; i++) {
-                const track = tracks[i];
-                const searchQuery = `${track.name} ${track.artist}`;
-
-                try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
-
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
-
-                        if (items.length > 0) {
-                            const trackCard = this.formatTrackCard(items[0]);
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
-                            }
-                            matchedTracks.push(items[0] as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: track.artist,
-                                name: track.name
-                            });
-                        }
-                    } else {
-                        notFoundTracks.push({
-                            artist: track.artist,
-                            name: track.name
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
-                    notFoundTracks.push({
-                        artist: track.artist,
-                        name: track.name
-                    });
-                }
-
-                const progress = ((i + 1) / totalTracks) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
-            }
-
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, totalTracks, notFoundTracks);
-            }
-
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
-
-            if (matchedTracks.length > 0) {
-                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
-            }
-
-        } catch (error) {
-            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to process YouTube Music playlist'}`);
-            console.error('YouTube Music playlist error:', error);
-        }
-    }
-
-    private async handleListenbrainzPlaylists(usernameOverride?: string, updateHistory: boolean = true): Promise<void> {
-        const username = (usernameOverride ?? this.searchInput.value).trim();
-        
         if (!username) {
-            this.displayMessage('Please enter ListenBrainz username');
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                try {
+                    const response = await fetch(`/api/listenbrainz/config?user_id=${encodeURIComponent(userId)}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.username) {
+                            username = data.username;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch listenbrainz config for username', e);
+                }
+            }
+        }
+
+        if (!username) {
+            this.displayMessage('Please enter ListenBrainz username or configure it in Settings');
             return;
         }
 
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'listenbrainz_playlists', username });
+            this.pushHistoryRoute({ view: 'listenbrainz_playlists', username, playlistType: type });
         }
+
+        this.currentExploreRoute = { view: 'listenbrainz_playlists', username, playlistType: type };
+        this.listenbrainzCurrentUsername = username;
+        this.listenbrainzCurrentPlaylist = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
         this.displayMessage('Loading ListenBrainz playlists...');
 
         try {
-            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}`);
-            
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `&user_id=${encodeURIComponent(userId)}` : '';
+            const typeQuery = type ? `&type=${encodeURIComponent(type)}` : '';
+            const response = await fetch(`/api/listenbrainz/playlists?username=${encodeURIComponent(username)}${userIdQuery}${typeQuery}`, {
+                signal: this.pendingRequestController?.signal
+            });
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
                 throw new Error(errorData.error || 'Failed to fetch ListenBrainz playlists');
@@ -2760,10 +7736,16 @@ class App {
             const playlists = playlistsData
                 .map((item: any) => item.playlist)
                 .filter((playlist: any) => playlist && playlist.title);
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+
+            let displayTitle = 'ListenBrainz Playlists';
+            if (type === 'user') displayTitle = 'User Playlists';
+            if (type === 'collaborator') displayTitle = 'Collaborator Playlists';
+            if (type === 'createdfor') displayTitle = 'Recommendation Playlists';
 
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
-                    <h2>ListenBrainz Playlists (${playlists.length})</h2>
+                    <h2>${displayTitle} (${playlists.length})</h2>
                 </div>
                 <div class="results-list">
                     ${playlists.map((playlist: any) => this.formatPlaylistCard(playlist)).join('')}
@@ -2782,7 +7764,7 @@ class App {
 
         // Extract public status from extension
         const isPublic = playlist.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.public || false;
-        
+
         // Extract identifier (which is the full URL)
         const playlistId = playlist.identifier ? playlist.identifier : '';
 
@@ -2798,10 +7780,42 @@ class App {
         `;
     }
 
-    private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
+    private async processWithConcurrency<T, R>(
+        items: T[],
+        concurrency: number,
+        processor: (item: T) => Promise<R>,
+        onResult: (result: R, index: number) => void
+    ): Promise<R[]> {
+        const results: R[] = new Array(items.length);
+        let currentIndex = 0;
+
+        const processNext = async (): Promise<void> => {
+            while (currentIndex < items.length) {
+                const index = currentIndex++;
+                const result = await processor(items[index]);
+                onResult(result, index);
+                results[index] = result;
+            }
+        };
+
+        const workers = Array(Math.min(concurrency, items.length))
+            .fill(null)
+            .map(() => processNext());
+
+        await Promise.all(workers);
+        return results;
+    }
+
+    private async fetchListenbrainzPlaylistTracks(playlistId: string, updateHistory: boolean = true, usernameOverride?: string): Promise<void> {
         this.downloadAllScope = 'loose';
+        const username = (usernameOverride || this.listenbrainzCurrentUsername || '').trim();
+        if (username) {
+            this.listenbrainzCurrentUsername = username;
+        }
+        this.currentExploreRoute = { view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId });
+            this.pushHistoryRoute({ view: 'listenbrainz_playlist_tracks', playlistId, username: this.listenbrainzCurrentUsername || undefined });
         }
         this.stopPlayback();
         this.displayMessage('Loading ListenBrainz playlist tracks...');
@@ -2815,7 +7829,11 @@ class App {
             }
 
             const playlistMbid = mbidMatch[1];
-            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}`);
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/listenbrainz/playlist/${encodeURIComponent(playlistMbid)}${userIdQuery}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlist' }));
@@ -2843,6 +7861,9 @@ class App {
             // Get playlist info for display
             const playlistTitle = playlist.title || 'Untitled Playlist';
             const playlistCreator = playlist.creator || 'Unknown';
+            this.listenbrainzCurrentPlaylist = { id: playlistId, title: playlistTitle };
+            this.explorePlaylistTitle = playlistTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             // Set up initial display with progress bar for searching
             this.resultsContainer.innerHTML = `
@@ -2851,92 +7872,89 @@ class App {
                         <h2>${this.escapeHtml(playlistTitle)}</h2>
                         <p class="playlist-creator-display">by ${this.escapeHtml(playlistCreator)}</p>
                     </div>
-                    <div class="progress-info">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
+                </div>
+                <div class="results-list">
+                    <div id="lbMatchProgress" style="padding: 12px 16px; font-size: 14px; color: #888;"></div>
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="listenbrainzResultsList"></div>
                         </div>
-                        <p class="progress-text" id="progressText">Searching for tracks: <span id="progressCount">0</span> / ${tracks.length}</p>
                     </div>
                 </div>
-                <div class="results-list" id="listenbrainzResultsList"></div>
             `;
 
             const resultsList = document.getElementById('listenbrainzResultsList');
-            const progressBar = document.getElementById('lastfmProgress');
-            const progressCount = document.getElementById('progressCount');
+            const progressEl = document.getElementById('lbMatchProgress');
             let foundCount = 0;
             const matchedTracks: Track[] = [];
             const notFoundTracks: Array<{ artist: string; name: string }> = [];
 
-            // Search for each track progressively
-            for (let i = 0; i < tracks.length; i++) {
-                const lbTrack = tracks[i];
-                const artists = lbTrack.creator || 'Unknown';
-                const searchQuery = `${lbTrack.title} ${artists}`;
+            const trackPayloads: Array<{ title: string; artist: string; album: string; identifier: string }> = tracks.map((lbTrack: any) => ({
+                title: lbTrack.title || '',
+                artist: lbTrack.creator || 'Unknown',
+                album: lbTrack.album || '',
+                identifier: Array.isArray(lbTrack.identifier) ? lbTrack.identifier[0] : lbTrack.identifier || '',
+            }));
 
-                try {
-                    const searchResponse = await fetch(`/search/?s=${encodeURIComponent(searchQuery)}`);
-                    
-                    if (searchResponse.ok) {
-                        const searchData = await searchResponse.json();
-                        const items = searchData.data?.items || [];
-                        
-                        if (items.length > 0) {
-                            // Add the first match to results
-                            const trackCard = this.formatTrackCard(items[0], false);
-                            if (resultsList) {
-                                resultsList.insertAdjacentHTML('beforeend', trackCard);
-                            }
-                            matchedTracks.push(items[0] as Track);
-                            foundCount++;
-                        } else {
-                            notFoundTracks.push({
-                                artist: artists,
-                                name: lbTrack.title || 'Unknown'
-                            });
+            const CONCURRENCY = 5;
+            let processedCount = 0;
+
+            if (progressEl) {
+                progressEl.textContent = `Matching ${tracks.length} tracks... (0/${tracks.length})`;
+            }
+
+            await this.processWithConcurrency(
+                trackPayloads,
+                CONCURRENCY,
+                async (payload) => {
+                    const response = await fetch('/api/listenbrainz/match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: this.pendingRequestController?.signal,
+                    });
+                    if (!response.ok) {
+                        return { match: null, title: payload.title, artist: payload.artist };
+                    }
+                    const data = await response.json();
+                    // Preserve original track info for the "not found" fallback
+                    data.title = payload.title;
+                    data.artist = payload.artist;
+                    return data;
+                },
+                (result: any) => {
+                    processedCount++;
+                    if (progressEl) {
+                        progressEl.textContent = `Matching ${tracks.length} tracks... (${processedCount}/${tracks.length})`;
+                    }
+
+                    if (result.match) {
+                        const trackRow = this.formatTrackGridRow(this.normalizeTrack(result.match as Track), {
+                            viewMode: 'multi-album',
+                            showTrackNumber: false,
+                            showAlbumColumn: true,
+                            showArtwork: true,
+                        });
+                        if (resultsList) {
+                            resultsList.insertAdjacentHTML('beforeend', trackRow);
                         }
+                        matchedTracks.push(result.match as Track);
+                        foundCount++;
                     } else {
                         notFoundTracks.push({
-                            artist: artists,
-                            name: lbTrack.title || 'Unknown'
+                            artist: result.artist || 'Unknown',
+                            name: result.title || 'Unknown',
                         });
                     }
-                } catch (error) {
-                    console.error(`Failed to search for ${searchQuery}:`, error);
-                    notFoundTracks.push({
-                        artist: artists,
-                        name: lbTrack.title || 'Unknown'
-                    });
                 }
+            );
 
-                // Update progress
-                const progress = ((i + 1) / tracks.length) * 100;
-                if (progressBar) {
-                    progressBar.style.width = `${progress}%`;
-                }
-                if (progressCount) {
-                    progressCount.textContent = (i + 1).toString();
-                }
+            if (progressEl) {
+                progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
             }
 
-            // Update final message
-            const progressText = document.getElementById('progressText');
-            if (progressText) {
-                this.updatePlaylistFoundSummary(progressText, foundCount, tracks.length, notFoundTracks);
-            }
-
-            // Create and add Download All button after searching is complete
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => this.downloadAllTracks());
-                resultsHeaderTop.appendChild(downloadAllBtn);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
-            }
+            this.createAddAllButtons();
 
             if (matchedTracks.length > 0) {
                 void this.annotateTrackCardsWithPlexStatus(matchedTracks);
@@ -2944,6 +7962,121 @@ class App {
         } catch (error) {
             this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load ListenBrainz playlist'}`);
             console.error('ListenBrainz playlist error:', error);
+        }
+    }
+
+    private async fetchYtmPlaylistTracks(playlistId: string, playlistTitle: string, updateHistory: boolean = true): Promise<void> {
+        this.currentExploreRoute = { view: 'youtube_music_playlist', playlistId, playlistTitle };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'youtube_music_playlist', playlistId, playlistTitle });
+        }
+        this.stopPlayback();
+        this.displayMessage('Loading YouTube Music playlist tracks...');
+
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const userIdQuery = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+            const response = await fetch(`/api/youtube_music/playlist/${encodeURIComponent(playlistId)}${userIdQuery}`, {
+                signal: this.pendingRequestController?.signal
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlist' }));
+                throw new Error(errorData.error || 'Failed to fetch YouTube Music playlist');
+            }
+
+            const data = await response.json();
+            const tracks = data.tracks || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this playlist');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+
+            const resolvedTitle = data.title || playlistTitle;
+            const trackCount = data.trackCount || tracks.length;
+
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(resolvedTitle)}</h2>
+                        <p class="playlist-creator-display">${trackCount} tracks</p>
+                    </div>
+                </div>
+                <div class="results-list">
+                    <div id="ytmMatchProgress" style="padding: 12px 16px; font-size: 14px; color: #888;"></div>
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="ytmResultsList"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const resultsList = document.getElementById('ytmResultsList');
+            const progressEl = document.getElementById('ytmMatchProgress');
+            let foundCount = 0;
+            const matchedTracks: Track[] = [];
+
+            for (let i = 0; i < tracks.length; i++) {
+                const ytmTrack = tracks[i];
+                const artists = (ytmTrack.artists || []).map((a: any) => a.name).filter(Boolean).join(', ') || 'Unknown';
+                const albumName = (ytmTrack.album && ytmTrack.album.name) || '';
+
+                if (progressEl) {
+                    progressEl.textContent = `Processing track ${i + 1} of ${tracks.length}`;
+                }
+
+                try {
+                    const matchResponse = await fetch('/api/youtube_music/match', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title: ytmTrack.title,
+                            artist: artists,
+                            album: albumName
+                        }),
+                        signal: this.pendingRequestController?.signal
+                    });
+
+                    if (matchResponse.ok) {
+                        const matchData = await matchResponse.json();
+
+                        if (matchData.match) {
+                            const trackRow = this.formatTrackGridRow(this.normalizeTrack(matchData.match as Track), {
+                                viewMode: 'multi-album',
+                                showTrackNumber: false,
+                                showAlbumColumn: true,
+                                showArtwork: true,
+                            });
+                            if (resultsList) {
+                                resultsList.insertAdjacentHTML('beforeend', trackRow);
+                            }
+                            matchedTracks.push(matchData.match as Track);
+                            foundCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Failed to match ${ytmTrack.title} by ${artists}:`, error);
+                }
+            }
+
+            if (progressEl) {
+                progressEl.textContent = `${foundCount} of ${tracks.length} tracks found`;
+            }
+
+            this.createAddAllButtons();
+
+            if (matchedTracks.length > 0) {
+                void this.annotateTrackCardsWithPlexStatus(matchedTracks);
+            }
+        } catch (error) {
+            this.displayMessage(`Error: ${error instanceof Error ? error.message : 'Failed to load YouTube Music playlist'}`);
+            console.error('YouTube Music playlist error:', error);
         }
     }
 
@@ -2958,10 +8091,10 @@ class App {
             id: Math.random() * 1000000, // Generate a temporary ID since ListenBrainz doesn't provide numeric IDs
             title: lbTrack.title || 'Unknown',
             duration: lbTrack.duration ? Math.floor(lbTrack.duration / 1000) : undefined,
-            artists: lbTrack.creator 
+            artists: lbTrack.creator
                 ? [{ id: 0, name: lbTrack.creator }]
                 : [],
-            artist: lbTrack.creator 
+            artist: lbTrack.creator
                 ? { id: 0, name: lbTrack.creator }
                 : undefined,
             album: undefined,
@@ -2972,31 +8105,11 @@ class App {
         };
     }
 
-    private updatePlaylistFoundSummary(
-        progressTextEl: HTMLElement,
-        foundCount: number,
-        totalTracks: number,
-        notFoundTracks: Array<{ artist: string; name: string }>
-    ): void {
-        progressTextEl.innerHTML = `Found <strong>${foundCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-
-        if (!notFoundTracks.length) {
-            progressTextEl.removeAttribute('title');
-            return;
-        }
-
-        const lines = notFoundTracks.map((track, index) => (
-            `${index + 1}. ${track.artist} - ${track.name}`
-        ));
-
-        progressTextEl.setAttribute(
-            'title',
-            `Not found (${notFoundTracks.length}):\n${lines.join('\n')}`
-        );
-    }
-
     private displayResults(data: SearchResult, query: string, searchType: string): void {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'search', searchType, query };
+        this.exploreSearchRoute = { ...this.currentExploreRoute };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         this.stopPlayback();
         this.updatePlexPlaylistContainerVisibility(true);
         if (data.error) {
@@ -3015,86 +8128,179 @@ class App {
         } else {
             items = data.data?.items || [];
         }
-        
+
         if (items.length === 0) {
             this.displayMessage(`No results found for "${query}"${data.proxied_via ? ' (via ' + data.proxied_via + ')' : ''}`);
             return;
         }
 
         // Display results with proxy info
-        const searchTypeName = searchType === 's' ? 'Tracks' : 
-                              searchType === 'a' ? 'Artists' :
-                              searchType === 'al' ? 'Albums' :
-                              searchType === 'p' ? 'Playlists' :
-                              searchType === 'trackid' ? 'Track ID' :
-                              'Results';
+        const searchTypeName = searchType === 's' ? 'Tracks' :
+            searchType === 'a' ? 'Artists' :
+                searchType === 'al' ? 'Albums' :
+                    searchType === 'p' ? 'Playlists' :
+                        searchType === 'trackid' ? 'Track ID' :
+                            'Results';
 
         this.resultsContainer.innerHTML = `
             <div class="results-header">
                 <h2>${searchTypeName} - "${this.escapeHtml(query)}"</h2>
                 ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
             </div>
-            <div class="results-list">
-                ${items.map(item => {
-                    if (searchType === 'al') return this.formatAlbumCard(item as AlbumSearchItem);
-                    if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
-                    if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
-                    return this.formatTrackCard(item as Track);
-                }).join('')}
-            </div>
+            ${searchType === 'al'
+                ? this.renderAlbumGrid(items as AlbumSearchItem[], { viewMode: 'search-albums' })
+                : searchType === 's' || searchType === 'trackid'
+                    ? this.formatTracksGrid(items as Track[])
+                    : `<div class="results-list${searchType === 'a' ? ' artist-results' : ''}">
+                    ${items.map(item => {
+                        if (searchType === 'a') return this.formatArtistCard(item as ArtistSearchItem);
+                        if (searchType === 'p') return this.formatSearchPlaylistCard(item as PlaylistSearchItem);
+                        return this.formatTrackCard(item as Track);
+                    }).join('')}
+                </div>`
+            }
         `;
 
         if (searchType === 's' || searchType === 'trackid') {
             void this.annotateTrackCardsWithPlexStatus(items as Track[]);
+        } else if (searchType === 'al') {
+            void this.annotateAlbumGridsWithPlexStatus(items as AlbumSearchItem[]);
+        } else if (searchType === 'a') {
+            void this.annotateArtistCardsWithPlexStatus(items as ArtistSearchItem[]);
         }
     }
 
-    private async annotateTrackCardsWithPlexStatus(tracks: Track[]): Promise<void> {
+    private async lookupStoredMatches(trackIds: Array<number | string>, albumIds: Array<number | string>, artistIds: Array<number | string>, signal?: AbortSignal): Promise<HifiMatchLookupResponse> {
+        const normalizedTrackIds = trackIds
+            .map(trackId => String(trackId).trim())
+            .filter(Boolean);
+        const normalizedAlbumIds = albumIds
+            .map(albumId => String(albumId).trim())
+            .filter(Boolean);
+        const normalizedArtistIds = artistIds
+            .map(artistId => String(artistId).trim())
+            .filter(Boolean);
+
+        if (normalizedTrackIds.length === 0 && normalizedAlbumIds.length === 0 && normalizedArtistIds.length === 0) {
+            return { tracks: [], albums: [], artists: [] };
+        }
+
+        const response = await fetch('/api/hifi/matches/lookup', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                track_ids: normalizedTrackIds,
+                album_ids: normalizedAlbumIds,
+                artist_ids: normalizedArtistIds
+            }),
+            signal
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to look up stored matches');
+        }
+
+        return await response.json() as HifiMatchLookupResponse;
+    }
+
+    private isLowQualityPlexMatch(variants: PlexSongVariant[] = []): boolean {
+        return Array.isArray(variants)
+            && variants.length > 0
+            && variants.every(variant =>
+                (variant.format === 'mp3' || variant.format === 'mpeg')
+                && typeof variant.bitrate === 'number'
+                && variant.bitrate <= 192
+            );
+    }
+
+    private createPlexMatchChip(match: { [key: string]: any; confidence?: number | null; variants?: PlexSongVariant[] }, options?: { inActions?: boolean; bulk?: boolean; incomplete?: boolean; hero?: boolean; trackId?: number; albumId?: number }): HTMLSpanElement {
+        const chip = document.createElement('span');
+        const lowQuality = this.isLowQualityPlexMatch(match.variants || []);
+        const incomplete = options?.incomplete === true;
+
+        const classNames = ['plex-existing-chip'];
+        if (options?.inActions) {
+            classNames.push('plex-existing-chip--in-actions');
+        }
+        if (options?.bulk) {
+            classNames.push('plex-existing-chip--bulk');
+        }
+        if (lowQuality) {
+            classNames.push('plex-existing-chip--low-quality');
+        }
+        if (options?.hero) {
+            classNames.push('plex-existing-chip--hero');
+        }
+        if (incomplete) {
+            classNames.push('plex-existing-chip--incomplete');
+        }
+        chip.className = classNames.join(' ');
+
+        let label = 'In Plex';
+        if (lowQuality) {
+            label += ' · low quality';
+        }
+        chip.textContent = label;
+        chip.title = this.buildStoredMatchTooltip(match.variants || [], incomplete);
+
+        if (options?.trackId && Number.isFinite(options.trackId)) chip.dataset.trackId = String(options.trackId);
+        if (options?.albumId && Number.isFinite(options.albumId)) chip.dataset.albumId = String(options.albumId);
+
+        return chip;
+    }
+
+    private buildStoredMatchTooltip(variants: PlexSongVariant[] = [], incomplete: boolean = false): string {
+        const heading = incomplete ? 'Exists in Plex (incomplete)' : 'Exists in Plex';
+
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return heading;
+        }
+
+        const details = variants.map((variant) => {
+            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
+                ? ` (${variant.bitrate} kbps)`
+                : '';
+            return variant.file_path
+                ? `  ${variant.file_path}${bitrate}`
+                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
+        });
+
+        return `${heading}\n${details.join('\n')}`;
+    }
+
+    private async annotateTrackCardsWithPlexStatus(tracks: Track[], albumId?: number): Promise<void> {
         if (!Array.isArray(tracks) || tracks.length === 0) {
             return;
         }
 
-        const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
-        if (cards.length === 0) {
+        const signal = this.pendingRequestController?.signal;
+        const trackIds = tracks.map(track => track.id).filter(trackId => Number.isFinite(trackId));
+        if (trackIds.length === 0) {
             return;
         }
 
-        const payloadTracks = tracks.map((track) => {
-            const artist = track.artists && track.artists.length > 0
-                ? track.artists.map(a => a.name).join(', ')
-                : track.artist?.name || '';
-            const album = track.album?.title || '';
-            return {
-                title: track.title || '',
-                artist,
-                album
-            };
-        });
-
         try {
-            const response = await fetch('/api/plex/songs/match', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ tracks: payloadTracks })
-            });
+            const lookup = await this.lookupStoredMatches(trackIds, [], [], signal);
+            const trackMatches = Array.isArray(lookup.tracks) ? lookup.tracks : [];
+            const matchById = new Map(trackMatches.map(match => [String(match.track_id), match]));
 
-            if (!response.ok) {
+            const gridRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row')) as HTMLElement[];
+            if (gridRows.length > 0) {
+                await this.annotateGridRowsWithPlexStatus(gridRows, matchById, albumId);
                 return;
             }
 
-            const data = await response.json() as { matches?: PlexTrackMatch[] };
-            const matches = Array.isArray(data.matches) ? data.matches : [];
-            const max = Math.min(cards.length, matches.length);
-
-            for (let i = 0; i < max; i += 1) {
-                const match = matches[i];
+            const cards = Array.from(this.resultsContainer.querySelectorAll('.results-list .track-card')) as HTMLElement[];
+            for (const card of cards) {
+                const trackId = String(card.getAttribute('data-track-id') || '').trim();
+                const match = matchById.get(trackId);
                 if (!match || !match.exists) {
                     continue;
                 }
 
-                const metadataEl = cards[i].querySelector('.track-metadata') as HTMLElement | null;
+                const metadataEl = card.querySelector('.track-metadata') as HTMLElement | null;
                 if (!metadataEl || metadataEl.querySelector('.plex-existing-chip')) {
                     continue;
                 }
@@ -3106,40 +8312,306 @@ class App {
                     metadataEl.appendChild(sep);
                 }
 
-                const allLowQualityMp3 = Array.isArray(match.variants) && match.variants.length > 0 &&
-                    match.variants.every(v =>
-                        (v.format === 'mp3' || v.format === 'mpeg') &&
-                        typeof v.bitrate === 'number' && v.bitrate <= 192
-                    );
-                const chip = document.createElement('span');
-                chip.className = allLowQualityMp3
-                    ? 'plex-existing-chip plex-existing-chip--low-quality'
-                    : 'plex-existing-chip';
-                chip.textContent = allLowQualityMp3 ? 'In Plex · low quality' : 'In Plex';
-                chip.title = this.buildPlexExistingTooltip(match.variants || []);
-                metadataEl.appendChild(chip);
+                metadataEl.appendChild(this.createPlexMatchChip(match, { trackId: parseInt(trackId, 10) }));
             }
         } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
             console.warn('Failed to annotate Plex inventory matches.', error);
         }
     }
 
-    private buildPlexExistingTooltip(variants: PlexSongVariant[]): string {
-        if (!Array.isArray(variants) || variants.length === 0) {
-            return 'Exists in Plex';
+    private async annotateGridRowsWithPlexStatus(gridRows: HTMLElement[], matchById: Map<string, HifiTrackLookupMatch>, albumId?: number): Promise<void> {
+        const resolvedMatches: HifiTrackLookupMatch[] = [];
+
+        for (const row of gridRows) {
+            const trackId = String(row.getAttribute('data-track-id') || '').trim();
+            const match = matchById.get(trackId);
+            if (!match || !match.exists) {
+                continue;
+            }
+
+            resolvedMatches.push(match);
+            row.setAttribute('data-plex-exists', 'true');
+
+            const actionsCell = row.querySelector('.grid-col-actions') as HTMLElement | null;
+            const addLibraryBtn = actionsCell?.querySelector('.grid-add-library-btn') as HTMLElement | null;
+            if (!actionsCell || !addLibraryBtn) {
+                continue;
+            }
+
+            addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, trackId: parseInt(trackId, 10) }));
         }
 
-        const details = variants.map((variant) => {
-            const bitrate = typeof variant.bitrate === 'number' && Number.isFinite(variant.bitrate)
-                ? ` (${variant.bitrate} kbps)`
+        const allRowsInPlex = gridRows.length > 0 && resolvedMatches.length === gridRows.length;
+        if (allRowsInPlex) {
+            this.replaceAddAllLibraryWithPlexBadge(resolvedMatches, albumId);
+        }
+    }
+
+    private async annotateAlbumGridsWithPlexStatus(albums: AlbumSearchItem[]): Promise<void> {
+        if (!Array.isArray(albums) || albums.length === 0) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        const albumIds = albums.map(album => album.id).filter(albumId => Number.isFinite(albumId));
+        if (albumIds.length === 0) {
+            return;
+        }
+
+        try {
+            const lookup = await this.lookupStoredMatches([], albumIds, [], signal);
+            const albumMatches = Array.isArray(lookup.albums) ? lookup.albums : [];
+            const matchById = new Map(albumMatches.map(match => [String(match.album_id), match]));
+            const gridRows = Array.from(this.resultsContainer.querySelectorAll('.albums-grid-row')) as HTMLElement[];
+
+            for (const row of gridRows) {
+                const albumId = String(row.getAttribute('data-album-id') || '').trim();
+                const match = matchById.get(albumId);
+                if (!match || !match.exists) {
+                    continue;
+                }
+
+                row.setAttribute('data-plex-exists', 'true');
+
+                const actionsCell = row.querySelector('.grid-col-actions') as HTMLElement | null;
+                const addLibraryBtn = actionsCell?.querySelector('.grid-add-library-btn') as HTMLElement | null;
+                if (!actionsCell || !addLibraryBtn) {
+                    continue;
+                }
+
+                addLibraryBtn.replaceWith(this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false, albumId: parseInt(albumId, 10) }));
+            }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate album grid rows with Plex status.', error);
+        }
+    }
+
+    private renderHeroCard(config: HeroCardConfig): string {
+        const isArtist = config.type === 'artist';
+        const sectionClass = isArtist ? 'artist-hero-section' : 'album-hero-section';
+        const contentClass = isArtist ? 'artist-hero-content' : 'album-hero-content';
+        const coverContainerClass = isArtist ? 'artist-cover-container' : 'album-cover-container';
+        const coverClass = isArtist ? 'artist-cover' : 'album-cover';
+        const coverPlaceholderClass = isArtist ? 'artist-cover-placeholder' : 'album-cover-placeholder';
+        const infoClass = isArtist ? 'artist-info' : 'album-info';
+        const titleClass = isArtist ? 'artist-hero-name' : 'album-title';
+        const actionsClass = isArtist ? 'artist-actions' : 'album-actions';
+
+        const coverHtml = config.coverUrl
+            ? `<img src="${this.escapeAttribute(config.coverUrl)}" alt="${this.escapeHtml(config.coverAlt)}" class="${coverClass}">`
+            : `<div class="${coverPlaceholderClass}"></div>`;
+
+        const titleHtml = `${this.escapeHtml(config.title)}${config.titleBadge || ''}`;
+
+        let subtitleHtml = '';
+        if (config.subtitle) {
+            const dataAttrs = config.subtitle.artistId
+                ? ` data-artist-id="${config.subtitle.artistId}"`
                 : '';
-            const path = variant.file_path
-                ? `  ${variant.file_path}${bitrate}`
-                : `  ${(variant.format || 'unknown').toUpperCase()}${bitrate}`;
-            return path;
+            const titleAttr = config.subtitle.title
+                ? ` title="${this.escapeHtml(config.subtitle.title)}"`
+                : '';
+            subtitleHtml = `<p class="album-artist"><span class="track-artist-name"${dataAttrs}${titleAttr}>${this.escapeHtml(config.subtitle.text)}</span></p>`;
+        }
+
+        let metadataHtml = '';
+        if (config.metadataItems && config.metadataItems.length > 0) {
+            const itemsHtml = config.metadataItems
+                .map(item => `<span class="metadata-item">${this.escapeHtml(item)}</span>`)
+                .join('');
+            metadataHtml = `<div class="album-metadata">${itemsHtml}</div>`;
+        }
+
+        let proxyHtml = '';
+        if (config.proxyInfo) {
+            proxyHtml = `<p class="proxy-info">Proxied via: <span class="proxy-name">${this.escapeHtml(config.proxyInfo)}</span></p>`;
+        }
+
+        const actionsHtml = config.actions
+            .map(action => {
+                let attrs = '';
+                if (action.id) attrs += ` id="${this.escapeAttribute(action.id)}"`;
+                attrs += ` class="album-action-btn${action.className ? ' ' + this.escapeAttribute(action.className) : ''}"`;
+                if (action.title) attrs += ` title="${this.escapeAttribute(action.title)}"`;
+                if (action.ariaLabel) attrs += ` aria-label="${this.escapeAttribute(action.ariaLabel)}"`;
+                if (action.disabled) attrs += ' disabled';
+                if (action.dataAttrs) {
+                    for (const [key, value] of Object.entries(action.dataAttrs)) {
+                        attrs += ` ${key}="${this.escapeHtml(value)}"`;
+                    }
+                }
+                return `<button${attrs}>${action.svgContent}</button>`;
+            })
+            .join('');
+
+        return `
+            <div class="${sectionClass}">
+                <div class="${contentClass}">
+                    <div class="${coverContainerClass}">
+                        ${coverHtml}
+                    </div>
+                    <div class="${infoClass}">
+                        <h1 class="${titleClass}">${titleHtml}</h1>
+                        ${subtitleHtml}
+                        ${metadataHtml}
+                        ${proxyHtml}
+                    </div>
+                </div>
+                <div class="${actionsClass}">
+                    ${actionsHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    private insertHeroPlexChip(container: HTMLElement | null, match: { exists: boolean; complete?: boolean }, options?: { inActions?: boolean; bulk?: boolean; hero?: boolean; trackId?: number; albumId?: number }): void {
+        if (!container || !match || !match.exists) {
+            return;
+        }
+        if (container.querySelector('.plex-existing-chip')) {
+            return;
+        }
+
+        const chip = this.createPlexMatchChip(match, {
+            inActions: options?.inActions,
+            bulk: options?.bulk,
+            incomplete: match.complete === false,
+            hero: options?.hero,
+            trackId: options?.trackId,
+            albumId: options?.albumId
         });
 
-        return `Exists in Plex\n${details.join('\n')}`;
+        if (options?.hero) {
+            container.appendChild(chip);
+            return;
+        }
+
+        const heading = container.querySelector('h1, .artist-hero-name, .album-title') as HTMLElement | null;
+        if (heading) {
+            heading.insertAdjacentElement('afterend', chip);
+            return;
+        }
+
+        container.appendChild(chip);
+    }
+
+    private async annotateArtistCardsWithPlexStatus(artists: ArtistSearchItem[]): Promise<void> {
+        if (!Array.isArray(artists) || artists.length === 0) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        const artistIds = artists.map(artist => artist.id).filter(artistId => Number.isFinite(artistId));
+        if (artistIds.length === 0) {
+            return;
+        }
+
+        try {
+            const lookup = await this.lookupStoredMatches([], [], artistIds, signal);
+            const artistMatches = Array.isArray(lookup.artists) ? lookup.artists : [];
+            const matchById = new Map(artistMatches.map(match => [String(match.artist_id), match]));
+            const cards = Array.from(this.resultsContainer.querySelectorAll('.artist-card-compact')) as HTMLElement[];
+
+            for (const card of cards) {
+                const artistId = String(card.getAttribute('data-artist-id') || '').trim();
+                const match = matchById.get(artistId);
+                if (!match || !match.exists || card.querySelector('.plex-existing-chip')) {
+                    continue;
+                }
+
+                const nameEl = card.querySelector('.artist-card-name') as HTMLElement | null;
+                if (!nameEl) {
+                    continue;
+                }
+
+                const chip = this.createPlexMatchChip(match, { inActions: true, incomplete: match.complete === false });
+                nameEl.insertAdjacentElement('afterend', chip);
+            }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate artist cards with Plex status.', error);
+        }
+    }
+
+    private async annotateAlbumHeroWithPlexStatus(albumId: number): Promise<void> {
+        if (!Number.isFinite(albumId)) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        try {
+            const lookup = await this.lookupStoredMatches([], [albumId], [], signal);
+            const albumMatch = Array.isArray(lookup.albums) ? lookup.albums[0] : undefined;
+            if (!albumMatch || !albumMatch.exists) {
+                return;
+            }
+
+            const container = document.querySelector('.album-actions') as HTMLElement | null;
+            this.insertHeroPlexChip(container, albumMatch, { inActions: true, bulk: true, albumId });
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate album hero with Plex status.', error);
+        }
+    }
+
+    private async annotateArtistHeroWithPlexStatus(artistId: number): Promise<void> {
+        if (!Number.isFinite(artistId)) {
+            return;
+        }
+
+        const signal = this.pendingRequestController?.signal;
+        try {
+            const lookup = await this.lookupStoredMatches([], [], [artistId], signal);
+            const artistMatch = Array.isArray(lookup.artists) ? lookup.artists[0] : undefined;
+            if (!artistMatch || !artistMatch.exists) {
+                return;
+            }
+
+            const container = document.querySelector('.artist-actions') as HTMLElement | null;
+            this.insertHeroPlexChip(container, artistMatch, { inActions: true, bulk: true });
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                return;
+            }
+            console.warn('Failed to annotate artist hero with Plex status.', error);
+        }
+    }
+
+    private replaceAddAllLibraryWithPlexBadge(matches: PlexTrackMatch[], albumId?: number): void {
+        const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement | null;
+        if (!addAllLibraryBtn || !addAllLibraryBtn.parentElement) {
+            return;
+        }
+
+        const albumActions = document.querySelector('.album-actions') as HTMLElement | null;
+        if (albumActions?.querySelector('.plex-existing-chip')) {
+            addAllLibraryBtn.remove();
+            return;
+        }
+
+        const aggregateMatch: PlexTrackMatch = {
+            exists: true,
+            confidence: matches.reduce((highest, match) => Math.max(highest, typeof match.confidence === 'number' ? match.confidence : 0), 0),
+            variants: matches.flatMap(match => match.variants || [])
+        };
+
+        if (albumActions) {
+            addAllLibraryBtn.remove();
+            albumActions.appendChild(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true, albumId }));
+            return;
+        }
+
+        addAllLibraryBtn.replaceWith(this.createPlexMatchChip(aggregateMatch, { inActions: true, bulk: true, albumId }));
     }
 
     private formatSearchPlaylistCard(playlist: PlaylistSearchItem): string {
@@ -3151,19 +8623,7 @@ class App {
             ? `${trackTotal} track${trackTotal !== 1 ? 's' : ''}`
             : '';
 
-        let quality = playlist.audioQuality || '';
-        if (playlist.mediaMetadata?.tags && playlist.mediaMetadata.tags.length > 0) {
-            const tags = playlist.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        const quality = playlist.audioQuality || '';
         const qualityDisplay = this.formatQuality(quality);
         const coverImage = this.getPlaylistCoverUrl(playlist);
 
@@ -3171,8 +8631,8 @@ class App {
             <div class="track-card album-card playlist-search-card clickable" data-playlist-id="${playlistId}" title="Click to view tracks">
                 <div class="track-artwork">
                     ${coverImage
-                        ? `<img src="${coverImage}" alt="${playlistName}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                ? `<img src="${coverImage}" alt="${playlistName}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <path d="M9 9h6"></path>
@@ -3180,7 +8640,7 @@ class App {
                                 <path d="M9 17h4"></path>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${playlistName}</div>
@@ -3238,17 +8698,76 @@ class App {
         return 'Unknown';
     }
 
+    private getAddAllPlaylistIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <g transform="translate(2,1)">
+                    <path d="M5 0v10"></path>
+                    <path d="M0 5h10"></path>
+                </g>
+                <g transform="translate(8,7)" opacity="0.7">
+                    <path d="M5 0v10"></path>
+                    <path d="M0 5h10"></path>
+                </g>
+            </svg>
+        `;
+    }
+
+    private getAddAllLibraryIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="2" width="14" height="4" rx="1"></rect>
+                <path d="M3 6v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6"></path>
+                <rect x="6" y="10" width="14" height="4" rx="1" opacity="0.6"></rect>
+                <path d="M7 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" opacity="0.6"></path>
+            </svg>
+        `;
+    }
+
+    private setBulkActionButtonState(
+        button: HTMLButtonElement | null,
+        buttonType: 'playlist' | 'library',
+        state: 'idle' | 'loading' | 'success' | 'failed'
+    ): void {
+        if (!button) {
+            return;
+        }
+
+        button.classList.remove('queued', 'in-progress', 'completed', 'failed');
+
+        if (state === 'loading') {
+            button.disabled = true;
+            button.classList.add('in-progress');
+            button.innerHTML = this.getSpinnerIconSvg();
+            return;
+        }
+
+        button.disabled = false;
+
+        if (state === 'success') {
+            button.classList.add('completed');
+            button.innerHTML = this.getCheckmarkIconSvg();
+            return;
+        }
+
+        if (state === 'failed') {
+            button.classList.add('failed');
+            button.innerHTML = this.getExclamationIconSvg();
+            return;
+        }
+
+        button.innerHTML = buttonType === 'playlist'
+            ? this.getAddAllPlaylistIconSvg()
+            : this.getAddAllLibraryIconSvg();
+    }
+
     private getPlaylistCoverUrl(playlist: PlaylistSearchItem): string {
         const rawCover = playlist.customImageUrl || playlist.squareImage || playlist.image || playlist.cover || '';
         if (!rawCover) {
             return '';
         }
 
-        if (rawCover.startsWith('http://') || rawCover.startsWith('https://')) {
-            return rawCover;
-        }
-
-        return this.formatTidalImageUrl(rawCover, 640);
+        return this.getHifiImageUrl(rawCover, 640);
     }
 
     private normalizePlaylistId(value: string): string {
@@ -3268,6 +8787,9 @@ class App {
 
     private async fetchPlaylistTracks(playlistId: string, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'playlist', playlistId };
+        this.explorePlaylistTitle = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'playlist', playlistId });
         }
@@ -3276,7 +8798,9 @@ class App {
 
         try {
             const normalizedPlaylistId = this.normalizePlaylistId(playlistId) || playlistId;
-            const response = await fetch(`/playlist/?id=${encodeURIComponent(normalizedPlaylistId)}`);
+            const response = await fetch(`/api/hifi/playlists/${encodeURIComponent(normalizedPlaylistId)}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch playlist');
@@ -3338,6 +8862,8 @@ class App {
             this.updatePlexPlaylistContainerVisibility(true);
 
             const playlistTitle = playlistMeta.title || playlistMeta.name || 'Playlist';
+            this.explorePlaylistTitle = playlistTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
             this.resultsContainer.innerHTML = `
                 <div class="results-header">
@@ -3345,33 +8871,31 @@ class App {
                         <h2>${this.escapeHtml(playlistTitle)}</h2>
                     </div>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
-                    </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map((track: Track) => this.formatTrackCard(track)).join('')}
+                    ${this.formatTracksGrid(tracks)}
                 </div>
             `;
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.downloadAllTracks();
-                });
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -3395,36 +8919,23 @@ class App {
         const albumId = track.album?.id;
 
         // Format duration
-        const duration = track.duration 
+        const duration = track.duration
             ? this.formatDuration(track.duration)
             : '';
 
-        // Get quality info - check mediaMetadata.tags for best quality
-        let quality = track.audioQuality || track.quality || '';
-        if (track.mediaMetadata?.tags && track.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            const tags = track.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        // Get quality info - prefer the normalized maxAudioQuality field
+        const quality = track.maxAudioQuality || track.audioQuality || track.quality || '';
         const qualityDisplay = this.formatQuality(quality);
 
         // Format track title with optional track number and version
         // For multi-disc albums, prepend disc number (e.g., "1-03" for disc 1, track 3)
         let trackTitle = this.escapeHtml(track.title);
-        
+
         // Append version info if available
         if (track.version && typeof track.version === 'string' && track.version.trim()) {
             trackTitle += ` (${this.escapeHtml(track.version)})`;
         }
-        
+
         if (showTrackNumber && track.trackNumber) {
             const volumeNumber = track.volumeNumber || 1;
             const displayTrackNumber = numberOfVolumes && numberOfVolumes > 1
@@ -3439,15 +8950,15 @@ class App {
                     ${this.getPlayIconSvg()}
                 </button>
                 <div class="track-artwork">
-                    ${albumCover 
-                        ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                    ${albumCover
+                ? `<img src="${this.formatTidalImageUrl(albumCover, 1280)}" alt="${track.title}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <circle cx="12" cy="12" r="3"></circle>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${trackTitle}</div>
@@ -3464,14 +8975,331 @@ class App {
                     <button class="track-more-btn" title="More Like This" aria-label="More Like This">
                         ${this.getMoreLikeIconSvg()}
                     </button>
-                    <button class="track-download-btn" title="Download" data-track-id="${track.id}">
+                    <button class="track-add-playlist-btn" title="Add to Playlist" data-track-id="${track.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="track-download-btn" title="Download to Library" data-track-id="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
                         </svg>
                     </button>
                 </div>
+            </div>
+        `;
+    }
+
+    private normalizeTrack(track: Track | PlexLibraryTrack): NormalizedTrack {
+        if ('artists' in track || 'artist' in track && typeof (track as Track).artist === 'object') {
+            const t = track as Track;
+            const artistNames = t.artists && t.artists.length > 0
+                ? t.artists.map(a => a.name).join(', ')
+                : (typeof t.artist === 'object' ? t.artist?.name : undefined) || 'Unknown Artist';
+            const primaryArtistId = t.artists?.[0]?.id ?? (typeof t.artist === 'object' ? t.artist?.id : undefined);
+            const quality = t.maxAudioQuality || t.audioQuality || t.quality || '';
+            return {
+                id: String(t.id),
+                title: t.title,
+                version: t.version,
+                artist: artistNames,
+                artistId: primaryArtistId,
+                album: t.album?.title || 'Unknown Album',
+                albumId: t.album?.id,
+                albumCover: t.album?.cover || t.cover,
+                trackNumber: t.trackNumber ?? null,
+                volumeNumber: t.volumeNumber || 1,
+                duration: t.duration ?? null,
+                quality,
+                explicit: t.explicit || false,
+            };
+        }
+        const p = track as PlexLibraryTrack;
+        const qualityFormat = (p.quality_format || '').trim().toUpperCase();
+        const qualityBitrate = typeof p.quality_bitrate_kbps === 'number' ? `${p.quality_bitrate_kbps} kbps` : undefined;
+        return {
+            id: p.id,
+            title: p.title || 'Unknown Track',
+            artist: p.artist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+            artistId: p.artist_id ? parseInt(p.artist_id, 10) : undefined,
+            album: p.album || 'Unknown Album',
+            albumCover: p.cover,
+            trackNumber: typeof p.track_number === 'number' ? p.track_number : null,
+            volumeNumber: typeof p.disc_number === 'number' ? p.disc_number : 1,
+            duration: typeof p.duration === 'number' ? Math.max(0, Math.round(p.duration / 1000)) : null,
+            quality: '',
+            explicit: false,
+            qualityFormat: qualityFormat || undefined,
+            qualityBitrate,
+        };
+    }
+
+    private allTracksFromSameAlbum(tracks: Track[]): boolean {
+        if (tracks.length <= 1) return true;
+        const firstAlbumId = tracks[0].album?.id;
+        return tracks.every(track => track.album?.id === firstAlbumId);
+    }
+
+    private renderTrackGrid(tracks: (Track | PlexLibraryTrack)[], options: TrackGridOptions): string {
+        const normalized = tracks.map(t => this.normalizeTrack(t));
+        const emptyMessage = options.emptyMessage || '<div class="library-placeholder"><p>No tracks found.</p></div>';
+
+        return `
+            <div class="tracks-grid-wrapper" data-view-mode="${options.viewMode}">
+                <div class="tracks-grid">
+                    ${this.formatTrackGridHeader(options.showTrackNumber || false, options.showAlbumColumn || false, options.showArtwork || false)}
+                    ${normalized.length > 0
+                ? normalized.map(track => this.formatTrackGridRow(track, options)).join('')
+                : emptyMessage}
+                </div>
+            </div>
+        `;
+    }
+
+    private formatTracksGrid(tracks: Track[], numberOfVolumes?: number, includeTrackNumbers: boolean = true): string {
+        const isSingleAlbum = this.allTracksFromSameAlbum(tracks);
+        const showTrackNumberColumn = includeTrackNumbers && isSingleAlbum;
+        const showArtworkInSingleAlbum = !includeTrackNumbers && isSingleAlbum;
+
+        if (isSingleAlbum) {
+            return this.renderTrackGrid(tracks, {
+                viewMode: 'single-album',
+                showTrackNumber: showTrackNumberColumn,
+                numberOfVolumes,
+                showAlbumColumn: false,
+                showArtwork: showArtworkInSingleAlbum,
+            });
+        } else {
+            return this.renderTrackGrid(tracks, {
+                viewMode: 'multi-album',
+                showTrackNumber: false,
+                showAlbumColumn: true,
+                showArtwork: true,
+            });
+        }
+    }
+
+    private formatTrackGridRow(track: NormalizedTrack, options: TrackGridOptions): string {
+        const showTrackNumber = options.showTrackNumber || false;
+        const showAlbumColumn = options.showAlbumColumn || false;
+        const showArtwork = options.showArtwork || false;
+        const dataAttr = options.dataAttr || 'data-track-id';
+        const extraRowClass = options.extraRowClass || '';
+        const actions = options.actions || 'full';
+        const qualityStyle = options.qualityStyle || 'tier';
+        const rowClasses = ['tracks-grid-row', ...(extraRowClass ? [extraRowClass] : [])].join(' ');
+        const extraAttrs = options.rowDataAttrs
+            ? Object.entries(options.rowDataAttrs(track)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
+            : '';
+
+        let trackTitle = this.escapeHtml(track.title);
+        if (track.version && typeof track.version === 'string' && track.version.trim()) {
+            trackTitle += ` (${this.escapeHtml(track.version)})`;
+        }
+
+        let trackNumberDisplay = '';
+        if (showTrackNumber && track.trackNumber) {
+            const vn = track.volumeNumber || 1;
+            trackNumberDisplay = options.numberOfVolumes && options.numberOfVolumes > 1
+                ? `${vn}-${String(track.trackNumber).padStart(2, '0')}`
+                : String(track.trackNumber);
+        }
+
+        const artworkSrc = track.albumCover
+            ? (track.albumCover.startsWith('http') ? track.albumCover : this.getHifiImageUrl(track.albumCover, 1280))
+            : null;
+
+        const durationDisplay = track.duration ? this.formatDuration(track.duration) : '—';
+
+        let qualityDisplay = '—';
+        if (qualityStyle === 'format-bitrate') {
+            const parts = [track.qualityFormat, track.qualityBitrate].filter(Boolean);
+            qualityDisplay = parts.length > 0 ? parts.join(' • ') : '—';
+        } else {
+            qualityDisplay = track.quality ? this.formatQuality(track.quality) : '—';
+        }
+
+        return `
+            <div class="${rowClasses}" ${dataAttr}="${track.id}" ${track.artistId ? `data-artist-id="${track.artistId}"` : ''} ${track.albumId ? `data-album-id="${track.albumId}"` : ''} ${extraAttrs}>
+                ${showArtwork ? `<div class="grid-cell grid-col-artwork">
+                    ${artworkSrc
+                    ? `<img src="${artworkSrc}" alt="${this.escapeHtml(track.title)}" loading="lazy">`
+                    : `<div class="grid-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                           </div>`
+                }
+                </div>` : ''}
+                ${showTrackNumber ? `<div class="grid-cell grid-col-track-number">${trackNumberDisplay}</div>` : ''}
+                <div class="grid-cell grid-col-title">
+                    <div class="track-title-with-badge">
+                        ${trackTitle}
+                        ${track.explicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
+                    </div>
+                </div>
+                <div class="grid-cell grid-col-artist">
+                    <span class="track-artist-name" ${track.artistId ? `title="View albums by ${this.escapeHtml(track.artist)}"` : ''}>${this.escapeHtml(track.artist)}</span>
+                </div>
+                ${showAlbumColumn ? `<div class="grid-cell grid-col-album">
+                    <span class="track-album-name" ${track.albumId ? `title="View tracks on ${this.escapeHtml(track.album)}"` : ''}>${this.escapeHtml(track.album)}</span>
+                </div>` : ''}
+                <div class="grid-cell grid-col-duration">${durationDisplay}</div>
+                <div class="grid-cell grid-col-quality">${qualityDisplay}</div>
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="Play" aria-label="Play" ${dataAttr}="${track.id}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                    ${actions === 'full' ? `
+                    <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${track.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
+                        </svg>
+                    </button>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    private formatTrackGridHeader(showTrackNumber: boolean, showAlbumColumn: boolean, showArtwork: boolean): string {
+        return `
+            <div class="tracks-grid-header">
+                ${showTrackNumber ? '<div class="grid-cell grid-col-track-number">#</div>' : ''}
+                ${showArtwork ? '<div class="grid-cell grid-col-artwork"></div>' : ''}
+                <div class="grid-cell grid-col-title">Title</div>
+                <div class="grid-cell grid-col-artist">Artist</div>
+                ${showAlbumColumn ? '<div class="grid-cell grid-col-album">Album</div>' : ''}
+                <div class="grid-cell grid-col-duration">Duration</div>
+                <div class="grid-cell grid-col-quality">MAX QUALITY</div>
+                <div class="grid-cell grid-col-actions">Actions</div>
+            </div>
+        `;
+    }
+
+    private async renderProgressiveTrackGrid(
+        tracks: PlaylistTrackInput[],
+        options: TrackGridOptions & { resultsContainerId: string; playlistName: string }
+    ): Promise<{ matched: Track[]; notFound: PlaylistTrackInput[] }> {
+        const resultsList = document.getElementById(options.resultsContainerId);
+        const matchedTracks: Track[] = [];
+        const notFoundTracks: PlaylistTrackInput[] = [];
+
+        for (const track of tracks) {
+            const searchQuery = `${track.name} ${track.artist}`;
+            try {
+                const response = await fetch(`/api/hifi/search?s=${encodeURIComponent(searchQuery)}`, {
+                    signal: this.pendingRequestController?.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const items = data.data?.items || [];
+                    if (items.length > 0) {
+                        const matched = items[0] as Track;
+                        const normalized = this.normalizeTrack(matched);
+                        const rowHtml = this.formatTrackGridRow(normalized, options);
+                        resultsList?.insertAdjacentHTML('beforeend', rowHtml);
+                        matchedTracks.push(matched);
+                    } else {
+                        notFoundTracks.push(track);
+                    }
+                } else {
+                    notFoundTracks.push(track);
+                }
+            } catch {
+                notFoundTracks.push(track);
+            }
+        }
+
+        return { matched: matchedTracks, notFound: notFoundTracks };
+    }
+
+    private createAddAllButtons(): void {
+        const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
+        if (!resultsHeaderTop || resultsHeaderTop.querySelector('.add-all-buttons-container')) {
+            return;
+        }
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'add-all-buttons-container';
+
+        const addPlaylistBtn = document.createElement('button');
+        addPlaylistBtn.id = 'addAllPlaylistBtn';
+        addPlaylistBtn.className = 'add-all-btn';
+        addPlaylistBtn.title = 'Add all tracks to a playlist';
+        addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+        addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+        buttonsContainer.appendChild(addPlaylistBtn);
+
+        const addLibraryBtn = document.createElement('button');
+        addLibraryBtn.id = 'addAllLibraryBtn';
+        addLibraryBtn.className = 'add-all-btn';
+        addLibraryBtn.title = 'Add all tracks to library';
+        addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+        addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+        buttonsContainer.appendChild(addLibraryBtn);
+
+        resultsHeaderTop.appendChild(buttonsContainer);
+        this.movePlexPlaylistContainerBeneathDownloadAll();
+    }
+
+    private normalizeAlbum(album: AlbumSearchItem | PlexLibraryAlbum): NormalizedAlbum {
+        if ('maxAudioQuality' in album || 'audioQuality' in album || 'releaseDate' in album || 'numberOfTracks' in album || 'numberOfItems' in album || 'explicit' in album) {
+            const a = album as AlbumSearchItem;
+            const artistNames = a.artists && a.artists.length > 0
+                ? a.artists.map(ar => ar.name).join(', ')
+                : (typeof a.artist === 'object' ? (a.artist as Artist)?.name : a.artist) || 'Unknown Artist';
+            const primaryArtistId = a.artists?.[0]?.id ?? (typeof a.artist === 'object' ? (a.artist as Artist)?.id : undefined);
+            const quality = a.maxAudioQuality || a.audioQuality || '';
+            return {
+                id: String(a.id),
+                type: a.type,
+                title: a.title,
+                artist: artistNames,
+                artistId: primaryArtistId,
+                year: a.releaseDate ? new Date(a.releaseDate).getFullYear() : null,
+                trackCount: a.numberOfTracks ?? a.numberOfItems ?? null,
+                quality,
+                explicit: a.explicit || false,
+                cover: a.cover,
+            };
+        }
+        const p = album as PlexLibraryAlbum;
+        return {
+            id: p.id,
+            title: p.title || 'Unknown Album',
+            artist: p.artist || this.libraryCurrentArtist?.name || 'Unknown Artist',
+            year: p.year ?? null,
+            trackCount: typeof p.track_count === 'number' ? p.track_count : null,
+            quality: '',
+            explicit: false,
+            cover: p.cover,
+        };
+    }
+
+    private formatAlbumGridHeader(hideArtist: boolean = false, includeQuality: boolean = true): string {
+        return `
+            <div class="albums-grid-header${hideArtist ? ' hide-artist' : ''}">
+                <div class="grid-cell grid-col-artwork"></div>
+                <div class="grid-cell grid-col-title">ALBUM</div>
+                ${!hideArtist ? '<div class="grid-cell grid-col-artist">ARTIST</div>' : ''}
+                <div class="grid-cell grid-col-year">YEAR</div>
+                <div class="grid-cell grid-col-track-count">TRACKS</div>
+                ${includeQuality ? '<div class="grid-cell grid-col-quality">MAX QUALITY</div>' : ''}
+                <div class="grid-cell grid-col-actions">ACTIONS</div>
             </div>
         `;
     }
@@ -3488,6 +9316,34 @@ class App {
         return `
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <rect x="6" y="6" width="12" height="12"></rect>
+            </svg>
+        `;
+    }
+
+    private getSpinnerIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" opacity="0.2"></circle>
+                <path d="M22 12a10 10 0 0 1-10 10" stroke-linecap="round">
+                    <animateTransform attributeName="transform" attributeType="XML" type="rotate" values="0 12 12;360 12 12" dur="1s" repeatCount="indefinite"></animateTransform>
+                </path>
+            </svg>
+        `;
+    }
+
+    private getCheckmarkIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        `;
+    }
+
+    private getExclamationIconSvg(): string {
+        return `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2v20"></path>
+                <circle cx="12" cy="20" r="1"></circle>
             </svg>
         `;
     }
@@ -3528,12 +9384,12 @@ class App {
         this.currentPlayButton = null;
     }
 
-    private async handlePlayToggle(
-        trackId: number,
-        trackCard: HTMLElement,
-        playButton: HTMLButtonElement
+    private async handlePlayGeneric(
+        playbackId: string,
+        playButton: HTMLButtonElement,
+        fetchStreamUrl: () => Promise<string>
     ): Promise<void> {
-        if (this.currentPlayingTrackId === trackId) {
+        if (this.currentPlayingTrackId === playbackId) {
             this.stopPlayback();
             return;
         }
@@ -3541,7 +9397,7 @@ class App {
         this.stopPlayback();
         this.setPlayButtonState(playButton, true);
         this.setPlayButtonLoading(playButton, true);
-        this.currentPlayingTrackId = trackId;
+        this.currentPlayingTrackId = playbackId;
         this.currentPlayButton = playButton;
 
         const audio = new Audio();
@@ -3564,7 +9420,7 @@ class App {
         this.currentAudioCleanup = { audio, onEnded, onError };
 
         try {
-            const streamUrl = await this.fetchTrackStreamUrl(trackId);
+            const streamUrl = await fetchStreamUrl();
             audio.src = streamUrl;
             this.setPlayButtonLoading(playButton, false);
             await audio.play();
@@ -3575,33 +9431,44 @@ class App {
         }
     }
 
+    private async handlePlayToggle(
+        trackId: number,
+        trackCard: HTMLElement,
+        playButton: HTMLButtonElement
+    ): Promise<void> {
+        const playbackTrackId = `deezer:${trackId}`;
+        await this.handlePlayGeneric(playbackTrackId, playButton, () => this.fetchTrackStreamUrl(trackId));
+    }
+
     private async fetchTrackStreamUrl(trackId: number): Promise<string> {
-        const qualities = ['LOSSLESS'];
+        return `/api/hifi/tracks/${encodeURIComponent(String(trackId))}/stream?quality=LOW`;
+    }
 
-        for (const quality of qualities) {
-            try {
-                const response = await fetch(`/track/?id=${trackId}&quality=${quality}`);
-                if (!response.ok) {
-                    continue;
-                }
+    private async handlePlayLibraryToggle(trackId: string, playButton: HTMLButtonElement): Promise<void> {
+        const playbackTrackId = `plex:${trackId}`;
+        await this.handlePlayGeneric(playbackTrackId, playButton, () => this.fetchLibraryTrackStreamUrl(trackId));
+    }
 
-                const data = await response.json();
-                const manifestBase64 = data?.data?.manifest || data?.manifest;
-                if (typeof manifestBase64 !== 'string') {
-                    continue;
-                }
-
-                const manifest = this.decodeManifest(manifestBase64);
-                const urls = manifest?.urls;
-                if (Array.isArray(urls) && typeof urls[0] === 'string') {
-                    return urls[0];
-                }
-            } catch (error) {
-                console.warn(`[PLAYBACK] Failed to fetch ${quality} stream:`, error);
-            }
+    private async fetchLibraryTrackStreamUrl(trackId: string): Promise<string> {
+        const params = new URLSearchParams();
+        const userId = this.getSelectedPlexUserId();
+        if (userId) {
+            params.set('user_id', userId);
         }
 
-        throw new Error('No playable stream found');
+        const query = params.toString();
+        const response = await fetch(`/api/plex/library/tracks/${encodeURIComponent(trackId)}/stream${query ? `?${query}` : ''}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch Plex library stream URL (HTTP ${response.status})`);
+        }
+
+        const data = await response.json().catch(() => ({} as { stream_url?: string }));
+        const streamUrl = (data as { stream_url?: string }).stream_url;
+        if (typeof streamUrl !== 'string' || !streamUrl) {
+            throw new Error('Plex library stream URL missing from response');
+        }
+
+        return streamUrl;
     }
 
     private decodeManifest(manifestBase64: string): { urls?: string[] } | null {
@@ -3623,45 +9490,32 @@ class App {
         const primaryArtistId = album.artists?.[0]?.id || album.artist?.id;
 
         // Format release year if available
-        const releaseYear = album.releaseDate 
+        const releaseYear = album.releaseDate
             ? new Date(album.releaseDate).getFullYear()
             : '';
 
         // Format track count
-        const trackCount = album.numberOfTracks 
-            ? `${album.numberOfTracks} track${album.numberOfTracks !== 1 ? 's' : ''}`
+        const trackCount = (album.numberOfTracks ?? album.numberOfItems)
+            ? `${album.numberOfTracks ?? album.numberOfItems} track${(album.numberOfTracks ?? album.numberOfItems) !== 1 ? 's' : ''}`
             : '';
 
-        // Format audio quality if available - check mediaMetadata.tags for best quality
-        let quality = album.audioQuality || '';
-        if (album.mediaMetadata?.tags && album.mediaMetadata.tags.length > 0) {
-            // Prioritize: HIRES_LOSSLESS > DOLBY_ATMOS > LOSSLESS > LOW
-            const tags = album.mediaMetadata.tags;
-            if (tags.includes('HIRES_LOSSLESS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('DOLBY_ATMOS')) {
-                quality = 'HIRES_LOSSLESS';
-            } else if (tags.includes('LOSSLESS')) {
-                quality = 'LOSSLESS';
-            } else if (tags.includes('LOW')) {
-                quality = 'LOW';
-            }
-        }
+        // Format audio quality if available - prefer the normalized maxAudioQuality field
+        const quality = album.maxAudioQuality || album.audioQuality || '';
         const qualityDisplay = this.formatQuality(quality);
 
         return `
             <div class="track-card album-card clickable" data-album-id="${album.id}" ${primaryArtistId ? `data-artist-id="${primaryArtistId}"` : ''} title="Click to view tracks">
                 <div class="track-artwork">
-                    ${album.cover 
-                        ? `<img src="${this.formatTidalImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+                    ${album.cover
+                ? `<img src="${this.getHifiImageUrl(album.cover, 1280)}" alt="${album.title}" loading="lazy">`
+                : `<div class="track-artwork-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                                 <circle cx="8.5" cy="8.5" r="1.5"></circle>
                                 <polyline points="21 15 16 10 5 21"></polyline>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
                 <div class="track-info">
                     <div class="track-title">${this.escapeHtml(album.title)}</div>
@@ -3686,35 +9540,111 @@ class App {
         `;
     }
 
-    private formatArtistCard(artist: ArtistSearchItem): string {
-        // Format popularity
-        const popularity = artist.popularity ? `Popularity: ${artist.popularity}` : '';
+    private formatAlbumGridRow(album: NormalizedAlbum, options: AlbumGridOptions): string {
+        const hideArtist = options.hideArtist || false;
+        const includeQuality = options.includeQuality !== false;
+        const dataAttr = options.dataAttr || 'data-album-id';
+        const extraRowClass = options.extraRowClass || '';
+        const actions = options.actions || 'full';
+        const rowClasses = ['albums-grid-row', ...(hideArtist ? ['hide-artist'] : []), ...(extraRowClass ? [extraRowClass] : [])].join(' ');
+        const extraAttrs = options.rowDataAttrs
+            ? Object.entries(options.rowDataAttrs(album)).map(([k, v]) => `${k}="${this.escapeHtml(v)}"`).join(' ')
+            : '';
+
+        const artworkSrc = album.cover
+            ? (album.cover.startsWith('http') ? album.cover : this.getHifiImageUrl(album.cover, 1280))
+            : null;
+
+        const year = album.year ? String(album.year) : '—';
+        const trackCount = album.trackCount ? String(album.trackCount) : '—';
+        const qualityDisplay = album.quality ? this.formatQuality(album.quality) : '—';
 
         return `
-            <div class="track-card artist-card clickable" data-artist-id="${artist.id}" title="Click to view albums">
-                <div class="track-artwork">
-                    ${artist.picture 
-                        ? `<img src="${this.formatTidalImageUrl(artist.picture, 750)}" alt="${artist.name}" loading="lazy">`
-                        : `<div class="track-artwork-placeholder">
+            <div class="${rowClasses}" ${dataAttr}="${album.id}" ${album.artistId ? `data-artist-id="${album.artistId}"` : ''} data-album-type="${album.type || ''}" ${extraAttrs}>
+                <div class="grid-cell grid-col-artwork">
+                    ${artworkSrc
+                ? `<img src="${artworkSrc}" alt="${this.escapeHtml(album.title)}" loading="lazy">`
+                : `<div class="grid-artwork-placeholder">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                           </div>`
+            }
+                </div>
+                <div class="grid-cell grid-col-title">
+                    <div class="track-title-with-badge">
+                        ${this.escapeHtml(album.title)}
+                        ${album.explicit ? `<span class="explicit-badge" title="Explicit content">E</span>` : ''}
+                    </div>
+                </div>
+                ${!hideArtist ? `<div class="grid-cell grid-col-artist">
+                    <span class="album-artist-name" ${album.artistId ? `title="View albums by ${this.escapeHtml(album.artist)}"` : ''}>${this.escapeHtml(album.artist)}</span>
+                </div>` : ''}
+                <div class="grid-cell grid-col-year">${year}</div>
+                <div class="grid-cell grid-col-track-count">${trackCount}</div>
+                ${includeQuality ? `<div class="grid-cell grid-col-quality">${qualityDisplay}</div>` : ''}
+                <div class="grid-cell grid-col-actions">
+                    <button class="grid-play-btn" title="View Tracks" aria-label="View Tracks" ${dataAttr}="${album.id}">
+                        ${this.getPlayIconSvg()}
+                    </button>
+                    ${actions === 'full' ? `
+                    <button class="grid-more-btn" title="Find Similar" aria-label="Find Similar">
+                        ${this.getMoreLikeIconSvg()}
+                    </button>
+                    <button class="grid-add-playlist-btn" title="Add to Playlist" ${dataAttr}="${album.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14"></path>
+                            <path d="M5 12h14"></path>
+                        </svg>
+                    </button>
+                    <button class="grid-add-library-btn" title="Add to Library" ${dataAttr}="${album.id}">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                            <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                            <rect x="8" y="12" width="8" height="1"></rect>
+                        </svg>
+                    </button>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    private renderAlbumGrid(albums: (AlbumSearchItem | PlexLibraryAlbum)[], options: AlbumGridOptions): string {
+        const normalized = albums.map(a => this.normalizeAlbum(a));
+        const emptyMessage = options.emptyMessage || '<div class="library-placeholder"><p>No albums found.</p></div>';
+
+        return `
+            <div class="albums-grid-wrapper" data-view-mode="${options.viewMode}">
+                <div class="albums-grid">
+                    ${this.formatAlbumGridHeader(options.hideArtist || false, options.includeQuality !== false)}
+                    ${normalized.length > 0
+                ? normalized.map(album => this.formatAlbumGridRow(album, options)).join('')
+                : emptyMessage}
+                </div>
+            </div>
+        `;
+    }
+
+    private formatArtistCard(artist: ArtistSearchItem): string {
+        return `
+            <div class="artist-card-compact clickable" data-artist-id="${artist.id}" title="Click to view albums">
+                <div class="artist-card-name">${this.escapeHtml(artist.name)}</div>
+                <div class="artist-card-image">
+                    ${artist.picture
+                ? `<img src="${this.getHifiImageUrl(artist.picture, 750)}" alt="${this.escapeHtml(artist.name)}" loading="lazy">`
+                : `<div class="artist-card-placeholder">
                             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="8" r="4"></circle>
                                 <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"></path>
                             </svg>
                            </div>`
-                    }
+            }
                 </div>
-                <div class="track-info">
-                    <div class="track-title">${this.escapeHtml(artist.name)}</div>
-                    <div class="track-artist">Artist</div>
-                    <div class="track-metadata">
-                        ${popularity ? `<span>${popularity}</span>` : ''}
-                    </div>
-                </div>
-                <div class="track-actions">
-                    <button class="track-more-btn" title="More Like This" aria-label="More Like This">
-                        ${this.getMoreLikeIconSvg()}
-                    </button>
-                </div>
+                <button class="artist-card-btn" title="Find Similar Artists" aria-label="Find Similar Artists">
+                    ${this.getMoreLikeIconSvg()}
+                </button>
             </div>
         `;
     }
@@ -3742,13 +9672,50 @@ class App {
 
     private formatQuality(quality: string): string {
         const qualityMap: { [key: string]: string } = {
-            'HI_RES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
-            'HIRES_LOSSLESS': 'Hi-Res • up to 24-bit/192kHz FLAC',
-            'LOSSLESS': 'CD • 16-bit/44.1kHz FLAC',
-            'HIGH': '320kbps AAC',
-            'LOW': '96kbps AAC'
+            'DOLBY_ATMOS': 'DOLBY ATMOS',
+            'HI_RES_LOSSLESS': 'HI-RES FLAC',
+            'HIRES_LOSSLESS': 'HI-RES FLAC',
+            'LOSSLESS': 'LOSSLESS FLAC',
+            'HIGH': 'HIGH AAC',
+            'LOW': 'LOW AAC'
         };
         return qualityMap[quality] || quality;
+    }
+
+    private formatTotalDuration(tracks: { duration?: number | null }[]): string {
+        const totalSeconds = tracks.reduce((sum, t) => {
+            const s = typeof t.duration === 'number' ? t.duration : 0;
+            return sum + Math.max(0, s);
+        }, 0);
+        const minutes = Math.floor(totalSeconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const remaining = minutes % 60;
+        return hours > 0 ? `${hours}h ${remaining}m` : `${minutes}m`;
+    }
+
+    private getHifiImageUrl(imageIdOrPath: string | undefined, size: number): string {
+        if (!imageIdOrPath) {
+            return '';
+        }
+
+        const normalized = imageIdOrPath.trim();
+        if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
+            return normalized;
+        }
+
+        if (normalized.startsWith('//')) {
+            return `https:${normalized}`;
+        }
+
+        if (normalized.startsWith('resources.tidal.com/')) {
+            return `https://${normalized}`;
+        }
+
+        if (normalized.startsWith('/images/')) {
+            return `https://resources.tidal.com${normalized}`;
+        }
+
+        return this.formatTidalImageUrl(normalized, size);
     }
 
     private formatTidalImageUrl(imageIdOrPath: string, size: number): string {
@@ -3768,16 +9735,23 @@ class App {
         maxRetries: number = 3
     ): Promise<Response> {
         let lastError: Error | null = null;
-        
+
+        // Use pendingRequestController only for GET requests (cancelled on page navigation)
+        // POST/PUT/DELETE/PATCH requests must complete even if user navigates away
+        const finalOptions = {
+            ...options,
+            signal: options?.signal || ((!options?.method || options.method === 'GET') ? this.pendingRequestController?.signal : undefined)
+        };
+
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
             try {
-                const response = await fetch(url, options);
-                
+                const response = await fetch(url, finalOptions);
+
                 // Only retry on 5xx errors or connection issues
                 if (response.status < 500) {
                     return response;
                 }
-                
+
                 // 5xx error - log and retry
                 lastError = new Error(`HTTP ${response.status}`);
                 if (attempt < maxRetries) {
@@ -3786,7 +9760,7 @@ class App {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
-                
+
                 // Last attempt, return the response
                 return response;
             } catch (error) {
@@ -3801,7 +9775,7 @@ class App {
                 throw error;
             }
         }
-        
+
         throw lastError || new Error('Fetch failed');
     }
 
@@ -3809,18 +9783,18 @@ class App {
         this.stopPlayback();
         this.updatePlexPlaylistContainerVisibility(false);
         this.lastRetryFunction = retryFn || null;
-        
-        const retryButton = retryFn 
+
+        const retryButton = retryFn
             ? `<button class="retry-button" id="retryButton">Retry</button>`
             : '';
-        
+
         this.resultsContainer.innerHTML = `
             <div class="message">
                 <p>${message}</p>
                 ${retryButton}
             </div>
         `;
-        
+
         if (retryFn) {
             const retryBtn = document.getElementById('retryButton');
             if (retryBtn) {
@@ -3833,6 +9807,9 @@ class App {
 
     private async fetchArtistAlbums(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'artist', artistId };
+        this.exploreArtistName = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'artist', artistId });
         }
@@ -3840,42 +9817,141 @@ class App {
         this.displayMessage('Loading artist albums...');
 
         try {
-            const response = await fetch(`/artist/?f=${artistId}`);
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}?include_albums=true&include_tracks=true`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch artist');
             }
 
-            const data: any = await response.json();
+            const data: ArtistObject = await response.json();
 
             if (data.error) {
                 this.displayMessage(`Error: ${data.error}`, () => this.fetchArtistAlbums(artistId));
                 return;
             }
 
-            // Extract albums from data.albums.items
-            const albums = data.albums?.items || [];
+            const artistData = data.artist || {};
+            const albums = Array.isArray(artistData.albums) ? artistData.albums : [];
+            const singles = Array.isArray(artistData.singles) ? artistData.singles : [];
+            const eps = Array.isArray(artistData.eps) ? artistData.eps : [];
+            const topTracks = Array.isArray(artistData.top_tracks) ? (artistData.top_tracks as Track[]).slice(0, 5) : [];
 
-            if (albums.length === 0) {
-                this.displayMessage('No albums found for this artist');
+            // Check all groups for empty state
+            if (albums.length === 0 && singles.length === 0 && eps.length === 0 && topTracks.length === 0) {
+                this.displayMessage('No releases or top tracks found for this artist');
                 return;
             }
 
-            // Get artist name from the first album's artist data
-            const artistName = albums[0]?.artist?.name || albums[0]?.artists?.[0]?.name || 'Artist';
+            const artistName = artistData.name || 'Artist';
+            const artistPictureUrl = artistData.picture || null;
+            this.exploreArtistName = artistName;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
 
-            // Display albums
+            const heroHtml = this.renderHeroCard({
+                type: 'artist',
+                coverUrl: artistPictureUrl || undefined,
+                coverAlt: artistName,
+                title: artistName,
+                proxyInfo: data.proxied_via || undefined,
+                actions: [
+                    {
+                        id: 'artistPlayBtn',
+                        className: 'primary',
+                        title: 'Play artist',
+                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                        disabled: topTracks.length === 0 && albums.length === 0 && singles.length === 0 && eps.length === 0,
+                    },
+                    {
+                        id: 'findSimilarArtistBtn',
+                        className: 'hero-bottom-right',
+                        title: 'Find similar artists',
+                        svgContent: this.getMoreLikeIconSvg(),
+                        dataAttrs: { 'data-artist-id': String(artistId) },
+                    },
+                ],
+            });
+
             this.resultsContainer.innerHTML = `
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>${this.escapeHtml(artistName)} - Albums</h2>
+                ${heroHtml}
+                ${topTracks.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Top Tracks</h2>
+                        </div>
                     </div>
-                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                </div>
-                <div class="results-list">
-                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
-                </div>
+                    ${this.formatTracksGrid(topTracks, undefined, false)}
+                ` : ''}
+                ${albums.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Albums</h2>
+                        </div>
+                    </div>
+                    ${this.renderAlbumGrid(albums, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
+                ${singles.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>Singles</h2>
+                        </div>
+                    </div>
+                    ${this.renderAlbumGrid(singles, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
+                ${eps.length > 0 ? `
+                    <div class="results-header">
+                        <div class="results-header-top">
+                            <h2>EPs</h2>
+                        </div>
+                    </div>
+                    ${this.renderAlbumGrid(eps, { viewMode: 'artist-albums', hideArtist: true })}
+                ` : ''}
             `;
+
+            // Attach event listener to play button
+            const playBtn = document.getElementById('artistPlayBtn') as HTMLButtonElement;
+            if (playBtn) {
+                playBtn.addEventListener('click', async () => {
+                    if (topTracks.length > 0) {
+                        void this.handlePlayToggle(topTracks[0].id, undefined as any, playBtn);
+                        return;
+                    }
+
+                    // Fallback to the first track from the first album/single/ep when no top tracks are available.
+                    const allReleases = [...albums, ...singles, ...eps];
+                    if (allReleases.length > 0) {
+                        const firstAlbumId = allReleases[0].id;
+                        try {
+                            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(firstAlbumId))}`, {
+                                signal: this.pendingRequestController?.signal
+                            });
+                            if (!response.ok) {
+                                throw new Error('Failed to fetch album');
+                            }
+                            const albumData: AlbumInfo = await response.json();
+                            const trackItems = albumData.data?.items || [];
+                            const tracks = trackItems.filter(item => item.type === 'track').map(item => item.item);
+                            if (tracks.length > 0) {
+                                void this.handlePlayToggle(tracks[0].id, undefined as any, playBtn);
+                            }
+                        } catch (error) {
+                            console.error('Error playing artist:', error);
+                        }
+                    }
+                });
+            }
+
+            const findSimilarArtistBtn = document.getElementById('findSimilarArtistBtn') as HTMLButtonElement;
+            if (findSimilarArtistBtn) {
+                findSimilarArtistBtn.addEventListener('click', () => {
+                    void this.navigateToRoute({ view: 'similar_artists', artistId }, true);
+                });
+            }
+
+            // Annotate with Plex status
+            void this.annotateAlbumGridsWithPlexStatus([...albums, ...singles, ...eps]);
+            void this.annotateArtistHeroWithPlexStatus(artistId);
         } catch (error) {
             this.displayMessage('Error loading artist albums. Please try again.', () => this.fetchArtistAlbums(artistId));
             console.error('Artist fetch error:', error);
@@ -3884,6 +9960,9 @@ class App {
 
     private async fetchAlbumTracks(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'album';
+        this.currentExploreRoute = { view: 'album', albumId };
+        this.exploreAlbumTitle = null;
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'album', albumId });
         }
@@ -3891,31 +9970,28 @@ class App {
         this.displayMessage('Loading album tracks...');
 
         try {
-            const response = await fetch(`/album/?id=${albumId}`);
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`, {
+                signal: this.pendingRequestController?.signal
+            });
 
             if (!response.ok) {
                 throw new Error('Failed to fetch album');
             }
 
-            const data: AlbumInfo = await response.json();
+            const data: AlbumObjectResponse = await response.json();
 
             if (data.error) {
                 this.displayMessage(`Error: ${data.error}`, () => this.fetchAlbumTracks(albumId));
                 return;
             }
 
-            // Extract album metadata from data root
-            const albumData = data.data;
+            const albumData = data.album;
             if (!albumData) {
                 this.displayMessage('No album data found');
                 return;
             }
 
-            // Extract tracks from items array
-            const trackItems = albumData.items || [];
-            const tracks = trackItems
-                .filter(item => item.type === 'track')
-                .map(item => item.item);
+            const tracks = albumData.tracks || [];
 
             if (tracks.length === 0) {
                 this.displayMessage('No tracks found in this album');
@@ -3935,58 +10011,149 @@ class App {
 
             // Get album info for display
             const albumTitle = albumData.title || 'Album';
+            this.exploreAlbumTitle = albumTitle;
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             const artistNames = albumData.artists && albumData.artists.length > 0
                 ? albumData.artists.map(a => a.name).join(', ')
                 : albumData.artist?.name || 'Unknown Artist';
+            const primaryArtistId = albumData.artists?.[0]?.id || albumData.artist?.id;
 
-            // Display tracks with Download All button
+            // Calculate total duration
+            const totalDurationSeconds = tracks.reduce((sum, track) => {
+                return sum + (track.duration || 0);
+            }, 0);
+            const totalDurationMinutes = Math.floor(totalDurationSeconds / 60);
+            const totalDurationHours = Math.floor(totalDurationMinutes / 60);
+            const remainingMinutes = totalDurationMinutes % 60;
+            const durationStr = totalDurationHours > 0
+                ? `${totalDurationHours}h ${remainingMinutes}m`
+                : `${totalDurationMinutes}m`;
+
+            const releaseDate = albumData.releaseDate
+                ? new Date(albumData.releaseDate).getFullYear()
+                : '';
+
+            const albumIsExplicit = Boolean(
+                albumData.explicit ||
+                albumData.mediaMetadata?.tags?.includes('EXPLICIT') ||
+                tracks.some(track => track.explicit)
+            );
+
+            const coverArt = albumData.cover
+                ? this.getHifiImageUrl(albumData.cover, 1280)
+                : '';
+
+            const heroHtml = this.renderHeroCard({
+                type: 'album',
+                coverUrl: coverArt || undefined,
+                coverAlt: albumTitle,
+                title: albumTitle,
+                titleBadge: albumIsExplicit
+                    ? '<span class="explicit-badge" title="Explicit content">E</span>'
+                    : undefined,
+                subtitle: {
+                    text: artistNames,
+                    artistId: primaryArtistId || undefined,
+                    title: primaryArtistId ? `View albums by ${artistNames}` : undefined,
+                },
+                metadataItems: [
+                    releaseDate ? String(releaseDate) : '',
+                    `${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`,
+                    durationStr,
+                ].filter(Boolean),
+                proxyInfo: data.proxied_via || undefined,
+                actions: [
+                    {
+                        id: 'albumPlayBtn',
+                        className: 'primary',
+                        title: 'Play album',
+                        svgContent: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>',
+                    },
+                    {
+                        id: 'findSimilarAlbumBtn',
+                        title: 'Find similar albums',
+                        svgContent: this.getMoreLikeIconSvg(),
+                        dataAttrs: { 'data-album-id': String(albumId) },
+                    },
+                    {
+                        id: 'addAllPlaylistBtn',
+                        title: 'Add all tracks to a playlist',
+                        svgContent: this.getAddAllPlaylistIconSvg(),
+                    },
+                    {
+                        id: 'addAllLibraryBtn',
+                        title: 'Add all tracks to library',
+                        svgContent: this.getAddAllLibraryIconSvg(),
+                    },
+                ],
+            });
+
             this.resultsContainer.innerHTML = `
-                <div class="results-header">
-                    <div class="results-header-top">
-                        <h2>${this.escapeHtml(albumTitle)} - ${this.escapeHtml(artistNames)}</h2>
-                    </div>
-                    ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
-                    </div>
-                </div>
+                ${heroHtml}
                 <div class="results-list">
-                    ${tracks.map(track => this.formatTrackCard(track, true, numberOfVolumes)).join('')}
+                    ${this.formatTracksGrid(tracks, numberOfVolumes)}
                 </div>
             `;
-
-            // Add Download All button
-            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement;
-            if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
-                    // Show progress info when download starts
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.downloadAllTracks();
-                });
-                resultsHeaderTop.appendChild(downloadAllBtn);
-                this.movePlexPlaylistContainerBeneathDownloadAll();
+            // Attach event listeners to action buttons
+            const addPlaylistBtn = document.getElementById('addAllPlaylistBtn') as HTMLButtonElement;
+            if (addPlaylistBtn) {
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
             }
 
-            void this.annotateTrackCardsWithPlexStatus(tracks);
+            const addLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
+            if (addLibraryBtn) {
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+            }
+
+            const findSimilarBtn = document.getElementById('findSimilarAlbumBtn') as HTMLButtonElement;
+            if (findSimilarBtn) {
+                findSimilarBtn.addEventListener('click', () => {
+                    void this.navigateToRoute({ view: 'similar_albums', albumId }, true);
+                });
+            }
+
+            const playBtn = document.getElementById('albumPlayBtn') as HTMLButtonElement;
+            if (playBtn) {
+                playBtn.addEventListener('click', () => {
+                    // Play the first track from the album
+                    if (tracks.length > 0) {
+                        void this.handlePlayToggle(tracks[0].id, undefined as any, playBtn);
+                    }
+                });
+            }
+
+            this.movePlexPlaylistContainerBeneathDownloadAll();
+
+            void this.annotateTrackCardsWithPlexStatus(tracks, albumId);
+            void this.annotateAlbumHeroWithPlexStatus(albumId);
         } catch (error) {
             this.displayMessage('Error loading album tracks. Please try again.', () => this.fetchAlbumTracks(albumId));
             console.error('Album fetch error:', error);
         }
     }
 
+    private async fetchAlbumObject(albumId: number): Promise<AlbumObject> {
+        const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch album');
+        }
+
+        const data: AlbumObjectResponse = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        if (!data.album) {
+            throw new Error('No album data found');
+        }
+
+        return data.album;
+    }
+
     private async fetchSimilarTracks(trackId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_tracks', trackId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_tracks', trackId });
         }
@@ -3994,7 +10161,9 @@ class App {
         this.displayMessage('Loading track recommendations...');
 
         try {
-            const response = await fetch(`/recommendations/?id=${encodeURIComponent(String(trackId))}`);
+            const response = await fetch(`/api/hifi/tracks/${encodeURIComponent(String(trackId))}/similar`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch recommendations');
             }
@@ -4022,33 +10191,31 @@ class App {
                         <h2>More Like This - Similar Tracks</h2>
                     </div>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
-                    <div class="progress-info" style="display: none;">
-                        <div class="progress-bar-container">
-                            <div class="progress-bar" id="lastfmProgress" style="width: 0%"></div>
-                        </div>
-                        <p class="progress-text" id="progressText">Queued <strong>0</strong> of <strong>${tracks.length}</strong> tracks</p>
-                    </div>
                 </div>
                 <div class="results-list">
-                    ${tracks.map((track) => this.formatTrackCard(track)).join('')}
+                    ${this.formatTracksGrid(tracks)}
                 </div>
             `;
 
             const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement | null;
             if (resultsHeaderTop) {
-                const downloadAllBtn = document.createElement('button');
-                downloadAllBtn.id = 'downloadAllBtn';
-                downloadAllBtn.className = 'download-all-btn';
-                downloadAllBtn.title = 'Download all tracks sequentially';
-                downloadAllBtn.textContent = 'Download All';
-                downloadAllBtn.addEventListener('click', () => {
-                    const progressInfo = document.querySelector('.progress-info') as HTMLElement | null;
-                    if (progressInfo) {
-                        progressInfo.style.display = 'block';
-                    }
-                    void this.downloadAllTracks();
-                });
-                resultsHeaderTop.appendChild(downloadAllBtn);
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
                 this.movePlexPlaylistContainerBeneathDownloadAll();
             }
 
@@ -4059,8 +10226,281 @@ class App {
         }
     }
 
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: number): Promise<void> {
+        this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+        if (updateHistory) {
+            this.pushHistoryRoute({ view: 'fresh_finds', freshFindsPlaylistId: playlistId });
+        }
+        this.stopPlayback();
+        this.freshFindsPolling = false;
+
+        if (playlistId) {
+            await this.renderFreshFindsTracks(this.getSelectedPlexUserId() || '', playlistId);
+            return;
+        }
+
+        this.displayMessage('Loading Fresh Finds...');
+
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            this.displayMessage('Not enough listen history to generate recommendations');
+            return;
+        }
+
+        try {
+            const playlistsResponse = await fetch(`/api/recommendations/playlists?user_id=${encodeURIComponent(userId)}`);
+            if (!playlistsResponse.ok) {
+                throw new Error('Failed to check playlists');
+            }
+            const playlistsData = await playlistsResponse.json();
+            const hasHistory = playlistsData.has_history as boolean;
+            const playlists = Array.isArray(playlistsData.playlists) ? playlistsData.playlists : [];
+            const existing = playlists.find((p: any) => p.slug === 'fresh-finds');
+
+            if (!hasHistory) {
+                this.displayMessage('Not enough listen history to generate recommendations');
+                return;
+            }
+
+            if (existing) {
+                const generatedAt = new Date(existing.generated_at);
+                const hoursSince = (Date.now() - generatedAt.getTime()) / (1000 * 60 * 60);
+                if (hoursSince > 24) {
+                    void this.triggerFreshFindsGeneration(userId);
+                }
+                await this.renderFreshFindsTracks(userId);
+            } else {
+                await this.triggerFreshFindsGeneration(userId);
+            }
+        } catch (error) {
+            this.displayMessage('Error loading Fresh Finds. Please try again.', () => this.fetchFreshFindsPlaylist());
+            console.error('Fresh Finds fetch error:', error);
+        }
+    }
+
+    private async triggerFreshFindsGeneration(userId: string): Promise<void> {
+        try {
+            const response = await fetch('/api/recommendations/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slug: 'fresh-finds', user_id: userId })
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                if (response.status === 409) {
+                    await this.pollForFreshFindsCompletion(userId);
+                    return;
+                }
+                throw new Error(data.error || 'Failed to start generation');
+            }
+            await this.pollForFreshFindsCompletion(userId);
+        } catch (error) {
+            console.error('Fresh Finds generation error:', error);
+        }
+    }
+
+    private async pollForFreshFindsCompletion(userId: string): Promise<void> {
+        if (this.freshFindsPolling) return;
+        this.freshFindsPolling = true;
+
+        const poll = async (): Promise<void> => {
+            if (!this.freshFindsPolling) return;
+            try {
+                const response = await fetch(`/api/jobs?jobs_filter=incomplete&exclude_bulk_playlist_add=0`);
+                if (!response.ok) throw new Error('Failed to check job status');
+                const data = await response.json();
+                const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+                const activeJob = jobs.find((j: any) => j.job_type === 'generate_recommendations' && (j.status === 'queued' || j.status === 'in_progress'));
+                if (activeJob) {
+                    this.renderFreshFindsProgress(activeJob);
+                    setTimeout(poll, 3000);
+                } else {
+                    this.freshFindsPolling = false;
+                    await this.renderFreshFindsTracks(userId);
+                }
+            } catch {
+                if (!this.freshFindsPolling) return;
+                setTimeout(poll, 3000);
+            }
+        };
+        await poll();
+    }
+
+    private renderFreshFindsProgress(job: any): void {
+        const stages = (job.result?.stages || {}) as Record<string, string>;
+        const progress = (job.result?.progress || {}) as Record<string, number>;
+        const stageList = [
+            { key: 'syncing_listen_history', label: 'Syncing Listen History' },
+            { key: 'gathering_seeds', label: 'Gathering Seeds' },
+            { key: 'fetching_recommendations', label: 'Fetching Recommendations' },
+            { key: 'processing_tracks', label: 'Processing Tracks' },
+            { key: 'saving_playlist', label: 'Saving Playlist' }
+        ];
+
+        const statusLabel = job.status === 'queued' ? 'Queued' : 'In Progress';
+        const seedsFound = progress.seeds_found || 0;
+        const recsFetched = progress.recommendations_fetched || 0;
+        const afterFilter = progress.tracks_after_filter || 0;
+
+        const stageHtml = stageList.map(s => {
+            const status = stages[s.key] || (job.status === 'succeeded' ? 'done' : 'pending');
+            const statusClass = `status-${status}`;
+            const label = status.replace('_', ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            return `
+                <div class="job-stage">
+                    <span>${s.label}</span>
+                    <span class="job-stage-status ${statusClass}">${label}</span>
+                </div>
+            `;
+        }).join('');
+
+        const progressText = seedsFound > 0
+            ? `${seedsFound} seeds • ${recsFetched} recommendations fetched • ${afterFilter} after filter`
+            : 'Waiting to start...';
+
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-${job.status === 'queued' ? 'queued' : 'in-progress'}">${statusLabel}</div>
+                </div>
+                <div class="job-sync-progress">${this.escapeHtml(progressText)}</div>
+                <div class="job-stages">
+                    ${stageHtml}
+                </div>
+            </div>
+        `;
+    }
+
+    private async renderFreshFindsTracks(userId: string, playlistId?: number): Promise<void> {
+        try {
+            let url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
+            if (playlistId) {
+                url += `&playlist_id=${playlistId}`;
+            }
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Fresh Finds tracks');
+            }
+            const data = await response.json();
+            const tracks = Array.isArray(data.tracks) ? data.tracks as Track[] : [];
+            const playlist = data.playlist || {};
+
+            if (tracks.length === 0) {
+                this.displayMessage('No new recommendations found. Try again later.');
+                return;
+            }
+
+            this.updatePlexPlaylistContainerVisibility(true);
+            const playlistName = playlist.name || 'Fresh Finds';
+            this.freshFindsPlaylistName = playlistName;
+            this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+            this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
+            const normalized = tracks.map(t => this.normalizeTrack(t));
+            const durationStr = this.formatTotalDuration(normalized);
+            this.resultsContainer.innerHTML = `
+                <div class="results-header">
+                    <div class="results-header-top">
+                        <h2>${this.escapeHtml(playlistName)}</h2>
+                    </div>
+                    <div class="playlist-subtitle">${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'} • ${durationStr}</div>
+                </div>
+                <div class="results-list">
+                    <div class="tracks-grid-wrapper" data-view-mode="multi-album">
+                        <div class="tracks-grid">
+                            ${this.formatTrackGridHeader(false, true, true)}
+                            <div id="freshFindsResultsList">
+                                ${tracks.map(track => this.formatTrackGridRow(this.normalizeTrack(track), {
+                                    viewMode: 'multi-album',
+                                    showTrackNumber: false,
+                                    showAlbumColumn: true,
+                                    showArtwork: true,
+                                })).join('')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const resultsHeaderTop = document.querySelector('.results-header-top') as HTMLElement | null;
+            if (resultsHeaderTop) {
+                const buttonsContainer = document.createElement('div');
+                buttonsContainer.className = 'add-all-buttons-container';
+
+                const generatedAt = playlist.generated_at as string | undefined;
+                const isToday = this.isPlaylistFromToday(generatedAt);
+                if (isToday) {
+                    const refreshBtn = document.createElement('button');
+                    refreshBtn.id = 'refreshFreshFindsBtn';
+                    refreshBtn.className = 'add-all-btn';
+                    refreshBtn.title = 'Refresh Fresh Finds';
+                    refreshBtn.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <polyline points="1 20 1 14 7 14"></polyline>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    `;
+                    refreshBtn.addEventListener('click', () => void this.refreshFreshFindsPlaylist(userId));
+                    buttonsContainer.appendChild(refreshBtn);
+                }
+
+                const addPlaylistBtn = document.createElement('button');
+                addPlaylistBtn.id = 'addAllPlaylistBtn';
+                addPlaylistBtn.className = 'add-all-btn';
+                addPlaylistBtn.title = 'Add all tracks to a playlist';
+                addPlaylistBtn.innerHTML = this.getAddAllPlaylistIconSvg();
+                addPlaylistBtn.addEventListener('click', () => this.addAllToPlaylist());
+                buttonsContainer.appendChild(addPlaylistBtn);
+                const addLibraryBtn = document.createElement('button');
+                addLibraryBtn.id = 'addAllLibraryBtn';
+                addLibraryBtn.className = 'add-all-btn';
+                addLibraryBtn.title = 'Add all tracks to library';
+                addLibraryBtn.innerHTML = this.getAddAllLibraryIconSvg();
+                addLibraryBtn.addEventListener('click', () => this.addAllToLibrary());
+                buttonsContainer.appendChild(addLibraryBtn);
+                resultsHeaderTop.appendChild(buttonsContainer);
+                this.movePlexPlaylistContainerBeneathDownloadAll();
+            }
+
+            void this.annotateTrackCardsWithPlexStatus(tracks);
+        } catch (error) {
+            this.displayMessage('Error loading Fresh Finds tracks. Please try again.', () => this.fetchFreshFindsPlaylist());
+            console.error('Fresh Finds tracks fetch error:', error);
+        }
+    }
+
+    private async refreshFreshFindsPlaylist(userId: string): Promise<void> {
+        this.stopPlayback();
+        this.freshFindsPolling = false;
+        this.resultsContainer.innerHTML = `
+            <div class="results-header">
+                <div class="results-header-top">
+                    <h2>Fresh Finds</h2>
+                </div>
+            </div>
+            <div class="job-item" style="margin-top: 1rem;">
+                <div class="job-main">
+                    <div class="job-title">Generating Fresh Finds</div>
+                    <div class="job-status status-in-progress">Starting...</div>
+                </div>
+            </div>
+        `;
+        await this.triggerFreshFindsGeneration(userId);
+        await this.renderFreshFindsTracks(userId);
+    }
+
     private async fetchSimilarAlbums(albumId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_albums', albumId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_albums', albumId });
         }
@@ -4068,7 +10508,9 @@ class App {
         this.displayMessage('Loading similar albums...');
 
         try {
-            const response = await fetch(`/album/similar/?id=${encodeURIComponent(String(albumId))}`);
+            const response = await fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}/similar`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch similar albums');
             }
@@ -4091,10 +10533,11 @@ class App {
                     <h2>More Like This - Similar Albums</h2>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
-                <div class="results-list">
-                    ${albums.map((album: AlbumSearchItem) => this.formatAlbumCard(album)).join('')}
-                </div>
+                ${this.renderAlbumGrid(albums, { viewMode: 'similar-albums' })}
             `;
+
+            // Annotate with Plex status
+            void this.annotateAlbumGridsWithPlexStatus(albums);
         } catch (error) {
             this.displayMessage('Error loading similar albums. Please try again.', () => this.fetchSimilarAlbums(albumId));
             console.error('Similar albums fetch error:', error);
@@ -4103,6 +10546,8 @@ class App {
 
     private async fetchSimilarArtists(artistId: number, updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
+        this.currentExploreRoute = { view: 'similar_artists', artistId };
+        this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
             this.pushHistoryRoute({ view: 'similar_artists', artistId });
         }
@@ -4110,7 +10555,9 @@ class App {
         this.displayMessage('Loading similar artists...');
 
         try {
-            const response = await fetch(`/artist/similar/?id=${encodeURIComponent(String(artistId))}`);
+            const response = await fetch(`/api/hifi/artists/${encodeURIComponent(String(artistId))}/similar`, {
+                signal: this.pendingRequestController?.signal
+            });
             if (!response.ok) {
                 throw new Error('Failed to fetch similar artists');
             }
@@ -4133,7 +10580,7 @@ class App {
                     <h2>More Like This - Similar Artists</h2>
                     ${data.proxied_via ? `<p class="proxy-info">Proxied via: <span class="proxy-name">${data.proxied_via}</span></p>` : ''}
                 </div>
-                <div class="results-list">
+                <div class="results-list artist-results">
                     ${artists.map((artist: ArtistSearchItem) => this.formatArtistCard(artist)).join('')}
                 </div>
             `;
@@ -4143,18 +10590,177 @@ class App {
         }
     }
 
+    private async withRedownloadContext(
+        chip: HTMLElement,
+        message: string,
+        action: () => Promise<void>
+    ): Promise<void> {
+        if (!window.confirm(message)) {
+            return;
+        }
+
+        const originalContent = chip.textContent;
+        const originalClassName = chip.className;
+        const originalTitle = chip.title;
+
+        chip.innerHTML = this.getSpinnerIconSvg();
+        chip.title = 'Re-downloading...';
+
+        const originalIgnoreMatches = this.downloadSettings.ignoreMatches;
+        this.downloadSettings.ignoreMatches = true;
+
+        const restoreChip = (): void => {
+            chip.textContent = originalContent || 'In Plex';
+            chip.className = originalClassName;
+            chip.title = originalTitle;
+        };
+
+        try {
+            await action();
+        } catch (error) {
+            console.error('[RE-DOWNLOAD] Error:', error);
+            restoreChip();
+            throw error;
+        } finally {
+            this.downloadSettings.ignoreMatches = originalIgnoreMatches;
+        }
+    }
+
+    private async handleRedownloadTrack(
+        trackId: number,
+        trackRow: HTMLElement,
+        chip: HTMLElement
+    ): Promise<void> {
+        console.log(`[RE-DOWNLOAD] Re-downloading track ${trackId}`);
+
+        await this.withRedownloadContext(chip, 'This track is already in your Plex library. Re-download it?', async () => {
+            const jobId = await this.downloadTrackToLibrary(trackId, 'loose');
+            console.log(`[RE-DOWNLOAD] Job queued: ${jobId}`);
+
+            chip.innerHTML = this.getSpinnerIconSvg();
+            chip.classList.add('plex-existing-chip--downloading');
+
+            const pollJob = async (): Promise<void> => {
+                try {
+                    const resp = await fetch(`/api/jobs/${jobId}`);
+                    if (!resp.ok) {
+                        chip.textContent = 'In Plex';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        return;
+                    }
+                    const job = await resp.json();
+                    if (job.status === 'succeeded') {
+                        chip.textContent = 'In Plex';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        chip.title = 'Re-downloaded successfully';
+                    } else if (job.status === 'failed') {
+                        chip.textContent = 'Failed';
+                        chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                        chip.title = 'Re-download failed';
+                    } else {
+                        setTimeout(pollJob, 2000);
+                    }
+                } catch {
+                    chip.textContent = 'In Plex';
+                    chip.className = chip.className.replace('plex-existing-chip--downloading', '').trim();
+                }
+            };
+
+            setTimeout(pollJob, 2000);
+        });
+    }
+
+    private async handleRedownloadAlbum(
+        albumId: number,
+        albumRow: HTMLElement,
+        chip: HTMLElement
+    ): Promise<void> {
+        console.log(`[RE-DOWNLOAD] Re-downloading album ${albumId}`);
+
+        try {
+            await this.withRedownloadContext(chip, 'This album is already in your Plex library. Re-download it?', async () => {
+                const albumData = await this.fetchAlbumObject(albumId);
+                const tracks = albumData.tracks || [];
+
+                if (tracks.length === 0) {
+                    this.displayMessage('No tracks found in this album');
+                    throw new Error('No tracks found');
+                }
+
+                const jobIds: number[] = [];
+                for (const track of tracks) {
+                    try {
+                        const jobId = await this.downloadTrackToLibrary(track.id, 'album');
+                        jobIds.push(jobId);
+                    } catch (error) {
+                        console.error(`[RE-DOWNLOAD] Failed to queue track ${track.id}:`, error);
+                    }
+                }
+
+                if (jobIds.length === 0) {
+                    throw new Error('No jobs were queued');
+                }
+
+                console.log(`[RE-DOWNLOAD] Queued ${jobIds.length} tracks`);
+                chip.textContent = 'In Plex';
+                chip.title = `Re-downloading ${jobIds.length} tracks...`;
+            });
+        } catch {
+            this.displayMessage('Error re-downloading album. Please try again.');
+        }
+    }
+
+    private async handleRedownloadAll(chip: HTMLElement): Promise<void> {
+        console.log('[RE-DOWNLOAD] Re-downloading all visible tracks');
+
+        try {
+            await this.withRedownloadContext(chip, 'All tracks are already in your Plex library. Re-download them?', async () => {
+            const trackRows = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
+            const totalTracks = trackRows.length;
+
+            if (totalTracks === 0) {
+                this.displayMessage('No visible tracks to re-download');
+                throw new Error('No tracks found');
+            }
+
+            const jobIds: number[] = [];
+            for (const trackRow of trackRows) {
+                const trackId = trackRow.getAttribute('data-track-id');
+                if (trackId) {
+                    try {
+                        const jobId = await this.downloadTrackToLibrary(parseInt(trackId, 10), this.downloadAllScope);
+                        jobIds.push(jobId);
+                    } catch (error) {
+                        console.error(`[RE-DOWNLOAD] Failed to queue track ${trackId}:`, error);
+                    }
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[RE-DOWNLOAD] Queued ${jobIds.length} tracks`);
+            chip.textContent = 'In Plex';
+            chip.title = `Re-downloading ${jobIds.length} tracks...`;
+        });
+        } catch {
+            this.displayMessage('Error re-downloading tracks. Please try again.');
+        }
+    }
+
     private async handleDownload(
         trackId: number,
         trackCard: HTMLElement,
         downloadType: 'album' | 'loose' = 'loose'
     ): Promise<void> {
-        const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+        const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
         if (!downloadBtn) {
             console.error('[DOWNLOAD] Download button not found');
             return;
         }
 
-        console.log(`[DOWNLOAD] Starting download for track ${trackId}`);
+        console.log(`[DOWNLOAD] Starting download to library for track ${trackId}`);
 
         const originalContent = downloadBtn.innerHTML;
         const originalDisabled = downloadBtn.disabled;
@@ -4166,15 +10772,12 @@ class App {
         downloadBtn.disabled = true;
 
         try {
-            console.log(`[DOWNLOAD] Calling downloadTrack with format: ${this.downloadSettings.format}`);
-            const playlistName = this.plexPlaylistNameInput.value.trim() || null;
-            const jobId = await this.downloadTrack(trackId, downloadType, playlistName);
+            console.log(`[DOWNLOAD] Calling downloadTrackToLibrary with quality: ${this.downloadSettings.quality}`);
+            const jobId = await this.downloadTrackToLibrary(trackId, downloadType);
             console.log(`[DOWNLOAD] Job queued successfully: ${jobId}`);
 
-            const statusEl = this.ensureJobStatusElement(trackCard);
-            this.setJobStatusChip(statusEl, 'queued');
-            this.setDownloadButtonCompleted(downloadBtn);
-            this.registerActiveJob(jobId, trackCard, downloadBtn, statusEl);
+            this.setDownloadButtonQueued(downloadBtn);
+            this.registerActiveJob(jobId, trackCard, downloadBtn, downloadBtn);
         } catch (error) {
             console.error('[DOWNLOAD] Download error:', error);
             // Check if this was an abort
@@ -4192,37 +10795,670 @@ class App {
         }
     }
 
-    private async downloadTrack(
+    private async handleAddToPlaylist(
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose' = 'loose'
+    ): Promise<void> {
+        const addPlaylistBtn = trackCard.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        console.log(`[PLAYLIST] Fetching playlists for track ${trackId}`);
+
+        try {
+            const playlists = await this.fetchPlaylists();
+            if (!playlists || playlists.length === 0) {
+                this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                return;
+            }
+
+            await this.showPlaylistSelector(playlists, trackId, trackCard, downloadType);
+        } catch (error) {
+            console.error('[PLAYLIST] Error handling add to playlist:', error);
+            this.displayMessage('Error fetching playlists. Please try again.');
+        }
+    }
+
+    private async fetchPlaylists(): Promise<string[]> {
+        try {
+            const userId = this.getSelectedPlexUserId();
+            const queryParam = userId ? `?user_id=${userId}` : '';
+            const response = await this.fetchWithRetry(`/api/plex/playlists${queryParam}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }, 3);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Failed to fetch playlists' }));
+                throw new Error(errorData.error || 'Failed to fetch Plex playlists');
+            }
+
+            const data = await response.json();
+            const playlists = data.playlists || [];
+            // Map objects to names if necessary
+            return playlists.map((p: any) => typeof p === 'string' ? p : p.name);
+        } catch (error) {
+            console.error('[PLEX] Error fetching playlists:', error);
+            throw error;
+        }
+    }
+
+    private async showPlaylistSelector(
+        playlists: string[],
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose'
+    ): Promise<void> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Select a Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+
+            // Content
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+
+            // Existing playlists
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                        resolve();
+                    });
+                    content.appendChild(button);
+                });
+            }
+
+            // Create new playlist section
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                    resolve();
+                }
+            });
+
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handlePlaylistSelected(playlistName, trackId, trackCard, downloadType);
+                        resolve();
+                    }
+                }
+            });
+
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+
+            // Footer
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            footer.appendChild(cancelBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve();
+                }
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handlePlaylistSelected(
+        playlistName: string,
+        trackId: number,
+        trackCard: HTMLElement,
+        downloadType: 'album' | 'loose'
+    ): Promise<void> {
+        const addPlaylistBtn = trackCard.querySelector('.track-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        console.log(`[PLAYLIST] Selected playlist: ${playlistName} for track ${trackId}`);
+
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        if (!addPlaylistBtn.dataset.originalContent) {
+            addPlaylistBtn.dataset.originalContent = originalContent;
+        }
+
+        addPlaylistBtn.disabled = true;
+
+        try {
+            const jobId = await this.downloadTrackWithPlaylist(trackId, downloadType, playlistName);
+            console.log(`[PLAYLIST] Job queued successfully: ${jobId}`);
+
+            this.setDownloadButtonQueued(addPlaylistBtn);
+            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, addPlaylistBtn);
+        } catch (error) {
+            console.error('[PLAYLIST] Error downloading with playlist:', error);
+            // Restore button on error
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            if (addPlaylistBtn.dataset.originalContent) {
+                delete addPlaylistBtn.dataset.originalContent;
+            }
+            this.displayMessage('Error adding track to playlist. Please try again.');
+        }
+    }
+
+    private async downloadTrackWithPlaylist(
         trackId: number,
         downloadType: 'album' | 'loose',
-        plexPlaylistName: string | null
+        playlistName: string
     ): Promise<number> {
         try {
-            console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
-            console.log(`[DOWNLOAD] Settings: format=${this.downloadSettings.format}`);
+            console.log(`[PLAYLIST] Sending download with playlist request for track ${trackId}`);
+            console.log(`[PLAYLIST] Settings: quality=${this.downloadSettings.quality}`);
+            console.log(`[PLAYLIST] Download type: ${downloadType}, Playlist: ${playlistName}`);
+
+            const plexUserId = this.getSelectedPlexUserId();
+            const response = await this.fetchWithRetry('/api/downloads', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    quality: this.downloadSettings.quality,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    plex_playlist: playlistName,
+                    plex_user_id: plexUserId,
+                    ignore_matches: this.downloadSettings.ignoreMatches
+                }),
+                signal: this.currentDownloadController?.signal
+            }, 3);
+
+            console.log(`[PLAYLIST] Response status: ${response.status}`);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[PLAYLIST] Download failed: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+            console.log(`[PLAYLIST] Server response:`, data);
+
+            if (!data.success) {
+                throw new Error(data.error || 'Download failed');
+            }
+
+            if (!data.job_id) {
+                throw new Error('Download job id missing from response');
+            }
+
+            console.log(`[PLAYLIST] Playlist download job queued: ${data.job_id}`);
+            return data.job_id as number;
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[PLAYLIST] Download was aborted');
+                throw error;
+            }
+            console.error('[PLAYLIST] Error in downloadTrackWithPlaylist:', error);
+            throw error;
+        }
+    }
+
+    private async handleAddAlbumToPlaylist(albumId: number, albumRow: HTMLElement): Promise<void> {
+        const addPlaylistBtn = albumRow.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
+        if (!addPlaylistBtn) {
+            console.error('[ALBUM_PLAYLIST] Add to playlist button not found');
+            return;
+        }
+
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        try {
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Fetch playlists once
+            try {
+                const playlists = await this.fetchPlaylists();
+                if (!playlists || playlists.length === 0) {
+                    this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                    return;
+                }
+
+                // Show playlist selector and handle selection
+                const selectedPlaylist = await this.showPlaylistSelectorForAlbum(playlists, tracks, albumRow, addPlaylistBtn);
+                if (!selectedPlaylist) {
+                    // User cancelled, restore button
+                    addPlaylistBtn.disabled = originalDisabled;
+                    addPlaylistBtn.innerHTML = originalContent;
+                }
+            } catch (error) {
+                console.error('[ALBUM_PLAYLIST] Error handling add to playlist:', error);
+                addPlaylistBtn.disabled = originalDisabled;
+                addPlaylistBtn.innerHTML = originalContent;
+                this.displayMessage('Error fetching playlists. Please try again.');
+            }
+        } catch (error) {
+            console.error('[ALBUM_PLAYLIST] Error adding album to playlist:', error);
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            this.displayMessage('Error adding album to playlist. Please try again.');
+        }
+    }
+
+    private showPlaylistSelectorForAlbum(
+        playlists: string[],
+        tracks: Track[],
+        albumRow: HTMLElement,
+        addPlaylistBtn: HTMLButtonElement
+    ): Promise<string | null> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Select a Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(null);
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+
+            // Content
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+
+            // Existing playlists
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                        resolve(playlistName);
+                    });
+                    content.appendChild(button);
+                });
+            }
+
+            // Create new playlist section
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                    resolve(playlistName);
+                }
+            });
+
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handlePlaylistSelectedForAlbum(playlistName, tracks, albumRow, addPlaylistBtn);
+                        resolve(playlistName);
+                    }
+                }
+            });
+
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+
+            // Footer
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve(null);
+            });
+            footer.appendChild(cancelBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve(null);
+                }
+            });
+
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handlePlaylistSelectedForAlbum(
+        playlistName: string,
+        tracks: Track[],
+        albumRow: HTMLElement,
+        addPlaylistBtn: HTMLButtonElement
+    ): Promise<void> {
+        const originalContent = addPlaylistBtn.innerHTML;
+        const originalDisabled = addPlaylistBtn.disabled;
+
+        // Show spinner on button
+        this.setDownloadButtonQueued(addPlaylistBtn);
+
+        try {
+            const jobIds: number[] = [];
+
+            // Queue all tracks for adding to playlist
+            for (const track of tracks) {
+                try {
+                    const jobId = await this.downloadTrackWithPlaylist(track.id, 'album', playlistName);
+                    jobIds.push(jobId);
+                } catch (error) {
+                    console.error(`[PLAYLIST] Failed to queue track ${track.id}:`, error);
+                    // Continue with next track
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[PLAYLIST] Queued ${jobIds.length} tracks to playlist: ${playlistName}`);
+
+            // Register all jobs for polling, but track them all under the button
+            // We'll monitor the first one for now and mark success when all are done
+            jobIds.forEach((jobId, index) => {
+                if (index === 0) {
+                    // Register first job with the button for visual feedback
+                    this.registerActiveJob(jobId, albumRow, addPlaylistBtn, addPlaylistBtn);
+                } else {
+                    // Register other jobs but don't update button - they're tracked internally
+                    this.activeJobMap.set(jobId, { trackCard: albumRow, downloadBtn: addPlaylistBtn, statusEl: addPlaylistBtn });
+                }
+            }
+            );
+            this.startJobStatusPolling();
+        } catch (error) {
+            console.error('[PLAYLIST] Error adding tracks to playlist:', error);
+            addPlaylistBtn.disabled = originalDisabled;
+            addPlaylistBtn.innerHTML = originalContent;
+            this.setDownloadButtonFailed(addPlaylistBtn);
+            this.displayMessage('Error adding album to playlist. Please try again.');
+        }
+    }
+
+    private async handleDownloadAlbum(albumId: number, albumRow: HTMLElement): Promise<void> {
+        const addLibraryBtn = albumRow.querySelector('.grid-add-library-btn') as HTMLButtonElement;
+        if (!addLibraryBtn) {
+            console.error('[ALBUM_DOWNLOAD] Add to library button not found');
+            return;
+        }
+
+        const originalContent = addLibraryBtn.innerHTML;
+        const originalDisabled = addLibraryBtn.disabled;
+
+        try {
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Show spinner on button
+            this.setDownloadButtonQueued(addLibraryBtn);
+
+            const jobIds: number[] = [];
+
+            // Queue all tracks for download to library
+            for (const track of tracks) {
+                try {
+                    const jobId = await this.downloadTrackToLibrary(track.id, 'album');
+                    jobIds.push(jobId);
+                } catch (error) {
+                    console.error(`[ALBUM_DOWNLOAD] Failed to queue track ${track.id}:`, error);
+                    // Continue with next track
+                }
+            }
+
+            if (jobIds.length === 0) {
+                throw new Error('No jobs were queued');
+            }
+
+            console.log(`[ALBUM_DOWNLOAD] Queued ${jobIds.length} tracks to library`);
+
+            // Register all jobs for polling, tracking them all under the button
+            jobIds.forEach((jobId, index) => {
+                if (index === 0) {
+                    // Register first job with the button for visual feedback
+                    this.registerActiveJob(jobId, albumRow, addLibraryBtn, addLibraryBtn);
+                } else {
+                    // Register other jobs but don't update button - they're tracked internally
+                    this.activeJobMap.set(jobId, { trackCard: albumRow, downloadBtn: addLibraryBtn, statusEl: addLibraryBtn });
+                }
+            });
+            this.startJobStatusPolling();
+        } catch (error) {
+            console.error('[ALBUM_DOWNLOAD] Error downloading album to library:', error);
+            addLibraryBtn.disabled = originalDisabled;
+            addLibraryBtn.innerHTML = originalContent;
+            this.setDownloadButtonFailed(addLibraryBtn);
+            this.displayMessage('Error adding album to library. Please try again.');
+        }
+    }
+
+    private async handlePlayAlbum(albumId: number, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const albumData = await this.fetchAlbumObject(albumId);
+            const tracks = albumData.tracks || [];
+
+            if (tracks.length === 0) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            // Play the first track from the album
+            const albumRow = playButton.closest('.albums-grid-row') as HTMLElement;
+            void this.handlePlayToggle(tracks[0].id, albumRow, playButton);
+        } catch (error) {
+            console.error('[ALBUM_PLAYBACK] Error playing album:', error);
+            this.displayMessage('Error playing album. Please try again.');
+        }
+    }
+
+    private async handlePlayLibraryAlbum(albumId: string, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/albums/${encodeURIComponent(albumId)}/tracks?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex album tracks');
+            }
+
+            const data = await response.json().catch(() => ({} as PlexLibraryAlbumTracksResponse));
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+            if (tracks.length === 0 || !tracks[0].id) {
+                this.displayMessage('No tracks found in this album');
+                return;
+            }
+
+            void this.handlePlayLibraryToggle(tracks[0].id, playButton);
+        } catch (error) {
+            console.error('[ALBUM_PLAYBACK] Error playing Plex library album:', error);
+            this.displayMessage('Error playing album. Please try again.');
+        }
+    }
+
+    private async handlePlayLibraryArtist(artistId: string, playButton: HTMLButtonElement): Promise<void> {
+        try {
+            const params = new URLSearchParams();
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/plex/library/artists/${encodeURIComponent(artistId)}/albums?${params.toString()}`);
+            if (!response.ok) {
+                throw new Error('Failed to fetch Plex artist albums');
+            }
+
+            const data = await response.json().catch(() => ({} as PlexLibraryArtistAlbumsResponse));
+            const albums = Array.isArray(data.albums) ? data.albums : [];
+            if (albums.length === 0 || !albums[0].id) {
+                this.displayMessage('No albums found for this artist');
+                return;
+            }
+
+            await this.handlePlayLibraryAlbum(albums[0].id, playButton);
+        } catch (error) {
+            console.error('[ARTIST_PLAYBACK] Error playing Plex library artist:', error);
+            this.displayMessage('Error playing artist. Please try again.');
+        }
+    }
+
+    private async downloadTrackToLibrary(
+        trackId: number,
+        downloadType: 'album' | 'loose'
+    ): Promise<number> {
+        try {
+            console.log(`[DOWNLOAD] Sending download-to-library request for track ${trackId}`);
+            console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
             console.log(`[DOWNLOAD] Download type: ${downloadType}`);
-            
-const plexUserId = this.getSelectedPlexUserId();
-                    const response = await this.fetchWithRetry('/api/download', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            trackId,
-                            format: this.downloadSettings.format,
-                            downloadType,
-                            fileNaming: this.downloadSettings.fileNamingAlbum,
-                            fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
-                            plex_playlist: plexPlaylistName,
-                            plex_user_id: plexUserId,
-                            ignore_matches: this.downloadSettings.ignoreMatches
+
+            const response = await this.fetchWithRetry('/api/downloads', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    quality: this.downloadSettings.quality,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    ignore_matches: this.downloadSettings.ignoreMatches
                 }),
                 signal: this.currentDownloadController?.signal
             }, 3);
 
             console.log(`[DOWNLOAD] Response status: ${response.status}`);
-            
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}));
                 const errorMsg = errorData.error || `HTTP ${response.status}`;
@@ -4233,7 +11469,69 @@ const plexUserId = this.getSelectedPlexUserId();
             // Parse the JSON response
             const data = await response.json();
             console.log(`[DOWNLOAD] Server response:`, data);
-            
+
+            if (!data.success) {
+                throw new Error(data.error || 'Download failed');
+            }
+
+            if (!data.job_id) {
+                throw new Error('Download job id missing from response');
+            }
+
+            console.log(`[DOWNLOAD] Library download job queued: ${data.job_id}`);
+            return data.job_id as number;
+        } catch (error) {
+            // Check if error is due to abort
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[DOWNLOAD] Download was aborted');
+                throw error;
+            }
+            console.error('[DOWNLOAD] Error in downloadTrackToLibrary:', error);
+            throw error;
+        }
+    }
+
+    private async downloadTrack(
+        trackId: number,
+        downloadType: 'album' | 'loose',
+        plexPlaylistName: string | null
+    ): Promise<number> {
+        try {
+            console.log(`[DOWNLOAD] Sending download request for track ${trackId}`);
+            console.log(`[DOWNLOAD] Settings: quality=${this.downloadSettings.quality}`);
+            console.log(`[DOWNLOAD] Download type: ${downloadType}`);
+
+            const plexUserId = this.getSelectedPlexUserId();
+            const response = await this.fetchWithRetry('/api/downloads', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    trackId,
+                    quality: this.downloadSettings.quality,
+                    fileNaming: this.downloadSettings.fileNamingAlbum,
+                    fileNamingAlbum: this.downloadSettings.fileNamingAlbum,
+                    plex_playlist: plexPlaylistName,
+                    plex_user_id: plexUserId,
+                    ignore_matches: this.downloadSettings.ignoreMatches
+                }),
+                signal: this.currentDownloadController?.signal
+            }, 3);
+
+            console.log(`[DOWNLOAD] Response status: ${response.status}`);
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                const errorMsg = errorData.error || `HTTP ${response.status}`;
+                console.error(`[DOWNLOAD] Download failed: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+
+            // Parse the JSON response
+            const data = await response.json();
+            console.log(`[DOWNLOAD] Server response:`, data);
+
             if (!data.success) {
                 throw new Error(data.error || 'Download failed');
             }
@@ -4262,49 +11560,37 @@ const plexUserId = this.getSelectedPlexUserId();
             downloadBtn.innerHTML = downloadBtn.dataset.originalContent;
             delete downloadBtn.dataset.originalContent;
         } else {
-            // Fallback: recreate the download icon
+            // Fallback: recreate the archive icon
             downloadBtn.innerHTML = `
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                    <rect x="2" y="3" width="20" height="5" rx="1"></rect>
+                    <path d="M4 8v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                    <rect x="8" y="12" width="8" height="1"></rect>
                 </svg>
             `;
         }
     }
 
-    private ensureJobStatusElement(trackCard: HTMLElement): HTMLElement {
-        const metadata = trackCard.querySelector('.track-metadata');
-        if (!metadata) {
-            const fallback = document.createElement('span');
-            fallback.className = 'job-status-chip status-queued';
-            fallback.textContent = 'Queued';
-            trackCard.appendChild(fallback);
-            return fallback;
+    private setJobStatusIcon(downloadBtn: HTMLButtonElement, status: string): void {
+        const effectiveStatus = status.replace('_', '-');
+        downloadBtn.classList.remove('queued', 'in-progress', 'completed', 'failed');
+        downloadBtn.classList.add(effectiveStatus);
+
+        if (effectiveStatus === 'queued' || effectiveStatus === 'in-progress') {
+            downloadBtn.innerHTML = this.getSpinnerIconSvg();
+        } else if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed-with-errors') {
+            downloadBtn.innerHTML = this.getCheckmarkIconSvg();
+        } else if (effectiveStatus === 'failed') {
+            downloadBtn.innerHTML = this.getExclamationIconSvg();
+            downloadBtn.disabled = false;
         }
-
-        let statusEl = metadata.querySelector('.job-status-chip') as HTMLElement | null;
-        if (!statusEl) {
-            statusEl = document.createElement('span');
-            statusEl.className = 'job-status-chip status-queued';
-            statusEl.textContent = 'Queued';
-            metadata.appendChild(statusEl);
-        }
-
-        return statusEl;
-    }
-
-    private setJobStatusChip(statusEl: HTMLElement, status: string): void {
-        const normalized = status.replace('_', '-');
-        statusEl.className = `job-status-chip status-${normalized}`;
-        statusEl.textContent = this.formatJobStatus(status);
     }
 
     private registerActiveJob(
         jobId: number,
         trackCard: HTMLElement,
         downloadBtn: HTMLButtonElement,
-        statusEl: HTMLElement
+        statusEl: HTMLButtonElement
     ): void {
         this.activeJobMap.set(jobId, { trackCard, downloadBtn, statusEl });
         this.startJobStatusPolling();
@@ -4361,12 +11647,12 @@ const plexUserId = this.getSelectedPlexUserId();
 
     private updateJobStatusForCard(
         job: JobItem,
-        context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLElement }
+        context: { trackCard: HTMLElement; downloadBtn: HTMLButtonElement; statusEl: HTMLButtonElement }
     ): void {
         const effectiveStatus = this.getEffectiveJobStatus(job);
-        this.setJobStatusChip(context.statusEl, effectiveStatus);
+        this.setJobStatusIcon(context.downloadBtn, effectiveStatus);
 
-        if (effectiveStatus === 'succeeded' || effectiveStatus === 'completed_with_errors') {
+        if (effectiveStatus === 'succeeded') {
             this.setDownloadButtonCompleted(context.downloadBtn);
             context.downloadBtn.disabled = true;
             this.activeJobMap.delete(job.id);
@@ -4392,11 +11678,19 @@ const plexUserId = this.getSelectedPlexUserId();
     private setDownloadButtonCompleted(downloadBtn: HTMLButtonElement): void {
         downloadBtn.disabled = true;
         downloadBtn.classList.add('completed');
-        downloadBtn.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-        `;
+        downloadBtn.innerHTML = this.getCheckmarkIconSvg();
+    }
+
+    private setDownloadButtonQueued(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = true;
+        downloadBtn.classList.add('queued');
+        downloadBtn.innerHTML = this.getSpinnerIconSvg();
+    }
+
+    private setDownloadButtonFailed(downloadBtn: HTMLButtonElement): void {
+        downloadBtn.disabled = false;
+        downloadBtn.classList.add('failed');
+        downloadBtn.innerHTML = this.getExclamationIconSvg();
     }
 
     private async downloadAllTracks(): Promise<void> {
@@ -4412,7 +11706,7 @@ const plexUserId = this.getSelectedPlexUserId();
 
         this.isDownloadingAll = true;
         this.downloadAllCancelRequested = false;
-        
+
         const downloadAllBtn = document.getElementById('downloadAllBtn') as HTMLButtonElement;
         if (downloadAllBtn) {
             downloadAllBtn.textContent = 'Cancel';
@@ -4420,7 +11714,7 @@ const plexUserId = this.getSelectedPlexUserId();
             downloadAllBtn.disabled = false;
         }
 
-        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.track-card')) as HTMLElement[];
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
         const totalTracks = trackCards.length;
         let downloadedCount = 0;
 
@@ -4430,11 +11724,11 @@ const plexUserId = this.getSelectedPlexUserId();
             // Check if cancel was requested
             if (this.downloadAllCancelRequested) {
                 console.log('[DOWNLOAD_ALL] Download all cancelled by user');
-                
+
                 // Restore buttons for incomplete downloads
                 for (let j = i; j < trackCards.length; j++) {
                     const trackCard = trackCards[j];
-                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
+                    const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
                     if (downloadBtn && !downloadBtn.classList.contains('completed')) {
                         this.restoreDownloadButton(downloadBtn);
                     }
@@ -4444,73 +11738,27 @@ const plexUserId = this.getSelectedPlexUserId();
 
             const trackCard = trackCards[i];
             const trackId = trackCard.getAttribute('data-track-id');
-            
+
             if (trackId) {
                 try {
                     console.log(`[DOWNLOAD_ALL] Downloading track ${i + 1}/${totalTracks}`);
-                    const downloadBtn = trackCard.querySelector('.track-download-btn') as HTMLButtonElement;
-                    
-                    // Directly call handleDownload instead of clicking
+                    const downloadBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
+
                     if (downloadBtn && !downloadBtn.classList.contains('completed')) {
-                        // Create abort controller for this download
                         this.currentDownloadController = new AbortController();
-                        const currentController = this.currentDownloadController;
-                        
-                        // Create promise that waits for the download to complete
-                        await new Promise<void>((resolve) => {
-                            // Call handleDownload directly
-                            void this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
-                            
-                            // Set a temporary handler to detect when download completes
-                            const checkCompletion = setInterval(() => {
-                                if (this.downloadAllCancelRequested || currentController.signal.aborted) {
-                                    clearInterval(checkCompletion);
-                                    resolve();
-                                    return;
-                                }
-                                
-                                if (downloadBtn.classList.contains('completed')) {
-                                    clearInterval(checkCompletion);
-                                    downloadedCount++;
-                                    
-                                    // Update progress bar and text
-                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                                    const progressText = document.getElementById('progressText');
-                                    if (progressBar) {
-                                        const progress = (downloadedCount / totalTracks) * 100;
-                                        progressBar.style.width = `${progress}%`;
-                                    }
-                                    if (progressText) {
-                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                                    }
-                                    
-                                    setTimeout(() => resolve(), 500); // Small delay before next
-                                }
-                            }, 100);
-                            
-                            // Set timeout to prevent hanging
-                            setTimeout(() => {
-                                clearInterval(checkCompletion);
-                                if (!downloadBtn.classList.contains('completed') && !this.downloadAllCancelRequested && !currentController.signal.aborted) {
-                                    downloadedCount++;
-                                    
-                                    // Update progress bar and text
-                                    const progressBar = document.getElementById('lastfmProgress') as HTMLElement;
-                                    const progressText = document.getElementById('progressText');
-                                    if (progressBar) {
-                                        const progress = (downloadedCount / totalTracks) * 100;
-                                        progressBar.style.width = `${progress}%`;
-                                    }
-                                    if (progressText) {
-                                        progressText.innerHTML = `Queued <strong>${downloadedCount}</strong> of <strong>${totalTracks}</strong> tracks`;
-                                    }
-                                }
-                                resolve();
-                            }, 120000); // 2 minutes timeout per track
-                        });
+
+                        try {
+                            await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        } catch (error) {
+                            console.error(`[DOWNLOAD_ALL] Download error for track ${trackId}:`, error);
+                        }
                     }
+
+                    // Count as queued whether processed or not (including skipped/already completed)
+                    downloadedCount++;
+
                 } catch (error) {
-                    console.error(`[DOWNLOAD_ALL] Error downloading track ${trackId}:`, error);
+                    console.error(`[DOWNLOAD_ALL] Error processing track ${trackId}:`, error);
                 }
             }
         }
@@ -4519,7 +11767,7 @@ const plexUserId = this.getSelectedPlexUserId();
         this.isDownloadingAll = false;
         this.downloadAllCancelRequested = false;
         this.currentDownloadController = null;
-        
+
         if (downloadAllBtn) {
             downloadAllBtn.textContent = 'Download All';
             downloadAllBtn.classList.remove('cancelling');
@@ -4527,6 +11775,359 @@ const plexUserId = this.getSelectedPlexUserId();
         }
 
         console.log(`[DOWNLOAD_ALL] Queued ${downloadedCount}/${totalTracks} tracks`);
+    }
+
+    private async addAllToLibrary(): Promise<void> {
+        if (this.isDownloadingAll) {
+            return;
+        }
+
+        this.isDownloadingAll = true;
+        this.downloadAllCancelRequested = false;
+
+        const addAllLibraryBtn = document.getElementById('addAllLibraryBtn') as HTMLButtonElement;
+        this.setBulkActionButtonState(addAllLibraryBtn, 'library', 'loading');
+
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
+        const totalTracks = trackCards.length;
+        let addedCount = 0;
+        let failedCount = 0;
+
+        console.log(`[ADD_ALL_LIBRARY] Starting batch add to library of ${totalTracks} tracks`);
+
+        for (let i = 0; i < trackCards.length; i++) {
+            const trackCard = trackCards[i];
+            const trackId = trackCard.getAttribute('data-track-id');
+
+            if (trackId) {
+                try {
+                    console.log(`[ADD_ALL_LIBRARY] Adding to library ${i + 1}/${totalTracks}`);
+                    const libraryBtn = trackCard.querySelector('.grid-add-library-btn') as HTMLButtonElement;
+
+                    if (libraryBtn && !libraryBtn.classList.contains('completed')) {
+                        const wasQueued = libraryBtn.classList.contains('queued');
+                        await this.handleDownload(parseInt(trackId, 10), trackCard, this.downloadAllScope);
+                        const isQueued = libraryBtn.classList.contains('queued');
+
+                        if (!wasQueued && isQueued) {
+                            addedCount++;
+                        } else if (!isQueued && !libraryBtn.classList.contains('completed')) {
+                            failedCount++;
+                        }
+                    }
+
+                } catch (error) {
+                    console.error(`[ADD_ALL_LIBRARY] Error processing track ${trackId}:`, error);
+                    failedCount++;
+                }
+            }
+        }
+
+        this.isDownloadingAll = false;
+        this.downloadAllCancelRequested = false;
+        this.currentDownloadController = null;
+
+        this.setBulkActionButtonState(addAllLibraryBtn, 'library', failedCount > 0 ? 'failed' : 'success');
+
+        console.log(`[ADD_ALL_LIBRARY] Queued ${addedCount}/${totalTracks} tracks`);
+    }
+
+    private async addAllToPlaylist(): Promise<void> {
+        if (this.isDownloadingAll) {
+            return;
+        }
+
+        try {
+            const playlists = await this.fetchPlaylists();
+            if (!playlists || playlists.length === 0) {
+                this.displayMessage('No Plex playlists found. Please create a playlist in Plex first.');
+                return;
+            }
+            await this.showPlaylistSelectorForAll(playlists, this.freshFindsPlaylistName);
+        } catch (error) {
+            console.error('[PLAYLIST_ALL] Error handling add all to playlist:', error);
+            this.displayMessage('Error fetching playlists. Please try again.');
+        }
+    }
+
+    private async showPlaylistSelectorForAll(playlists: string[], defaultPlaylistName: string | null = null): Promise<void> {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'playlist-modal-overlay';
+            const modal = document.createElement('div');
+            modal.className = 'playlist-modal';
+            const header = document.createElement('div');
+            header.className = 'playlist-modal-header';
+            const title = document.createElement('h3');
+            title.textContent = 'Add All Tracks to Playlist';
+            const closeBtn = document.createElement('button');
+            closeBtn.className = 'playlist-modal-close';
+            closeBtn.innerHTML = '×';
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            header.appendChild(title);
+            header.appendChild(closeBtn);
+            const content = document.createElement('div');
+            content.className = 'playlist-modal-content';
+            if (playlists.length > 0) {
+                playlists.forEach((playlistName: string) => {
+                    const button = document.createElement('button');
+                    button.className = 'playlist-item-btn';
+                    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>${playlistName}</span>`;
+                    button.addEventListener('click', async () => {
+                        overlay.remove();
+                        await this.handleAddAllToPlaylist(playlistName);
+                        resolve();
+                    });
+                    content.appendChild(button);
+                });
+            }
+            const createSection = document.createElement('div');
+            createSection.className = 'playlist-create-section';
+            const divider = document.createElement('div');
+            divider.className = 'playlist-create-divider';
+            divider.textContent = 'or';
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'playlist-create-inline-group';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'playlist-create-inline-input';
+            input.placeholder = 'New playlist name...';
+            if (defaultPlaylistName) {
+                input.value = defaultPlaylistName;
+            }
+            const okBtn = document.createElement('button');
+            okBtn.className = 'playlist-create-inline-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', async () => {
+                const playlistName = input.value.trim();
+                if (playlistName) {
+                    overlay.remove();
+                    await this.handleAddAllToPlaylist(playlistName);
+                    resolve();
+                }
+            });
+            input.addEventListener('keypress', (e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                    const playlistName = input.value.trim();
+                    if (playlistName) {
+                        overlay.remove();
+                        void this.handleAddAllToPlaylist(playlistName);
+                        resolve();
+                    }
+                }
+            });
+            inputGroup.appendChild(input);
+            inputGroup.appendChild(okBtn);
+            if (playlists.length > 0) {
+                createSection.appendChild(divider);
+            }
+            createSection.appendChild(inputGroup);
+            content.appendChild(createSection);
+            const footer = document.createElement('div');
+            footer.className = 'playlist-modal-footer';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'playlist-modal-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                overlay.remove();
+                resolve();
+            });
+            footer.appendChild(cancelBtn);
+            modal.appendChild(header);
+            modal.appendChild(content);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+            overlay.addEventListener('click', (e: Event) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                    resolve();
+                }
+            });
+            document.body.appendChild(overlay);
+            input.focus();
+        });
+    }
+
+    private async handleAddAllToPlaylist(playlistName: string): Promise<void> {
+        if (this.isDownloadingAll) {
+            return;
+        }
+
+        this.isDownloadingAll = true;
+        const addAllPlaylistBtn = document.getElementById('addAllPlaylistBtn') as HTMLButtonElement;
+        this.setBulkActionButtonState(addAllPlaylistBtn, 'playlist', 'loading');
+
+        const trackCards = Array.from(this.resultsContainer.querySelectorAll('.tracks-grid-row[data-track-id]')) as HTMLElement[];
+        const totalTracks = trackCards.length;
+        let addedCount = 0;
+        let failedCount = 0;
+        console.log(`[PLAYLIST_ALL] Adding all ${totalTracks} tracks to playlist: ${playlistName}`);
+        for (let i = 0; i < trackCards.length; i++) {
+            const trackCard = trackCards[i];
+            const trackId = trackCard.getAttribute('data-track-id');
+            if (trackId) {
+                try {
+                    console.log(`[PLAYLIST_ALL] Adding track ${i + 1}/${totalTracks}`);
+                    const addPlaylistBtn = trackCard.querySelector('.grid-add-playlist-btn') as HTMLButtonElement;
+                    if (addPlaylistBtn && !addPlaylistBtn.classList.contains('completed')) {
+                        const originalContent = addPlaylistBtn.innerHTML;
+                        const originalDisabled = addPlaylistBtn.disabled;
+                        if (!addPlaylistBtn.dataset.originalContent) {
+                            addPlaylistBtn.dataset.originalContent = originalContent;
+                        }
+                        addPlaylistBtn.disabled = true;
+                        try {
+                            const jobId = await this.downloadTrackWithPlaylist(parseInt(trackId, 10), this.downloadAllScope, playlistName);
+                            console.log(`[PLAYLIST_ALL] Job queued successfully: ${jobId}`);
+                            this.setDownloadButtonQueued(addPlaylistBtn);
+                            this.registerActiveJob(jobId, trackCard, addPlaylistBtn, addPlaylistBtn);
+                            addedCount++;
+                        } catch (error) {
+                            console.error('[PLAYLIST_ALL] Error adding track to playlist:', error);
+                            addPlaylistBtn.disabled = originalDisabled;
+                            addPlaylistBtn.innerHTML = originalContent;
+                            if (addPlaylistBtn.dataset.originalContent) {
+                                delete addPlaylistBtn.dataset.originalContent;
+                            }
+                            failedCount++;
+                        }
+                    }
+
+                } catch (error) {
+                    console.error(`[PLAYLIST_ALL] Error processing track ${trackId}:`, error);
+                    failedCount++;
+                }
+            }
+        }
+        this.isDownloadingAll = false;
+        this.setBulkActionButtonState(addAllPlaylistBtn, 'playlist', failedCount > 0 ? 'failed' : 'success');
+        console.log(`[PLAYLIST_ALL] Queued ${addedCount}/${totalTracks} tracks`);
+    }
+
+    private async loadListenHistory(): Promise<void> {
+        if (this.historyLoading) return;
+        this.historyLoading = true;
+
+        if (!this.historyTableContainer) {
+            this.historyLoading = false;
+            return;
+        }
+
+        this.historyTableContainer.innerHTML = '<p class="loading-text">Loading listen history...</p>';
+
+        try {
+            this.pendingRequestController = new AbortController();
+            const params = new URLSearchParams();
+            params.set('limit', '200');
+            const userId = this.getSelectedPlexUserId();
+            if (userId) {
+                params.set('user_id', userId);
+            }
+
+            const response = await fetch(`/api/listen-history?${params.toString()}`, {
+                cache: 'no-store',
+                signal: this.pendingRequestController.signal
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch listen history');
+            }
+
+            const data = await response.json();
+            this.historyEntries = data.history || [];
+            this.renderListenHistory();
+        } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                return;
+            }
+            if (this.historyTableContainer) {
+                this.historyTableContainer.innerHTML = `<p class="loading-text">Error loading listen history: ${error instanceof Error ? error.message : 'Unknown error'}</p>`;
+            }
+        } finally {
+            this.historyLoading = false;
+        }
+    }
+
+    private renderListenHistory(): void {
+        if (!this.historyTableContainer) return;
+
+        if (this.historyEntries.length === 0) {
+            this.historyTableContainer.innerHTML = '<p class="loading-text">No listen history found. Run a Plex library sync to populate history.</p>';
+            return;
+        }
+
+        const rows = this.historyEntries.map(entry => {
+            const playedDate = this.formatHistoryDate(entry.played_at);
+            const duration = entry.duration ? this.formatHistoryDuration(entry.duration) : '';
+            const hifiBadge = entry.hifi_id ? `<span class="hifi-badge" title="HiFi ID">${this.escapeHtml(entry.hifi_id)}</span>` : '';
+
+            return `<tr>
+                <td>${this.escapeHtml(playedDate)}</td>
+                <td>${this.escapeHtml(entry.title)}</td>
+                <td>${this.escapeHtml(entry.artist || '')}</td>
+                <td>${this.escapeHtml(entry.album || '')}</td>
+                <td>${this.escapeHtml(duration)}</td>
+                <td>${hifiBadge}</td>
+            </tr>`;
+        }).join('');
+
+        this.historyTableContainer.innerHTML = `
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Played</th>
+                        <th>Track</th>
+                        <th>Artist</th>
+                        <th>Album</th>
+                        <th>Duration</th>
+                        <th>HiFi</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        `;
+    }
+
+    private isPlaylistFromToday(generatedAt?: string): boolean {
+        if (!generatedAt) return false;
+        const genDate = new Date(generatedAt);
+        const genDay = genDate.toLocaleDateString('en-US', { timeZone: this.timezone });
+        const nowDay = new Date().toLocaleDateString('en-US', { timeZone: this.timezone });
+        return genDay === nowDay;
+    }
+
+    private formatHistoryDate(isoString: string): string {
+        try {
+            const date = new Date(isoString);
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffHours = diffMs / (1000 * 60 * 60);
+            const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+            if (diffHours < 1) {
+                const mins = Math.floor(diffMs / (1000 * 60));
+                return `${mins}m ago`;
+            }
+            if (diffHours < 24) {
+                return `${Math.floor(diffHours)}h ago`;
+            }
+            if (diffDays < 7) {
+                return `${Math.floor(diffDays)}d ago`;
+            }
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: this.timezone });
+        } catch {
+            return isoString;
+        }
+    }
+
+    private formatHistoryDuration(ms: number): string {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
 }
 

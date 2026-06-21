@@ -52,6 +52,9 @@ squidly.db
 .classpath
 .settings/
 
+# OpenCode
+.opencode/
+
 # OS
 .DS_Store
 .DS_Store?
@@ -78,3 +81,9 @@ copilot-instructions.md
 
 # Test scripts
 test_scripts/
+# Generated TypeScript output
+src/app.js
+
+# Pre-compressed static assets
+static/dist/*.gz
+static/dist/*.br

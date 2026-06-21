@@ -9,7 +9,7 @@ import socket
 from urllib.parse import quote_plus
 
 # PostgreSQL configuration (required)
-postgres_host = (os.environ.get('POSTGRES_HOST') or os.environ.get('PORTGRES_HOST') or '').strip()
+postgres_host = (os.environ.get('POSTGRES_HOST') or '').strip()
 postgres_db = (os.environ.get('POSTGRES_DB') or '').strip()
 postgres_user = (os.environ.get('POSTGRES_USER') or '').strip()
 postgres_password = (os.environ.get('POSTGRES_PASSWORD') or '').strip()
@@ -42,12 +42,38 @@ WORKER_ID = f"{socket.gethostname()}:{os.getpid()}"
 
 # Default download settings (used when database doesn't yet have values)
 DEFAULT_DOWNLOAD_SETTINGS = {
-    'format': 'original',
+    'quality': 'LOSSLESS',
     'parent_folder': '',
     'file_naming_album': '{artist}/{album}/{track} - {title}.{ext}',
     'jobs_refresh_interval_seconds': 30,
-    'ignore_matches': False
+    'ignore_matches': False,
+    'tag_title': True,
+    'tag_artist': True,
+    'tag_album_artist': True,
+    'tag_album': True,
+    'tag_year': True,
+    'tag_track_number': True,
+    'tag_track_total': True,
+    'tag_disc_number': True,
+    'tag_disc_total': True,
+    'tag_version': True,
+    'tag_tidal_track_id': True,
+    'tag_tidal_album_id': True,
+    'tag_isrc': True,
+    'tag_copyright': True,
+    'tag_cover_art': True,
+    'tag_explicit': True,
+    'tag_explicit_suffix': True,
+    'penalty_compilation': True,
+    'penalty_single': True,
+    'penalty_karaoke': True,
+    'penalty_live': True,
+    'download_source': 'tidal',
+    'deezer_arl': '',
 }
 
 # Temporary scratch directory used during downloads
 TEMP_FOLDER = '/app/temp'
+
+# Application timezone (default UTC)
+app_timezone = os.environ.get('TZ', 'UTC')

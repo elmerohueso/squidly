@@ -39,15 +39,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy Flask application
 COPY app.py .
 COPY squidly ./squidly
-COPY squidurls.json .
 COPY templates ./templates
 COPY static ./static
 
 # Copy built assets from frontend stage
 COPY --from=frontend-builder /app/static/dist ./static/dist
 
-# Create data directory
-RUN mkdir -p /data
+# Create logs directory
+RUN mkdir -p /logs
 
 # Disable Python output buffering
 ENV PYTHONUNBUFFERED=1
@@ -57,4 +56,4 @@ EXPOSE 5000
 
 # Run with gunicorn for production
 # Using --preload to load app before forking workers (runs validation once)
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--preload", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--preload", "--timeout", "120", "--access-logfile", "/logs/gunicorn_access.log", "--error-logfile", "/logs/gunicorn_error.log", "app:app"]
