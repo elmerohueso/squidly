@@ -55,10 +55,30 @@ def _score_track_candidate(title, artist, album, item):
     return score
 
 
-def _lookup_track_metadata(cur, title, artist, album, fuzzy=False):
+def _lookup_track_metadata(cur, title, artist, album, fuzzy=False, isrc=None):
     """Query local tracks table for rows matching title+artist+album, falling back to title+artist.
     If fuzzy=True, falls back further to normalized text matching when exact matches fail."""
     rows = []
+
+    isrc_clean = str(isrc).strip().upper() if isrc else ''
+    if isrc_clean:
+        cur.execute(
+            """
+            SELECT tracks.title, artists.name AS artist, albums.title AS album,
+                   tracks.format, tracks.bitrate, tracks.path
+            FROM tracks
+            LEFT JOIN albums ON albums.album_id = tracks.album_id
+            LEFT JOIN artists ON artists.artist_id = tracks.artist_id
+            WHERE UPPER(TRIM(tracks.isrc)) = %s
+              AND tracks.library_id IS NOT NULL
+              AND tracks.library_id <> ''
+            ORDER BY tracks.last_seen_at DESC
+            """,
+            (isrc_clean,)
+        )
+        rows = cur.fetchall() or []
+        if rows:
+            return rows
 
     if album:
         cur.execute(

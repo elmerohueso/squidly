@@ -726,3 +726,187 @@ class TestDownloadSourceRegistry:
                             )
                         # Should fail because no handlers available
                         assert 'failed' in str(excinfo.value).lower() or 'unknown' in str(excinfo.value).lower()
+
+
+# =============================================================================
+# ISRC-based library match skip (Fix 2 end-to-end)
+# =============================================================================
+
+
+class TestIsrcBasedLibraryMatchSkip:
+    """End-to-end tests for the ISRC-based library match skip in
+    process_download_job.
+
+    When _lookup_track_metadata returns rows (because the ISRC matched an
+    existing library track), the download pipeline is skipped and the
+    matched path is queued for playlist addition.
+    """
+
+    @staticmethod
+    def _make_track_with_isrc(isrc="US56V0507710"):
+        track = _make_mock_hifi_track_object()
+        track['track']['isrc'] = isrc
+        return track
+
+    def test_isrc_match_skips_download_and_queues_playlist(self):
+        """When _lookup_track_metadata returns a row with a path (ISRC
+        matched an existing library track), the download is skipped and
+        queue_pending_playlist_addition is called with the matched path.
+        No download source handler is invoked."""
+        from squidly.jobs.processors.download import process_download_job
+
+        track_with_isrc = self._make_track_with_isrc('US56V0507710')
+
+        metadata_rows = [
+            {
+                'path': 'Panic! At The Disco/A Fever You Sweat Out/01 - I Write Sins.flac',
+                'format': 'flac',
+                'bitrate': 1411,
+                'album': 'A Fever You Sweat Out',
+            }
+        ]
+
+        mock_handler = MagicMock()
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=metadata_rows),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'tidal,qobuz,deezer,deezer_mirror',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {
+                            'tidal': mock_handler,
+                            'qobuz': mock_handler,
+                            'deezer': mock_handler,
+                            'deezer_mirror': mock_handler,
+                        },
+                    ):
+                        with patch(
+                            'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                        ) as mock_queue:
+                            result = process_download_job(
+                                'test-job-isrc-match',
+                                {
+                                    'trackId': '987654321',
+                                    'downloadQuality': 'LOSSLESS',
+                                    'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                    'ignore_matches': False,
+                                    'plex_playlist': 'Test Playlist',
+                                },
+                            )
+
+        # Download handler was NOT called (skip path)
+        mock_handler.assert_not_called()
+        # queue_pending_playlist_addition was called with the matched path
+        mock_queue.assert_called_once()
+        call_path = mock_queue.call_args[0][0]
+        assert 'Panic! At The Disco' in call_path
+        assert call_path.endswith('.flac')
+        # Result indicates download was skipped
+        assert result.get('download_skipped_existing') is True
+        assert result['stages']['downloaded'] == 'done'
+        assert result['stages']['written'] == 'done'
+
+    def test_ignore_matches_bypasses_isrc_skip(self):
+        """When ignore_matches=True, the download proceeds even if
+        _lookup_track_metadata returns rows."""
+        from squidly.jobs.processors.download import process_download_job
+
+        track_with_isrc = self._make_track_with_isrc('US56V0507710')
+
+        metadata_rows = [
+            {
+                'path': 'Panic! At The Disco/A Fever You Sweat Out/01 - I Write Sins.flac',
+                'format': 'flac',
+                'bitrate': 1411,
+                'album': 'A Fever You Sweat Out',
+            }
+        ]
+
+        flac_fd, flac_path = tempfile.mkstemp(suffix='.flac')
+        try:
+            os.write(flac_fd, b'fLaC' + b'\x00' * 100)
+        finally:
+            os.close(flac_fd)
+
+        mock_handler = MagicMock(return_value={
+            'file_path': flac_path,
+            'source': 'https://tidal-mirror.example.com',
+        })
+
+        with patch.multiple(
+            'squidly.jobs.processors.download',
+            get_hifi_track_object=MagicMock(return_value=track_with_isrc),
+            get_db_connection=MagicMock(),
+            _lookup_track_metadata=MagicMock(return_value=metadata_rows),
+            jobs=MagicMock(),
+            upsert_download_match_hint=MagicMock(),
+            get_download_settings=MagicMock(return_value={
+                'download_source': 'tidal',
+                'tag_explicit_suffix': False,
+            }),
+            set_last_download_activity_at=MagicMock(),
+            plex_healthcheck=MagicMock(return_value=True),
+            get_plex_config=MagicMock(return_value=MagicMock()),
+        ):
+            with patch('squidly.jobs.processors.download.os.path.exists',
+                       return_value=True):
+                with patch('squidly.jobs.processors.download.os.makedirs'):
+                    with patch.dict(
+                        'squidly.jobs.processors.download._DOWNLOAD_SOURCE_HANDLERS',
+                        {'tidal': mock_handler},
+                    ):
+                        with patch(
+                            'squidly.infrastructure.downloads.detect_audio_format',
+                            return_value='flac',
+                        ):
+                            with patch(
+                                'squidly.infrastructure.downloads.validate_audio_duration',
+                            ):
+                                with patch(
+                                    'squidly.infrastructure.downloads.add_id3_tags_to_file',
+                                ):
+                                    with patch(
+                                        'squidly.jobs.processors.download.os.path.getsize',
+                                        return_value=2048,
+                                    ):
+                                        with patch(
+                                            'squidly.jobs.processors.download.shutil.move',
+                                        ):
+                                            with patch(
+                                                'squidly.jobs.processors.download.queue_pending_playlist_addition',
+                                            ) as mock_queue:
+                                                with patch(
+                                                    'builtins.open',
+                                                    mock_open(read_data=b'fLaC\x00\x00\x00\x00'),
+                                                ):
+                                                    result = process_download_job(
+                                                        'test-job-ignore-matches',
+                                                        {
+                                                            'trackId': '987654321',
+                                                            'downloadQuality': 'LOSSLESS',
+                                                            'fileNaming': '{artist}/{album}/{track} - {title}.{ext}',
+                                                            'ignore_matches': True,
+                                                            'plex_playlist': 'Test Playlist',
+                                                        },
+                                                    )
+
+        # Download handler WAS called (ignore_matches bypassed the skip)
+        mock_handler.assert_called_once()
+        # Result does NOT indicate download was skipped
+        assert result.get('download_skipped_existing') is None or result.get('download_skipped_existing') is False
+        assert result['stages']['downloaded'] == 'done'

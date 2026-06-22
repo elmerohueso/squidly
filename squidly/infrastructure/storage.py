@@ -968,11 +968,21 @@ def get_local_track_by_isrc(isrc):
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT track_id, hifi_id, library_id, album_id, artist_id, title
-        FROM tracks
-        WHERE UPPER(TRIM(isrc)) = %s
-          AND library_id IS NOT NULL AND library_id <> ''
-        ORDER BY last_seen_at DESC
+        SELECT
+            t.track_id,
+            t.hifi_id,
+            t.library_id,
+            t.album_id,
+            t.artist_id,
+            t.title,
+            a.title AS album_title,
+            ar.name AS artist_name
+        FROM tracks t
+        LEFT JOIN albums a ON a.album_id = t.album_id
+        LEFT JOIN artists ar ON ar.artist_id = t.artist_id
+        WHERE UPPER(TRIM(t.isrc)) = %s
+          AND t.library_id IS NOT NULL AND t.library_id <> ''
+        ORDER BY t.last_seen_at DESC
         LIMIT 1
         """,
         (str(isrc).strip().upper(),)

@@ -418,6 +418,11 @@ def process_recommendation_job(job_id, payload):
             if local:
                 rec['library_id'] = local['library_id']
                 rec['hifi_id'] = local['hifi_id']
+                rec['album'] = local.get('album_title') or rec.get('album')
+                rec['artist'] = local.get('artist_name') or rec.get('artist')
+                rec['album_id'] = local.get('album_id')
+                rec['artist_id'] = local.get('artist_id')
+                rec['cover'] = None
 
     # Step 8: Combine — new tracks first, then library tracks
     top_tracks = selected_new + selected_library
@@ -432,6 +437,8 @@ def process_recommendation_job(job_id, payload):
     from squidly.services.hifi import _fetch_hifi_track_info_payload, extract_hifi_track_info
     resolved_count = 0
     for rec in top_tracks:
+        if rec.get('library_id'):
+            continue
         tid = rec.get('hifi_id')
         if not tid:
             continue

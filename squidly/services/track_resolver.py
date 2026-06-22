@@ -130,24 +130,8 @@ def _is_single(track_data, album_data):
     return num is not None and isinstance(num, (int, float)) and int(num) <= 4
 
 
-def _is_soundtrack(track_data, album_data):
-    """Check album and track for soundtrack indicators."""
-    title = str(track_data.get('title') or '')
-    version = str(track_data.get('version') or '')
-    album_title = str((album_data or track_data.get('album', {})).get('title') or '')
-    if _has_any([album_title], SOUNDTRACK_KEYWORDS):
-        return True
-    if re.search(r'from\s+["\u201c\u201d]', f'{title} {version}'.lower()):
-        return True
-    if _has_any([title, version], ['soundtrack', 'motion picture']):
-        return True
-    return False
-
-
 def _is_compilation(track_data, album_data):
-    """True if the track is on a compilation (not a soundtrack)."""
-    if _is_soundtrack(track_data, album_data):
-        return False
+    """True if the track is on a compilation"""
     if album_data and album_data.get('type') in ('SINGLE', 'EP'):
         return False
 
@@ -278,7 +262,7 @@ def _get_hifi_quality_rank(quality: Optional[str]) -> int:
 
 def _filter_and_rank_isrc_results(
     items, title, track_artist, album,
-    original_is_soundtrack, original_hifi_id,
+    original_hifi_id,
     caller_album_data=None, settings=None,
 ):
     """Filter and rank ISRC search results using tiered tuple scoring.
@@ -459,10 +443,6 @@ def resolve_track(
         if isrc:
             logger.info("[RESOLVE] MusicBrainz resolved ISRC %s for '%s' by '%s'", isrc, title, track_artist)
 
-    # Step 3: Determine if original album is a soundtrack
-    original_is_soundtrack = False
-    if track_info and album_data:
-        original_is_soundtrack = _is_soundtrack(track_info, album_data)
 
     # Step 4: ISRC search path
     if isrc:
@@ -470,7 +450,7 @@ def resolve_track(
         if items:
             best = _filter_and_rank_isrc_results(
                 items, title, track_artist, album,
-                original_is_soundtrack, original_hifi_id,
+                original_hifi_id,
                 caller_album_data=album_data, settings=settings,
             )
             if best:

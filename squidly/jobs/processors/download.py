@@ -295,7 +295,10 @@ def process_download_job(job_id, payload):
 
     conn = get_db_connection()
     cur = conn.cursor()
-    metadata_rows = _lookup_track_metadata(cur, track_title, artist_name, album_name)
+    metadata_rows = _lookup_track_metadata(
+        cur, track_title, artist_name, album_name,
+        isrc=track_data.get('isrc'),
+    )
     conn.close()
 
     ignore_matches = bool(payload.get('ignore_matches', False))
