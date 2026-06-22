@@ -261,7 +261,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',  # skip original
             settings={},
         )
@@ -277,7 +276,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',
             settings={},
         )
@@ -291,7 +289,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',
             settings={},
         )
@@ -305,7 +302,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',
             settings={},
         )
@@ -319,7 +315,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='218160',
             settings={},
         )
@@ -331,7 +326,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id=None,
             settings={},
         )
@@ -343,7 +337,6 @@ class TestFilterAndRankIsrcResults:
             title='Completely Different Song',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id=None,
             settings={},
         )
@@ -359,7 +352,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',
             settings={'penalty_compilation': False},
         )
@@ -394,7 +386,6 @@ class TestFilterAndRankIsrcResults:
             title='Desperately Wanting',
             track_artist='Better Than Ezra',
             album='',
-            original_is_soundtrack=False,
             original_hifi_id='999999',
             settings={'penalty_live': False},
         )

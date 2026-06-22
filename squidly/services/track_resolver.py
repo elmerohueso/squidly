@@ -44,10 +44,6 @@ COMPILATION_KEYWORDS = (
     'grandes exitos', 'lo mejor de', 'exitos', 'lo mejor',
 )
 
-SOUNDTRACK_KEYWORDS = (
-    'soundtrack', 'original motion picture', 'music from',
-    'tv series', 'from the motion picture',
-)
 
 LIVE_VERSION_KEYWORDS = (
     'live', 'concert', 'unplugged', 'acoustic', 'from ',
