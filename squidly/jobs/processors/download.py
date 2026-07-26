@@ -13,6 +13,7 @@ from squidly.services import deezer
 from squidly.services import deezer_mirror
 from squidly.services import qobuz
 from squidly.services import hifi
+from squidly.services import amazon
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.infrastructure.config import DOWNLOADS_ROOT
 from squidly.infrastructure.db import get_db_connection
@@ -46,6 +47,7 @@ _DOWNLOAD_SOURCE_HANDLERS = {
     'deezer': deezer.download_track_by_isrc,
     'deezer_mirror': deezer_mirror.download_track_by_isrc,
     'tidal': hifi.download_track_by_isrc,
+    'amazon': amazon.download_track_by_isrc,
 }
 
 
@@ -408,7 +410,7 @@ def process_download_job(job_id, payload):
 
     # --- Download track with source fallback ---
     # Build priority order from comma-separated download_source (e.g. "tidal,qobuz")
-    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz', 'deezer', 'deezer_mirror')]
+    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon')]
     if not download_sources:
         download_sources = ['tidal']
 
@@ -436,6 +438,17 @@ def process_download_job(job_id, payload):
             last_download_error = "Deezer Mirror requires ISRC (permanent)"
             continue
 
+        if current_source == 'amazon':
+            dl_settings = get_download_settings()
+            if not (dl_settings.get('amazon_api_base_url') or '').strip():
+                logger.info("[DOWNLOAD] Skipping Amazon: API base URL not configured")
+                last_download_error = "Amazon API base URL not configured (permanent)"
+                continue
+            if not (dl_settings.get('amazon_turnstile_site_key') or '').strip():
+                logger.info("[DOWNLOAD] Skipping Amazon: Turnstile site key not configured")
+                last_download_error = "Amazon Turnstile site key not configured (permanent)"
+                continue
+
         temp_source_path = ''
 
         try:
@@ -448,6 +461,8 @@ def process_download_job(job_id, payload):
             isrc = track_data.get('isrc')
             if handler is hifi.download_track_by_isrc:
                 result = handler(isrc, quality_choice, track_id=track_id)
+            elif handler is amazon.download_track_by_isrc:
+                result = handler(isrc, quality_choice, track_id=track_id, track_object=track_data)
             else:
                 result = handler(isrc, quality_choice)
 

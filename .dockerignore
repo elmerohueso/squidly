@@ -38,3 +38,6 @@ LICENSE
 
 # Docker
 .dockerignore
+
+# Chrome profile (mounted volume, not needed in image)
+chrome-profile/

@@ -256,6 +256,12 @@
                                     <button type="button" class="source-move-up" data-source="deezer_mirror" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="deezer_mirror" title="Move down">↓</button>
                                 </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="amazon" id="downloadSourceAmazon">
+                                    <span>Amazon (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="amazon" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="amazon" title="Move down">↓</button>
+                                </label>
                             </div>
 
                             <div class="settings-section-title">Deezer ARL</div>
@@ -268,6 +274,21 @@
                                 open DevTools (F12) → Storage tab → Cookies, and copy the value of the <code>arl</code> cookie.
                             </p>
                             <p class="settings-note" id="deezerConfigStatus"></p>
+
+                            <div class="settings-section-title">Amazon Music</div>
+                            <label class="settings-label" for="amazonApiBaseUrl">API Base URL</label>
+                            <input type="url" id="amazonApiBaseUrl" class="settings-input"
+                                placeholder="https://amz.geeked.wtf" autocomplete="off">
+                            <label class="settings-label" for="amazonTurnstileSiteKey">Turnstile Site Key</label>
+                            <input type="text" id="amazonTurnstileSiteKey" class="settings-input"
+                                placeholder="0x4AAAAAADgxqF6QVMm0GLHH" autocomplete="off">
+                            <label class="settings-label" for="amazonMonochromeDomain">Monochrome Domain</label>
+                            <input type="text" id="amazonMonochromeDomain" class="settings-input"
+                                placeholder="monochrome.samidy.com" autocomplete="off">
+                            <p class="settings-hint">
+                                The Monochrome domain is used for Turnstile authentication context.
+                            </p>
+                            <p class="settings-note" id="amazonConfigStatus"></p>
 
                             <div class="settings-section-title">Download Settings</div>
                             <label class="settings-label" for="qualityLossless">Quality</label>

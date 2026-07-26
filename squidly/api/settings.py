@@ -117,6 +117,9 @@ def download_settings():
         'ignore_matches': payload.get('ignoreMatches', payload.get('ignore_matches', current.get('ignore_matches', DEFAULT_DOWNLOAD_SETTINGS.get('ignore_matches', False)))),
         'download_source': payload.get('downloadSource', payload.get('download_source', current.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']))),
         'deezer_arl': payload.get('deezerArl') or payload.get('deezer_arl') or current.get('deezer_arl', ''),
+        'amazon_api_base_url': payload.get('amazonApiBaseUrl') or payload.get('amazon_api_base_url') or current.get('amazon_api_base_url', ''),
+        'amazon_turnstile_site_key': payload.get('amazonTurnstileSiteKey') or payload.get('amazon_turnstile_site_key') or current.get('amazon_turnstile_site_key', ''),
+        'amazon_monochrome_domain': payload.get('amazonMonochromeDomain') or payload.get('amazon_monochrome_domain') or current.get('amazon_monochrome_domain', ''),
     }
 
     for key in tag_keys:
@@ -130,7 +133,7 @@ def download_settings():
 
     # Validate comma-separated download source priority list
     download_sources = [s.strip() for s in updated['download_source'].split(',')]
-    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer', 'deezer_mirror') for s in download_sources):
+    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon') for s in download_sources):
         return jsonify({'error': 'Invalid download source value(s)'}), 400
     # Normalize: preserve order, remove duplicates
     seen = set()
@@ -168,6 +171,9 @@ def download_settings():
         'ignore_matches': updated['ignore_matches'],
         'download_source': updated['download_source'],
         'deezer_arl': updated['deezer_arl'],
+        'amazon_api_base_url': updated['amazon_api_base_url'],
+        'amazon_turnstile_site_key': updated['amazon_turnstile_site_key'],
+        'amazon_monochrome_domain': updated['amazon_monochrome_domain'],
     }
     for key in tag_keys:
         result[key] = updated[key]

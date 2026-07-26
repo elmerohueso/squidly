@@ -456,7 +456,8 @@ def get_download_settings():
                tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                tag_explicit, tag_explicit_suffix,
-               penalty_compilation, penalty_karaoke, penalty_live, download_source, deezer_arl
+               penalty_compilation, penalty_karaoke, penalty_live, download_source, deezer_arl,
+               amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain
         FROM download_settings
         WHERE id = 1
         """
@@ -474,6 +475,7 @@ def get_download_settings():
                 tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
+                amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -481,7 +483,8 @@ def get_download_settings():
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['quality'],
@@ -513,6 +516,9 @@ def get_download_settings():
                 DEFAULT_DOWNLOAD_SETTINGS['penalty_live'],
                 DEFAULT_DOWNLOAD_SETTINGS['download_source'],
                 DEFAULT_DOWNLOAD_SETTINGS['deezer_arl'],
+                '',
+                '',
+                '',
                 now
             )
         )
@@ -524,7 +530,8 @@ def get_download_settings():
                    tag_track_number, tag_track_total, tag_disc_number, tag_disc_total, tag_version,
                    tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                    tag_explicit, tag_explicit_suffix,
-                   penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl
+                   penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
+                   amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain
             FROM download_settings
             WHERE id = 1
             """
@@ -585,6 +592,9 @@ def get_download_settings():
         'penalty_live': bool(row.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
         'download_source': row.get('download_source') or DEFAULT_DOWNLOAD_SETTINGS['download_source'],
         'deezer_arl': str(row.get('deezer_arl') or ''),
+        'amazon_api_base_url': str(row.get('amazon_api_base_url') or ''),
+        'amazon_turnstile_site_key': str(row.get('amazon_turnstile_site_key') or ''),
+        'amazon_monochrome_domain': str(row.get('amazon_monochrome_domain') or ''),
     }
 
 
@@ -601,6 +611,7 @@ def save_download_settings(settings):
             tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
+                amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -608,7 +619,8 @@ def save_download_settings(settings):
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             quality = excluded.quality,
             parent_folder = excluded.parent_folder,
@@ -638,6 +650,9 @@ def save_download_settings(settings):
             penalty_live = excluded.penalty_live,
             download_source = excluded.download_source,
             deezer_arl = excluded.deezer_arl,
+            amazon_api_base_url = excluded.amazon_api_base_url,
+            amazon_turnstile_site_key = excluded.amazon_turnstile_site_key,
+            amazon_monochrome_domain = excluded.amazon_monochrome_domain,
             updated_at = excluded.updated_at
         """,
         (
@@ -670,6 +685,9 @@ def save_download_settings(settings):
             bool(settings.get('penalty_live', DEFAULT_DOWNLOAD_SETTINGS['penalty_live'])),
             settings.get('download_source', DEFAULT_DOWNLOAD_SETTINGS['download_source']),
             settings.get('deezer_arl', ''),
+            settings.get('amazon_api_base_url', ''),
+            settings.get('amazon_turnstile_site_key', ''),
+            settings.get('amazon_monochrome_domain', ''),
             now
         )
     )

@@ -100,6 +100,12 @@ def init_db():
         cur.execute("ALTER TABLE download_settings ADD COLUMN download_source TEXT NOT NULL DEFAULT 'tidal'")
     if 'deezer_arl' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN deezer_arl TEXT NOT NULL DEFAULT ''")
+    if 'amazon_api_base_url' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN amazon_api_base_url TEXT NOT NULL DEFAULT ''")
+    if 'amazon_turnstile_site_key' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN amazon_turnstile_site_key TEXT NOT NULL DEFAULT ''")
+    if 'amazon_monochrome_domain' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN amazon_monochrome_domain TEXT NOT NULL DEFAULT ''")
 
     cur.execute(
         """

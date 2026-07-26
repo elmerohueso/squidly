@@ -1,10 +1,10 @@
 # Squidly
 
-A music downloader and library manager built with Flask and TypeScript. Downloads tracks from Tidal, Qobuz, and Deezer, then tags and syncs to Plex.
+A music downloader and library manager built with Flask and TypeScript. Downloads tracks from Tidal, Qobuz, Deezer, and Amazon Music, then tags and syncs to Plex.
 
 ## Features
 
-- **Multi-Source Downloads** — Tidal (hifi-api mirrors), Qobuz (qqdl mirrors), and Deezer (ARL-based)
+- **Multi-Source Downloads** — Tidal (hifi-api mirrors), Qobuz (qqdl mirrors), Deezer (ARL-based), and Amazon Music (API mirror via Turnstile)
 - **Format Support** — FLAC and M4A output with metadata tagging
 - **Plex Integration** — Library sync, automatic scan/update, and playlist management
 - **Listen Tracking** — Syncs play history from Plex to power personalized recommendations
