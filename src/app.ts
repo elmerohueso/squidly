@@ -527,6 +527,9 @@ interface DownloadSettings {
     penaltyKaraoke: boolean;
     penaltyLive: boolean;
     deezerArl: string;
+    amazonApiBaseUrl: string;
+    amazonTurnstileSiteKey: string;
+    amazonMonochromeDomain: string;
 }
 
 interface AppRouteState {
@@ -716,6 +719,10 @@ class App {
     private ytmConfigStatusEl: HTMLElement;
     private deezerArlInput: HTMLInputElement;
     private deezerConfigStatusEl: HTMLElement;
+    private amazonApiBaseUrlInput: HTMLInputElement;
+    private amazonTurnstileSiteKeyInput: HTMLInputElement;
+    private amazonMonochromeDomainInput: HTMLInputElement;
+    private amazonConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsRetentionInput: HTMLInputElement;
     private freshFindsNewPctSlider: HTMLInputElement;
@@ -1008,6 +1015,10 @@ class App {
         this.ytmConfigStatusEl = document.getElementById('ytmConfigStatus') as HTMLElement;
         this.deezerArlInput = document.getElementById('deezerArl') as HTMLInputElement;
         this.deezerConfigStatusEl = document.getElementById('deezerConfigStatus') as HTMLElement;
+        this.amazonApiBaseUrlInput = document.getElementById('amazonApiBaseUrl') as HTMLInputElement;
+        this.amazonTurnstileSiteKeyInput = document.getElementById('amazonTurnstileSiteKey') as HTMLInputElement;
+        this.amazonMonochromeDomainInput = document.getElementById('amazonMonochromeDomain') as HTMLInputElement;
+        this.amazonConfigStatusEl = document.getElementById('amazonConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
         this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
@@ -1308,7 +1319,7 @@ class App {
         if (this.downloadSourceList) {
             this.downloadSourceList.addEventListener('change', (e) => {
                 const target = e.target as HTMLInputElement;
-                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer' || target.value === 'deezer_mirror')) {
+                if (target.type === 'checkbox' && (target.value === 'tidal' || target.value === 'qobuz' || target.value === 'deezer' || target.value === 'deezer_mirror' || target.value === 'amazon')) {
                     // Ensure at least one source is checked
                     const checkedBoxes = this.downloadSourceList.querySelectorAll('input[type="checkbox"]:checked');
                     if (checkedBoxes.length === 0) {
@@ -5700,6 +5711,9 @@ class App {
             penaltyKaraoke: true,
             penaltyLive: true,
             deezerArl: '',
+            amazonApiBaseUrl: '',
+            amazonTurnstileSiteKey: '',
+            amazonMonochromeDomain: '',
         };
     }
 
@@ -5753,6 +5767,21 @@ class App {
                 : typeof (raw as { deezer_arl?: string }).deezer_arl === 'string'
                     ? (raw as { deezer_arl?: string }).deezer_arl!
                     : fallback.deezerArl,
+            amazonApiBaseUrl: typeof (raw as DownloadSettings).amazonApiBaseUrl === 'string'
+                ? (raw as DownloadSettings).amazonApiBaseUrl
+                : typeof (raw as { amazon_api_base_url?: string }).amazon_api_base_url === 'string'
+                    ? (raw as { amazon_api_base_url?: string }).amazon_api_base_url!
+                    : fallback.amazonApiBaseUrl,
+            amazonTurnstileSiteKey: typeof (raw as DownloadSettings).amazonTurnstileSiteKey === 'string'
+                ? (raw as DownloadSettings).amazonTurnstileSiteKey
+                : typeof (raw as { amazon_turnstile_site_key?: string }).amazon_turnstile_site_key === 'string'
+                    ? (raw as { amazon_turnstile_site_key?: string }).amazon_turnstile_site_key!
+                    : fallback.amazonTurnstileSiteKey,
+            amazonMonochromeDomain: typeof (raw as DownloadSettings).amazonMonochromeDomain === 'string'
+                ? (raw as DownloadSettings).amazonMonochromeDomain
+                : typeof (raw as { amazon_monochrome_domain?: string }).amazon_monochrome_domain === 'string'
+                    ? (raw as { amazon_monochrome_domain?: string }).amazon_monochrome_domain!
+                    : fallback.amazonMonochromeDomain,
         } as DownloadSettings;
     }
 
@@ -5795,6 +5824,9 @@ class App {
         this.fileNamingAlbumInput.value = settings.fileNamingAlbum;
         this.jobsRefreshIntervalSecondsInput.value = String(settings.jobsRefreshIntervalSeconds);
         this.ignoreMatchesCheckbox.checked = settings.ignoreMatches === true;
+        this.amazonApiBaseUrlInput.value = settings.amazonApiBaseUrl;
+        this.amazonTurnstileSiteKeyInput.value = settings.amazonTurnstileSiteKey;
+        this.amazonMonochromeDomainInput.value = settings.amazonMonochromeDomain;
         for (const id of App.TAG_CHECKBOX_IDS) {
             const s = settings as unknown as Record<string, boolean>;
             if (this.tagCheckboxes[id] && s[id] !== undefined) {
@@ -5822,6 +5854,9 @@ class App {
             jobsRefreshIntervalSeconds: parsedJobsRefreshIntervalSeconds ?? fallbackIntervalSeconds,
             ignoreMatches: this.ignoreMatchesCheckbox.checked,
             deezerArl: this.deezerArlInput.value.trim() || '',
+            amazonApiBaseUrl: this.amazonApiBaseUrlInput?.value.trim() || '',
+            amazonTurnstileSiteKey: this.amazonTurnstileSiteKeyInput?.value.trim() || '',
+            amazonMonochromeDomain: this.amazonMonochromeDomainInput?.value.trim() || '',
             ...(() => {
                 const result: Record<string, boolean> = {};
                 for (const id of App.TAG_CHECKBOX_IDS) {
