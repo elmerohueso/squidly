@@ -1489,7 +1489,14 @@ def _update_premium_db(name: str, result: dict) -> None:
                     "UPDATE mirror_endpoints SET online = 0, is_premium = NULL, last_checked = %s WHERE name = %s",
                     (now, name)
                 )
-                logger.info("[PREMIUM] Marked mirror '%s' as offline, reset is_premium", name)
+                logger.info("[PREMIUM] Marked mirror '%s' offline, reset is_premium", name)
+        else:
+            # Inconclusive (is_online is None) — can't confirm premium if unreachable
+            cur.execute(
+                "UPDATE mirror_endpoints SET is_premium = NULL, last_checked = %s WHERE name = %s",
+                (now, name)
+            )
+            logger.info("[PREMIUM] Inconclusive for '%s', reset is_premium", name)
         conn.commit()
         conn.close()
     except Exception as db_err:
