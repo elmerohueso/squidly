@@ -107,6 +107,14 @@ def init_db():
     if 'amazon_monochrome_domain' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN amazon_monochrome_domain TEXT NOT NULL DEFAULT ''")
 
+    # Monochrome settings columns
+    if 'monochrome_api_base_url' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_api_base_url TEXT NOT NULL DEFAULT 'https://track-api.monochrome.tf'")
+    if 'monochrome_turnstile_site_key' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_turnstile_site_key TEXT NOT NULL DEFAULT '0x4AAAAAADgxqF6QVMm0GLHH'")
+    if 'monochrome_domain' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_domain TEXT NOT NULL DEFAULT ''")
+
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS mirror_endpoints (

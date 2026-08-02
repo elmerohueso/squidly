@@ -2730,6 +2730,16 @@ body {
     color: var(--color-deezer-brand);
 }
 
+.mirror-type-amazon {
+    background: #232f3e;
+    color: #ff9900;
+}
+
+.mirror-type-monochrome {
+    background: #1a1a2e;
+    color: #e94560;
+}
+
 .settings-label {
     display: block;
     font-weight: 600;

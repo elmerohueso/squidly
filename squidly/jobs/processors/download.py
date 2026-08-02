@@ -14,6 +14,7 @@ from squidly.services import deezer_mirror
 from squidly.services import qobuz
 from squidly.services import hifi
 from squidly.services import amazon
+from squidly.services import monochrome
 from squidly.infrastructure.config import DEFAULT_DOWNLOAD_SETTINGS
 from squidly.infrastructure.config import DOWNLOADS_ROOT
 from squidly.infrastructure.db import get_db_connection
@@ -48,6 +49,7 @@ _DOWNLOAD_SOURCE_HANDLERS = {
     'deezer_mirror': deezer_mirror.download_track_by_isrc,
     'tidal': hifi.download_track_by_isrc,
     'amazon': amazon.download_track_by_isrc,
+    'monochrome': monochrome.download_track_by_isrc,
 }
 
 
@@ -410,7 +412,7 @@ def process_download_job(job_id, payload):
 
     # --- Download track with source fallback ---
     # Build priority order from comma-separated download_source (e.g. "tidal,qobuz")
-    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon')]
+    download_sources = [s.strip() for s in download_source.split(',') if s.strip() in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon', 'monochrome')]
     if not download_sources:
         download_sources = ['tidal']
 
@@ -449,6 +451,21 @@ def process_download_job(job_id, payload):
                 last_download_error = "Amazon Turnstile site key not configured (permanent)"
                 continue
 
+        if current_source == 'monochrome':
+            dl_settings = get_download_settings()
+            if not (dl_settings.get('monochrome_api_base_url') or '').strip():
+                logger.info("[DOWNLOAD] Skipping Monochrome: API base URL not configured")
+                last_download_error = "Monochrome API base URL not configured (permanent)"
+                continue
+            if not (dl_settings.get('monochrome_turnstile_site_key') or '').strip():
+                logger.info("[DOWNLOAD] Skipping Monochrome: Turnstile site key not configured")
+                last_download_error = "Monochrome Turnstile site key not configured (permanent)"
+                continue
+            if not (dl_settings.get('monochrome_domain') or '').strip():
+                logger.info("[DOWNLOAD] Skipping Monochrome: domain not configured")
+                last_download_error = "Monochrome domain not configured (permanent)"
+                continue
+
         temp_source_path = ''
 
         try:
@@ -462,6 +479,8 @@ def process_download_job(job_id, payload):
             if handler is hifi.download_track_by_isrc:
                 result = handler(isrc, quality_choice, track_id=track_id)
             elif handler is amazon.download_track_by_isrc:
+                result = handler(isrc, quality_choice, track_id=track_id, track_object=track_data)
+            elif handler is monochrome.download_track_by_isrc:
                 result = handler(isrc, quality_choice, track_id=track_id, track_object=track_data)
             else:
                 result = handler(isrc, quality_choice)

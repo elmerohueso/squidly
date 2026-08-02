@@ -120,6 +120,9 @@ def download_settings():
         'amazon_api_base_url': payload.get('amazonApiBaseUrl') or payload.get('amazon_api_base_url') or current.get('amazon_api_base_url', ''),
         'amazon_turnstile_site_key': payload.get('amazonTurnstileSiteKey') or payload.get('amazon_turnstile_site_key') or current.get('amazon_turnstile_site_key', ''),
         'amazon_monochrome_domain': payload.get('amazonMonochromeDomain') or payload.get('amazon_monochrome_domain') or current.get('amazon_monochrome_domain', ''),
+        'monochrome_api_base_url': payload.get('monochromeApiBaseUrl') or payload.get('monochrome_api_base_url') or current.get('monochrome_api_base_url', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_api_base_url', 'https://track-api.monochrome.tf')),
+        'monochrome_turnstile_site_key': payload.get('monochromeTurnstileSiteKey') or payload.get('monochrome_turnstile_site_key') or current.get('monochrome_turnstile_site_key', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_turnstile_site_key', '0x4AAAAAADgxqF6QVMm0GLHH')),
+        'monochrome_domain': payload.get('monochromeDomain') or payload.get('monochrome_domain') or current.get('monochrome_domain', ''),
     }
 
     for key in tag_keys:
@@ -133,7 +136,7 @@ def download_settings():
 
     # Validate comma-separated download source priority list
     download_sources = [s.strip() for s in updated['download_source'].split(',')]
-    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon') for s in download_sources):
+    if not download_sources or not all(s in ('tidal', 'qobuz', 'deezer', 'deezer_mirror', 'amazon', 'monochrome') for s in download_sources):
         return jsonify({'error': 'Invalid download source value(s)'}), 400
     # Normalize: preserve order, remove duplicates
     seen = set()
@@ -174,6 +177,9 @@ def download_settings():
         'amazon_api_base_url': updated['amazon_api_base_url'],
         'amazon_turnstile_site_key': updated['amazon_turnstile_site_key'],
         'amazon_monochrome_domain': updated['amazon_monochrome_domain'],
+        'monochrome_api_base_url': updated['monochrome_api_base_url'],
+        'monochrome_turnstile_site_key': updated['monochrome_turnstile_site_key'],
+        'monochrome_domain': updated['monochrome_domain'],
     }
     for key in tag_keys:
         result[key] = updated[key]

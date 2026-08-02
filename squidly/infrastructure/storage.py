@@ -457,7 +457,8 @@ def get_download_settings():
                tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                tag_explicit, tag_explicit_suffix,
                penalty_compilation, penalty_karaoke, penalty_live, download_source, deezer_arl,
-               amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain
+               amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
+               monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain
         FROM download_settings
         WHERE id = 1
         """
@@ -476,6 +477,7 @@ def get_download_settings():
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                 amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
+                monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -484,6 +486,7 @@ def get_download_settings():
                     %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s,
                     %s, %s, %s)
             """,
             (
@@ -519,6 +522,9 @@ def get_download_settings():
                 '',
                 '',
                 '',
+                DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url'],
+                DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key'],
+                '',
                 now
             )
         )
@@ -531,7 +537,8 @@ def get_download_settings():
                    tag_tidal_track_id, tag_tidal_album_id, tag_isrc, tag_copyright, tag_cover_art,
                    tag_explicit, tag_explicit_suffix,
                    penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
-                   amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain
+                   amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
+                   monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain
             FROM download_settings
             WHERE id = 1
             """
@@ -595,6 +602,9 @@ def get_download_settings():
         'amazon_api_base_url': str(row.get('amazon_api_base_url') or ''),
         'amazon_turnstile_site_key': str(row.get('amazon_turnstile_site_key') or ''),
         'amazon_monochrome_domain': str(row.get('amazon_monochrome_domain') or ''),
+        'monochrome_api_base_url': str(row.get('monochrome_api_base_url') or DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url']),
+        'monochrome_turnstile_site_key': str(row.get('monochrome_turnstile_site_key') or DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key']),
+        'monochrome_domain': str(row.get('monochrome_domain') or ''),
     }
 
 
@@ -612,6 +622,7 @@ def save_download_settings(settings):
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                 amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
+                monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -620,6 +631,7 @@ def save_download_settings(settings):
                     %s, %s, %s, %s, %s,
                     %s, %s,
                     %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s,
                     %s, %s, %s)
         ON CONFLICT(id) DO UPDATE SET
             quality = excluded.quality,
@@ -653,6 +665,9 @@ def save_download_settings(settings):
             amazon_api_base_url = excluded.amazon_api_base_url,
             amazon_turnstile_site_key = excluded.amazon_turnstile_site_key,
             amazon_monochrome_domain = excluded.amazon_monochrome_domain,
+            monochrome_api_base_url = excluded.monochrome_api_base_url,
+            monochrome_turnstile_site_key = excluded.monochrome_turnstile_site_key,
+            monochrome_domain = excluded.monochrome_domain,
             updated_at = excluded.updated_at
         """,
         (
@@ -688,6 +703,9 @@ def save_download_settings(settings):
             settings.get('amazon_api_base_url', ''),
             settings.get('amazon_turnstile_site_key', ''),
             settings.get('amazon_monochrome_domain', ''),
+            settings.get('monochrome_api_base_url', DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url']),
+            settings.get('monochrome_turnstile_site_key', DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key']),
+            settings.get('monochrome_domain', ''),
             now
         )
     )
