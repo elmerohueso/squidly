@@ -420,8 +420,6 @@ def process_recommendation_job(job_id, payload):
                 rec['hifi_id'] = local['hifi_id']
                 rec['album'] = local.get('album_title') or rec.get('album')
                 rec['artist'] = local.get('artist_name') or rec.get('artist')
-                rec['album_id'] = local.get('album_id')
-                rec['artist_id'] = local.get('artist_id')
                 rec['cover'] = None
 
     # Step 8: Combine — new tracks first, then library tracks

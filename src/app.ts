@@ -3690,10 +3690,10 @@ class App {
         if (route.view === 'home') {
             this.stopPlayback();
             this.updatePlexPlaylistContainerVisibility(false);
-            this.resultsContainer.innerHTML = '';
             if (updateHistory) {
                 this.pushHistoryRoute({ view: 'home' });
             }
+            await this.renderExploreHome();
             return;
         }
 
@@ -10258,6 +10258,60 @@ class App {
         } catch (error) {
             this.displayMessage('Error loading recommendations. Please try again.', () => this.fetchSimilarTracks(trackId));
             console.error('Recommendations fetch error:', error);
+        }
+    }
+
+    private async renderExploreHome(): Promise<void> {
+        this.resultsContainer.innerHTML = '';
+
+        const userId = this.getSelectedPlexUserId();
+        if (!userId) {
+            this.resultsContainer.innerHTML = '<div class="library-placeholder"><p>Select a Plex user to see Fresh Finds.</p></div>';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`);
+            if (!response.ok) {
+                this.resultsContainer.innerHTML = '<div class="library-placeholder"><p>No Fresh Finds available.</p></div>';
+                return;
+            }
+            const data = await response.json();
+            const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+
+            if (tracks.length === 0) {
+                this.resultsContainer.innerHTML = '<div class="library-placeholder"><p>No Fresh Finds available.</p></div>';
+                return;
+            }
+
+            // Extract unique album IDs from tracks (filter nulls)
+            const seenAlbumIds = new Set<number>();
+            for (const track of tracks) {
+                const albumId = track.album?.id;
+                if (albumId && !seenAlbumIds.has(albumId)) {
+                    seenAlbumIds.add(albumId);
+                }
+            }
+
+            // Fetch full album objects from HiFi API in parallel
+            const albumFetches = Array.from(seenAlbumIds).map(albumId =>
+                fetch(`/api/hifi/albums/${encodeURIComponent(String(albumId))}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(json => json?.album as AlbumSearchItem | undefined)
+                    .catch(() => undefined)
+            );
+            const fetchedAlbums = (await Promise.all(albumFetches)).filter((a): a is AlbumSearchItem => !!a);
+
+            if (fetchedAlbums.length === 0) {
+                this.resultsContainer.innerHTML = '<div class="library-placeholder"><p>No Fresh Finds available.</p></div>';
+                return;
+            }
+
+            this.resultsContainer.innerHTML = this.renderAlbumGrid(fetchedAlbums, { viewMode: 'search-albums' });
+            void this.annotateAlbumGridsWithPlexStatus(fetchedAlbums);
+        } catch (error) {
+            console.error('Explore home load error:', error);
+            this.resultsContainer.innerHTML = '<div class="library-placeholder"><p>Failed to load Fresh Finds.</p></div>';
         }
     }
 
