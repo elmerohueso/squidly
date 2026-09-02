@@ -50,8 +50,6 @@ def _run_step7(recs, mock_get_local):
                 rec['hifi_id'] = local['hifi_id']
                 rec['album'] = local.get('album_title') or rec.get('album')
                 rec['artist'] = local.get('artist_name') or rec.get('artist')
-                rec['album_id'] = local.get('album_id')
-                rec['artist_id'] = local.get('artist_id')
                 rec['cover'] = None
 
 
@@ -82,12 +80,13 @@ def _run_step9(top_tracks, mock_resolve_track):
 
 
 class TestStep7LocalMetadataOverwrite:
-    """Step 7 overwrites rec fields from the local library row."""
+    """Step 7 overwrites rec metadata from the local library row,
+    but preserves Tidal album_id and artist_id for frontend use."""
 
     def test_local_metadata_wins(self):
         """When get_local_track_by_isrc returns a local row, the rec's
-        hifi_id, library_id, album, artist, album_id, artist_id, cover
-        are overwritten from the local track."""
+        hifi_id, library_id, album, artist, cover are overwritten from
+        the local track. album_id and artist_id stay as Tidal IDs."""
         local_row = {
             'hifi_id': 307230,
             'library_id': '135100',
@@ -106,14 +105,15 @@ class TestStep7LocalMetadataOverwrite:
         assert rec['library_id'] == '135100'
         assert rec['album'] == 'A Fever You Sweat Out'
         assert rec['artist'] == 'Panic! At The Disco'
-        assert rec['album_id'] == 99
-        assert rec['artist_id'] == 88
+        # album_id and artist_id stay as original Tidal values
+        assert rec['album_id'] == 777
+        assert rec['artist_id'] == 666
         assert rec['cover'] is None
 
     def test_local_row_missing_album_title_falls_back(self):
         """When the local row's album_title is NULL (LEFT JOIN missed),
         rec['album'] falls back to the original Tidal value via `or`.
-        album_id is still overwritten to None."""
+        album_id and artist_id stay as original Tidal IDs."""
         local_row = {
             'hifi_id': 307230,
             'library_id': '135100',
@@ -129,11 +129,11 @@ class TestStep7LocalMetadataOverwrite:
 
         # album falls back to the original Tidal value
         assert rec['album'] == 'Back to the 00s'
-        # album_id is overwritten to None (no fallback for IDs)
-        assert rec['album_id'] is None
+        # album_id and artist_id stay as original Tidal values
+        assert rec['album_id'] == 777
+        assert rec['artist_id'] == 666
         # artist_name is present, so artist is overwritten
         assert rec['artist'] == 'Panic! At The Disco'
-        assert rec['artist_id'] == 88
         assert rec['library_id'] == '135100'
         assert rec['hifi_id'] == 307230
         assert rec['cover'] is None
@@ -163,9 +163,8 @@ class TestStep7LocalMetadataOverwrite:
         mock_get_local.assert_not_called()
 
     def test_local_track_with_library_id_but_null_album_id(self):
-        """Edge case: library_id present but album_id NULL.
-        album falls back to Tidal value; album_id is overwritten to None.
-        The asymmetry: album keeps Tidal value, album_id is None."""
+        """Edge case: library_id present but album_id NULL in local row.
+        album falls back to Tidal value; album_id stays as Tidal ID."""
         local_row = {
             'hifi_id': 307230,
             'library_id': '135100',
@@ -181,11 +180,11 @@ class TestStep7LocalMetadataOverwrite:
 
         # album falls back to Tidal value (None or 'Back to the 00s' -> 'Back to the 00s')
         assert rec['album'] == 'Back to the 00s'
-        # album_id is overwritten to None
-        assert rec['album_id'] is None
+        # album_id stays as original Tidal value
+        assert rec['album_id'] == 777
         # artist was present, so it's overwritten
         assert rec['artist'] == 'Panic! At The Disco'
-        assert rec['artist_id'] == 88
+        assert rec['artist_id'] == 666
 
 
 # ---------------------------------------------------------------------------
