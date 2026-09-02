@@ -530,6 +530,9 @@ interface DownloadSettings {
     amazonApiBaseUrl: string;
     amazonTurnstileSiteKey: string;
     amazonMonochromeDomain: string;
+    monochromeApiBaseUrl: string;
+    monochromeTurnstileSiteKey: string;
+    monochromeDomain: string;
 }
 
 interface AppRouteState {
@@ -723,6 +726,10 @@ class App {
     private amazonTurnstileSiteKeyInput: HTMLInputElement;
     private amazonMonochromeDomainInput: HTMLInputElement;
     private amazonConfigStatusEl: HTMLElement;
+    private monochromeApiBaseUrlInput: HTMLInputElement;
+    private monochromeTurnstileSiteKeyInput: HTMLInputElement;
+    private monochromeDomainInput: HTMLInputElement;
+    private monochromeConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
     private freshFindsRetentionInput: HTMLInputElement;
     private freshFindsNewPctSlider: HTMLInputElement;
@@ -1019,6 +1026,10 @@ class App {
         this.amazonTurnstileSiteKeyInput = document.getElementById('amazonTurnstileSiteKey') as HTMLInputElement;
         this.amazonMonochromeDomainInput = document.getElementById('amazonMonochromeDomain') as HTMLInputElement;
         this.amazonConfigStatusEl = document.getElementById('amazonConfigStatus') as HTMLElement;
+        this.monochromeApiBaseUrlInput = document.getElementById('monochromeApiBaseUrl') as HTMLInputElement;
+        this.monochromeTurnstileSiteKeyInput = document.getElementById('monochromeTurnstileSiteKey') as HTMLInputElement;
+        this.monochromeDomainInput = document.getElementById('monochromeDomain') as HTMLInputElement;
+        this.monochromeConfigStatusEl = document.getElementById('monochromeConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
         this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
         this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
@@ -5520,7 +5531,7 @@ class App {
                 sections.push(`<div class="job-sync-progress">Upgraded existing file${upgradedFromBitrate ? ` (was ${upgradedFromBitrate} kbps)` : ''}</div>`);
             }
             if (downloadMirror) {
-                const mirrorLabel = mirrorType === 'deezer_mirror' || mirrorType === 'deezer' ? 'Deezer' : mirrorType || '';
+                const mirrorLabel = mirrorType === 'deezer_mirror' || mirrorType === 'deezer' ? 'Deezer' : mirrorType === 'monochrome' ? 'Monochrome' : mirrorType || '';
                 const badge = mirrorLabel ? `<span class="mirror-type-badge mirror-type-${this.escapeHtml(mirrorType || '')}">${this.escapeHtml(mirrorLabel)}</span> ` : '';
                 sections.push(`<div class="job-sync-progress">${badge}Discovered via <span class="mirror-url">${this.escapeHtml(downloadMirror)}</span></div>`);
             }
@@ -5714,6 +5725,9 @@ class App {
             amazonApiBaseUrl: '',
             amazonTurnstileSiteKey: '',
             amazonMonochromeDomain: '',
+            monochromeApiBaseUrl: 'https://track-api.monochrome.tf',
+            monochromeTurnstileSiteKey: '0x4AAAAAADgxqF6QVMm0GLHH',
+            monochromeDomain: '',
         };
     }
 
@@ -5782,6 +5796,21 @@ class App {
                 : typeof (raw as { amazon_monochrome_domain?: string }).amazon_monochrome_domain === 'string'
                     ? (raw as { amazon_monochrome_domain?: string }).amazon_monochrome_domain!
                     : fallback.amazonMonochromeDomain,
+            monochromeApiBaseUrl: typeof (raw as DownloadSettings).monochromeApiBaseUrl === 'string'
+                ? (raw as DownloadSettings).monochromeApiBaseUrl
+                : typeof (raw as { monochrome_api_base_url?: string }).monochrome_api_base_url === 'string'
+                    ? (raw as { monochrome_api_base_url?: string }).monochrome_api_base_url!
+                    : fallback.monochromeApiBaseUrl,
+            monochromeTurnstileSiteKey: typeof (raw as DownloadSettings).monochromeTurnstileSiteKey === 'string'
+                ? (raw as DownloadSettings).monochromeTurnstileSiteKey
+                : typeof (raw as { monochrome_turnstile_site_key?: string }).monochrome_turnstile_site_key === 'string'
+                    ? (raw as { monochrome_turnstile_site_key?: string }).monochrome_turnstile_site_key!
+                    : fallback.monochromeTurnstileSiteKey,
+            monochromeDomain: typeof (raw as DownloadSettings).monochromeDomain === 'string'
+                ? (raw as DownloadSettings).monochromeDomain
+                : typeof (raw as { monochrome_domain?: string }).monochrome_domain === 'string'
+                    ? (raw as { monochrome_domain?: string }).monochrome_domain!
+                    : fallback.monochromeDomain,
         } as DownloadSettings;
     }
 
@@ -5827,6 +5856,9 @@ class App {
         this.amazonApiBaseUrlInput.value = settings.amazonApiBaseUrl;
         this.amazonTurnstileSiteKeyInput.value = settings.amazonTurnstileSiteKey;
         this.amazonMonochromeDomainInput.value = settings.amazonMonochromeDomain;
+        this.monochromeApiBaseUrlInput.value = settings.monochromeApiBaseUrl;
+        this.monochromeTurnstileSiteKeyInput.value = settings.monochromeTurnstileSiteKey;
+        this.monochromeDomainInput.value = settings.monochromeDomain;
         for (const id of App.TAG_CHECKBOX_IDS) {
             const s = settings as unknown as Record<string, boolean>;
             if (this.tagCheckboxes[id] && s[id] !== undefined) {
@@ -5857,6 +5889,9 @@ class App {
             amazonApiBaseUrl: this.amazonApiBaseUrlInput?.value.trim() || '',
             amazonTurnstileSiteKey: this.amazonTurnstileSiteKeyInput?.value.trim() || '',
             amazonMonochromeDomain: this.amazonMonochromeDomainInput?.value.trim() || '',
+            monochromeApiBaseUrl: this.monochromeApiBaseUrlInput?.value.trim() || '',
+            monochromeTurnstileSiteKey: this.monochromeTurnstileSiteKeyInput?.value.trim() || '',
+            monochromeDomain: this.monochromeDomainInput?.value.trim() || '',
             ...(() => {
                 const result: Record<string, boolean> = {};
                 for (const id of App.TAG_CHECKBOX_IDS) {

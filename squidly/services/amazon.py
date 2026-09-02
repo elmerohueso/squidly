@@ -12,9 +12,9 @@ import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import time
-from pathlib import Path
+
+from squidly.services import turnstile
 
 logger = logging.getLogger(__name__)
 
@@ -31,50 +31,14 @@ AMAZON_QUALITY_MAP = {
 }
 
 # ---------------------------------------------------------------------------
-# Browser JS: Turnstile → JWT → Amazon Music API
+# Browser JS: call Amazon Music API (Turnstile JWT handled separately)
 # ---------------------------------------------------------------------------
 
-BROWSER_JS = '''
+_AMAZON_API_JS = '''
 (async () => {
     const API_BASE_URL = API_URL;
-    const SITE_KEY = SITE_KEY_PLACEHOLDER;
+    const JWT = JWT_VALUE;
     const TRACK = TRACK_JSON;
-
-    // Load Turnstile
-    const script = document.createElement('script');
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    await new Promise((resolve, reject) => {
-        script.onload = resolve;
-        script.onerror = () => reject(new Error('Failed to load Turnstile'));
-        document.head.appendChild(script);
-    });
-
-    // Render invisible widget and execute
-    const token = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Turnstile timed out')), 30000);
-        const widgetId = turnstile.render(document.body, {
-            sitekey: SITE_KEY,
-            size: 'invisible',
-            execution: 'execute',
-            callback: (t) => { clearTimeout(timeout); resolve(t); },
-            'error-callback': () => { clearTimeout(timeout); reject(new Error('Turnstile failed')); },
-            'expired-callback': () => { clearTimeout(timeout); reject(new Error('Turnstile expired')); },
-        });
-        turnstile.execute(widgetId);
-    });
-
-    // Exchange token for JWT
-    const authResp = await fetch(API_BASE_URL + '/api/auth/turnstile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cf_turnstile_response: token }),
-    });
-    if (!authResp.ok) {
-        const text = await authResp.text();
-        throw new Error('Auth failed: ' + authResp.status + ' ' + text);
-    }
-    const authData = await authResp.json();
-    const jwt = authData.access_token || authData.token || authData.jwt;
 
     // Build Amazon API URL from track metadata
     const params = new URLSearchParams({
@@ -88,7 +52,7 @@ BROWSER_JS = '''
 
     // Call Amazon Music API
     const trackResp = await fetch(trackUrl, {
-        headers: { 'X-Turnstile-JWT': jwt },
+        headers: { 'X-Turnstile-JWT': JWT },
     });
     if (!trackResp.ok) {
         const text = await trackResp.text();
@@ -143,27 +107,11 @@ def _build_track_metadata(track_object: dict) -> dict:
     }
 
 
-def _start_xvfb():
-    """Start Xvfb virtual framebuffer. Returns the subprocess."""
-    display = ':99'
-    logger.info("[AMAZON] Starting Xvfb on %s", display)
-    xvfb_proc = subprocess.Popen(
-        ['Xvfb', display, '-screen', '0', '1920x1080x24'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(1)
-    if xvfb_proc.poll() is not None:
-        raise RuntimeError('Xvfb failed to start. Install it: apt install xvfb')
-    os.environ['DISPLAY'] = display
-    return xvfb_proc
-
-
-def _call_amazon_api_from_browser(page, api_base_url: str, site_key: str, track_metadata: dict) -> dict:
-    """Run the full Turnstile + Amazon API flow inside the browser page."""
+def _call_amazon_api_from_browser(page, api_base_url: str, jwt: str, track_metadata: dict) -> dict:
+    """Run the Amazon Music API call inside the browser page using an existing JWT."""
     track_json = json.dumps(track_metadata)
-    js = BROWSER_JS.replace('SITE_KEY_PLACEHOLDER', json.dumps(site_key))
-    js = js.replace('API_URL', json.dumps(api_base_url))
+    js = _AMAZON_API_JS.replace('API_URL', json.dumps(api_base_url))
+    js = js.replace('JWT_VALUE', json.dumps(jwt))
     js = js.replace('TRACK_JSON', track_json)
     return page.evaluate(js)
 
@@ -220,7 +168,7 @@ def download_track_by_isrc(
     xvfb_proc = None
     try:
         # Start Xvfb
-        xvfb_proc = _start_xvfb()
+        xvfb_proc = turnstile.start_xvfb()
 
         # Launch Playwright with persistent Chrome context
         from playwright.sync_api import sync_playwright
@@ -256,9 +204,21 @@ def download_track_by_isrc(
                        else route.continue_())
             page.goto(f'https://{monochrome_domain}', wait_until='domcontentloaded')
 
-            # Run Turnstile + Amazon API flow
-            logger.info("[AMAZON] Authenticating and calling Amazon Music API")
-            result = _call_amazon_api_from_browser(page, api_base_url, site_key, track_metadata)
+            # Solve Turnstile and get JWT via shared utility
+            logger.info("[AMAZON] Solving Turnstile and exchanging for JWT")
+            jwt = turnstile.solve_turnstile_get_jwt(
+                page,
+                api_base_url=api_base_url,
+                site_key=site_key,
+                auth_path='/api/auth/turnstile',
+                token_field='cf_turnstile_response',
+            )
+            if not jwt:
+                raise ValueError('Turnstile solve returned no JWT')
+
+            # Call Amazon Music API with the JWT
+            logger.info("[AMAZON] Calling Amazon Music API")
+            result = _call_amazon_api_from_browser(page, api_base_url, jwt, track_metadata)
 
             page.close()
             context.close()

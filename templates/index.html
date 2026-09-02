@@ -262,6 +262,12 @@
                                     <button type="button" class="source-move-up" data-source="amazon" title="Move up">↑</button>
                                     <button type="button" class="source-move-down" data-source="amazon" title="Move down">↓</button>
                                 </label>
+                                <label class="toggle-option download-source-item">
+                                    <input type="checkbox" value="monochrome" id="downloadSourceMonochrome">
+                                    <span>Monochrome (API Mirror)</span>
+                                    <button type="button" class="source-move-up" data-source="monochrome" title="Move up">↑</button>
+                                    <button type="button" class="source-move-down" data-source="monochrome" title="Move down">↓</button>
+                                </label>
                             </div>
 
                             <div class="settings-section-title">Deezer ARL</div>
@@ -289,6 +295,22 @@
                                 The Monochrome domain is used for Turnstile authentication context.
                             </p>
                             <p class="settings-note" id="amazonConfigStatus"></p>
+
+                            <div class="settings-section-title">Monochrome</div>
+                            <label class="settings-label" for="monochromeApiBaseUrl">API Base URL</label>
+                            <input type="url" id="monochromeApiBaseUrl" class="settings-input"
+                                placeholder="https://track-api.monochrome.tf" autocomplete="off">
+                            <label class="settings-label" for="monochromeTurnstileSiteKey">Turnstile Site Key</label>
+                            <input type="text" id="monochromeTurnstileSiteKey" class="settings-input"
+                                placeholder="0x4AAAAAADgxqF6QVMm0GLHH" autocomplete="off">
+                            <label class="settings-label" for="monochromeDomain">Monochrome Domain</label>
+                            <input type="text" id="monochromeDomain" class="settings-input"
+                                placeholder="monochrome.samidy.com" autocomplete="off">
+                            <p class="settings-hint">
+                                The Monochrome domain is used for Turnstile authentication context.
+                                Monochrome always downloads lossless FLAC — quality setting is ignored.
+                            </p>
+                            <p class="settings-note" id="monochromeConfigStatus"></p>
 
                             <div class="settings-section-title">Download Settings</div>
                             <label class="settings-label" for="qualityLossless">Quality</label>

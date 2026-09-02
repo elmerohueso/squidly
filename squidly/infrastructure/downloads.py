@@ -114,7 +114,7 @@ QUALITY_PRESETS = {
 
 def expected_download_format(source: str, quality: str) -> str:
     """Map a download source and quality preset to the expected audio container format."""
-    if source in ('deezer', 'deezer_mirror'):
+    if source in ('deezer', 'deezer_mirror', 'monochrome'):
         return 'flac'
     if quality in ('HIGH', 'LOW', 'DOLBY_ATMOS'):
         return 'm4a'
