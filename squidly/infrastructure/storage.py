@@ -458,7 +458,7 @@ def get_download_settings():
                tag_explicit, tag_explicit_suffix,
                penalty_compilation, penalty_karaoke, penalty_live, download_source, deezer_arl,
                amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
-               monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain
+               monochrome_api_base_url, monochrome_api_token, monochrome_turnstile_site_key, monochrome_domain
         FROM download_settings
         WHERE id = 1
         """
@@ -477,7 +477,7 @@ def get_download_settings():
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                 amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
-                monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain,
+                monochrome_api_base_url, monochrome_api_token, monochrome_turnstile_site_key, monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -487,7 +487,8 @@ def get_download_settings():
                     %s, %s,
                     %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s)
+                    %s, %s, %s, %s,
+                    %s)
             """,
             (
                 DEFAULT_DOWNLOAD_SETTINGS['quality'],
@@ -523,6 +524,7 @@ def get_download_settings():
                 '',
                 '',
                 DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url'],
+                DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_token'],
                 DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key'],
                 '',
                 now
@@ -538,7 +540,7 @@ def get_download_settings():
                    tag_explicit, tag_explicit_suffix,
                    penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                    amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
-                   monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain
+                   monochrome_api_base_url, monochrome_api_token, monochrome_turnstile_site_key, monochrome_domain
             FROM download_settings
             WHERE id = 1
             """
@@ -603,6 +605,7 @@ def get_download_settings():
         'amazon_turnstile_site_key': str(row.get('amazon_turnstile_site_key') or ''),
         'amazon_monochrome_domain': str(row.get('amazon_monochrome_domain') or ''),
         'monochrome_api_base_url': str(row.get('monochrome_api_base_url') or DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url']),
+        'monochrome_api_token': str(row.get('monochrome_api_token') or DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_token']),
         'monochrome_turnstile_site_key': str(row.get('monochrome_turnstile_site_key') or DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key']),
         'monochrome_domain': str(row.get('monochrome_domain') or ''),
     }
@@ -622,7 +625,7 @@ def save_download_settings(settings):
                 tag_explicit, tag_explicit_suffix,
                 penalty_compilation, penalty_single, penalty_karaoke, penalty_live, download_source, deezer_arl,
                 amazon_api_base_url, amazon_turnstile_site_key, amazon_monochrome_domain,
-                monochrome_api_base_url, monochrome_turnstile_site_key, monochrome_domain,
+                monochrome_api_base_url, monochrome_api_token, monochrome_turnstile_site_key, monochrome_domain,
                 updated_at
             )
             VALUES (1, %s, %s, %s, %s, %s, %s,
@@ -632,7 +635,8 @@ def save_download_settings(settings):
                     %s, %s,
                     %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s)
+                    %s, %s, %s, %s,
+                    %s)
         ON CONFLICT(id) DO UPDATE SET
             quality = excluded.quality,
             parent_folder = excluded.parent_folder,
@@ -666,6 +670,7 @@ def save_download_settings(settings):
             amazon_turnstile_site_key = excluded.amazon_turnstile_site_key,
             amazon_monochrome_domain = excluded.amazon_monochrome_domain,
             monochrome_api_base_url = excluded.monochrome_api_base_url,
+            monochrome_api_token = excluded.monochrome_api_token,
             monochrome_turnstile_site_key = excluded.monochrome_turnstile_site_key,
             monochrome_domain = excluded.monochrome_domain,
             updated_at = excluded.updated_at
@@ -704,6 +709,7 @@ def save_download_settings(settings):
             settings.get('amazon_turnstile_site_key', ''),
             settings.get('amazon_monochrome_domain', ''),
             settings.get('monochrome_api_base_url', DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_base_url']),
+            settings.get('monochrome_api_token', DEFAULT_DOWNLOAD_SETTINGS['monochrome_api_token']),
             settings.get('monochrome_turnstile_site_key', DEFAULT_DOWNLOAD_SETTINGS['monochrome_turnstile_site_key']),
             settings.get('monochrome_domain', ''),
             now
@@ -803,33 +809,6 @@ def get_fresh_finds_auto_download(plex_client_id: str) -> bool:
     row = cur.fetchone()
     conn.close()
     return bool(row.get('auto_download_fresh_finds')) if row else False
-
-
-def get_fresh_finds_retention_count(plex_account_id):
-    """Get the Fresh Finds retention count for a user. Default 7 if not set."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT fresh_finds_retention_count FROM user_settings WHERE plex_account_id = %s",
-        (plex_account_id,)
-    )
-    row = cur.fetchone()
-    conn.close()
-    val = row.get('fresh_finds_retention_count') if row else None
-    return val if val is not None else 7
-
-
-def set_fresh_finds_retention_count(plex_client_id, count):
-    """Set the Fresh Finds retention count for a specific user. Clamps to [1, 7]."""
-    count = max(1, min(7, int(count)))
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE user_settings SET fresh_finds_retention_count = %s WHERE plex_client_id = %s",
-        (count, plex_client_id)
-    )
-    conn.commit()
-    conn.close()
 
 
 def get_fresh_finds_new_track_pct(plex_account_id):
@@ -954,24 +933,64 @@ def get_random_listen_history_seeds(plex_account_id, limit=25, days=30):
 
 
 def get_existing_fresh_finds_isrcs(plex_account_id):
-    """Return set of ISRCs from tracks in all existing Fresh Finds playlists for this user."""
+    """Return set of ISRCs from tracks in the current Fresh Finds playlist for this user."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT DISTINCT UPPER(TRIM(t.isrc)) AS isrc
+        SELECT DISTINCT rpt.isrc
         FROM recommendation_playlist_tracks rpt
         JOIN recommendation_playlists rp ON rp.id = rpt.playlist_id
-        JOIN tracks t ON CAST(t.hifi_id AS TEXT) = CAST(rpt.hifi_id AS TEXT)
         WHERE rp.plex_account_id = %s
           AND rp.slug = 'fresh-finds'
-          AND t.isrc IS NOT NULL AND t.isrc != ''
+          AND rpt.isrc IS NOT NULL AND rpt.isrc != ''
         """,
         (plex_account_id,)
     )
     rows = cur.fetchall() or []
     conn.close()
     return {str(row['isrc']).strip().upper() for row in rows}
+
+
+def get_listened_track_ids(plex_account_id, playlist_id):
+    """Return hifi_ids of tracks in the given playlist that the user has listened to
+    since the playlist was generated."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT rpt.hifi_id
+        FROM recommendation_playlist_tracks rpt
+        JOIN recommendation_playlists rp ON rp.id = rpt.playlist_id
+        JOIN listen_history lh ON lh.hifi_id = CAST(rpt.hifi_id AS TEXT)
+        WHERE rp.id = %s
+          AND rp.plex_account_id = %s
+          AND lh.played_at >= rp.generated_at
+        """,
+        (playlist_id, plex_account_id)
+    )
+    rows = cur.fetchall() or []
+    conn.close()
+    return {row['hifi_id'] for row in rows}
+
+
+def remove_listened_tracks(playlist_id, listened_hifi_ids):
+    """Remove tracks from a playlist by their hifi_ids. Returns the count removed."""
+    if not listened_hifi_ids:
+        return 0
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        DELETE FROM recommendation_playlist_tracks
+        WHERE playlist_id = %s AND hifi_id = ANY(%s)
+        """,
+        (playlist_id, list(listened_hifi_ids))
+    )
+    removed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return removed
 
 
 def get_recently_played_isrcs(plex_account_id, days=30):
@@ -1028,100 +1047,6 @@ def get_local_track_by_isrc(isrc):
     if row:
         return dict(row)
     return None
-
-
-def _parse_fresh_finds_date(name):
-    """Parse the effective date from a Fresh Finds playlist name.
-    
-    Name format is 'Fresh Finds (M-D)'. Since names don't include a year,
-    uses the current year and shifts back one year if the result is in the
-    future (handles Dec/Jan year boundary).
-    Returns a date object, or None if the name can't be parsed.
-    """
-    m = re.match(r'^Fresh Finds\s*\((\d{1,2})-(\d{1,2})\)$', name)
-    if not m:
-        return None
-    month, day = int(m.group(1)), int(m.group(2))
-    today = date.today()
-    try:
-        parsed = date(today.year, month, day)
-    except ValueError:
-        return None
-    if parsed > today:
-        parsed = parsed.replace(year=today.year - 1)
-    return parsed
-
-
-def cleanup_old_fresh_finds(plex_account_id):
-    """Delete Fresh Finds playlists beyond the user's retention count from DB and Plex.
-    
-    Keeps the N most recent playlists (by date parsed from the playlist name)
-    where N is the retention count.
-    Returns dict with 'deleted_count' and 'plex_deleted' counts.
-    """
-    retention_count = get_fresh_finds_retention_count(plex_account_id)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    # Fetch all fresh-finds playlists
-    cur.execute(
-        """
-        SELECT id, name, playlist_date
-        FROM recommendation_playlists
-        WHERE plex_account_id = %s
-          AND slug = 'fresh-finds'
-        """,
-        (plex_account_id,)
-    )
-    all_playlists = cur.fetchall() or []
-
-    # Sort by date parsed from the name (most recent first).
-    # Entries with unparseable names sort to the end (oldest).
-    def sort_key(p):
-        d = _parse_fresh_finds_date(p['name'])
-        if d is None:
-            return date.min
-        return d
-
-    all_playlists.sort(key=sort_key, reverse=True)
-
-    if len(all_playlists) <= retention_count:
-        conn.close()
-        return {'deleted_count': 0, 'plex_deleted': 0}
-
-    # Keep the N most recent, delete the rest
-    playlists_to_keep = all_playlists[:retention_count]
-    playlists_to_delete = all_playlists[retention_count:]
-
-    playlist_ids = [p['id'] for p in playlists_to_delete]
-    playlist_names = [p['name'] for p in playlists_to_delete]
-
-    # CASCADE on recommendation_playlist_tracks handles child rows
-    cur.execute(
-        "DELETE FROM recommendation_playlists WHERE id = ANY(%s)",
-        (playlist_ids,)
-    )
-    conn.commit()
-    conn.close()
-
-    # Best-effort Plex cleanup using keys first, fallback to names
-    plex_deleted = 0
-    try:
-        from squidly.infrastructure.plex import delete_plex_playlists_by_keys_or_names
-        plex_deleted = delete_plex_playlists_by_keys_or_names(
-            plex_playlist_keys=[],
-            fallback_names=playlist_names
-        )
-    except Exception as e:
-        logger.info("[FRESH_FINDS_CLEANUP] Plex cleanup failed (non-fatal): %s", str(e))
-
-    logger.info(
-        "[FRESH_FINDS_CLEANUP] Deleted %d old playlists from DB, %d from Plex for plex_account_id=%s (retention_count=%d, total_before=%d)",
-        len(playlist_ids), plex_deleted, plex_account_id, retention_count, len(all_playlists)
-    )
-
-    return {'deleted_count': len(playlist_ids), 'plex_deleted': plex_deleted}
 
 
 def get_listen_history(plex_account_id=None, limit=100, since=None):
@@ -1310,22 +1235,15 @@ def get_existing_artist_titles():
 
 
 def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_count, tracks):
-    from squidly.infrastructure.config import app_timezone
-    from zoneinfo import ZoneInfo
-    from datetime import datetime
-
-    now_tz = datetime.now(ZoneInfo(app_timezone))
-    playlist_date = now_tz.date()
-
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute(
             """
             SELECT id FROM recommendation_playlists
-            WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
+            WHERE plex_account_id = %s AND slug = %s
             """,
-            (plex_account_id, slug, playlist_date)
+            (plex_account_id, slug)
         )
         existing = cur.fetchone()
 
@@ -1343,11 +1261,11 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
         else:
             cur.execute(
                 """
-                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at, playlist_date)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
+                INSERT INTO recommendation_playlists (plex_account_id, name, slug, strategy, seed_count, track_count, generated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
-                (plex_account_id, name, slug, strategy, seed_count, len(tracks), playlist_date)
+                (plex_account_id, name, slug, strategy, seed_count, len(tracks))
             )
             playlist_id = cur.fetchone()['id']
 
@@ -1360,8 +1278,8 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
             cur.execute(
                 """
                 INSERT INTO recommendation_playlist_tracks
-                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, library_id, isrc)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (playlist_id, position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, library_id, isrc, original_hifi_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     playlist_id,
@@ -1379,6 +1297,7 @@ def save_recommendation_playlist(plex_account_id, slug, name, strategy, seed_cou
                     track.get('album_id'),
                     track.get('library_id'),
                     track.get('isrc'),
+                    track.get('original_hifi_id'),
                 )
             )
 
@@ -1421,7 +1340,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
 
     cur.execute(
         """
-        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc, original_hifi_id
         FROM recommendation_playlist_tracks
         WHERE playlist_id = %s
         ORDER BY position
@@ -1454,6 +1373,7 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
                 'artist_id': t['artist_id'],
                 'album_id': t['album_id'],
                 'isrc': t['isrc'],
+                'original_hifi_id': t['original_hifi_id'],
             }
             for t in tracks
         ]
@@ -1461,22 +1381,16 @@ def get_recommendation_playlist(plex_account_id, slug, playlist_id=None):
 
 
 def get_todays_recommendation_playlist(plex_account_id, slug):
-    """Get today's recommendation playlist for a user/slug using app_timezone for the date."""
-    from squidly.infrastructure.config import app_timezone
-    from zoneinfo import ZoneInfo
-    from datetime import datetime
-
-    today = datetime.now(ZoneInfo(app_timezone)).date()
-
+    """Get the current recommendation playlist for a user/slug."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
         SELECT id, name, slug, strategy, seed_count, track_count, generated_at
         FROM recommendation_playlists
-        WHERE plex_account_id = %s AND slug = %s AND playlist_date = %s
+        WHERE plex_account_id = %s AND slug = %s
         """,
-        (plex_account_id, slug, today)
+        (plex_account_id, slug)
     )
     playlist = cur.fetchone()
     if not playlist:
@@ -1485,7 +1399,7 @@ def get_todays_recommendation_playlist(plex_account_id, slug):
 
     cur.execute(
         """
-        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc
+        SELECT position, hifi_id, title, artist, album, duration, cover, seed_hifi_id, score, quality, artist_id, album_id, isrc, original_hifi_id
         FROM recommendation_playlist_tracks
         WHERE playlist_id = %s
         ORDER BY position
@@ -1518,6 +1432,7 @@ def get_todays_recommendation_playlist(plex_account_id, slug):
                 'artist_id': t['artist_id'],
                 'album_id': t['album_id'],
                 'isrc': t['isrc'],
+                'original_hifi_id': t['original_hifi_id'],
             }
             for t in tracks
         ]

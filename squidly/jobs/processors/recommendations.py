@@ -23,6 +23,7 @@ from squidly.infrastructure.storage import (
     get_random_listen_history_seeds,
     get_fresh_finds_track_count, get_fresh_finds_history_days,
     get_existing_fresh_finds_isrcs,
+    get_listened_track_ids, remove_listened_tracks,
 )
 from squidly.infrastructure.storage import save_recommendation_playlist
 from zoneinfo import ZoneInfo
@@ -212,6 +213,7 @@ def process_recommendation_job(job_id, payload):
                         album = track.get('album') if isinstance(track.get('album'), dict) else {}
                         raw_recommendations.append({
                             'hifi_id': int(track['id']),
+                            'original_hifi_id': int(track['id']),  # Preserve for cover lookup
                             'title': track['title'],
                             'artist': primary_artist.get('name') if isinstance(primary_artist, dict) else '',
                             'artist_id': primary_artist.get('id') if isinstance(primary_artist, dict) else None,
@@ -249,6 +251,8 @@ def process_recommendation_job(job_id, payload):
             deduped[key] = {**rec, 'score': 1}
         else:
             deduped[key]['score'] += 1
+    logger.info("[RECOMMENDATION] Job %s: %d raw -> %d after ISRC dedup",
+                job_id, len(raw_recommendations), len(deduped))
 
     # Step 2: Dedupe against existing Fresh Finds playlists (by ISRC)
     existing_ff_isrcs = get_existing_fresh_finds_isrcs(plex_account_id)
@@ -274,16 +278,21 @@ def process_recommendation_job(job_id, payload):
         rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
         if rec_rank >= min_rank:
             quality_filtered.append(rec)
+    logger.info("[RECOMMENDATION] Job %s: quality filter %d -> %d (min=%s)",
+                job_id, len(deduped), len(quality_filtered), min_quality)
     progress['tracks_after_quality_filter'] = len(quality_filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
 
     # Step 4: Exclude tracks recently played by this user (30 days, hardcoded)
     from squidly.infrastructure.storage import get_recently_played_isrcs
     recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
+    before_recent = len(quality_filtered)
     quality_filtered = [
         rec for rec in quality_filtered
         if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
     ]
+    logger.info("[RECOMMENDATION] Job %s: recently played filter removed %d tracks",
+                job_id, before_recent - len(quality_filtered))
 
     # Step 5: Classify into NEW or LIBRARY candidate pools
     from squidly.infrastructure.storage import get_existing_isrcs, get_existing_artist_titles
@@ -311,6 +320,9 @@ def process_recommendation_job(job_id, payload):
         else:
             new_candidates.append(rec)
 
+    logger.info("[RECOMMENDATION] Job %s: classified %d new, %d library from %d tracks",
+                job_id, len(new_candidates), len(library_candidates), len(quality_filtered))
+
     # Step 6: Sort both pools and calculate distribution
     new_candidates.sort(key=lambda x: x['score'], reverse=True)
     library_candidates.sort(key=lambda x: x['score'], reverse=True)
@@ -330,6 +342,9 @@ def process_recommendation_job(job_id, payload):
     elif len(selected_library) < n_library and len(new_candidates) > n_new:
         extra = n_library - len(selected_library)
         selected_new = new_candidates[:n_new + extra]
+
+    logger.info("[RECOMMENDATION] Job %s: selected %d new + %d library (target %d%% new, %d tracks)",
+                job_id, len(selected_new), len(selected_library), new_track_pct, track_count)
 
     progress['tracks_new_candidates'] = len(new_candidates)
     progress['tracks_library_candidates'] = len(library_candidates)
@@ -420,7 +435,6 @@ def process_recommendation_job(job_id, payload):
                 rec['hifi_id'] = local['hifi_id']
                 rec['album'] = local.get('album_title') or rec.get('album')
                 rec['artist'] = local.get('artist_name') or rec.get('artist')
-                rec['cover'] = None
 
     # Step 8: Combine — new tracks first, then library tracks
     top_tracks = selected_new + selected_library
@@ -486,13 +500,19 @@ def process_recommendation_job(job_id, payload):
     stages['processing_tracks'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
+    # Log cover data status
+    tracks_with_cover = sum(1 for t in top_tracks if t.get('cover'))
+    logger.info("[RECOMMENDATION] Job %s: %d/%d tracks have cover data",
+                job_id, tracks_with_cover, len(top_tracks))
+
     # Stage 5: Save playlist
     stages['saving_playlist'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s saving %d tracks for %s", job_id, len(top_tracks), plex_username)
+    logger.info("[RECOMMENDATION] Job %s processing %d new recommendations for %s (trigger=%s)",
+                job_id, len(top_tracks), plex_username, trigger)
 
     if not top_tracks:
-        logger.info("[RECOMMENDATION] Job %s no tracks found, skipping playlist save", job_id)
+        logger.info("[RECOMMENDATION] Job %s no new recommendations found", job_id)
         stages['saving_playlist'] = 'done'
         progress['tracks_saved'] = 0
         jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -503,10 +523,39 @@ def process_recommendation_job(job_id, payload):
             'plex_username': plex_username,
         }
 
-    from squidly.infrastructure.config import app_timezone
-    from zoneinfo import ZoneInfo
-    now_tz = datetime.now(ZoneInfo(app_timezone))
-    playlist_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
+    if trigger == 'manual':
+        # Manual refresh: replace entire playlist with fresh recommendations
+        # This ensures all tracks have fresh metadata and cover data
+        combined = top_tracks[:track_count]
+        removed_by_listen = 0
+        logger.info("[RECOMMENDATION] Job %s: manual refresh, replacing playlist with %d tracks",
+                    job_id, len(combined))
+    else:
+        # Scheduled (nightly): keep unlistened tracks, add new recommendations to fill gaps
+        existing_playlist = get_recommendation_playlist(plex_account_id, slug)
+        kept_existing = []
+        removed_by_listen = 0
+        if existing_playlist:
+            existing_tracks = existing_playlist.get('tracks', [])
+            listened_ids = get_listened_track_ids(plex_account_id, existing_playlist['id'])
+            kept_existing = [t for t in existing_tracks if t['hifi_id'] not in listened_ids]
+            removed_by_listen = len(existing_tracks) - len(kept_existing)
+            if removed_by_listen > 0:
+                logger.info("[RECOMMENDATION] Job %s: removed %d listened tracks from existing playlist",
+                            job_id, removed_by_listen)
+
+        # Combine: kept existing tracks + new recommendations, capped at track_count
+        combined = kept_existing + top_tracks
+        combined = combined[:track_count]
+        logger.info("[RECOMMENDATION] Job %s: scheduled run, kept %d existing + %d new = %d tracks",
+                    job_id, len(kept_existing), len(top_tracks), len(combined))
+
+    progress['tracks_after_filter'] = len(combined)
+    progress['tracks_saved'] = len(combined)
+    progress['tracks_removed_by_listen'] = removed_by_listen
+    jobs.update_job_progress(job_id, {'progress': progress})
+
+    playlist_name = "Fresh Finds"
 
     playlist_id = save_recommendation_playlist(
         plex_account_id=plex_account_id,
@@ -514,21 +563,10 @@ def process_recommendation_job(job_id, payload):
         name=playlist_name,
         strategy='fresh-finds',
         seed_count=len(seeds),
-        tracks=top_tracks
+        tracks=combined
     )
 
-    # Stage 6: Cleanup old Fresh Finds playlists
-    from squidly.infrastructure.storage import cleanup_old_fresh_finds
-    try:
-        cleanup_result = cleanup_old_fresh_finds(plex_account_id)
-        logger.info(
-            "[RECOMMENDATION] Job %s cleanup: deleted %d old DB playlists, %d Plex playlists",
-            job_id, cleanup_result.get('deleted_count', 0), cleanup_result.get('plex_deleted', 0)
-        )
-    except Exception as e:
-        logger.warning("[RECOMMENDATION] Job %s cleanup failed (non-fatal): %s", job_id, str(e))
-
-    progress['tracks_saved'] = len(top_tracks)
+    progress['tracks_saved'] = len(combined)
     stages['saving_playlist'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
 
@@ -541,8 +579,9 @@ def process_recommendation_job(job_id, payload):
 
 
 def process_fresh_finds_auto_download_job(job_id, payload):
-    """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs."""
-    from squidly.infrastructure.storage import get_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
+    """Process a fresh_finds_auto_download job: read the playlist for each enabled user and queue download_track jobs
+    for tracks not already in the user's library."""
+    from squidly.infrastructure.storage import get_todays_recommendation_playlist, get_download_settings, get_fresh_finds_auto_download_users
     from squidly.jobs.orchestration import is_job_type_running_or_queued
     from squidly.infrastructure.job_queue import enqueue_job, RetryableError
 
@@ -570,7 +609,12 @@ def process_fresh_finds_auto_download_job(job_id, payload):
     file_naming = settings.get('file_naming_album', '{artist}/{album}/{track} - {title}.{ext}')
     file_naming_album = settings.get('file_naming_album', '{artist}/{album}/{track} - {title}.{ext}')
 
+    # Pre-load library ISRCs to skip already-downloaded tracks
+    from squidly.infrastructure.storage import get_existing_isrcs
+    existing_library_isrcs = get_existing_isrcs()
+
     total_tracks_queued = 0
+    total_tracks_skipped = 0
     users_processed = []
 
     for user in auto_download_users:
@@ -594,11 +638,18 @@ def process_fresh_finds_auto_download_job(job_id, payload):
             logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: empty playlist for user %s (account %s)", job_id, plex_username, plex_account_id)
             continue
 
-        # Queue a download_track job for each track
+        # Queue a download_track job for each track not already in the library
         tracks_queued = 0
+        tracks_skipped = 0
         for track in tracks:
             hifi_id = track.get('hifi_id')
             if not hifi_id:
+                continue
+
+            # Skip tracks already in the library
+            track_isrc = str(track.get('isrc') or '').strip().upper()
+            if track_isrc and track_isrc in existing_library_isrcs:
+                tracks_skipped += 1
                 continue
 
             plex_client_id = user.get('plex_client_id')
@@ -629,15 +680,17 @@ def process_fresh_finds_auto_download_job(job_id, payload):
                             job_id, hifi_id, str(e))
 
         total_tracks_queued += tracks_queued
+        total_tracks_skipped += tracks_skipped
         users_processed.append(plex_username)
-        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d/%d tracks for %s",
-                    job_id, tracks_queued, len(tracks), plex_username)
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d, skipped %d (already in library) for %s",
+                    job_id, tracks_queued, tracks_skipped, plex_username)
 
-    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d total tracks for %d users (%s)",
-                job_id, total_tracks_queued, len(users_processed), ', '.join(users_processed))
+    logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: queued %d total tracks, skipped %d for %d users (%s)",
+                job_id, total_tracks_queued, total_tracks_skipped, len(users_processed), ', '.join(users_processed))
 
     return {
         'tracks_queued': total_tracks_queued,
+        'tracks_skipped': total_tracks_skipped,
         'users_processed': users_processed,
     }
 

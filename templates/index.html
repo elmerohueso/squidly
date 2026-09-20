@@ -296,19 +296,19 @@
                             </p>
                             <p class="settings-note" id="amazonConfigStatus"></p>
 
-                            <div class="settings-section-title">Monochrome</div>
+                            <div class="settings-section-title">Unified Playback</div>
                             <label class="settings-label" for="monochromeApiBaseUrl">API Base URL</label>
                             <input type="url" id="monochromeApiBaseUrl" class="settings-input"
-                                placeholder="https://track-api.monochrome.tf" autocomplete="off">
-                            <label class="settings-label" for="monochromeTurnstileSiteKey">Turnstile Site Key</label>
-                            <input type="text" id="monochromeTurnstileSiteKey" class="settings-input"
-                                placeholder="0x4AAAAAADgxqF6QVMm0GLHH" autocomplete="off">
-                            <label class="settings-label" for="monochromeDomain">Monochrome Domain</label>
-                            <input type="text" id="monochromeDomain" class="settings-input"
-                                placeholder="monochrome.samidy.com" autocomplete="off">
+                                placeholder="https://music-api.geeked.wtf" autocomplete="off">
                             <p class="settings-hint">
-                                The Monochrome domain is used for Turnstile authentication context.
-                                Monochrome always downloads lossless FLAC — quality setting is ignored.
+                                The API endpoint that resolves Amazon and Monochrome sources.
+                            </p>
+                            <label class="settings-label" for="monochromeApiToken">App API Key</label>
+                            <input type="text" id="monochromeApiToken" class="settings-input"
+                                placeholder="Bearer key used with Turnstile session" autocomplete="off">
+                            <p class="settings-hint">
+                                Bearer key used with a browser Turnstile session for playback.
+                                Unified Playback always downloads lossless FLAC — quality setting is ignored.
                             </p>
                             <p class="settings-note" id="monochromeConfigStatus"></p>
 
@@ -386,10 +386,10 @@
                         </div>
 
                         <div class="settings-section" id="musicDiscoverySettings">
-                            <h3>Music &amp; Playlist Discovery</h3>
+                            <h3>Music Discovery</h3>
 
                             <div class="settings-section-title">Fresh Finds</div>
-                            <p class="settings-hint">Fresh Finds playlists are generated nightly with recommendations based on your Plex listening history.</p>
+                            <p class="settings-hint">The Fresh Finds playlist is populated nightly based on recommendations from your listening history. Tracks you've listened to are removed and replaced with new recommendations.</p>
 
                             <div class="settings-row">
                                 <label class="settings-label settings-inline-label" for="freshFindsHistoryDays">Listening history window</label>
@@ -423,27 +423,12 @@
                                     <button type="button" class="retention-spinner-btn" id="trackCountDec" aria-label="Decrease track count" data-spinner-dec="freshFindsTrackCount">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                     </button>
-                                    <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="50" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="50" data-spinner-step="5">
+                                    <input type="number" id="freshFindsTrackCount" class="retention-spinner-input" min="10" max="100" value="25" readonly data-spinner-input="true" data-spinner-min="10" data-spinner-max="100" data-spinner-step="5">
                                     <button type="button" class="retention-spinner-btn" id="trackCountInc" aria-label="Increase track count" data-spinner-inc="freshFindsTrackCount">
                                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                                     </button>
                                 </div>
                             </div>
-
-                            <div class="settings-row">
-                                <label class="settings-label settings-inline-label" for="freshFindsRetentionCount">Keep up to</label>
-                                <div class="retention-spinner">
-                                    <button type="button" class="retention-spinner-btn" id="retentionDec" aria-label="Decrease retention" data-spinner-dec="freshFindsRetentionCount">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                    <input type="number" id="freshFindsRetentionCount" class="retention-spinner-input" min="1" max="7" value="7" readonly data-spinner-input="true" data-spinner-min="1" data-spinner-max="7" data-spinner-step="1">
-                                    <button type="button" class="retention-spinner-btn" id="retentionInc" aria-label="Increase retention" data-spinner-inc="freshFindsRetentionCount">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    </button>
-                                </div>
-                                <span class="settings-unit-label">Fresh Finds playlists</span>
-                            </div>
-                            <p class="settings-hint">Older playlists are cleaned up (in both Squidly and Plex) automatically after the nightly Fresh Finds generation.</p>
 
                             <div class="tag-toggle-row">
                                 <span class="tag-toggle-label">Auto-download Fresh Finds tracks to Plex</span>
@@ -452,7 +437,7 @@
                                     <span class="tag-switch-slider"></span>
                                 </label>
                             </div>
-                            <p class="settings-hint">When enabled, tracks from the nightly Fresh Finds playlist are automatically queued for download to your Plex library.</p>
+                            <p class="settings-hint">When enabled, tracks from the Fresh Finds playlist are automatically queued for download to your Plex library.</p>
 
                             <hr class="settings-divider">
 

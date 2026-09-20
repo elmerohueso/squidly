@@ -5,16 +5,12 @@ recommendations_bp = Blueprint("recommendations", __name__)
 @recommendations_bp.route('/api/recommendations/playlists', methods=['GET'])
 def list_recommendation_playlists_route():
     from squidly.infrastructure.storage import list_recommendation_playlists, has_listen_history, resolve_plex_account_id
-    from squidly.infrastructure.config import app_timezone
-    from zoneinfo import ZoneInfo
     from datetime import datetime
 
     user_id = request.args.get('user_id', '').strip() or None
     plex_account_id = resolve_plex_account_id(user_id) if user_id else None
 
-    # Compute today's Fresh Finds name using server timezone
-    now_tz = datetime.now(ZoneInfo(app_timezone))
-    today_name = f"Fresh Finds ({now_tz.strftime('%-m')}-{now_tz.strftime('%-d')})"
+    today_name = "Fresh Finds"
 
     if plex_account_id is None:
         return jsonify({'playlists': [], 'has_history': False, 'today': {'name': today_name, 'exists': False}})
@@ -61,6 +57,7 @@ def generate_recommendation_playlist():
 @recommendations_bp.route('/api/recommendations/<slug>', methods=['GET'])
 def get_recommendation_playlist_route(slug):
     from squidly.infrastructure.storage import get_recommendation_playlist, resolve_plex_account_id
+    from squidly.infrastructure.downloads import format_tidal_image_url
     from datetime import datetime
     user_id = request.args.get('user_id', '').strip() or None
     plex_account_id = resolve_plex_account_id(user_id) if user_id else None
@@ -76,10 +73,14 @@ def get_recommendation_playlist_route(slug):
     for t in playlist_data['tracks']:
         artist_id = t.get('artist_id')
         album_id = t.get('album_id')
+        cover = t.get('cover') or ''
+        # Convert UUID hash to full Tidal image URL if needed
+        if cover and not cover.startswith('http'):
+            cover = format_tidal_image_url(cover, 640)
         tracks.append({
             'id': t['hifi_id'], 'title': t['title'],
             'artists': [{'id': artist_id, 'name': t['artist'] or 'Unknown Artist'}] if t['artist'] else [],
-            'album': {'id': album_id, 'title': t['album'] or '', 'cover': t['cover']} if t['album'] or t['cover'] else {},
+            'album': {'id': album_id, 'title': t['album'] or '', 'cover': cover} if t['album'] or cover else {},
             'duration': t['duration'], 'explicit': False, 'maxAudioQuality': t.get('quality') or '',
         })
     return jsonify({
