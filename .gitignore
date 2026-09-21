@@ -87,3 +87,4 @@ src/app.js
 # Pre-compressed static assets
 static/dist/*.gz
 static/dist/*.br
+.scratch/
