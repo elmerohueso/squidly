@@ -457,14 +457,6 @@ def process_download_job(job_id, payload):
                 logger.info("[DOWNLOAD] Skipping Monochrome: API base URL not configured")
                 last_download_error = "Monochrome API base URL not configured (permanent)"
                 continue
-            if not (dl_settings.get('monochrome_turnstile_site_key') or '').strip():
-                logger.info("[DOWNLOAD] Skipping Monochrome: Turnstile site key not configured")
-                last_download_error = "Monochrome Turnstile site key not configured (permanent)"
-                continue
-            if not (dl_settings.get('monochrome_domain') or '').strip():
-                logger.info("[DOWNLOAD] Skipping Monochrome: domain not configured")
-                last_download_error = "Monochrome domain not configured (permanent)"
-                continue
 
         temp_source_path = ''
 

@@ -24,8 +24,6 @@ from squidly.infrastructure.storage import (
     resolve_plex_account_id,
     get_fresh_finds_auto_download,
     set_fresh_finds_auto_download,
-    get_fresh_finds_retention_count,
-    set_fresh_finds_retention_count,
     get_fresh_finds_new_track_pct,
     set_fresh_finds_new_track_pct,
     get_fresh_finds_track_count,
@@ -120,7 +118,8 @@ def download_settings():
         'amazon_api_base_url': payload.get('amazonApiBaseUrl') or payload.get('amazon_api_base_url') or current.get('amazon_api_base_url', ''),
         'amazon_turnstile_site_key': payload.get('amazonTurnstileSiteKey') or payload.get('amazon_turnstile_site_key') or current.get('amazon_turnstile_site_key', ''),
         'amazon_monochrome_domain': payload.get('amazonMonochromeDomain') or payload.get('amazon_monochrome_domain') or current.get('amazon_monochrome_domain', ''),
-        'monochrome_api_base_url': payload.get('monochromeApiBaseUrl') or payload.get('monochrome_api_base_url') or current.get('monochrome_api_base_url', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_api_base_url', 'https://track-api.monochrome.tf')),
+        'monochrome_api_base_url': payload.get('monochromeApiBaseUrl') or payload.get('monochrome_api_base_url') or current.get('monochrome_api_base_url', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_api_base_url', 'https://music-api.geeked.wtf')),
+        'monochrome_api_token': payload.get('monochromeApiToken') or payload.get('monochrome_api_token') or current.get('monochrome_api_token', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_api_token', '')),
         'monochrome_turnstile_site_key': payload.get('monochromeTurnstileSiteKey') or payload.get('monochrome_turnstile_site_key') or current.get('monochrome_turnstile_site_key', DEFAULT_DOWNLOAD_SETTINGS.get('monochrome_turnstile_site_key', '0x4AAAAAADgxqF6QVMm0GLHH')),
         'monochrome_domain': payload.get('monochromeDomain') or payload.get('monochrome_domain') or current.get('monochrome_domain', ''),
     }
@@ -178,6 +177,7 @@ def download_settings():
         'amazon_turnstile_site_key': updated['amazon_turnstile_site_key'],
         'amazon_monochrome_domain': updated['amazon_monochrome_domain'],
         'monochrome_api_base_url': updated['monochrome_api_base_url'],
+        'monochrome_api_token': updated['monochrome_api_token'],
         'monochrome_turnstile_site_key': updated['monochrome_turnstile_site_key'],
         'monochrome_domain': updated['monochrome_domain'],
     }
@@ -407,7 +407,6 @@ def get_fresh_finds_config():
 
     return jsonify({
         'auto_download': get_fresh_finds_auto_download(user_id),
-        'retention': get_fresh_finds_retention_count(plex_account_id),
         'new_track_pct': get_fresh_finds_new_track_pct(plex_account_id),
         'track_count': get_fresh_finds_track_count(plex_account_id),
         'history_days': get_fresh_finds_history_days(plex_account_id),
@@ -424,12 +423,10 @@ def save_fresh_finds_config():
 
     if 'auto_download' in payload:
         set_fresh_finds_auto_download(user_id, bool(payload['auto_download']))
-    if 'retention' in payload:
-        set_fresh_finds_retention_count(user_id, max(1, min(100, int(payload['retention']))))
     if 'new_track_pct' in payload:
         set_fresh_finds_new_track_pct(user_id, max(0, min(100, int(payload['new_track_pct']))))
     if 'track_count' in payload:
-        set_fresh_finds_track_count(user_id, max(10, min(50, int(payload['track_count']))))
+        set_fresh_finds_track_count(user_id, max(10, min(100, int(payload['track_count']))))
     if 'history_days' in payload:
         set_fresh_finds_history_days(user_id, max(10, min(60, int(payload['history_days']))))
 

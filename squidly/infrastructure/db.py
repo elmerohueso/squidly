@@ -107,9 +107,12 @@ def init_db():
     if 'amazon_monochrome_domain' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN amazon_monochrome_domain TEXT NOT NULL DEFAULT ''")
 
-    # Monochrome settings columns
+    # Monochrome / Unified Playback settings columns
     if 'monochrome_api_base_url' not in columns:
-        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_api_base_url TEXT NOT NULL DEFAULT 'https://track-api.monochrome.tf'")
+        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_api_base_url TEXT NOT NULL DEFAULT 'https://music-api.geeked.wtf'")
+    if 'monochrome_api_token' not in columns:
+        cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_api_token TEXT NOT NULL DEFAULT 'amp_29b2lIr4mze4tK-P8QDOxfMZ9anCgJ9_uGTUks3nIyo'")
+    # Legacy columns (kept for backwards compatibility, no longer used)
     if 'monochrome_turnstile_site_key' not in columns:
         cur.execute("ALTER TABLE download_settings ADD COLUMN monochrome_turnstile_site_key TEXT NOT NULL DEFAULT '0x4AAAAAADgxqF6QVMm0GLHH'")
     if 'monochrome_domain' not in columns:
@@ -140,11 +143,11 @@ def init_db():
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN mirror_type TEXT NOT NULL DEFAULT 'tidal'")
     if 'is_premium' not in mirror_columns:
         cur.execute("ALTER TABLE mirror_endpoints ADD COLUMN is_premium INTEGER")
-    # One-time backfill: mirrors that were download-enabled but never premium-checked
+    # One-time backfill: mirrors that were enabled but never premium-checked
     cur.execute("""
         UPDATE mirror_endpoints
         SET is_premium = 1
-        WHERE downloads_enabled = 1 AND is_premium IS NULL
+        WHERE enabled = 1 AND is_premium IS NULL
     """)
     cur.execute(
         """
@@ -731,6 +734,48 @@ def init_db():
         WHERE plex_playlist_key IS NOT NULL
         """
     )
+
+    # ── Migration: single Fresh Finds playlist per user ──
+    # Collapse multiple dated playlists into one per (plex_account_id, slug).
+    # Keeps the most recent playlist_date for each group; deletes the rest.
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'recommendation_playlists' AND column_name = 'playlist_date'
+        """
+    )
+    if cur.fetchone():
+        # Delete older playlists, keeping only the most recent per (plex_account_id, slug)
+        cur.execute(
+            """
+            DELETE FROM recommendation_playlists
+            WHERE id NOT IN (
+                SELECT DISTINCT ON (plex_account_id, slug) id
+                FROM recommendation_playlists
+                ORDER BY plex_account_id, slug, playlist_date DESC
+            )
+            """
+        )
+        # Drop the date-based unique index and playlist_date column
+        cur.execute("DROP INDEX IF EXISTS idx_rec_playlists_unique")
+        cur.execute("DROP INDEX IF EXISTS idx_rec_playlists_history")
+        cur.execute("ALTER TABLE recommendation_playlists DROP COLUMN playlist_date")
+        # Create new unique index: one playlist per (plex_account_id, slug)
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_rec_playlists_unique ON recommendation_playlists (plex_account_id, slug)"
+        )
+
+    # Drop fresh_finds_retention_count from user_settings
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'user_settings' AND column_name = 'fresh_finds_retention_count'
+        """
+    )
+    if cur.fetchone():
+        cur.execute("ALTER TABLE user_settings DROP COLUMN fresh_finds_retention_count")
 
     conn.commit()
     conn.close()

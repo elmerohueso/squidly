@@ -597,12 +597,14 @@ class TestProcessRecommendationJobIsrcSection:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations.get_recommendation_playlist')
+    @patch('squidly.jobs.processors.recommendations.get_listened_track_ids')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_isrc_check_does_not_break_when_all_pass(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
+        mock_listened,
+        mock_existing_playlist,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -687,8 +689,9 @@ class TestProcessRecommendationJobIsrcSection:
         # Mock playlist save
         mock_save_playlist.return_value = 42
 
-        # Mock cleanup
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        # Mock existing playlist / listened track removal (no existing playlist)
+        mock_existing_playlist.return_value = None
+        mock_listened.return_value = set()
 
         # Mock get_squid_urls via the mocked downloads module
         mock_downloads.get_squid_urls.return_value = []
@@ -729,12 +732,14 @@ class TestProcessRecommendationJobIsrcSection:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations.get_recommendation_playlist')
+    @patch('squidly.jobs.processors.recommendations.get_listened_track_ids')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_isrc_check_removals_logged_and_refilled(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
+        mock_listened,
+        mock_existing_playlist,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -849,8 +854,9 @@ class TestProcessRecommendationJobIsrcSection:
         # Mock playlist save
         mock_save_playlist.return_value = 42
 
-        # Mock cleanup
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        # Mock existing playlist / listened track removal (no existing playlist)
+        mock_existing_playlist.return_value = None
+        mock_listened.return_value = set()
 
         # Mock get_squid_urls via the mocked downloads module
         mock_downloads.get_squid_urls.return_value = []
@@ -894,12 +900,14 @@ class TestProcessRecommendationJobMirrorType:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations.get_recommendation_playlist')
+    @patch('squidly.jobs.processors.recommendations.get_listened_track_ids')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_mirror_type_tidal_in_make_request_call(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
+        mock_listened,
+        mock_existing_playlist,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -973,7 +981,8 @@ class TestProcessRecommendationJobMirrorType:
         mock_fetch_payload.return_value = None
 
         mock_save_playlist.return_value = 42
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        mock_existing_playlist.return_value = None
+        mock_listened.return_value = set()
         mock_downloads.get_squid_urls.return_value = []
 
         process_recommendation_job(1, {
@@ -1022,12 +1031,10 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_empty_top_tracks_skips_playlist_save(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -1048,8 +1055,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_downloads,
         mock_filter,
     ):
-        """When top_tracks is empty, save_recommendation_playlist and
-        cleanup_old_fresh_finds are NOT called."""
+        """When top_tracks is empty, save_recommendation_playlist is NOT called."""
         from squidly.jobs.processors.recommendations import process_recommendation_job
 
         # Mock _filter_available_tracks — receives empty lists, returns empty
@@ -1102,9 +1108,6 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         # Playlist save mock
         mock_save_playlist.return_value = 42
 
-        # Cleanup mock
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
-
         # Mock get_squid_urls
         mock_downloads.get_squid_urls.return_value = []
 
@@ -1118,8 +1121,6 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
 
         # Assert save_recommendation_playlist was NOT called
         mock_save_playlist.assert_not_called()
-        # Assert cleanup_old_fresh_finds was NOT called
-        mock_cleanup.assert_not_called()
         # Sanity check — result is not None
         assert result is not None
 
@@ -1142,12 +1143,10 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_empty_top_tracks_returns_expected_result(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -1204,7 +1203,6 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_resolve_track.return_value = {'hifi_id': '200', 'reason': 'exact', 'source': 'hifi_id'}
         mock_fetch_payload.return_value = None
         mock_save_playlist.return_value = 42
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
@@ -1259,12 +1257,14 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
     @patch('squidly.services.hifi._fetch_hifi_track_info_payload')
     @patch('squidly.services.hifi.extract_hifi_track_info')
     @patch('squidly.jobs.processors.recommendations.save_recommendation_playlist')
-    @patch('squidly.infrastructure.storage.cleanup_old_fresh_finds')
+    @patch('squidly.jobs.processors.recommendations.get_recommendation_playlist')
+    @patch('squidly.jobs.processors.recommendations.get_listened_track_ids')
     @patch('squidly.jobs.processors.recommendations._raise_if_job_cancelled')
     def test_non_empty_top_tracks_calls_save(
         self,
         mock_raise_cancelled,
-        mock_cleanup,
+        mock_listened,
+        mock_existing_playlist,
         mock_save_playlist,
         mock_extract_info,
         mock_fetch_payload,
@@ -1285,8 +1285,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_downloads,
         mock_filter,
     ):
-        """When top_tracks has items, save_recommendation_playlist and
-        cleanup_old_fresh_finds ARE called."""
+        """When top_tracks has items, save_recommendation_playlist IS called."""
         from squidly.jobs.processors.recommendations import process_recommendation_job
 
         # Mock _filter_available_tracks to pass all tracks through
@@ -1349,8 +1348,9 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         # Playlist save mock
         mock_save_playlist.return_value = 42
 
-        # Cleanup mock
-        mock_cleanup.return_value = {'deleted_count': 0, 'plex_deleted': 0}
+        # Mock existing playlist / listened track removal (no existing playlist)
+        mock_existing_playlist.return_value = None
+        mock_listened.return_value = set()
 
         # Mock get_squid_urls
         mock_downloads.get_squid_urls.return_value = []
@@ -1365,8 +1365,6 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
 
         # Assert save_recommendation_playlist WAS called
         mock_save_playlist.assert_called_once()
-        # Assert cleanup_old_fresh_finds WAS called
-        mock_cleanup.assert_called_once()
         # Sanity check — tracks were saved
         assert result is not None
         assert result['progress']['tracks_saved'] > 0
@@ -1389,7 +1387,7 @@ class TestListRecommendationPlaylistsRouteToday:
     """
 
     def test_today_field_present_when_no_user_id(self):
-        """Call without user_id — returns today with exists: false and valid format."""
+        """Call without user_id — returns today with exists: false."""
         from squidly.app import app
 
         with app.test_client() as client:
@@ -1402,13 +1400,12 @@ class TestListRecommendationPlaylistsRouteToday:
         assert data['playlists'] == []
         assert data['has_history'] is False
 
-        # Validate name format: Fresh Finds (M-D)
+        # Name is now always static "Fresh Finds"
         name = data['today']['name']
-        assert re.match(r'^Fresh Finds \(\d{1,2}-\d{1,2}\)$', name), \
-            f"Expected 'Fresh Finds (M-D)' format, got: {name}"
+        assert name == 'Fresh Finds', f"Expected 'Fresh Finds', got: {name}"
 
     def test_today_name_format(self):
-        """Verify today.name always matches Fresh Finds (M-D) pattern."""
+        """Verify today.name is always 'Fresh Finds'."""
         from squidly.app import app
 
         with app.test_client() as client:
@@ -1416,8 +1413,7 @@ class TestListRecommendationPlaylistsRouteToday:
 
         data = response.get_json()
         name = data['today']['name']
-        assert re.match(r'^Fresh Finds \(\d{1,2}-\d{1,2}\)$', name), \
-            f"Name '{name}' does not match Fresh Finds (M-D) format"
+        assert name == 'Fresh Finds', f"Name '{name}' does not match 'Fresh Finds'"
 
     def test_today_exists_true_when_playlist_matches(self):
         """today.exists is True when a playlist with today's name exists."""

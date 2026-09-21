@@ -70,7 +70,9 @@ DEFAULT_DOWNLOAD_SETTINGS = {
     'penalty_live': True,
     'download_source': 'tidal',
     'deezer_arl': '',
-    'monochrome_api_base_url': 'https://track-api.monochrome.tf',
+    'monochrome_api_base_url': 'https://music-api.geeked.wtf',
+    'monochrome_api_token': 'amp_29b2lIr4mze4tK-P8QDOxfMZ9anCgJ9_uGTUks3nIyo',
+    # Legacy settings (kept for backwards compatibility, no longer used)
     'monochrome_turnstile_site_key': '0x4AAAAAADgxqF6QVMm0GLHH',
     'monochrome_domain': '',
 }

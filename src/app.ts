@@ -531,8 +531,7 @@ interface DownloadSettings {
     amazonTurnstileSiteKey: string;
     amazonMonochromeDomain: string;
     monochromeApiBaseUrl: string;
-    monochromeTurnstileSiteKey: string;
-    monochromeDomain: string;
+    monochromeApiToken: string;
 }
 
 interface AppRouteState {
@@ -546,7 +545,6 @@ interface AppRouteState {
     playlistTitle?: string;
     username?: string;
     playlistType?: string;
-    freshFindsPlaylistId?: number;
 }
 
 type AppPage = 'explore' | 'library' | 'settings' | 'mirrors' | 'matches' | 'jobs' | 'history';
@@ -727,11 +725,9 @@ class App {
     private amazonMonochromeDomainInput: HTMLInputElement;
     private amazonConfigStatusEl: HTMLElement;
     private monochromeApiBaseUrlInput: HTMLInputElement;
-    private monochromeTurnstileSiteKeyInput: HTMLInputElement;
-    private monochromeDomainInput: HTMLInputElement;
+    private monochromeApiTokenInput: HTMLInputElement;
     private monochromeConfigStatusEl: HTMLElement;
     private autoDownloadFreshFindsCheckbox: HTMLInputElement;
-    private freshFindsRetentionInput: HTMLInputElement;
     private freshFindsNewPctSlider: HTMLInputElement;
     private freshFindsNewPctValueEl: HTMLElement;
     private freshFindsTrackCountInput: HTMLInputElement;
@@ -1027,11 +1023,9 @@ class App {
         this.amazonMonochromeDomainInput = document.getElementById('amazonMonochromeDomain') as HTMLInputElement;
         this.amazonConfigStatusEl = document.getElementById('amazonConfigStatus') as HTMLElement;
         this.monochromeApiBaseUrlInput = document.getElementById('monochromeApiBaseUrl') as HTMLInputElement;
-        this.monochromeTurnstileSiteKeyInput = document.getElementById('monochromeTurnstileSiteKey') as HTMLInputElement;
-        this.monochromeDomainInput = document.getElementById('monochromeDomain') as HTMLInputElement;
+        this.monochromeApiTokenInput = document.getElementById('monochromeApiToken') as HTMLInputElement;
         this.monochromeConfigStatusEl = document.getElementById('monochromeConfigStatus') as HTMLElement;
         this.autoDownloadFreshFindsCheckbox = document.getElementById('autoDownloadFreshFinds') as HTMLInputElement;
-        this.freshFindsRetentionInput = document.getElementById('freshFindsRetentionCount') as HTMLInputElement;
         this.freshFindsNewPctSlider = document.getElementById('freshFindsNewPct') as HTMLInputElement;
         this.freshFindsNewPctValueEl = document.getElementById('freshFindsNewPctValue') as HTMLElement;
         this.freshFindsTrackCountInput = document.getElementById('freshFindsTrackCount') as HTMLInputElement;
@@ -1409,9 +1403,6 @@ class App {
         }
         if (this.autoDownloadFreshFindsCheckbox) {
             this.autoDownloadFreshFindsCheckbox.addEventListener('change', () => this.queueFreshFindsSave('auto_download', this.autoDownloadFreshFindsCheckbox.checked));
-        }
-        if (this.freshFindsRetentionInput) {
-            this.freshFindsRetentionInput.addEventListener('change', () => this.queueFreshFindsSave('retention', parseInt(this.freshFindsRetentionInput.value, 10)));
         }
         if (this.freshFindsNewPctSlider) {
             this.freshFindsNewPctSlider.addEventListener('change', () => this.queueFreshFindsSave('new_track_pct', parseInt(this.freshFindsNewPctSlider.value, 10)));
@@ -3207,52 +3198,12 @@ class App {
     }
 
     private async loadSquidlySection(container: HTMLUListElement): Promise<void> {
-        const userId = this.getSelectedPlexUserId();
-
-        try {
-            const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
-            const response = await fetch(`/api/recommendations/playlists${query}`);
-            if (!response.ok) {
-                throw new Error('Failed to load recommendations');
-            }
-            const data = await response.json();
-            const hasHistory = data.has_history as boolean;
-            const playlists = Array.isArray(data.playlists) ? data.playlists : [];
-            const today = data.today as { name: string; exists: boolean };
-
-            // Always show today's Fresh Finds entry
-            const todayLi = this.createSidebarPlaylistItem(today.name, () => {
-                this.closeMobileMenu();
-                this.switchPage('explore');
-                if (today.exists) {
-                    const todayPlaylist = playlists.find((p: any) => p.name === today.name);
-                    void this.fetchFreshFindsPlaylist(false, todayPlaylist?.id);
-                } else {
-                    void this.fetchFreshFindsPlaylist();
-                }
-            });
-            container.appendChild(todayLi);
-
-            // Show older playlists (excluding today's if already shown)
-            if (hasHistory) {
-                for (const playlist of playlists) {
-                    if (playlist.name === today.name) continue;
-                    const li = this.createSidebarPlaylistItem(playlist.name || 'Fresh Finds', () => {
-                        this.closeMobileMenu();
-                        this.switchPage('explore');
-                        void this.fetchFreshFindsPlaylist(false, playlist.id);
-                    });
-                    container.appendChild(li);
-                }
-            }
-        } catch {
-            const li = this.createSidebarPlaylistItem('Fresh Finds', () => {
-                this.closeMobileMenu();
-                this.switchPage('explore');
-                void this.fetchFreshFindsPlaylist();
-            });
-            container.appendChild(li);
-        }
+        const li = this.createSidebarPlaylistItem('Fresh Finds', () => {
+            this.closeMobileMenu();
+            this.switchPage('explore');
+            void this.fetchFreshFindsPlaylist();
+        });
+        container.appendChild(li);
     }
 
     private initializeHistoryControls(): void {
@@ -3411,11 +3362,7 @@ class App {
         }
 
         if (view === 'fresh_finds') {
-            const playlistIdParam = params.get('playlist_id');
-            const playlistId = playlistIdParam ? Number(playlistIdParam) : undefined;
-            return playlistId && Number.isFinite(playlistId) && playlistId > 0
-                ? { view: 'fresh_finds', freshFindsPlaylistId: playlistId }
-                : { view: 'fresh_finds' };
+            return { view: 'fresh_finds' };
         }
 
         return view === 'home' ? { view: 'home' } : null;
@@ -3532,10 +3479,6 @@ class App {
 
             if (route.view === 'similar_artists' && route.artistId) {
                 params.set('id', String(route.artistId));
-            }
-
-            if (route.view === 'fresh_finds' && route.freshFindsPlaylistId) {
-                params.set('playlist_id', String(route.freshFindsPlaylistId));
             }
         } else {
             params.set('tab', tab);
@@ -3760,7 +3703,7 @@ class App {
         }
 
         if (route.view === 'fresh_finds') {
-            await this.fetchFreshFindsPlaylist(updateHistory, route.freshFindsPlaylistId);
+            await this.fetchFreshFindsPlaylist(updateHistory);
             return;
         }
     }
@@ -5725,9 +5668,8 @@ class App {
             amazonApiBaseUrl: '',
             amazonTurnstileSiteKey: '',
             amazonMonochromeDomain: '',
-            monochromeApiBaseUrl: 'https://track-api.monochrome.tf',
-            monochromeTurnstileSiteKey: '0x4AAAAAADgxqF6QVMm0GLHH',
-            monochromeDomain: '',
+            monochromeApiBaseUrl: 'https://music-api.geeked.wtf',
+            monochromeApiToken: 'amp_29b2lIr4mze4tK-P8QDOxfMZ9anCgJ9_uGTUks3nIyo',
         };
     }
 
@@ -5801,16 +5743,11 @@ class App {
                 : typeof (raw as { monochrome_api_base_url?: string }).monochrome_api_base_url === 'string'
                     ? (raw as { monochrome_api_base_url?: string }).monochrome_api_base_url!
                     : fallback.monochromeApiBaseUrl,
-            monochromeTurnstileSiteKey: typeof (raw as DownloadSettings).monochromeTurnstileSiteKey === 'string'
-                ? (raw as DownloadSettings).monochromeTurnstileSiteKey
-                : typeof (raw as { monochrome_turnstile_site_key?: string }).monochrome_turnstile_site_key === 'string'
-                    ? (raw as { monochrome_turnstile_site_key?: string }).monochrome_turnstile_site_key!
-                    : fallback.monochromeTurnstileSiteKey,
-            monochromeDomain: typeof (raw as DownloadSettings).monochromeDomain === 'string'
-                ? (raw as DownloadSettings).monochromeDomain
-                : typeof (raw as { monochrome_domain?: string }).monochrome_domain === 'string'
-                    ? (raw as { monochrome_domain?: string }).monochrome_domain!
-                    : fallback.monochromeDomain,
+            monochromeApiToken: typeof (raw as DownloadSettings).monochromeApiToken === 'string'
+                ? (raw as DownloadSettings).monochromeApiToken
+                : typeof (raw as { monochrome_api_token?: string }).monochrome_api_token === 'string'
+                    ? (raw as { monochrome_api_token?: string }).monochrome_api_token!
+                    : fallback.monochromeApiToken,
         } as DownloadSettings;
     }
 
@@ -5857,8 +5794,7 @@ class App {
         this.amazonTurnstileSiteKeyInput.value = settings.amazonTurnstileSiteKey;
         this.amazonMonochromeDomainInput.value = settings.amazonMonochromeDomain;
         this.monochromeApiBaseUrlInput.value = settings.monochromeApiBaseUrl;
-        this.monochromeTurnstileSiteKeyInput.value = settings.monochromeTurnstileSiteKey;
-        this.monochromeDomainInput.value = settings.monochromeDomain;
+        this.monochromeApiTokenInput.value = settings.monochromeApiToken;
         for (const id of App.TAG_CHECKBOX_IDS) {
             const s = settings as unknown as Record<string, boolean>;
             if (this.tagCheckboxes[id] && s[id] !== undefined) {
@@ -5890,8 +5826,7 @@ class App {
             amazonTurnstileSiteKey: this.amazonTurnstileSiteKeyInput?.value.trim() || '',
             amazonMonochromeDomain: this.amazonMonochromeDomainInput?.value.trim() || '',
             monochromeApiBaseUrl: this.monochromeApiBaseUrlInput?.value.trim() || '',
-            monochromeTurnstileSiteKey: this.monochromeTurnstileSiteKeyInput?.value.trim() || '',
-            monochromeDomain: this.monochromeDomainInput?.value.trim() || '',
+            monochromeApiToken: this.monochromeApiTokenInput?.value.trim() || '',
             ...(() => {
                 const result: Record<string, boolean> = {};
                 for (const id of App.TAG_CHECKBOX_IDS) {
@@ -6283,7 +6218,6 @@ class App {
             const userId = this.getSelectedPlexUserId();
             if (!userId) {
                 this.autoDownloadFreshFindsCheckbox.checked = false;
-                if (this.freshFindsRetentionInput) this.freshFindsRetentionInput.value = '7';
                 if (this.freshFindsNewPctSlider) this.freshFindsNewPctSlider.value = '50';
                 if (this.freshFindsNewPctValueEl) this.freshFindsNewPctValueEl.textContent = '50%';
                 if (this.freshFindsTrackCountInput) this.freshFindsTrackCountInput.value = '25';
@@ -6294,10 +6228,6 @@ class App {
             if (response.ok) {
                 const data = await response.json();
                 this.autoDownloadFreshFindsCheckbox.checked = data.auto_download ?? false;
-                if (this.freshFindsRetentionInput && data.retention) {
-                    this.freshFindsRetentionInput.value = String(data.retention);
-                    this.freshFindsRetentionInput.dispatchEvent(new Event('change'));
-                }
                 if (this.freshFindsNewPctSlider && data.new_track_pct !== undefined) {
                     this.freshFindsNewPctSlider.value = String(data.new_track_pct);
                 }
@@ -10350,20 +10280,15 @@ class App {
         }
     }
 
-    private async fetchFreshFindsPlaylist(updateHistory: boolean = true, playlistId?: number): Promise<void> {
+    private async fetchFreshFindsPlaylist(updateHistory: boolean = true): Promise<void> {
         this.downloadAllScope = 'loose';
-        this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+        this.currentExploreRoute = { view: 'fresh_finds' };
         this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
         if (updateHistory) {
-            this.pushHistoryRoute({ view: 'fresh_finds', freshFindsPlaylistId: playlistId });
+            this.pushHistoryRoute({ view: 'fresh_finds' });
         }
         this.stopPlayback();
         this.freshFindsPolling = false;
-
-        if (playlistId) {
-            await this.renderFreshFindsTracks(this.getSelectedPlexUserId() || '', playlistId);
-            return;
-        }
 
         this.displayMessage('Loading Fresh Finds...');
 
@@ -10380,8 +10305,7 @@ class App {
             }
             const playlistsData = await playlistsResponse.json();
             const hasHistory = playlistsData.has_history as boolean;
-            const playlists = Array.isArray(playlistsData.playlists) ? playlistsData.playlists : [];
-            const existing = playlists.find((p: any) => p.slug === 'fresh-finds');
+            const existing = (Array.isArray(playlistsData.playlists) ? playlistsData.playlists : []).find((p: any) => p.slug === 'fresh-finds');
 
             if (!hasHistory) {
                 this.displayMessage('Not enough listen history to generate recommendations');
@@ -10389,11 +10313,6 @@ class App {
             }
 
             if (existing) {
-                const generatedAt = new Date(existing.generated_at);
-                const hoursSince = (Date.now() - generatedAt.getTime()) / (1000 * 60 * 60);
-                if (hoursSince > 24) {
-                    void this.triggerFreshFindsGeneration(userId);
-                }
                 await this.renderFreshFindsTracks(userId);
             } else {
                 await this.triggerFreshFindsGeneration(userId);
@@ -10503,12 +10422,9 @@ class App {
         `;
     }
 
-    private async renderFreshFindsTracks(userId: string, playlistId?: number): Promise<void> {
+    private async renderFreshFindsTracks(userId: string): Promise<void> {
         try {
-            let url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
-            if (playlistId) {
-                url += `&playlist_id=${playlistId}`;
-            }
+            const url = `/api/recommendations/fresh-finds?user_id=${encodeURIComponent(userId)}`;
             const response = await fetch(url);
             if (!response.ok) {
                 throw new Error('Failed to fetch Fresh Finds tracks');
@@ -10525,7 +10441,7 @@ class App {
             this.updatePlexPlaylistContainerVisibility(true);
             const playlistName = playlist.name || 'Fresh Finds';
             this.freshFindsPlaylistName = playlistName;
-            this.currentExploreRoute = { view: 'fresh_finds', freshFindsPlaylistId: playlistId };
+            this.currentExploreRoute = { view: 'fresh_finds' };
             this.renderExploreTopBarBreadcrumb(this.currentExploreRoute);
             const normalized = tracks.map(t => this.normalizeTrack(t));
             const durationStr = this.formatTotalDuration(normalized);
