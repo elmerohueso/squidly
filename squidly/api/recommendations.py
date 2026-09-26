@@ -32,7 +32,7 @@ def list_recommendation_playlists_route():
 
 @recommendations_bp.route('/api/recommendations/generate', methods=['POST'])
 def generate_recommendation_playlist():
-    from squidly.jobs.orchestration import queue_recommendation_generation
+    from squidly.jobs.orchestration import queue_generate_fresh_finds
     from squidly.infrastructure.storage import get_all_plex_account_mappings
     data = request.json if request.is_json else {}
     slug = data.get('slug', 'fresh-finds')
@@ -49,7 +49,7 @@ def generate_recommendation_playlist():
             break
     if plex_account_id is None:
         return jsonify({'error': 'User not found'}), 404
-    job_id = queue_recommendation_generation(slug=slug, plex_account_id=plex_account_id, plex_username=plex_username or 'Unknown', trigger='manual')
+    job_id = queue_generate_fresh_finds(slug=slug, plex_account_id=plex_account_id, plex_username=plex_username or 'Unknown', trigger='manual')
     if job_id is None:
         return jsonify({'error': 'A recommendation generation job is already queued or in progress'}), 409
     return jsonify({'ok': True, 'job_id': job_id, 'status': 'queued'}), 202

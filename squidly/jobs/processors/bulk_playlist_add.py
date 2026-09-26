@@ -10,7 +10,7 @@ from squidly.infrastructure.plex import (
     _add_items_to_playlist,
     _playlist_operation_lock,
 )
-from squidly.infrastructure.storage import get_plex_config
+from squidly.infrastructure.storage import get_plex_config, get_todays_recommendation_playlist
 from squidly.infrastructure.db import get_db_connection
 from squidly import jobs
 from squidly.jobs.orchestration import (
@@ -109,6 +109,69 @@ def bulk_add_tracks_to_playlists(job_id, payload):
         groups[key]['tracks'].append(item)
         groups[key]['ids'].extend(library_ids)
 
+    # ── Filter stale Fresh Finds tracks ──
+    # For recommendation playlists, only add tracks that are still in the current
+    # DB playlist. Prevents accumulation in Plex when the DB playlist replaces nightly.
+    stale_skipped = 0
+    conn = get_db_connection()
+    cur = conn.cursor()
+    for key, group_data in list(groups.items()):
+        plex_user_id, playlist_name = key
+        if playlist_name != 'Fresh Finds':
+            continue
+
+        # Resolve plex_user_id (which may be plex_client_id) → plex_account_id
+        cur.execute(
+            "SELECT plex_account_id FROM user_settings WHERE plex_client_id = %s OR plex_account_id = %s LIMIT 1",
+            (str(plex_user_id) if plex_user_id else '', str(plex_user_id) if plex_user_id else '')
+        )
+        row = cur.fetchone()
+        if not row:
+            logger.info("[BULK_PLAYLIST] No user_settings for plex_user_id=%s, allowing all tracks", plex_user_id)
+            continue
+        plex_account_id = row['plex_account_id']
+
+        # Get current recommendation playlist hifi_ids
+        playlist = get_todays_recommendation_playlist(plex_account_id, 'fresh-finds')
+        if not playlist:
+            logger.info("[BULK_PLAYLIST] No current Fresh Finds playlist for account %s, allowing all tracks", plex_account_id)
+            continue
+        current_hifi_ids = {t['hifi_id'] for t in playlist.get('tracks', []) if t.get('hifi_id')}
+
+        # Build path→hifi_id index for these pending tracks
+        original_count = len(group_data['tracks'])
+        filtered_tracks = []
+        filtered_ids = []
+        for i, item in enumerate(group_data['tracks']):
+            file_path = str(item.get('file_path') or '').strip()
+            path_parts = [p for p in re.split(r'[\\/]+', file_path) if p]
+            tail_parts = path_parts[-3:] if len(path_parts) >= 3 else path_parts
+            trailing_suffix = '/'.join(tail_parts)
+
+            # Look up hifi_id from tracks table (matches SQL replace(path, '\\', '/'))
+            cur.execute("SELECT hifi_id FROM tracks WHERE lower(right(replace(path, '\\', '/'), length(%s))) = lower(%s)", (trailing_suffix, trailing_suffix))
+            track_row = cur.fetchone()
+            hifi_id = track_row['hifi_id'] if track_row and track_row.get('hifi_id') else None
+
+            if hifi_id and hifi_id in current_hifi_ids:
+                filtered_tracks.append(item)
+                filtered_ids.append(group_data['ids'][i])
+            else:
+                stale_skipped += 1
+                logger.info("[BULK_PLAYLIST] Skipping stale track: %s (hifi_id=%s not in current playlist)", file_path, hifi_id)
+
+        group_data['tracks'] = filtered_tracks
+        group_data['ids'] = filtered_ids
+
+        if original_count != len(filtered_tracks):
+            logger.info("[BULK_PLAYLIST] Filtered %d → %d tracks for Fresh Finds (user %s)", original_count, len(filtered_tracks), plex_user_id)
+
+    conn.close()
+
+    if stale_skipped:
+        logger.info("[BULK_PLAYLIST] Skipped %d stale tracks not in current Fresh Finds playlists", stale_skipped)
+        progress['total_tracks'] = total - stale_skipped
+
     stages['adding_to_playlists'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
 
@@ -179,6 +242,42 @@ def bulk_add_tracks_to_playlists(job_id, payload):
 
     if successful_ids:
         delete_pending_playlist_adds(successful_ids)
+
+    # ── Sync Fresh Finds playlists to DB ──
+    # After adding tracks, remove any Plex tracks that are no longer in the DB playlist.
+    # This ensures the Plex playlist matches the DB (source of truth).
+    from squidly.infrastructure.plex import sync_plex_playlist_to_db
+    synced_playlists = set()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    for (plex_user_id, playlist_name), group_data in groups.items():
+        if playlist_name != 'Fresh Finds':
+            continue
+        if plex_user_id in synced_playlists:
+            continue
+        synced_playlists.add(plex_user_id)
+
+        # Resolve plex_user_id → plex_account_id
+        cur.execute(
+            "SELECT plex_account_id FROM user_settings WHERE plex_client_id = %s OR plex_account_id = %s LIMIT 1",
+            (str(plex_user_id) if plex_user_id else '', str(plex_user_id) if plex_user_id else '')
+        )
+        row = cur.fetchone()
+        if not row:
+            continue
+        plex_account_id = row['plex_account_id']
+
+        # Get current DB playlist
+        db_playlist = get_todays_recommendation_playlist(plex_account_id, 'fresh-finds')
+        if not db_playlist:
+            continue
+
+        desired_hifi_ids = {t['hifi_id'] for t in db_playlist.get('tracks', []) if t.get('hifi_id')}
+        removed = sync_plex_playlist_to_db(plex_account_id, playlist_name, desired_hifi_ids)
+        if removed:
+            logger.info("[BULK_PLAYLIST] Synced Plex playlist '%s' for user %s, removed %d stale tracks",
+                        playlist_name, plex_user_id, removed)
+    conn.close()
 
     summary = (
         f"{progress['tracks_processed']}/{total} tracks processed • "

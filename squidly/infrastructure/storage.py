@@ -952,22 +952,38 @@ def get_existing_fresh_finds_isrcs(plex_account_id):
     return {str(row['isrc']).strip().upper() for row in rows}
 
 
-def get_listened_track_ids(plex_account_id, playlist_id):
-    """Return hifi_ids of tracks in the given playlist that the user has listened to
-    since the playlist was generated."""
+def get_listened_track_ids(plex_account_id, history_days, tracks):
+    """Return hifi_ids of tracks that the user has listened to within history_days.
+
+    Args:
+        plex_account_id: Plex account ID
+        history_days: Number of days to look back
+        tracks: List of track dicts with 'hifi_id' key
+
+    Returns:
+        Set of hifi_ids that have been listened to within the time window
+    """
+    if not tracks:
+        return set()
+
+    hifi_ids = [str(t['hifi_id']) for t in tracks if t.get('hifi_id')]
+    if not hifi_ids:
+        return set()
+
     conn = get_db_connection()
     cur = conn.cursor()
+    # Use parameterized query for the IN clause
+    placeholders = ', '.join(['%s'] * len(hifi_ids))
     cur.execute(
-        """
-        SELECT DISTINCT rpt.hifi_id
-        FROM recommendation_playlist_tracks rpt
-        JOIN recommendation_playlists rp ON rp.id = rpt.playlist_id
-        JOIN listen_history lh ON lh.hifi_id = CAST(rpt.hifi_id AS TEXT)
-        WHERE rp.id = %s
-          AND rp.plex_account_id = %s
-          AND lh.played_at >= rp.generated_at
+        f"""
+        SELECT DISTINCT lh.hifi_id
+        FROM listen_history lh
+        WHERE lh.plex_account_id = %s
+          AND lh.hifi_id IS NOT NULL
+          AND lh.hifi_id IN ({placeholders})
+          AND lh.played_at >= NOW() - INTERVAL '{history_days} days'
         """,
-        (playlist_id, plex_account_id)
+        [plex_account_id] + hifi_ids
     )
     rows = cur.fetchall() or []
     conn.close()

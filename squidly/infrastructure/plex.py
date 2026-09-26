@@ -87,6 +87,86 @@ def _add_items_to_playlist(playlist, items):
     return added, skipped, failed
 
 
+def sync_plex_playlist_to_db(plex_account_id, playlist_name, desired_hifi_ids):
+    """Remove tracks from a Plex playlist that are not in the desired set.
+
+    Looks up each Plex track's hifi_id via the local tracks table (by library_id/ratingKey)
+    and removes any whose hifi_id is not in desired_hifi_ids.
+
+    Args:
+        plex_account_id: Plex account ID (unused for now, global server connection).
+        playlist_name: Name of the playlist in Plex.
+        desired_hifi_ids: Set of hifi_ids that should remain in the playlist.
+    """
+    config = get_plex_config()
+    server_url = (config.get('server_url') or '').strip()
+    api_token = (config.get('api_token') or '').strip()
+
+    if not server_url or not api_token:
+        logger.info("[PLEX] Cannot sync playlist: Plex not configured")
+        return 0
+
+    try:
+        plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+    except Exception as e:
+        logger.warning("[PLEX] Cannot connect to sync playlist: %s", str(e))
+        return 0
+
+    # Find the playlist
+    playlist = None
+    try:
+        for pl in plex.playlists():
+            if pl.title == playlist_name:
+                playlist = pl
+                break
+    except Exception as e:
+        logger.warning("[PLEX] Error listing playlists for sync: %s", str(e))
+        return 0
+
+    if not playlist:
+        logger.info("[PLEX] Playlist '%s' not found, nothing to sync", playlist_name)
+        return 0
+
+    # Get current items from Plex
+    try:
+        current_items = playlist.items()
+    except Exception as e:
+        logger.warning("[PLEX] Error reading playlist '%s' items: %s", playlist_name, str(e))
+        return 0
+
+    if not current_items:
+        return 0
+
+    # Look up each item's hifi_id via the tracks table (library_id = Plex ratingKey)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    items_to_remove = []
+    for item in current_items:
+        rating_key = str(getattr(item, 'ratingKey', '') or '')
+        if not rating_key:
+            continue
+        cur.execute("SELECT hifi_id FROM tracks WHERE library_id = %s", (rating_key,))
+        row = cur.fetchone()
+        if row and row['hifi_id'] and row['hifi_id'] not in desired_hifi_ids:
+            items_to_remove.append(item)
+    conn.close()
+
+    if not items_to_remove:
+        logger.info("[PLEX] Playlist '%s' already in sync (%d tracks)", playlist_name, len(current_items))
+        return 0
+
+    # Remove stale tracks
+    try:
+        with _playlist_operation_lock:
+            playlist.removeItems(items_to_remove)
+        logger.info("[PLEX] Removed %d listened tracks from Plex playlist '%s'", len(items_to_remove), playlist_name)
+    except Exception as e:
+        logger.warning("[PLEX] Failed to remove tracks from playlist '%s': %s", playlist_name, str(e))
+        return 0
+
+    return len(items_to_remove)
+
+
 def set_plex_health_status(ok, value):
     """Update cached Plex healthcheck status."""
     with _plex_health_status_lock:

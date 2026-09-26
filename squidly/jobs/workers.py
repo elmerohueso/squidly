@@ -26,7 +26,7 @@ from squidly.jobs.orchestration import (
     handle_on_success,
     is_job_type_running_or_queued,
     is_pipeline_busy,
-    queue_recommendation_generation,
+    queue_generate_fresh_finds,
 )
 from squidly.infrastructure.plex import get_last_successful_plex_sync_finished_at
 from squidly.infrastructure.storage import get_plex_config
@@ -381,7 +381,7 @@ def nightly_maintenance_scheduler_worker():
 
             if last_run_date == today:
                 # Same day — check if we need to queue auto-download yet
-                if auto_download_pending and not is_job_type_running_or_queued('generate_recommendations'):
+                if auto_download_pending and not is_job_type_running_or_queued('generate_fresh_finds'):
                     from squidly.jobs.orchestration import queue_fresh_finds_auto_download
                     try:
                         auto_job_id = queue_fresh_finds_auto_download(trigger='scheduled')
@@ -428,7 +428,7 @@ def nightly_maintenance_scheduler_worker():
                     continue
 
                 try:
-                    job_id = queue_recommendation_generation(
+                    job_id = queue_generate_fresh_finds(
                         slug='fresh-finds',
                         plex_account_id=plex_account_id,
                         plex_username=plex_username,
@@ -440,7 +440,7 @@ def nightly_maintenance_scheduler_worker():
                     logger.warning("[NIGHTLY_MAINTENANCE] Failed to queue for %s: %s", plex_username, e)
 
             # Mark auto-download as pending — will be queued on a later pass
-            # once all generate_recommendations jobs have finished.
+            # once all generate_fresh_finds jobs have finished.
             auto_download_pending = True
 
         except Exception as e:
@@ -458,7 +458,7 @@ _GENERIC_WORKER_TYPES = [
     'automatic_matching',
     'bulk_playlist_add',
     'plex_listen_history_sync',
-    'generate_recommendations',
+    'generate_fresh_finds',
     'fresh_finds_auto_download',
 ]
 

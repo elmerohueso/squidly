@@ -4246,7 +4246,7 @@ class App {
                 return 'Plex Update';
             case 'plex_listen_history_sync':
                 return 'Listen History Sync';
-            case 'generate_recommendations':
+            case 'generate_fresh_finds':
                 return 'Fresh Finds';
             case 'bulk_playlist_add':
                 return 'Playlist Update';
@@ -5421,7 +5421,7 @@ class App {
                 ? `${usersProcessed}/${totalUsers} users • ${totalFetched} entries fetched • ${totalStored} stored`
                 : `${usersProcessed}/${totalUsers} users processed`;
             bodyHtml = `<div class="job-sync-progress">${this.escapeHtml(progressText)}</div>`;
-        } else if (job.job_type === 'generate_recommendations') {
+        } else if (job.job_type === 'generate_fresh_finds') {
             stageDefs = [
                 { key: 'syncing_listen_history', label: 'Syncing Listen History' },
                 { key: 'gathering_seeds', label: 'Gathering Seeds' },
@@ -5539,7 +5539,7 @@ class App {
             return 'Listen History Sync';
         }
 
-        if (job.job_type === 'generate_recommendations') {
+        if (job.job_type === 'generate_fresh_finds') {
             const username = job.payload?.plex_username || 'Unknown';
             const trigger = String(job.result?.trigger || job.payload?.trigger || '').trim();
             if (trigger === 'scheduled') return `Fresh Finds - ${username} (Scheduled)`;
@@ -10355,7 +10355,7 @@ class App {
                 if (!response.ok) throw new Error('Failed to check job status');
                 const data = await response.json();
                 const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-                const activeJob = jobs.find((j: any) => j.job_type === 'generate_recommendations' && (j.status === 'queued' || j.status === 'in_progress'));
+                const activeJob = jobs.find((j: any) => j.job_type === 'generate_fresh_finds' && (j.status === 'queued' || j.status === 'in_progress'));
                 if (activeJob) {
                     this.renderFreshFindsProgress(activeJob);
                     setTimeout(poll, 3000);

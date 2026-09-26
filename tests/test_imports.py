@@ -88,7 +88,7 @@ def test_import_orchestration():
         queue_plex_library_update,
         queue_plex_listen_history_sync,
         queue_pending_playlist_addition,
-        queue_recommendation_generation,
+        queue_generate_fresh_finds,
         start_plex_library_update_job,
         wait_for_job_type,
     )

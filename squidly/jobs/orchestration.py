@@ -50,10 +50,10 @@ JOB_TYPES = {
         'idle_sleep': 5,
         'process_fn': 'squidly.jobs.processors.listen_history.process_plex_listen_history_sync',
     },
-    'generate_recommendations': {
+    'generate_fresh_finds': {
         'max_attempts': 3,
         'idle_sleep': 5,
-        'process_fn': 'squidly.jobs.processors.recommendations.process_recommendation_job',
+        'process_fn': 'squidly.jobs.processors.recommendations.process_fresh_finds_job',
     },
     'fresh_finds_auto_download': {
         'max_attempts': 3,
@@ -114,7 +114,7 @@ _PIPELINE_JOB_TYPES = (
     'plex_library_sync',
     'automatic_matching',
     'bulk_playlist_add',
-    'generate_recommendations',
+    'generate_fresh_finds',
     'fresh_finds_auto_download',
 )
 
@@ -228,8 +228,8 @@ def queue_bulk_playlist_add_job(trigger='post_library_sync'):
     return job_id
 
 
-def queue_recommendation_generation(slug, plex_account_id, plex_username, trigger='scheduled'):
-    """Queue a generate_recommendations job."""
+def queue_generate_fresh_finds(slug, plex_account_id, plex_username, trigger='scheduled'):
+    """Queue a generate_fresh_finds job."""
     payload = {
         'slug': slug,
         'plex_account_id': plex_account_id,
@@ -237,7 +237,7 @@ def queue_recommendation_generation(slug, plex_account_id, plex_username, trigge
         'trigger': trigger,
         'requested_at': datetime.utcnow().isoformat() + 'Z'
     }
-    return enqueue_job('generate_recommendations', payload)
+    return enqueue_job('generate_fresh_finds', payload)
 
 
 def queue_fresh_finds_auto_download(trigger='scheduled'):

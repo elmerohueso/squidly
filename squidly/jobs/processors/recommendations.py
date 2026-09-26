@@ -11,7 +11,7 @@ from squidly.infrastructure.db import get_db_connection
 from squidly.infrastructure.job_queue import enqueue_job
 from squidly.jobs.orchestration import is_job_type_running_or_queued
 from squidly.jobs.orchestration import queue_plex_listen_history_sync
-from squidly.jobs.orchestration import queue_recommendation_generation
+from squidly.jobs.orchestration import queue_generate_fresh_finds
 from squidly.jobs.workers import _raise_if_job_cancelled
 from squidly.services.hifi import _get_hifi_audio_quality_rank
 from squidly.services import qobuz
@@ -123,7 +123,7 @@ def _filter_available_tracks(tracks, settings):
     return available, removed
 
 
-def process_recommendation_job(job_id, payload):
+def process_fresh_finds_job(job_id, payload):
     from urllib.parse import urlencode
 
     stages = {
@@ -153,9 +153,9 @@ def process_recommendation_job(job_id, payload):
     # Stage 1: Sync listen history
     stages['syncing_listen_history'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s syncing listen history for %s", job_id, plex_username)
+    logger.info("[FRESH_FINDS] Job %s syncing listen history for %s", job_id, plex_username)
 
-    sync_job_id = queue_plex_listen_history_sync('recommendation')
+    sync_job_id = queue_plex_listen_history_sync('fresh_finds')
     if sync_job_id:
         from squidly.jobs.orchestration import wait_for_job_type
         wait_for_job_type('plex_listen_history_sync', timeout=120, poll_interval=2, check_cancelled_job_id=job_id)
@@ -163,15 +163,64 @@ def process_recommendation_job(job_id, payload):
     stages['syncing_listen_history'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 2: Gather seeds — random from configurable time window
+    # Stage 2: Read settings and build remaining playlist
     stages['gathering_seeds'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s gathering seeds for %s", job_id, plex_username)
+    logger.info("[FRESH_FINDS] Job %s reading settings for %s", job_id, plex_username)
 
     track_count = get_fresh_finds_track_count(plex_account_id)
     history_days = get_fresh_finds_history_days(plex_account_id)
 
-    seeds = get_random_listen_history_seeds(plex_account_id, limit=track_count, days=history_days)
+    # Build remaining playlist: scheduled keeps unlistened tracks, manual starts empty
+    kept_existing = []
+    removed_by_listen = 0
+    if trigger == 'scheduled':
+        existing_playlist = get_recommendation_playlist(plex_account_id, slug)
+        if existing_playlist:
+            existing_tracks = existing_playlist.get('tracks', [])
+            listened_ids = get_listened_track_ids(plex_account_id, history_days, existing_tracks)
+            kept_existing = [t for t in existing_tracks if t['hifi_id'] not in listened_ids]
+            removed_by_listen = len(existing_tracks) - len(kept_existing)
+            if removed_by_listen > 0:
+                logger.info("[FRESH_FINDS] Job %s: removed %d listened tracks from existing playlist",
+                            job_id, removed_by_listen)
+
+    slots_needed = track_count - len(kept_existing)
+    logger.info("[FRESH_FINDS] Job %s: track_count=%d, kept=%d, slots_needed=%d",
+                job_id, track_count, len(kept_existing), slots_needed)
+
+    if slots_needed <= 0:
+        # Playlist is already full, nothing to do
+        logger.info("[FRESH_FINDS] Job %s: no slots needed, playlist is full", job_id)
+        stages['gathering_seeds'] = 'done'
+        stages['fetching_recommendations'] = 'done'
+        stages['processing_tracks'] = 'done'
+        stages['saving_playlist'] = 'in_progress'
+        combined = kept_existing[:track_count]
+        playlist_id = save_recommendation_playlist(
+            plex_account_id=plex_account_id,
+            slug=slug,
+            name="Fresh Finds",
+            strategy='fresh-finds',
+            seed_count=0,
+            tracks=combined
+        )
+        progress['tracks_after_filter'] = len(combined)
+        progress['tracks_saved'] = len(combined)
+        progress['tracks_removed_by_listen'] = removed_by_listen
+        stages['saving_playlist'] = 'done'
+        jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
+        return {
+            'stages': stages,
+            'progress': progress,
+            'trigger': trigger,
+            'plex_username': plex_username,
+        }
+
+    # Stage 3: Gather seeds — random from configurable time window
+    logger.info("[FRESH_FINDS] Job %s gathering %d seeds for %s", job_id, slots_needed, plex_username)
+
+    seeds = get_random_listen_history_seeds(plex_account_id, limit=slots_needed, days=history_days)
     progress['seeds_found'] = len(seeds)
     jobs.update_job_progress(job_id, {'progress': progress})
 
@@ -181,10 +230,10 @@ def process_recommendation_job(job_id, payload):
     stages['gathering_seeds'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 3: Fetch recommendations
+    # Stage 4: Fetch recommendations
     stages['fetching_recommendations'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s fetching recommendations for %d seeds", job_id, len(seeds))
+    logger.info("[FRESH_FINDS] Job %s fetching recommendations for %d seeds", job_id, len(seeds))
 
     raw_recommendations = []
     for seed in seeds:
@@ -228,16 +277,16 @@ def process_recommendation_job(job_id, payload):
                 progress['recommendations_fetched'] = len(raw_recommendations)
                 jobs.update_job_progress(job_id, {'progress': progress})
         except Exception as e:
-            logger.warning("[RECOMMENDATION] Job %s failed to fetch recommendations for seed %s: %s", job_id, hifi_id, e)
+            logger.warning("[FRESH_FINDS] Job %s failed to fetch recommendations for seed %s: %s", job_id, hifi_id, e)
             continue
 
     stages['fetching_recommendations'] = 'done'
     jobs.update_job_progress(job_id, {'stages': stages})
 
-    # Stage 4: Process tracks
+    # Stage 5: Process tracks
     stages['processing_tracks'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
+    logger.info("[FRESH_FINDS] Job %s processing %d raw recommendations", job_id, len(raw_recommendations))
 
     # Step 1: Deduplicate by ISRC, aggregate frequency score
     from squidly.infrastructure.utils import normalize_match_text
@@ -251,7 +300,7 @@ def process_recommendation_job(job_id, payload):
             deduped[key] = {**rec, 'score': 1}
         else:
             deduped[key]['score'] += 1
-    logger.info("[RECOMMENDATION] Job %s: %d raw -> %d after ISRC dedup",
+    logger.info("[FRESH_FINDS] Job %s: %d raw -> %d after ISRC dedup",
                 job_id, len(raw_recommendations), len(deduped))
 
     # Step 2: Dedupe against existing Fresh Finds playlists (by ISRC)
@@ -261,7 +310,7 @@ def process_recommendation_job(job_id, payload):
         key: rec for key, rec in deduped.items()
         if str(rec.get('isrc') or '').strip().upper() not in existing_ff_isrcs
     }
-    logger.info("[RECOMMENDATION] Job %s: removed %d tracks already in existing FF playlists",
+    logger.info("[FRESH_FINDS] Job %s: removed %d tracks already in existing FF playlists",
                 job_id, before_ff_dedup - len(deduped))
 
     settings = get_download_settings()
@@ -278,20 +327,20 @@ def process_recommendation_job(job_id, payload):
         rec_rank = _get_hifi_audio_quality_rank(rec.get('quality', ''))
         if rec_rank >= min_rank:
             quality_filtered.append(rec)
-    logger.info("[RECOMMENDATION] Job %s: quality filter %d -> %d (min=%s)",
+    logger.info("[FRESH_FINDS] Job %s: quality filter %d -> %d (min=%s)",
                 job_id, len(deduped), len(quality_filtered), min_quality)
     progress['tracks_after_quality_filter'] = len(quality_filtered)
     jobs.update_job_progress(job_id, {'progress': progress})
 
-    # Step 4: Exclude tracks recently played by this user (30 days, hardcoded)
+    # Step 4: Exclude tracks recently played by this user (within history_days)
     from squidly.infrastructure.storage import get_recently_played_isrcs
-    recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=30)
+    recently_played_isrcs = get_recently_played_isrcs(plex_account_id, days=history_days)
     before_recent = len(quality_filtered)
     quality_filtered = [
         rec for rec in quality_filtered
         if str(rec.get('isrc') or '').strip().upper() not in recently_played_isrcs
     ]
-    logger.info("[RECOMMENDATION] Job %s: recently played filter removed %d tracks",
+    logger.info("[FRESH_FINDS] Job %s: recently played filter removed %d tracks",
                 job_id, before_recent - len(quality_filtered))
 
     # Step 5: Classify into NEW or LIBRARY candidate pools
@@ -320,7 +369,7 @@ def process_recommendation_job(job_id, payload):
         else:
             new_candidates.append(rec)
 
-    logger.info("[RECOMMENDATION] Job %s: classified %d new, %d library from %d tracks",
+    logger.info("[FRESH_FINDS] Job %s: classified %d new, %d library from %d tracks",
                 job_id, len(new_candidates), len(library_candidates), len(quality_filtered))
 
     # Step 6: Sort both pools and calculate distribution
@@ -343,8 +392,8 @@ def process_recommendation_job(job_id, payload):
         extra = n_library - len(selected_library)
         selected_new = new_candidates[:n_new + extra]
 
-    logger.info("[RECOMMENDATION] Job %s: selected %d new + %d library (target %d%% new, %d tracks)",
-                job_id, len(selected_new), len(selected_library), new_track_pct, track_count)
+    logger.info("[FRESH_FINDS] Job %s: selected %d new + %d library (target %d%% new, %d tracks)",
+                job_id, len(selected_new), len(selected_library), new_track_pct, slots_needed)
 
     progress['tracks_new_candidates'] = len(new_candidates)
     progress['tracks_library_candidates'] = len(library_candidates)
@@ -364,7 +413,7 @@ def process_recommendation_job(job_id, payload):
 
     # Filter new pool
     filtered_new, removed_new = _filter_available_tracks(selected_new, settings)
-    logger.info("[RECOMMENDATION] ISRC pre-check: new pool %d kept, %d removed",
+    logger.info("[FRESH_FINDS] ISRC pre-check: new pool %d kept, %d removed",
                 len(filtered_new), removed_new)
 
     # Refill new pool from same-pool overflow first, then cross-pool
@@ -389,7 +438,7 @@ def process_recommendation_job(job_id, payload):
 
     # Filter library pool
     filtered_library, removed_lib = _filter_available_tracks(selected_library, settings)
-    logger.info("[RECOMMENDATION] ISRC pre-check: library pool %d kept, %d removed",
+    logger.info("[FRESH_FINDS] ISRC pre-check: library pool %d kept, %d removed",
                 len(filtered_library), removed_lib)
 
     # Refill library pool from same-pool overflow first, then cross-pool
@@ -417,7 +466,7 @@ def process_recommendation_job(job_id, payload):
 
     total_removed = removed_new + removed_lib
     if total_removed > 0:
-        logger.info("[RECOMMENDATION] Job %s: ISRC pre-check removed %d tracks, refilled from overflow",
+        logger.info("[FRESH_FINDS] Job %s: ISRC pre-check removed %d tracks, refilled from overflow",
                     job_id, total_removed)
 
     progress['tracks_removed_by_isrc'] = total_removed
@@ -438,7 +487,7 @@ def process_recommendation_job(job_id, payload):
 
     # Step 8: Combine — new tracks first, then library tracks
     top_tracks = selected_new + selected_library
-    top_tracks = top_tracks[:track_count]
+    top_tracks = top_tracks[:slots_needed]
 
     progress['tracks_after_filter'] = len(top_tracks)
     progress['tracks_saved'] = len(top_tracks)
@@ -490,10 +539,10 @@ def process_recommendation_job(job_id, payload):
                     if info.get('audioQuality'):
                         rec['quality'] = info['audioQuality']
                 resolved_count += 1
-                logger.info("[RECOMMENDATION] Resolved track %s (%s, source=%s) -> %s",
+                logger.info("[FRESH_FINDS] Resolved track %s (%s, source=%s) -> %s",
                             tid, result['reason'], result['source'], new_id)
         except Exception as e:
-            logger.warning("[RECOMMENDATION] Failed to resolve track %s: %s", tid, e)
+            logger.warning("[FRESH_FINDS] Failed to resolve track %s: %s", tid, e)
     progress['tracks_resolved'] = resolved_count
     jobs.update_job_progress(job_id, {'progress': {**progress, 'tracks_resolved': resolved_count}})
 
@@ -502,17 +551,17 @@ def process_recommendation_job(job_id, payload):
 
     # Log cover data status
     tracks_with_cover = sum(1 for t in top_tracks if t.get('cover'))
-    logger.info("[RECOMMENDATION] Job %s: %d/%d tracks have cover data",
+    logger.info("[FRESH_FINDS] Job %s: %d/%d tracks have cover data",
                 job_id, tracks_with_cover, len(top_tracks))
 
-    # Stage 5: Save playlist
+    # Stage 6: Save playlist
     stages['saving_playlist'] = 'in_progress'
     jobs.update_job_progress(job_id, {'stages': stages})
-    logger.info("[RECOMMENDATION] Job %s processing %d new recommendations for %s (trigger=%s)",
+    logger.info("[FRESH_FINDS] Job %s processing %d new recommendations for %s (trigger=%s)",
                 job_id, len(top_tracks), plex_username, trigger)
 
     if not top_tracks:
-        logger.info("[RECOMMENDATION] Job %s no new recommendations found", job_id)
+        logger.info("[FRESH_FINDS] Job %s no new recommendations found", job_id)
         stages['saving_playlist'] = 'done'
         progress['tracks_saved'] = 0
         jobs.update_job_progress(job_id, {'stages': stages, 'progress': progress})
@@ -523,32 +572,10 @@ def process_recommendation_job(job_id, payload):
             'plex_username': plex_username,
         }
 
-    if trigger == 'manual':
-        # Manual refresh: replace entire playlist with fresh recommendations
-        # This ensures all tracks have fresh metadata and cover data
-        combined = top_tracks[:track_count]
-        removed_by_listen = 0
-        logger.info("[RECOMMENDATION] Job %s: manual refresh, replacing playlist with %d tracks",
-                    job_id, len(combined))
-    else:
-        # Scheduled (nightly): keep unlistened tracks, add new recommendations to fill gaps
-        existing_playlist = get_recommendation_playlist(plex_account_id, slug)
-        kept_existing = []
-        removed_by_listen = 0
-        if existing_playlist:
-            existing_tracks = existing_playlist.get('tracks', [])
-            listened_ids = get_listened_track_ids(plex_account_id, existing_playlist['id'])
-            kept_existing = [t for t in existing_tracks if t['hifi_id'] not in listened_ids]
-            removed_by_listen = len(existing_tracks) - len(kept_existing)
-            if removed_by_listen > 0:
-                logger.info("[RECOMMENDATION] Job %s: removed %d listened tracks from existing playlist",
-                            job_id, removed_by_listen)
-
-        # Combine: kept existing tracks + new recommendations, capped at track_count
-        combined = kept_existing + top_tracks
-        combined = combined[:track_count]
-        logger.info("[RECOMMENDATION] Job %s: scheduled run, kept %d existing + %d new = %d tracks",
-                    job_id, len(kept_existing), len(top_tracks), len(combined))
+    # Combine: kept existing tracks + new recommendations
+    combined = kept_existing + top_tracks
+    logger.info("[FRESH_FINDS] Job %s: %s, kept %d existing + %d new = %d tracks",
+                job_id, trigger, len(kept_existing), len(top_tracks), len(combined))
 
     progress['tracks_after_filter'] = len(combined)
     progress['tracks_saved'] = len(combined)
@@ -587,12 +614,12 @@ def process_fresh_finds_auto_download_job(job_id, payload):
 
     slug = payload.get('slug', 'fresh-finds')
 
-    # If generate_recommendations jobs are still running, retry later.
+    # If generate_fresh_finds jobs are still running, retry later.
     # The scheduler queues this job alongside recommendation jobs, so we need
     # to wait for them to finish before reading the playlists.
-    if is_job_type_running_or_queued('generate_recommendations'):
-        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: generate_recommendations still running, retrying later", job_id)
-        raise RetryableError("generate_recommendations jobs still in progress")
+    if is_job_type_running_or_queued('generate_fresh_finds'):
+        logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s: generate_fresh_finds still running, retrying later", job_id)
+        raise RetryableError("generate_fresh_finds jobs still in progress")
 
     logger.info("[FRESH_FINDS_AUTO_DOWNLOAD] Job %s processing for all enabled users", job_id)
 

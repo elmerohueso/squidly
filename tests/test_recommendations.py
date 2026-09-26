@@ -21,9 +21,9 @@ class TestQueueRecommendationGeneration:
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 42
 
-        from squidly.jobs.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_generate_fresh_finds
 
-        job_id = queue_recommendation_generation(
+        job_id = queue_generate_fresh_finds(
             slug='fresh-finds',
             plex_account_id=123,
             plex_username='brendan',
@@ -33,7 +33,7 @@ class TestQueueRecommendationGeneration:
         assert job_id == 42
         mock_enqueue.assert_called_once()
         args = mock_enqueue.call_args
-        assert args[0][0] == 'generate_recommendations'
+        assert args[0][0] == 'generate_fresh_finds'
         payload = args[0][1]
         assert payload['slug'] == 'fresh-finds'
         assert payload['plex_account_id'] == 123
@@ -47,9 +47,9 @@ class TestQueueRecommendationGeneration:
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 1
 
-        from squidly.jobs.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_generate_fresh_finds
 
-        queue_recommendation_generation(
+        queue_generate_fresh_finds(
             slug='fresh-finds',
             plex_account_id=1,
             plex_username='test'
@@ -64,9 +64,9 @@ class TestQueueRecommendationGeneration:
         mock_dt.utcnow.return_value.isoformat.return_value = '2024-01-15T10:30:00'
         mock_enqueue.return_value = 2
 
-        from squidly.jobs.orchestration import queue_recommendation_generation
+        from squidly.jobs.orchestration import queue_generate_fresh_finds
 
-        queue_recommendation_generation(
+        queue_generate_fresh_finds(
             slug='fresh-finds',
             plex_account_id=1,
             plex_username='test',
@@ -572,7 +572,7 @@ class TestFilterAvailableTracks:
 
 
 class TestProcessRecommendationJobIsrcSection:
-    """Test the ISRC pre-check call site in process_recommendation_job.
+    """Test the ISRC pre-check call site in process_fresh_finds_job.
 
     These tests mock _filter_available_tracks to verify the integration
     code path doesn't break when tracks pass/fail the ISRC check.
@@ -627,7 +627,7 @@ class TestProcessRecommendationJobIsrcSection:
     ):
         """When _filter_available_tracks passes all tracks through (no removals),
         the job should complete normally with no refill logic triggered."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         # Mock _filter_available_tracks to return all tracks unchanged
         mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
@@ -697,7 +697,7 @@ class TestProcessRecommendationJobIsrcSection:
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
-        result = process_recommendation_job(1, {
+        result = process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
@@ -762,7 +762,7 @@ class TestProcessRecommendationJobIsrcSection:
     ):
         """When _filter_available_tracks removes some tracks, the refill
         logic runs and the job should still complete with the right counts."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         call_count = [0]
 
@@ -862,7 +862,7 @@ class TestProcessRecommendationJobIsrcSection:
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
-        result = process_recommendation_job(1, {
+        result = process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
@@ -929,7 +929,7 @@ class TestProcessRecommendationJobMirrorType:
         mock_filter,
     ):
         """Verify that make_request_with_retry_rotating_mirrors is called with mirror_type='tidal'."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
 
@@ -985,7 +985,7 @@ class TestProcessRecommendationJobMirrorType:
         mock_listened.return_value = set()
         mock_downloads.get_squid_urls.return_value = []
 
-        process_recommendation_job(1, {
+        process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
@@ -1001,11 +1001,11 @@ class TestProcessRecommendationJobMirrorType:
 
 
 # ---------------------------------------------------------------------------
-# Tests for empty top_tracks guard clause in process_recommendation_job
+# Tests for empty top_tracks guard clause in process_fresh_finds_job
 # ---------------------------------------------------------------------------
 
 class TestProcessRecommendationJobEmptyPlaylistGuard:
-    """Tests for the empty top_tracks guard in process_recommendation_job (lines 485-495).
+    """Tests for the empty top_tracks guard in process_fresh_finds_job (lines 485-495).
 
     When top_tracks is empty, the function must skip save_recommendation_playlist(),
     mark saving_playlist as done, set tracks_saved=0, and return early with the
@@ -1056,7 +1056,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_filter,
     ):
         """When top_tracks is empty, save_recommendation_playlist is NOT called."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         # Mock _filter_available_tracks — receives empty lists, returns empty
         mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
@@ -1112,7 +1112,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
-        result = process_recommendation_job(1, {
+        result = process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
@@ -1169,7 +1169,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
     ):
         """When top_tracks is empty, the function returns the expected dict shape
         with tracks_saved=0 and saving_playlist='done'."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         # Identical setup to test_empty_top_tracks_skips_playlist_save
         mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
@@ -1206,7 +1206,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
-        result = process_recommendation_job(1, {
+        result = process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
@@ -1286,7 +1286,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_filter,
     ):
         """When top_tracks has items, save_recommendation_playlist IS called."""
-        from squidly.jobs.processors.recommendations import process_recommendation_job
+        from squidly.jobs.processors.recommendations import process_fresh_finds_job
 
         # Mock _filter_available_tracks to pass all tracks through
         mock_filter.side_effect = lambda tracks, settings: (list(tracks), 0)
@@ -1356,7 +1356,7 @@ class TestProcessRecommendationJobEmptyPlaylistGuard:
         mock_downloads.get_squid_urls.return_value = []
 
         # Execute
-        result = process_recommendation_job(1, {
+        result = process_fresh_finds_job(1, {
             'plex_account_id': 123,
             'plex_username': 'testuser',
             'slug': 'fresh-finds',
