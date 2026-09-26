@@ -953,7 +953,7 @@ def get_existing_fresh_finds_isrcs(plex_account_id):
 
 
 def get_listened_track_ids(plex_account_id, history_days, tracks):
-    """Return hifi_ids of tracks that the user has listened to within history_days.
+    """Return hifi_ids and library_ids (Plex ratingKeys) of tracks the user has listened to.
 
     Args:
         plex_account_id: Plex account ID
@@ -961,14 +961,15 @@ def get_listened_track_ids(plex_account_id, history_days, tracks):
         tracks: List of track dicts with 'hifi_id' key
 
     Returns:
-        Set of hifi_ids that have been listened to within the time window
+        Tuple of (hifi_ids, library_ids) where each is a set of strings.
+        library_ids are Plex ratingKeys from the tracks table.
     """
     if not tracks:
-        return set()
+        return set(), set()
 
     hifi_ids = [str(t['hifi_id']) for t in tracks if t.get('hifi_id')]
     if not hifi_ids:
-        return set()
+        return set(), set()
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -976,8 +977,9 @@ def get_listened_track_ids(plex_account_id, history_days, tracks):
     placeholders = ', '.join(['%s'] * len(hifi_ids))
     cur.execute(
         f"""
-        SELECT DISTINCT lh.hifi_id
+        SELECT DISTINCT lh.hifi_id, t.library_id
         FROM listen_history lh
+        LEFT JOIN tracks t ON t.hifi_id = lh.hifi_id
         WHERE lh.plex_account_id = %s
           AND lh.hifi_id IS NOT NULL
           AND lh.hifi_id IN ({placeholders})
@@ -987,7 +989,9 @@ def get_listened_track_ids(plex_account_id, history_days, tracks):
     )
     rows = cur.fetchall() or []
     conn.close()
-    return {row['hifi_id'] for row in rows}
+    hifi_id_set = {row['hifi_id'] for row in rows}
+    library_id_set = {row['library_id'] for row in rows if row.get('library_id')}
+    return hifi_id_set, library_id_set
 
 
 def remove_listened_tracks(playlist_id, listened_hifi_ids):

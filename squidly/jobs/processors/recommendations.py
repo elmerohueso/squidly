@@ -25,6 +25,7 @@ from squidly.infrastructure.storage import (
     get_existing_fresh_finds_isrcs,
     get_listened_track_ids, remove_listened_tracks,
 )
+from squidly.infrastructure.plex import _playlist_operation_lock
 from squidly.infrastructure.storage import save_recommendation_playlist
 from zoneinfo import ZoneInfo
 
@@ -178,12 +179,41 @@ def process_fresh_finds_job(job_id, payload):
         existing_playlist = get_recommendation_playlist(plex_account_id, slug)
         if existing_playlist:
             existing_tracks = existing_playlist.get('tracks', [])
-            listened_ids = get_listened_track_ids(plex_account_id, history_days, existing_tracks)
+            listened_ids, listened_rating_keys = get_listened_track_ids(plex_account_id, history_days, existing_tracks)
             kept_existing = [t for t in existing_tracks if t['hifi_id'] not in listened_ids]
             removed_by_listen = len(existing_tracks) - len(kept_existing)
             if removed_by_listen > 0:
                 logger.info("[FRESH_FINDS] Job %s: removed %d listened tracks from existing playlist",
                             job_id, removed_by_listen)
+
+                # Also remove listened tracks from the Plex copy of Fresh Finds
+                try:
+                    from plexapi.server import PlexServer
+                    from squidly.infrastructure.storage import get_plex_config
+                    config = get_plex_config()
+                    server_url = (config.get('server_url') or '').strip()
+                    api_token = (config.get('api_token') or '').strip()
+                    if server_url and api_token:
+                        plex = PlexServer(server_url.rstrip('/'), api_token, timeout=10)
+                        plex_playlist = None
+                        for pl in plex.playlists():
+                            if pl.title == 'Fresh Finds':
+                                plex_playlist = pl
+                                break
+                        if plex_playlist:
+                            plex_items = plex_playlist.items()
+                            to_remove = [
+                                item for item in plex_items
+                                if str(getattr(item, 'ratingKey', '')) in listened_rating_keys
+                            ]
+                            if to_remove:
+                                with _playlist_operation_lock:
+                                    plex_playlist.removeItems(to_remove)
+                                logger.info("[FRESH_FINDS] Job %s: removed %d listened tracks from Plex Fresh Finds",
+                                            job_id, len(to_remove))
+                except Exception as e:
+                    logger.warning("[FRESH_FINDS] Job %s: failed to remove listened tracks from Plex: %s",
+                                   job_id, e)
 
     slots_needed = track_count - len(kept_existing)
     logger.info("[FRESH_FINDS] Job %s: track_count=%d, kept=%d, slots_needed=%d",
